@@ -3,10 +3,17 @@
  *
  * Entry point for the Zendorium API. Mounts all route files,
  * connects to the Coordinator, and streams events over WebSocket.
+ * Serves ui/ as static files at / and /ui/*.
+ *
+ * Can be run directly: node server/index.js
  */
 
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
+import fastifyStatic from "@fastify/static";
 import cors from "@fastify/cors";
 
 import { createTailscaleAuth } from "./middleware/auth.js";
@@ -49,14 +56,31 @@ export interface ServerContext {
   startedAt: string;
 }
 
+// ─── Defaults for standalone boot ────────────────────────────────────
+
+function defaultTrustProfile(): TrustProfile {
+  return {
+    scores: new Map(),
+    tierThresholds: { fast: 0.6, standard: 0.75, premium: 0.9 },
+  };
+}
+
+// ─── Resolve ui/ directory relative to this file ─────────────────────
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const UI_ROOT = join(__dirname, "..", "ui");
+
 // ─── Boot ────────────────────────────────────────────────────────────
 
 export async function createServer(
   config: Partial<ServerConfig> = {},
-  trustProfile: TrustProfile,
-  workerRegistry: WorkerRegistry
+  trustProfile?: TrustProfile,
+  workerRegistry?: WorkerRegistry
 ): Promise<ReturnType<typeof Fastify>> {
   const cfg: ServerConfig = { ...DEFAULT_CONFIG, ...config };
+  const registry = workerRegistry ?? new WorkerRegistry();
+  const profile = trustProfile ?? defaultTrustProfile();
 
   const eventBus = createEventBus();
 
@@ -65,28 +89,26 @@ export async function createServer(
       projectRoot: cfg.projectRoot,
       ...cfg.coordinatorConfig,
     },
-    trustProfile,
-    workerRegistry,
+    profile,
+    registry,
     eventBus
   );
 
   const ctx: ServerContext = {
     coordinator,
     eventBus,
-    workerRegistry,
+    workerRegistry: registry,
     config: cfg,
     startedAt: new Date().toISOString(),
   };
 
   // ─── Fastify instance ──────────────────────────────────────────
+  // Use basic logger — pino-pretty is optional and crashes silently
+  // if not installed. Safe to add back after `pnpm add pino-pretty`.
 
   const server = Fastify({
     logger: {
       level: "info",
-      transport: {
-        target: "pino-pretty",
-        options: { colorize: true },
-      },
     },
   });
 
@@ -98,6 +120,28 @@ export async function createServer(
   });
 
   await server.register(websocket);
+
+  // ─── Static files: ui/ at /ui/* ────────────────────────────────
+
+  await server.register(fastifyStatic, {
+    root: UI_ROOT,
+    prefix: "/ui/",
+  });
+
+  // ─── GET / → serve ui/index.html directly ─────────────────────
+  // Read with fs instead of reply.sendFile to avoid decorator issues.
+
+  const indexHtmlPath = join(UI_ROOT, "index.html");
+  let indexHtml: string;
+  try {
+    indexHtml = readFileSync(indexHtmlPath, "utf-8");
+  } catch {
+    indexHtml = "<html><body><h1>Zendorium</h1><p>ui/index.html not found</p></body></html>";
+  }
+
+  server.get("/", async (_request, reply) => {
+    reply.type("text/html").send(indexHtml);
+  });
 
   // ─── Auth middleware ───────────────────────────────────────────
 
@@ -123,22 +167,24 @@ export async function createServer(
   // ─── WebSocket endpoint ────────────────────────────────────────
 
   server.register(async function (fastify) {
-    fastify.get("/ws", { websocket: true }, (socket, req) => {
+    fastify.get("/ws", { websocket: true }, (connection, req) => {
+      const socket = connection.socket;
+
       // Parse optional event filter from query
-      const url = new URL(req.url ?? "/", "http://localhost");
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const filterParam = url.searchParams.get("events");
       const filter = filterParam
         ? (filterParam.split(",") as any[])
         : undefined;
 
-      eventBus.addClient(socket, filter);
+      eventBus.addClient(socket as any, filter);
 
       socket.on("close", () => {
-        eventBus.removeClient(socket);
+        eventBus.removeClient(socket as any);
       });
 
       socket.on("error", () => {
-        eventBus.removeClient(socket);
+        eventBus.removeClient(socket as any);
       });
 
       // Client can send ping, we respond with pong
@@ -162,8 +208,8 @@ export async function createServer(
 
 export async function startServer(
   config: Partial<ServerConfig> = {},
-  trustProfile: TrustProfile,
-  workerRegistry: WorkerRegistry
+  trustProfile?: TrustProfile,
+  workerRegistry?: WorkerRegistry
 ): Promise<void> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const server = await createServer(cfg, trustProfile, workerRegistry);
@@ -172,6 +218,7 @@ export async function startServer(
     const address = await server.listen({ port: cfg.port, host: cfg.host });
     server.log.info(`Zendorium server listening on ${address}`);
     server.log.info(`WebSocket available at ws://${cfg.host}:${cfg.port}/ws`);
+    server.log.info(`UI available at http://${cfg.host}:${cfg.port}/`);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
@@ -186,6 +233,19 @@ export async function startServer(
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+// ─── Self-boot when run directly ─────────────────────────────────────
+
+const isDirectRun =
+  process.argv[1]?.endsWith("server/index.js") ||
+  process.argv[1]?.endsWith("server/index.ts");
+
+if (isDirectRun) {
+  startServer().catch((err) => {
+    console.error("Zendorium server failed to start:", err);
+    process.exit(1);
+  });
 }
 
 // ─── Type augmentation for Fastify ───────────────────────────────────

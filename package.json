@@ -1,0 +1,37 @@
+{
+  "name": "zendorium",
+  "version": "1.0.0",
+  "description": "Build quality without token burn.",
+  "main": "dist/server/index.js",
+  "type": "module",
+  "bin": {
+    "zendorium": "./cli/zendorium.ts"
+  },
+  "scripts": {
+    "start": "npx tsx server/index.ts",
+    "build": "tsc",
+    "dev": "npx tsx watch server/index.ts",
+    "cli": "tsx cli/zendorium.ts"
+  },
+  "keywords": [
+    "ai",
+    "build",
+    "orchestration",
+    "governed"
+  ],
+  "author": "Zen",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/ws": "^8.18.1",
+    "glob": "^13.0.6",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/static": "^9.1.0",
+    "@fastify/websocket": "^11.2.0",
+    "fastify": "^5.8.4"
+  }
+}
