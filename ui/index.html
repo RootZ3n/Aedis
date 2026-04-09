@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zendorium</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            void: "#050816",
+            ink: "#0c1122",
+            panel: "rgba(10, 18, 34, 0.82)",
+            line: "rgba(111, 168, 255, 0.18)",
+            glow: "#4df5c8",
+            active: "#62a8ff",
+            warn: "#ffb84d",
+            danger: "#ff6b7a",
+            text: "#edf4ff",
+            mute: "#92a1bd"
+          },
+          fontFamily: {
+            body: ["IBM Plex Sans", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"]
+          },
+          boxShadow: {
+            panel: "0 18px 60px rgba(0, 0, 0, 0.35)",
+            glow: "0 0 0 1px rgba(77, 245, 200, 0.16), 0 0 28px rgba(77, 245, 200, 0.14)"
+          },
+          animation: {
+            breathe: "breathe 4.8s ease-in-out infinite",
+            drift: "drift 16s ease-in-out infinite"
+          },
+          keyframes: {
+            breathe: {
+              "0%, 100%": { opacity: "0.88", transform: "translateY(0px)" },
+              "50%": { opacity: "1", transform: "translateY(-4px)" }
+            },
+            drift: {
+              "0%, 100%": { transform: "translate3d(0, 0, 0)" },
+              "50%": { transform: "translate3d(10px, -12px, 0)" }
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    html, body {
+      min-height: 100%;
+      margin: 0;
+      background:
+        radial-gradient(circle at 14% 18%, rgba(77, 245, 200, 0.13), transparent 28%),
+        radial-gradient(circle at 86% 14%, rgba(98, 168, 255, 0.14), transparent 24%),
+        radial-gradient(circle at 80% 78%, rgba(188, 140, 255, 0.12), transparent 20%),
+        linear-gradient(180deg, #06101d 0%, #040814 100%);
+      color: #edf4ff;
+      font-family: "IBM Plex Sans", sans-serif;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: auto;
+      width: 28rem;
+      height: 28rem;
+      border-radius: 999px;
+      filter: blur(40px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::before {
+      top: -6rem;
+      left: -4rem;
+      background: rgba(77, 245, 200, 0.08);
+      animation: drift 18s ease-in-out infinite;
+    }
+
+    body::after {
+      right: -6rem;
+      bottom: -8rem;
+      background: rgba(98, 168, 255, 0.08);
+      animation: drift 20s ease-in-out infinite reverse;
+    }
+  </style>
+</head>
+<body class="overflow-x-hidden">
+  <div class="relative min-h-screen">
+    <div class="mx-auto flex min-h-screen max-w-[1600px] flex-col px-6 py-6 lg:px-8">
+      <header class="mb-6 flex flex-col gap-4 rounded-[28px] border border-line bg-panel/70 px-6 py-5 shadow-panel backdrop-blur-xl lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p class="font-mono text-[11px] uppercase tracking-[0.32em] text-glow">Zendorium</p>
+          <h1 class="mt-2 text-3xl font-semibold text-text">Run orchestration with receipts, workers, and intent held in one place.</h1>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <span class="rounded-full border border-line bg-ink/80 px-4 py-2 font-mono text-xs uppercase tracking-[0.18em] text-mute">Bioluminescent runtime</span>
+          <span class="rounded-full border border-glow/20 bg-glow/10 px-4 py-2 font-mono text-xs uppercase tracking-[0.18em] text-glow">Standalone UI foundation</span>
+        </div>
+      </header>
+
+      <main class="grid flex-1 gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <aside class="rounded-[28px] border border-line bg-panel/75 p-5 shadow-panel backdrop-blur-xl">
+          <div class="mb-6 flex items-center justify-between">
+            <div>
+              <p class="font-mono text-[11px] uppercase tracking-[0.26em] text-glow">Control Rail</p>
+              <h2 class="mt-2 text-lg font-semibold text-text">Foundation Shell</h2>
+            </div>
+            <span class="h-3 w-3 rounded-full bg-glow shadow-glow"></span>
+          </div>
+
+          <div class="space-y-3 font-mono text-sm text-mute">
+            <div class="rounded-2xl border border-line bg-ink/80 px-4 py-3">Run State</div>
+            <div class="rounded-2xl border border-line bg-ink/80 px-4 py-3">Worker Status</div>
+            <div class="rounded-2xl border border-line bg-ink/80 px-4 py-3">Intent Object</div>
+            <div class="rounded-2xl border border-line bg-ink/80 px-4 py-3">Task Graph</div>
+            <div class="rounded-2xl border border-line bg-ink/80 px-4 py-3">Receipt Feed</div>
+          </div>
+        </aside>
+
+        <section class="grid gap-6 lg:grid-cols-2">
+          <div class="rounded-[28px] border border-line bg-panel/75 p-6 shadow-panel backdrop-blur-xl animate-breathe">
+            <p class="font-mono text-[11px] uppercase tracking-[0.28em] text-glow">Mount Point</p>
+            <div id="zendorium-root" class="mt-4 min-h-[420px] rounded-[24px] border border-dashed border-line bg-ink/70 p-6">
+              <div class="max-w-xl">
+                <h2 class="text-2xl font-semibold text-text">React app mounts here.</h2>
+                <p class="mt-3 text-sm leading-7 text-mute">
+                  This shell is ready for the standalone runtime UI. Use the component foundation in
+                  <span class="mx-1 font-mono text-text">ui/components</span>
+                  to build the live orchestration surface.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-[28px] border border-line bg-panel/75 p-6 shadow-panel backdrop-blur-xl">
+            <p class="font-mono text-[11px] uppercase tracking-[0.28em] text-active">Design Notes</p>
+            <div class="mt-4 space-y-4 text-sm leading-7 text-mute">
+              <p>Dark glass panels, cold-blue edges, and bioluminescent green highlights match the Squidley V2 family without copying the exact layout.</p>
+              <p>Breathing animation is subtle by default so live run cards can feel active without turning the whole page into motion soup.</p>
+              <p>Typography uses IBM Plex Sans plus JetBrains Mono to keep the same operational tone as the rest of the lab.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

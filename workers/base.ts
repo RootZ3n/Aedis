@@ -1,0 +1,331 @@
+/**
+ * BaseWorker — Contract schema and interface for all Zendorium workers.
+ *
+ * Workers are the execution units of Zendorium. Each worker type has a
+ * specific role in the build pipeline, but they all share the same
+ * contract: receive an assignment, produce a result, report cost.
+ *
+ * Worker Types:
+ *   Scout      — Gathers context, identifies patterns, maps dependencies
+ *   Builder    — Produces code changes based on intent and context
+ *   Critic     — Reviews builder output for correctness, style, risk
+ *   Verifier   — Runs tests, type checks, linting against changes
+ *   Integrator — Merges results, resolves conflicts, produces final diff
+ *
+ * Key principle: Workers see the full IntentObject, not just their file task.
+ * This lets them make coherent decisions aligned with the build's purpose.
+ */
+
+import type { IntentObject } from "../core/intent.js";
+import type { AssembledContext } from "../core/context-assembler.js";
+import type { CostEntry, Issue, RunTask } from "../core/runstate.js";
+
+// ─── Worker Types ────────────────────────────────────────────────────
+
+export type WorkerType = "scout" | "builder" | "critic" | "verifier" | "integrator";
+
+export type WorkerTier = "fast" | "standard" | "premium";
+
+// ─── Worker Contract ─────────────────────────────────────────────────
+
+export interface WorkerAssignment {
+  /** The task from RunState this worker is executing */
+  readonly task: RunTask;
+  /** The full intent — workers see purpose, not just mechanics */
+  readonly intent: IntentObject;
+  /** Assembled context relevant to this task */
+  readonly context: AssembledContext;
+  /** Results from upstream workers (e.g., Scout results for Builder) */
+  readonly upstreamResults: readonly WorkerResult[];
+  /** Which model tier to use for this assignment */
+  readonly tier: WorkerTier;
+  /** Maximum tokens this worker may consume */
+  readonly tokenBudget: number;
+}
+
+export interface WorkerResult {
+  /** Which worker produced this result */
+  readonly workerType: WorkerType;
+  /** Task ID this result corresponds to */
+  readonly taskId: string;
+  /** Whether the worker completed successfully */
+  readonly success: boolean;
+  /** Primary output — meaning varies by worker type */
+  readonly output: WorkerOutput;
+  /** Issues found during execution */
+  readonly issues: readonly Issue[];
+  /** Actual cost incurred */
+  readonly cost: CostEntry;
+  /** Confidence score 0-1 in the quality of this result */
+  readonly confidence: number;
+  /** Files this worker read or modified */
+  readonly touchedFiles: readonly TouchedFile[];
+  /** Assumptions the worker made (need Coordinator acceptance) */
+  readonly assumptions: readonly string[];
+  /** Wall-clock milliseconds */
+  readonly durationMs: number;
+}
+
+export interface TouchedFile {
+  readonly path: string;
+  readonly operation: "read" | "create" | "modify" | "delete";
+}
+
+// ─── Output Types Per Worker ─────────────────────────────────────────
+
+export type WorkerOutput =
+  | ScoutOutput
+  | BuilderOutput
+  | CriticOutput
+  | VerifierOutput
+  | IntegratorOutput;
+
+export interface ScoutOutput {
+  readonly kind: "scout";
+  /** Dependency graph edges relevant to the task */
+  readonly dependencies: readonly DependencyEdge[];
+  /** Patterns discovered in the codebase */
+  readonly patterns: readonly CodePattern[];
+  /** Risk assessment for the planned changes */
+  readonly riskAssessment: RiskAssessment;
+  /** Suggested approach based on findings */
+  readonly suggestedApproach: string;
+}
+
+export interface BuilderOutput {
+  readonly kind: "builder";
+  /** File changes produced */
+  readonly changes: readonly FileChange[];
+  /** Rationale for key decisions */
+  readonly decisions: readonly BuildDecision[];
+  /** Whether the builder thinks more review is warranted */
+  readonly needsCriticReview: boolean;
+}
+
+export interface CriticOutput {
+  readonly kind: "critic";
+  /** Overall verdict */
+  readonly verdict: "approve" | "request-changes" | "reject";
+  /** Detailed review comments */
+  readonly comments: readonly ReviewComment[];
+  /** Suggested changes if verdict is not approve */
+  readonly suggestedChanges: readonly FileChange[];
+  /** Coherence with intent assessment */
+  readonly intentAlignment: number; // 0-1
+}
+
+export interface VerifierOutput {
+  readonly kind: "verifier";
+  /** Test results */
+  readonly testResults: readonly TestResult[];
+  /** Type check passed */
+  readonly typeCheckPassed: boolean;
+  /** Lint passed */
+  readonly lintPassed: boolean;
+  /** Build succeeded */
+  readonly buildPassed: boolean;
+  /** Overall verification verdict */
+  readonly passed: boolean;
+}
+
+export interface IntegratorOutput {
+  readonly kind: "integrator";
+  /** Final merged changeset */
+  readonly finalChanges: readonly FileChange[];
+  /** Conflicts that were resolved */
+  readonly conflictsResolved: readonly ConflictResolution[];
+  /** Pre-commit coherence check result */
+  readonly coherenceCheck: CoherenceCheckResult;
+  /** Ready to apply */
+  readonly readyToApply: boolean;
+}
+
+// ─── Supporting Types ────────────────────────────────────────────────
+
+export interface DependencyEdge {
+  readonly from: string;
+  readonly to: string;
+  readonly type: "import" | "type" | "test" | "config";
+}
+
+export interface CodePattern {
+  readonly name: string;
+  readonly description: string;
+  readonly examples: readonly string[]; // file paths
+}
+
+export interface RiskAssessment {
+  readonly level: "low" | "medium" | "high" | "critical";
+  readonly factors: readonly string[];
+  readonly mitigations: readonly string[];
+}
+
+export interface FileChange {
+  readonly path: string;
+  readonly operation: "create" | "modify" | "delete";
+  readonly content?: string;        // Full content for create
+  readonly diff?: string;           // Unified diff for modify
+  readonly originalContent?: string; // For rollback
+}
+
+export interface BuildDecision {
+  readonly description: string;
+  readonly rationale: string;
+  readonly alternatives: readonly string[];
+}
+
+export interface ReviewComment {
+  readonly file: string;
+  readonly line?: number;
+  readonly severity: "nit" | "suggestion" | "concern" | "blocker";
+  readonly message: string;
+  readonly suggestedFix?: string;
+}
+
+export interface TestResult {
+  readonly name: string;
+  readonly passed: boolean;
+  readonly durationMs: number;
+  readonly error?: string;
+}
+
+export interface ConflictResolution {
+  readonly file: string;
+  readonly description: string;
+  readonly strategy: "ours" | "theirs" | "manual-merge";
+}
+
+export interface CoherenceCheckResult {
+  readonly passed: boolean;
+  readonly checks: readonly { name: string; passed: boolean; message: string }[];
+}
+
+// ─── Base Worker Interface ───────────────────────────────────────────
+
+export interface BaseWorker {
+  /** Worker type identifier */
+  readonly type: WorkerType;
+
+  /** Human-readable name for logging */
+  readonly name: string;
+
+  /**
+   * Execute the assignment and return a result.
+   * Workers MUST NOT mutate the assignment, intent, or context.
+   * Workers MUST report all files they touch.
+   * Workers MUST track and report their cost.
+   */
+  execute(assignment: WorkerAssignment): Promise<WorkerResult>;
+
+  /**
+   * Estimate the cost of executing this assignment without doing the work.
+   * Used by the TrustRouter to make routing decisions.
+   */
+  estimateCost(assignment: WorkerAssignment): Promise<CostEntry>;
+
+  /**
+   * Check if this worker can handle the given assignment.
+   * Returns false if the assignment is outside this worker's capabilities.
+   */
+  canHandle(assignment: WorkerAssignment): boolean;
+}
+
+// ─── Abstract Base Implementation ────────────────────────────────────
+
+export abstract class AbstractWorker implements BaseWorker {
+  abstract readonly type: WorkerType;
+  abstract readonly name: string;
+
+  abstract execute(assignment: WorkerAssignment): Promise<WorkerResult>;
+
+  abstract estimateCost(assignment: WorkerAssignment): Promise<CostEntry>;
+
+  canHandle(_assignment: WorkerAssignment): boolean {
+    return true;
+  }
+
+  /** Helper: build a successful result */
+  protected success(
+    assignment: WorkerAssignment,
+    output: WorkerOutput,
+    opts: {
+      cost: CostEntry;
+      confidence: number;
+      touchedFiles: TouchedFile[];
+      assumptions?: string[];
+      issues?: Issue[];
+      durationMs: number;
+    }
+  ): WorkerResult {
+    return {
+      workerType: this.type,
+      taskId: assignment.task.id,
+      success: true,
+      output,
+      issues: opts.issues ?? [],
+      cost: opts.cost,
+      confidence: opts.confidence,
+      touchedFiles: opts.touchedFiles,
+      assumptions: opts.assumptions ?? [],
+      durationMs: opts.durationMs,
+    };
+  }
+
+  /** Helper: build a failed result */
+  protected failure(
+    assignment: WorkerAssignment,
+    error: string,
+    cost: CostEntry,
+    durationMs: number
+  ): WorkerResult {
+    return {
+      workerType: this.type,
+      taskId: assignment.task.id,
+      success: false,
+      output: this.emptyOutput(),
+      issues: [{ severity: "error", message: error }],
+      cost,
+      confidence: 0,
+      touchedFiles: [],
+      assumptions: [],
+      durationMs,
+    };
+  }
+
+  /** Subclasses return their type-specific empty output */
+  protected abstract emptyOutput(): WorkerOutput;
+
+  /** Helper: zero cost entry */
+  protected zeroCost(): CostEntry {
+    return { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
+  }
+}
+
+// ─── Worker Registry ─────────────────────────────────────────────────
+
+export class WorkerRegistry {
+  private workers = new Map<WorkerType, BaseWorker[]>();
+
+  register(worker: BaseWorker): void {
+    const existing = this.workers.get(worker.type) ?? [];
+    existing.push(worker);
+    this.workers.set(worker.type, existing);
+  }
+
+  getWorkers(type: WorkerType): BaseWorker[] {
+    return this.workers.get(type) ?? [];
+  }
+
+  getWorker(type: WorkerType): BaseWorker | undefined {
+    const workers = this.getWorkers(type);
+    return workers[0];
+  }
+
+  getAllWorkers(): BaseWorker[] {
+    return [...this.workers.values()].flat();
+  }
+
+  hasWorker(type: WorkerType): boolean {
+    return (this.workers.get(type)?.length ?? 0) > 0;
+  }
+}
