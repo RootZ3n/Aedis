@@ -10,22 +10,15 @@
   <style>
     :root {
       color-scheme: dark;
-      --void: #050814;
-      --void-2: #0a1223;
-      --panel: rgba(11, 20, 37, 0.82);
-      --panel-strong: rgba(10, 18, 34, 0.93);
-      --line: rgba(118, 157, 209, 0.18);
-      --line-strong: rgba(118, 157, 209, 0.28);
       --text: #edf4ff;
       --muted: #95a5c0;
       --dim: #70839c;
+      --line: rgba(118,157,209,0.18);
+      --line-strong: rgba(118,157,209,0.28);
       --glow: #53f3ce;
-      --blue: #69abff;
-      --violet: #b38fff;
-      --amber: #ffbf5b;
       --green: #49d17d;
+      --amber: #ffbf5b;
       --red: #ff6a74;
-      --pink: #ff83db;
       --scout: #53f3ce;
       --builder: #69abff;
       --critic: #ffbf5b;
@@ -33,12 +26,11 @@
       --integrator: #b38fff;
       --escalation: #ff83db;
       --coordinator: #dce7f7;
-      --shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-      --shadow-soft: 0 14px 40px rgba(2, 7, 18, 0.56);
+      --shadow: 0 20px 60px rgba(0,0,0,0.4);
+      --shadow-soft: 0 14px 40px rgba(2,7,18,0.56);
       --mono: 'JetBrains Mono', monospace;
       --body: 'IBM Plex Sans', sans-serif;
     }
-
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
@@ -46,14 +38,12 @@
       background:
         radial-gradient(circle at 12% 16%, rgba(83,243,206,0.12), transparent 24%),
         radial-gradient(circle at 84% 12%, rgba(105,171,255,0.12), transparent 22%),
-        radial-gradient(circle at 88% 82%, rgba(179,143,255,0.1), transparent 20%),
+        radial-gradient(circle at 88% 82%, rgba(179,143,255,0.10), transparent 20%),
         linear-gradient(180deg, #07101d 0%, #050814 100%);
       color: var(--text);
       font-family: var(--body);
     }
-
-    body::before,
-    body::after {
+    body::before, body::after {
       content: "";
       position: fixed;
       width: 28rem;
@@ -62,494 +52,123 @@
       filter: blur(48px);
       pointer-events: none;
       z-index: 0;
-      opacity: 0.5;
+      opacity: 0.45;
       animation: drift 18s ease-in-out infinite;
     }
-
-    body::before {
-      top: -9rem;
-      left: -7rem;
-      background: rgba(83,243,206,0.08);
-    }
-
-    body::after {
-      right: -8rem;
-      bottom: -10rem;
-      background: rgba(105,171,255,0.08);
-      animation-direction: reverse;
-    }
-
-    @keyframes drift {
-      0%, 100% { transform: translate3d(0, 0, 0); }
-      50% { transform: translate3d(10px, -12px, 0); }
-    }
-
+    body::before { top: -9rem; left: -7rem; background: rgba(83,243,206,0.08); }
+    body::after { right: -8rem; bottom: -10rem; background: rgba(105,171,255,0.08); animation-direction: reverse; }
+    @keyframes drift { 0%,100%{transform:translate3d(0,0,0)} 50%{transform:translate3d(10px,-12px,0)} }
     @keyframes breathe {
-      0%, 100% { box-shadow: var(--shadow-soft), 0 0 0 1px rgba(83,243,206,0.05); }
+      0%,100% { box-shadow: var(--shadow-soft), 0 0 0 1px rgba(83,243,206,0.05); }
       50% { box-shadow: var(--shadow-soft), 0 0 0 1px rgba(83,243,206,0.12), 0 0 28px rgba(83,243,206,0.08); }
     }
-
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); opacity: 0.92; }
-      50% { transform: scale(1.06); opacity: 1; }
-    }
-
-    .app {
-      position: relative;
-      z-index: 1;
-      min-height: 100vh;
-      padding: 28px;
-    }
-
-    .shell {
-      max-width: 1600px;
-      margin: 0 auto;
-      display: grid;
-      gap: 22px;
-    }
-
-    .hero,
-    .panel,
-    .rail {
-      background: linear-gradient(180deg, rgba(13, 22, 40, 0.82), rgba(7, 13, 24, 0.94));
+    @keyframes pulse { 0%,100%{transform:scale(1);opacity:.92} 50%{transform:scale(1.06);opacity:1} }
+    .app { position: relative; z-index: 1; min-height: 100vh; padding: 28px; }
+    .shell { max-width: 1600px; margin: 0 auto; display: grid; gap: 22px; }
+    .hero, .panel, .rail {
+      background: linear-gradient(180deg, rgba(13,22,40,0.82), rgba(7,13,24,0.94));
       border: 1px solid var(--line);
       border-radius: 28px;
       box-shadow: var(--shadow);
       backdrop-filter: blur(16px);
       animation: breathe 5.6s ease-in-out infinite;
     }
-
-    .hero {
-      padding: 26px 28px;
-      display: grid;
-      gap: 18px;
+    .hero { padding: 26px 28px; display: grid; gap: 18px; }
+    .hero-top, .history-head, .receipt-head, .approval-row, .cost-row, .intent-meta, .settings-head, .config-status-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
     }
-
-    .hero-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 18px;
-      flex-wrap: wrap;
+    .worker-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
+    .eyebrow, .section-label, .mini-label, .metric-label, .field-label {
+      font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .18em; color: var(--dim);
     }
-
-    .eyebrow,
-    .section-label,
-    .mini-label,
-    .metric-label,
-    .field-label {
-      font-family: var(--mono);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.18em;
-      color: var(--dim);
-    }
-
-    h1, h2, h3, p { margin: 0; }
-
-    .hero-title {
-      margin-top: 8px;
-      font-family: var(--mono);
-      font-size: clamp(28px, 4vw, 38px);
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-
-    .hero-sub {
-      margin-top: 8px;
-      max-width: 760px;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-
+    h1,h2,h3,p { margin: 0; }
+    .hero-title { margin-top: 8px; font-family: var(--mono); font-size: clamp(28px,4vw,38px); letter-spacing: .14em; text-transform: uppercase; }
+    .hero-sub { margin-top: 8px; max-width: 760px; color: var(--muted); line-height: 1.7; }
     .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      padding: 11px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(83,243,206,0.2);
-      background: rgba(83,243,206,0.08);
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--glow);
+      display: inline-flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 999px;
+      border: 1px solid rgba(83,243,206,0.2); background: rgba(83,243,206,0.08); font-family: var(--mono); font-size: 12px; color: var(--glow);
     }
-
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      background: currentColor;
-      box-shadow: 0 0 14px currentColor;
-      animation: pulse 1.8s ease-in-out infinite;
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: currentColor; box-shadow: 0 0 14px currentColor; animation: pulse 1.8s ease-in-out infinite; }
+    .prompt-stack { display: grid; gap: 14px; }
+    .repo-row { display: grid; gap: 14px; align-items: center; grid-template-columns: minmax(220px,260px) minmax(0,1fr); }
+    .prompt-row { display: grid; gap: 14px; align-items: center; grid-template-columns: minmax(0,1fr) auto; }
+    .repo-wrap { display: grid; gap: 8px; }
+    .repo-input, .prompt-input, .config-select, .button {
+      border-radius: 18px; border: 1px solid var(--line-strong); background: rgba(8,15,28,0.88); color: var(--text); font: inherit;
     }
-
-    .prompt-stack {
-      display: grid;
-      gap: 14px;
-    }
-
-    .repo-row,
-    .prompt-row {
-      display: grid;
-      gap: 14px;
-      align-items: center;
-    }
-
-    .repo-row {
-      grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-    }
-
-    .prompt-row {
-      grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .repo-wrap {
-      display: grid;
-      gap: 8px;
-    }
-
-    .repo-input,
-    .prompt-input,
-    .config-select,
+    .repo-input, .prompt-input { padding: 16px 18px; font-size: 15px; min-height: 56px; width: 100%; }
+    .repo-input:focus, .prompt-input:focus, .config-select:focus { outline: none; border-color: rgba(83,243,206,0.32); box-shadow: 0 0 0 3px rgba(83,243,206,0.08); }
     .button {
-      border-radius: 18px;
-      border: 1px solid var(--line-strong);
-      background: rgba(8, 15, 28, 0.88);
-      color: var(--text);
-      font: inherit;
-    }
-
-    .repo-input,
-    .prompt-input {
-      padding: 16px 18px;
-      font-size: 15px;
-      min-height: 56px;
-      width: 100%;
-    }
-
-    .repo-input:focus,
-    .prompt-input:focus,
-    .config-select:focus {
-      outline: none;
-      border-color: rgba(83,243,206,0.32);
-      box-shadow: 0 0 0 3px rgba(83,243,206,0.08);
-    }
-
-    .button {
-      min-width: 180px;
-      padding: 16px 18px;
-      font-family: var(--mono);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      cursor: pointer;
-      background: linear-gradient(180deg, rgba(23, 48, 72, 0.96), rgba(10, 20, 37, 0.96));
-      transition: transform 160ms ease, box-shadow 160ms ease;
+      min-width: 180px; padding: 16px 18px; font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .14em; cursor: pointer;
+      background: linear-gradient(180deg, rgba(23,48,72,0.96), rgba(10,20,37,0.96)); transition: transform 160ms ease, box-shadow 160ms ease;
       box-shadow: 0 0 0 1px rgba(83,243,206,0.08), 0 0 18px rgba(83,243,206,0.08);
     }
-
     .button:hover { transform: translateY(-1px); }
-    .button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none;
+    .button:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+    .button-sm { min-width: auto; padding: 10px 16px; font-size: 11px; }
+    .repo-hint, .worker-task, .worker-model, .receipt-meta, .coherence-detail, .history-sub, .approval-sub, .cost-sub, .settings-note, .config-fixed {
+      color: var(--muted); font-size: 13px; line-height: 1.6;
     }
-
-    .button-sm {
-      min-width: auto;
-      padding: 10px 16px;
-      font-size: 11px;
+    .main { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 22px; align-items: start; }
+    .rail { padding: 18px; position: sticky; top: 20px; display: grid; gap: 16px; }
+    .rail-list, .receipt-list, .coherence-list, .history-list { display: grid; gap: 12px; }
+    .history-item, .receipt-item, .coherence-item, .approval-row, .cost-row {
+      padding: 12px 14px; border-radius: 16px; background: rgba(10,18,32,0.82); border: 1px solid rgba(110,144,194,0.14);
     }
-
-    .repo-hint {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-
-    .main {
-      display: grid;
-      grid-template-columns: 320px minmax(0, 1fr);
-      gap: 22px;
-      align-items: start;
-    }
-
-    .rail {
-      padding: 18px;
-      position: sticky;
-      top: 20px;
-      display: grid;
-      gap: 16px;
-    }
-
-    .rail-list,
-    .receipt-list,
-    .coherence-list,
-    .history-list {
-      display: grid;
-      gap: 12px;
-    }
-
-    .history-item,
-    .receipt-item,
-    .coherence-item,
-    .approval-row,
-    .cost-row {
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(10, 18, 32, 0.82);
-      border: 1px solid rgba(110, 144, 194, 0.14);
-    }
-
-    .history-item.active {
-      border-color: rgba(83,243,206,0.26);
-      box-shadow: 0 0 0 1px rgba(83,243,206,0.1), 0 0 16px rgba(83,243,206,0.06);
-    }
-
-    .history-head,
-    .receipt-head,
-    .approval-row,
-    .cost-row,
-    .worker-meta,
-    .intent-meta,
-    .settings-head,
-    .config-status-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .content {
-      display: grid;
-      gap: 22px;
-    }
-
-    .grid-top,
-    .grid-mid,
-    .grid-bottom {
-      display: grid;
-      gap: 22px;
-    }
-
-    .grid-top,
-    .grid-mid {
-      grid-template-columns: 1.1fr 0.9fr;
-    }
-
-    .grid-bottom {
-      grid-template-columns: 1fr 1fr;
-    }
-
-    .panel {
-      padding: 20px;
-      display: grid;
-      gap: 14px;
-      min-width: 0;
-    }
-
-    .intent-box,
-    .pre-box {
-      border-radius: 18px;
-      border: 1px solid rgba(110, 144, 194, 0.16);
-      background: rgba(8, 15, 28, 0.88);
-      padding: 16px;
-      overflow: auto;
-    }
-
-    pre {
-      margin: 0;
-      color: #dce7f7;
-      font-family: var(--mono);
-      font-size: 12px;
-      line-height: 1.7;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .worker-grid {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    .worker-card,
-    .metric-card {
-      border-radius: 18px;
-      background: rgba(9, 17, 31, 0.88);
-      border: 1px solid rgba(110, 144, 194, 0.14);
-      padding: 14px;
-      display: grid;
-      gap: 10px;
-    }
-
-    .worker-card.active {
-      animation: breathe 2.2s ease-in-out infinite;
-    }
-
-    .worker-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .worker-role {
-      font-family: var(--mono);
-      font-size: 12px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-
+    .history-item.active { border-color: rgba(83,243,206,0.26); box-shadow: 0 0 0 1px rgba(83,243,206,0.1), 0 0 16px rgba(83,243,206,0.06); }
+    .content { display: grid; gap: 22px; }
+    .grid-top, .grid-mid, .grid-bottom { display: grid; gap: 22px; }
+    .grid-top, .grid-mid { grid-template-columns: 1.1fr .9fr; }
+    .grid-bottom { grid-template-columns: 1fr 1fr; }
+    .panel { padding: 20px; display: grid; gap: 14px; min-width: 0; }
+    .intent-box, .pre-box { border-radius: 18px; border: 1px solid rgba(110,144,194,0.16); background: rgba(8,15,28,0.88); padding: 16px; overflow: auto; }
+    pre { margin: 0; color: #dce7f7; font-family: var(--mono); font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+    .worker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+    .worker-card, .metric-card { border-radius: 18px; background: rgba(9,17,31,0.88); border: 1px solid rgba(110,144,194,0.14); padding: 16px; display: grid; gap: 10px; min-width: 0; }
+    .worker-card.active { animation: breathe 2.2s ease-in-out infinite; }
+    .worker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .worker-role { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
     .worker-badge {
-      padding: 4px 8px;
-      border-radius: 999px;
-      font-family: var(--mono);
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      border: 1px solid currentColor;
-      color: inherit;
-      background: rgba(255,255,255,0.04);
+      padding: 4px 8px; border-radius: 999px; font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+      border: 1px solid currentColor; color: inherit; background: rgba(255,255,255,0.04); white-space: nowrap;
     }
-
     .worker-card[data-role="scout"] { color: var(--scout); }
     .worker-card[data-role="builder"] { color: var(--builder); }
     .worker-card[data-role="critic"] { color: var(--critic); }
     .worker-card[data-role="verifier"] { color: var(--verifier); }
     .worker-card[data-role="integrator"] { color: var(--integrator); }
-
-    .worker-task,
-    .worker-model,
-    .receipt-meta,
-    .coherence-detail,
-    .history-sub,
-    .approval-sub,
-    .cost-sub,
-    .settings-note,
-    .config-fixed {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    .worker-model-assigned {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--muted);
-      padding-top: 8px;
-      border-top: 1px solid rgba(110,144,194,0.1);
-    }
-
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    .metric-value {
-      font-family: var(--mono);
-      font-size: 26px;
-      margin-top: 4px;
-    }
-
-    .graph-wrap {
-      border-radius: 18px;
-      border: 1px solid rgba(110, 144, 194, 0.16);
-      background: rgba(8, 15, 28, 0.9);
-      padding: 10px;
-      overflow: auto;
-    }
-
-    svg {
-      display: block;
-      width: 100%;
-      min-height: 280px;
-    }
-
-    .node-ring.active {
-      animation: pulse 1.4s ease-in-out infinite;
-    }
-
-    .empty {
-      padding: 20px;
-      border-radius: 18px;
-      background: rgba(8, 15, 28, 0.84);
-      border: 1px dashed rgba(110, 144, 194, 0.18);
-      color: var(--dim);
-      line-height: 1.7;
-    }
-
+    .worker-task, .worker-model, .worker-model-assigned { overflow-wrap: break-word; word-break: break-word; min-width: 0; }
+    .worker-model-assigned { font-family: var(--mono); font-size: 11px; color: var(--muted); padding-top: 8px; border-top: 1px solid rgba(110,144,194,0.1); line-height: 1.5; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+    .metric-value { font-family: var(--mono); font-size: 26px; margin-top: 4px; }
+    .graph-wrap { border-radius: 18px; border: 1px solid rgba(110,144,194,0.16); background: rgba(8,15,28,0.9); padding: 10px; overflow: auto; }
+    svg { display: block; width: 100%; min-height: 280px; }
+    .node-ring.active { animation: pulse 1.4s ease-in-out infinite; }
+    .empty { padding: 20px; border-radius: 18px; background: rgba(8,15,28,0.84); border: 1px dashed rgba(110,144,194,0.18); color: var(--dim); line-height: 1.7; }
     .ok { color: var(--green); }
     .warn { color: var(--amber); }
     .bad { color: var(--red); }
     .live { color: var(--glow); }
-
-    .settings-grid {
-      display: grid;
-      gap: 12px;
-    }
-
-    .settings-row {
-      display: grid;
-      grid-template-columns: 128px minmax(0, 1fr) 150px;
-      gap: 12px;
-      align-items: center;
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(10, 18, 32, 0.82);
-      border: 1px solid rgba(110, 144, 194, 0.14);
-    }
-
-    .settings-role {
-      font-family: var(--mono);
-      font-size: 12px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
+    .settings-grid { display: grid; gap: 12px; }
+    .settings-row { display: grid; grid-template-columns: 128px minmax(0,1fr) 150px; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 16px; background: rgba(10,18,32,0.82); border: 1px solid rgba(110,144,194,0.14); }
+    .settings-role { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
     .config-select {
-      padding: 10px 12px;
-      border-radius: 12px;
-      cursor: pointer;
-      appearance: none;
-      -webkit-appearance: none;
+      padding: 10px 12px; border-radius: 12px; cursor: pointer; appearance: none; -webkit-appearance: none;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%2395a5c0' stroke-width='1.5'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 10px center;
-      padding-right: 28px;
-      font-family: var(--mono);
-      font-size: 12px;
+      background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; font-family: var(--mono); font-size: 12px;
     }
-
-    .settings-provider {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      justify-self: end;
-    }
-
+    .settings-provider { font-family: var(--mono); font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; justify-self: end; }
     @media (max-width: 1320px) {
-      .main,
-      .grid-top,
-      .grid-mid,
-      .grid-bottom { grid-template-columns: 1fr; }
+      .main, .grid-top, .grid-mid, .grid-bottom { grid-template-columns: 1fr; }
       .rail { position: static; }
-      .worker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .settings-row { grid-template-columns: 110px minmax(0, 1fr); }
+      .worker-grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+      .settings-row { grid-template-columns: 110px minmax(0,1fr); }
       .settings-provider { justify-self: start; }
     }
-
     @media (max-width: 760px) {
       .app { padding: 16px; }
-      .repo-row,
-      .prompt-row,
-      .worker-grid,
-      .metrics,
-      .settings-row { grid-template-columns: 1fr; }
+      .repo-row, .prompt-row, .worker-grid, .metrics, .settings-row { grid-template-columns: 1fr; }
+      .worker-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -584,7 +203,7 @@
         <aside class="rail">
           <div>
             <div class="section-label">Run history</div>
-            <h2 style="margin-top:8px;font-family:var(--mono);font-size:18px;letter-spacing:0.08em;">Recent runs</h2>
+            <h2 style="margin-top:8px;font-family:var(--mono);font-size:18px;letter-spacing:.08em;">Recent runs</h2>
           </div>
           <div id="history-list" class="history-list"></div>
           <div class="panel" style="padding:16px;">
@@ -617,9 +236,7 @@
           <div class="grid-mid">
             <section class="panel">
               <div class="section-label">Task graph</div>
-              <div class="graph-wrap">
-                <svg id="task-graph" viewBox="0 0 920 320" preserveAspectRatio="xMidYMid meet"></svg>
-              </div>
+              <div class="graph-wrap"><svg id="task-graph" viewBox="0 0 920 320" preserveAspectRatio="xMidYMid meet"></svg></div>
             </section>
 
             <section class="panel">
@@ -632,7 +249,7 @@
             <div class="settings-head">
               <div>
                 <div class="section-label">Settings</div>
-                <h2 style="margin-top:8px;font-family:var(--mono);font-size:18px;letter-spacing:0.08em;">Worker model assignments</h2>
+                <h2 style="margin-top:8px;font-family:var(--mono);font-size:18px;letter-spacing:.08em;">Worker model assignments</h2>
               </div>
               <div class="settings-note">GET/POST /config/models</div>
             </div>
@@ -648,7 +265,6 @@
               <div class="section-label">Live receipt feed</div>
               <div id="receipt-list" class="receipt-list"></div>
             </section>
-
             <section class="panel">
               <div class="section-label">Raw stream</div>
               <div class="pre-box"><pre id="stream-log">Waiting for runtime events...</pre></div>
@@ -664,52 +280,40 @@
     const WS_URL = 'ws://localhost:18796/ws';
     const ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator'];
     const CONFIG_ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator', 'escalation', 'coordinator'];
-    const STORAGE_KEYS = {
-      repoPath: 'zendorium.repoPath',
-      modelConfig: 'zendorium.modelConfig',
-    };
-
+    const STORAGE_KEYS = { repoPath: 'zendorium.repoPath', modelConfig: 'zendorium.modelConfig' };
     const ROLE_COLORS = {
-      scout: '#53f3ce',
-      builder: '#69abff',
-      critic: '#ffbf5b',
-      verifier: '#ff6a74',
-      integrator: '#b38fff',
-      escalation: '#ff83db',
-      coordinator: '#dce7f7',
+      scout: '#53f3ce', builder: '#69abff', critic: '#ffbf5b', verifier: '#ff6a74', integrator: '#b38fff', escalation: '#ff83db', coordinator: '#dce7f7'
     };
-
     const MODEL_OPTIONS = {
       scout: [{ model: 'local', provider: 'local', label: 'local' }],
       builder: [
         { model: 'qwen3.6-plus', provider: 'modelstudio', label: 'qwen3.6-plus' },
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
         { model: 'minimax-coding', provider: 'minimax', label: 'minimax-coding' },
-        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' }
       ],
       critic: [
         { model: 'qwen3.5:9b', provider: 'ollama', label: 'qwen3.5:9b' },
         { model: 'qwen3.5:4b', provider: 'ollama', label: 'qwen3.5:4b' },
-        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' }
       ],
       verifier: [{ model: 'local', provider: 'local', label: 'local' }],
       integrator: [
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
-        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' }
       ],
       escalation: [
         { model: 'claude-opus-4-6', provider: 'anthropic', label: 'claude-opus-4-6' },
         { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
-        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
+        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' }
       ],
       coordinator: [
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
-        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
-      ],
+        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' }
+      ]
     };
-
     const DEFAULT_MODEL_CONFIG = {
       scout: { model: 'local', provider: 'local' },
       builder: { model: 'qwen3.6-plus', provider: 'modelstudio' },
@@ -717,51 +321,20 @@
       verifier: { model: 'local', provider: 'local' },
       integrator: { model: 'glm-4', provider: 'modelstudio' },
       escalation: { model: 'claude-opus-4-6', provider: 'anthropic' },
-      coordinator: { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter' },
+      coordinator: { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter' }
     };
-
-    const state = {
-      socket: null,
-      connected: false,
-      currentRunId: null,
-      runs: [],
-      history: [],
-      active: createEmptyRun(),
-      modelConfig: { ...DEFAULT_MODEL_CONFIG },
-      repoPath: '.',
-    };
+    const state = { socket: null, connected: false, currentRunId: null, runs: [], history: [], active: createEmptyRun(), modelConfig: { ...DEFAULT_MODEL_CONFIG }, repoPath: '.' };
 
     function createEmptyRun() {
-      return {
-        id: null,
-        prompt: '',
-        repoPath: '.',
-        status: 'idle',
-        startedAt: null,
-        completedAt: null,
-        totalCostUsd: 0,
-        receiptCount: 0,
-        mergeApproval: { status: 'pending', reason: 'No merge decision yet.' },
-        coherenceChecks: [],
-        intent: null,
-        graph: { nodes: [], edges: [] },
-        workers: ROLE_ORDER.reduce((acc, role) => {
-          acc[role] = { role, status: 'idle', model: 'unassigned', currentTask: 'Waiting', note: '' };
-          return acc;
-        }, {}),
-        receipts: [],
-        stream: [],
-      };
+      const workers = {};
+      for (const role of ROLE_ORDER) workers[role] = { role, status: 'idle', model: 'unassigned', currentTask: 'Waiting', note: '' };
+      return { id: null, prompt: '', repoPath: '.', status: 'idle', startedAt: null, completedAt: null, totalCostUsd: 0, receiptCount: 0, mergeApproval: { status: 'pending', reason: 'No merge decision yet.' }, coherenceChecks: [], intent: null, graph: { nodes: [], edges: [] }, workers, receipts: [], stream: [] };
     }
 
     function ensureRun(runId) {
       if (!runId) return state.active;
       let run = state.runs.find((entry) => entry.id === runId);
-      if (!run) {
-        run = createEmptyRun();
-        run.id = runId;
-        state.runs.unshift(run);
-      }
+      if (!run) { run = createEmptyRun(); run.id = runId; state.runs.unshift(run); }
       return run;
     }
 
@@ -788,34 +361,24 @@
       const ws = new WebSocket(WS_URL);
       state.socket = ws;
       setSocketStatus(`Connecting to ${WS_URL}`);
-
       ws.addEventListener('open', () => {
         state.connected = true;
         setSocketStatus(`Connected to ${WS_URL}`, true);
         ws.send(JSON.stringify({ type: 'hello', client: 'zendorium-ui' }));
         render();
       });
-
       ws.addEventListener('message', (event) => {
         let payload;
-        try {
-          payload = JSON.parse(event.data);
-        } catch {
-          payload = { type: 'log', message: String(event.data) };
-        }
+        try { payload = JSON.parse(event.data); } catch { payload = { type: 'log', message: String(event.data) }; }
         ingestEvent(payload);
       });
-
       ws.addEventListener('close', () => {
         state.connected = false;
         setSocketStatus('Disconnected. Retrying soon...');
         render();
         window.setTimeout(connect, 1800);
       });
-
-      ws.addEventListener('error', () => {
-        setSocketStatus('Socket error. Waiting for runtime...');
-      });
+      ws.addEventListener('error', () => setSocketStatus('Socket error. Waiting for runtime...'));
     }
 
     function submitPrompt(event) {
@@ -824,7 +387,6 @@
       const input = document.getElementById('prompt-input');
       const prompt = input.value.trim();
       if (!prompt || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
-
       const syntheticId = `run-${Date.now().toString(36)}`;
       const run = createEmptyRun();
       run.id = syntheticId;
@@ -836,55 +398,28 @@
       state.currentRunId = syntheticId;
       state.runs.unshift(run);
       state.history = dedupeHistory([syntheticId, ...state.history]);
-
-      state.socket.send(JSON.stringify({
-        type: 'run',
-        prompt,
-        input: prompt,
-        request: prompt,
-        runId: syntheticId,
-        repoPath: state.repoPath,
-        repo_path: state.repoPath,
-        client: 'zendorium-ui',
-      }));
-
+      state.socket.send(JSON.stringify({ type: 'run', prompt, input: prompt, request: prompt, runId: syntheticId, repoPath: state.repoPath, repo_path: state.repoPath, client: 'zendorium-ui' }));
       input.value = '';
       render();
     }
 
-    function dedupeHistory(items) {
-      return [...new Set(items)].slice(0, 24);
-    }
-
-    function normalizeType(payload) {
-      return String(payload.type || payload.event || payload.kind || 'log').toLowerCase();
-    }
-
-    function guessRunId(payload) {
-      return payload.runId || payload.run_id || payload.id || state.currentRunId || null;
-    }
+    function dedupeHistory(items) { return [...new Set(items)].slice(0, 24); }
+    function normalizeType(payload) { return String(payload.type || payload.event || payload.kind || 'log').toLowerCase(); }
+    function guessRunId(payload) { return payload.runId || payload.run_id || payload.id || state.currentRunId || null; }
 
     function ingestEvent(payload) {
       const type = normalizeType(payload);
       const runId = guessRunId(payload);
       const run = ensureRun(runId);
       if (runId && !run.id) run.id = runId;
-      if (runId) {
-        state.currentRunId = runId;
-        state.active = run;
-        state.history = dedupeHistory([runId, ...state.history]);
-      }
-
+      if (runId) { state.currentRunId = runId; state.active = run; state.history = dedupeHistory([runId, ...state.history]); }
       run.stream.push(JSON.stringify(payload, null, 2));
       if (run.stream.length > 28) run.stream.shift();
-
       if (payload.prompt || payload.request || payload.input) run.prompt = payload.prompt || payload.request || payload.input;
       if (payload.repoPath || payload.repo_path) run.repoPath = payload.repoPath || payload.repo_path;
       if (payload.startedAt || payload.started_at) run.startedAt = payload.startedAt || payload.started_at;
       if (payload.completedAt || payload.completed_at) run.completedAt = payload.completedAt || payload.completed_at;
-      if (payload.totalCostUsd != null || payload.total_cost_usd != null) {
-        run.totalCostUsd = Number(payload.totalCostUsd ?? payload.total_cost_usd ?? run.totalCostUsd);
-      }
+      if (payload.totalCostUsd != null || payload.total_cost_usd != null) run.totalCostUsd = Number(payload.totalCostUsd ?? payload.total_cost_usd ?? run.totalCostUsd);
       if (Array.isArray(payload.receipts)) {
         run.receipts = payload.receipts.map(normalizeReceipt);
         run.receiptCount = run.receipts.length;
@@ -892,15 +427,10 @@
       }
       if (payload.intent || payload.intentObject || payload.intent_object) run.intent = payload.intent || payload.intentObject || payload.intent_object;
       if (payload.graph || payload.taskGraph || payload.task_graph) run.graph = normalizeGraph(payload.graph || payload.taskGraph || payload.task_graph);
-      if (Array.isArray(payload.coherenceChecks || payload.coherence_checks)) {
-        run.coherenceChecks = (payload.coherenceChecks || payload.coherence_checks).map(normalizeCoherence);
-      }
-      if (payload.mergeApproval || payload.merge_approval || payload.approval) {
-        run.mergeApproval = normalizeApproval(payload.mergeApproval || payload.merge_approval || payload.approval);
-      }
+      if (Array.isArray(payload.coherenceChecks || payload.coherence_checks)) run.coherenceChecks = (payload.coherenceChecks || payload.coherence_checks).map(normalizeCoherence);
+      if (payload.mergeApproval || payload.merge_approval || payload.approval) run.mergeApproval = normalizeApproval(payload.mergeApproval || payload.merge_approval || payload.approval);
       if (Array.isArray(payload.workers)) applyWorkers(run, payload.workers);
       if (payload.worker || payload.workerStatus || payload.worker_status) applyWorkers(run, [payload.worker || payload.workerStatus || payload.worker_status]);
-
       if (type.includes('receipt')) {
         const receipt = normalizeReceipt(payload.receipt || payload);
         run.receipts.unshift(receipt);
@@ -908,17 +438,12 @@
         run.receiptCount = run.receipts.length;
         run.totalCostUsd += Number(receipt.costUsd || 0);
       }
-
       if (type === 'run_started' || type === 'start' || type === 'run') run.status = 'running';
-      else if (type.includes('complete') || type === 'done') {
-        run.status = payload.status || 'complete';
-        run.completedAt = payload.completedAt || payload.completed_at || new Date().toISOString();
-      } else if (type.includes('error') || type.includes('failed')) run.status = 'failed';
+      else if (type.includes('complete') || type === 'done') { run.status = payload.status || 'complete'; run.completedAt = payload.completedAt || payload.completed_at || new Date().toISOString(); }
+      else if (type.includes('error') || type.includes('failed')) run.status = 'failed';
       else if (payload.status) run.status = payload.status;
-
       if (payload.task && !payload.graph) mergeTaskIntoGraph(run, payload.task, type);
       if (payload.node) mergeTaskIntoGraph(run, payload.node, type);
-
       render();
     }
 
@@ -929,12 +454,7 @@
         status: String(node.status || 'planned'),
         workerType: String(node.workerType || node.worker_type || inferWorkerType(node.label || node.id || 'builder')),
       })) : [];
-
-      const edges = Array.isArray(graph.edges) ? graph.edges.map((edge) => ({
-        from: String(edge.from || edge.source),
-        to: String(edge.to || edge.target),
-      })) : [];
-
+      const edges = Array.isArray(graph.edges) ? graph.edges.map((edge) => ({ from: String(edge.from || edge.source), to: String(edge.to || edge.target) })) : [];
       return { nodes, edges };
     }
 
@@ -956,13 +476,9 @@
         status: String(task.status || eventStatusFromType(type)),
         workerType: String(task.workerType || task.worker_type || inferWorkerType(task.label || task.description || id)),
       };
-      if (existing) Object.assign(existing, next);
-      else run.graph.nodes.push(next);
-
+      if (existing) Object.assign(existing, next); else run.graph.nodes.push(next);
       const upstream = task.dependsOn || task.depends_on || task.from;
-      if (Array.isArray(upstream)) {
-        for (const source of upstream) addGraphEdge(run.graph, String(source), id);
-      }
+      if (Array.isArray(upstream)) for (const source of upstream) addGraphEdge(run.graph, String(source), id);
     }
 
     function addGraphEdge(graph, from, to) {
@@ -988,18 +504,11 @@
     }
 
     function normalizeCoherence(item) {
-      return {
-        name: String(item.name || item.label || 'Check'),
-        passed: Boolean(item.passed ?? item.ok),
-        message: String(item.message || item.details || ''),
-      };
+      return { name: String(item.name || item.label || 'Check'), passed: Boolean(item.passed ?? item.ok), message: String(item.message || item.details || '') };
     }
 
     function normalizeApproval(value) {
-      return {
-        status: String(value.status || value.state || 'pending'),
-        reason: String(value.reason || value.message || 'Awaiting integrator decision.'),
-      };
+      return { status: String(value.status || value.state || 'pending'), reason: String(value.reason || value.message || 'Awaiting integrator decision.') };
     }
 
     function applyWorkers(run, workers) {
@@ -1019,14 +528,9 @@
     async function loadModelConfig() {
       const cached = window.localStorage.getItem(STORAGE_KEYS.modelConfig);
       if (cached) {
-        try {
-          state.modelConfig = mergeModelConfig(JSON.parse(cached));
-        } catch {
-          state.modelConfig = { ...DEFAULT_MODEL_CONFIG };
-        }
+        try { state.modelConfig = mergeModelConfig(JSON.parse(cached)); } catch { state.modelConfig = { ...DEFAULT_MODEL_CONFIG }; }
       }
       renderSettings();
-
       try {
         const res = await fetch(`${API_BASE}/config/models`);
         if (!res.ok) throw new Error(`${res.status}`);
@@ -1043,11 +547,7 @@
 
     async function saveModelConfig() {
       const payload = {};
-      for (const role of CONFIG_ROLE_ORDER) {
-        const current = readSetting(role);
-        payload[role] = current;
-      }
-
+      for (const role of CONFIG_ROLE_ORDER) payload[role] = readSetting(role);
       try {
         const res = await fetch(`${API_BASE}/config/models`, {
           method: 'POST',
@@ -1093,10 +593,7 @@
       if (role === 'scout' || role === 'verifier') return MODEL_OPTIONS[role][0];
       const select = document.getElementById(`model-${role}`);
       const model = select ? select.value : state.modelConfig[role].model;
-      return {
-        model,
-        provider: findProvider(role, model) || state.modelConfig[role].provider,
-      };
+      return { model, provider: findProvider(role, model) || state.modelConfig[role].provider };
     }
 
     function setConfigStatus(message, isError) {
@@ -1112,7 +609,6 @@
         const color = ROLE_COLORS[role] || 'var(--text)';
         const options = MODEL_OPTIONS[role] || [];
         const fixed = role === 'scout' || role === 'verifier';
-
         return `
           <div class="settings-row">
             <div class="settings-role" style="color:${color}">${esc(role)}</div>
@@ -1180,9 +676,7 @@
           <strong style="font-family:var(--mono);font-size:13px;">Status</strong>
           <span class="worker-badge ${cls}">${esc(approval.status)}</span>
         </div>
-        <div class="approval-row">
-          <span class="approval-sub">${esc(approval.reason)}</span>
-        </div>
+        <div class="approval-row"><span class="approval-sub">${esc(approval.reason)}</span></div>
       `;
     }
 
@@ -1246,10 +740,7 @@
 
     function renderHistory() {
       const list = document.getElementById('history-list');
-      if (!state.runs.length) {
-        list.innerHTML = `<div class="empty">Submitted runs will stack here.</div>`;
-        return;
-      }
+      if (!state.runs.length) { list.innerHTML = `<div class="empty">Submitted runs will stack here.</div>`; return; }
       list.innerHTML = state.runs.slice(0, 14).map((run) => `
         <button class="history-item ${run.id === state.currentRunId ? 'active' : ''}" style="text-align:left;color:inherit;cursor:pointer;" onclick="selectRun('${esc(run.id)}')">
           <div class="history-head">
@@ -1286,7 +777,6 @@
         svg.innerHTML = `<text x="24" y="40" fill="var(--dim)" font-family="var(--mono)" font-size="13">No task graph yet. Submit a run or wait for the server to publish one.</text>`;
         return;
       }
-
       const levels = ['planned', 'ready', 'active', 'completed', 'failed'];
       const grouped = new Map();
       for (const status of levels) grouped.set(status, []);
@@ -1294,24 +784,19 @@
         const status = grouped.has(node.status) ? node.status : 'planned';
         grouped.get(status).push(node);
       }
-
       const layout = new Map();
       const columnWidth = 170;
       const rowHeight = 88;
       levels.forEach((status, col) => {
         const nodes = grouped.get(status);
-        nodes.forEach((node, row) => {
-          layout.set(node.id, { x: 90 + col * columnWidth, y: 56 + row * rowHeight });
-        });
+        nodes.forEach((node, row) => layout.set(node.id, { x: 90 + col * columnWidth, y: 56 + row * rowHeight }));
       });
-
       const edgeMarkup = graph.edges.map((edge) => {
         const from = layout.get(edge.from);
         const to = layout.get(edge.to);
         if (!from || !to) return '';
         return `<path d="M ${from.x + 24} ${from.y} C ${from.x + 72} ${from.y}, ${to.x - 72} ${to.y}, ${to.x - 24} ${to.y}" fill="none" stroke="rgba(118,157,209,0.32)" stroke-width="2" />`;
       }).join('');
-
       const nodeMarkup = graph.nodes.map((node) => {
         const pos = layout.get(node.id) || { x: 100, y: 100 };
         const color = ROLE_COLORS[node.workerType] || '#69abff';
@@ -1321,16 +806,12 @@
           <g>
             <circle cx="${pos.x}" cy="${pos.y}" r="20" fill="${fill}" stroke="${color}" stroke-width="2.5" class="node-ring ${active ? 'active' : ''}" />
             <circle cx="${pos.x}" cy="${pos.y}" r="8" fill="${color}" opacity="0.94" />
-            <text x="${pos.x}" y="${pos.y + 42}" text-anchor="middle" fill="#dce7f7" font-family="var(--mono)" font-size="11">${esc(node.label).slice(0, 22)}</text>
+            <text x="${pos.x}" y="${pos.y + 42}" text-anchor="middle" fill="#dce7f7" font-family="var(--mono)" font-size="11">${esc(node.label).slice(0,22)}</text>
             <text x="${pos.x}" y="${pos.y + 58}" text-anchor="middle" fill="${color}" font-family="var(--mono)" font-size="10">${esc(node.status)}</text>
           </g>
         `;
       }).join('');
-
-      const headerMarkup = levels.map((status, index) => `
-        <text x="${90 + index * columnWidth}" y="24" text-anchor="middle" fill="rgba(149,165,192,0.9)" font-family="var(--mono)" font-size="11">${status.toUpperCase()}</text>
-      `).join('');
-
+      const headerMarkup = levels.map((status, index) => `<text x="${90 + index * columnWidth}" y="24" text-anchor="middle" fill="rgba(149,165,192,0.9)" font-family="var(--mono)" font-size="11">${status.toUpperCase()}</text>`).join('');
       svg.innerHTML = headerMarkup + edgeMarkup + nodeMarkup;
     }
 
@@ -1356,7 +837,6 @@
     document.getElementById('config-save').addEventListener('click', saveModelConfig);
     document.getElementById('repo-input').addEventListener('change', persistRepoPath);
     document.getElementById('repo-input').addEventListener('blur', persistRepoPath);
-
     loadRepoPath();
     renderSettings();
     render();

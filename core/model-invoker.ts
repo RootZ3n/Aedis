@@ -10,6 +10,7 @@
  *   - anthropic: https://api.anthropic.com/v1/messages + ANTHROPIC_API_KEY
  *   - openai: https://api.openai.com/v1/chat/completions + OPENAI_API_KEY
  *   - minimax: MiniMax chat completions + MINIMAX_API_KEY
+ *   - zai: OpenAI-compatible, ZAI_BASE_URL + ZAI_API_KEY
  *   - local: mock response, zero cost
  */
 
@@ -22,6 +23,7 @@ export type Provider =
   | "anthropic"
   | "openai"
   | "minimax"
+  | "zai"
   | "local";
 
 export interface InvokeConfig {
@@ -59,6 +61,8 @@ const COST_PER_1K: Record<string, { input: number; output: number }> = {
   "gpt-5.4":         { input: 0.005,  output: 0.015  },
   // MiniMax
   "minimax-coding":  { input: 0.0004, output: 0.0016 },
+  // ZAI
+  "glm-5.1":        { input: 0.002,  output: 0.006  },
 };
 
 function estimateCost(model: string, tokensIn: number, tokensOut: number): number {
@@ -153,6 +157,13 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
           model, prompt, systemPrompt, maxTokens,
         );
         break;
+      case "zai":
+        result = await invokeOpenAICompatible(
+          process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4/",
+          requireEnv("ZAI_API_KEY"),
+          model, prompt, systemPrompt, maxTokens,
+        );
+        break;
       default:
         throw new InvokerError(`Unknown provider "${provider}"`);
     }
@@ -180,7 +191,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
   }
 }
 
-// ─── Local (Mock) ────────────────────────────────────────────────────
+// ─── Local (Mock) ─────────────────────────────────────��──────────────
 
 function invokeLocal(prompt: string): InvokeResult {
   return {
@@ -223,7 +234,7 @@ async function invokeOllama(
   return { text, tokensIn, tokensOut, costUsd: estimateCost(model, tokensIn, tokensOut) };
 }
 
-// ─── OpenAI-Compatible (ModelStudio, OpenRouter, OpenAI, MiniMax) ────
+// ─── OpenAI-Compatible (ModelStudio, OpenRouter, OpenAI, MiniMax, ZAI) ─
 
 async function invokeOpenAICompatible(
   baseUrl: string,

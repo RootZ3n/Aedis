@@ -7,19 +7,43 @@
  * DELETE /tasks/:id — Cancel a running task
  */
 
+import { randomUUID } from "crypto";
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerContext } from "../index.js";
 
 // ─── Request/Response Schemas ────────────────────────────────────────
 
 interface SubmitBody {
-  input: string;
+  /** Natural language prompt — also accepted as "input" */
+  prompt?: string;
+  input?: string;
+  /** Repo path to operate on */
+  repoPath?: string;
   exclusions?: string[];
   quality_bar?: "minimal" | "standard" | "hardened";
 }
 
 interface TaskParams {
   id: string;
+}
+
+// ─── In-memory run tracker (bridges POST → Coordinator → WS) ────────
+
+interface TrackedRun {
+  taskId: string;
+  runId: string | null;
+  status: "queued" | "running" | "complete" | "failed" | "cancelled";
+  prompt: string;
+  submittedAt: string;
+  completedAt: string | null;
+  receipt: unknown | null;
+  error: string | null;
+}
+
+const trackedRuns = new Map<string, TrackedRun>();
+
+export function getTrackedRun(taskId: string): TrackedRun | undefined {
+  return trackedRuns.get(taskId);
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────
@@ -29,6 +53,10 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * POST /tasks — Submit a new build task.
+   *
+   * Calls coordinator.submit() and tracks the run.
+   * Returns immediately with task_id. The run executes async.
+   * Client should subscribe on WebSocket with { type: "subscribe", runId }.
    */
   fastify.post<{ Body: SubmitBody }>(
     "/",
@@ -36,9 +64,10 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         body: {
           type: "object",
-          required: ["input"],
           properties: {
+            prompt: { type: "string", minLength: 1 },
             input: { type: "string", minLength: 1 },
+            repoPath: { type: "string" },
             exclusions: { type: "array", items: { type: "string" } },
             quality_bar: { type: "string", enum: ["minimal", "standard", "hardened"] },
           },
@@ -46,42 +75,79 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request: FastifyRequest<{ Body: SubmitBody }>, reply: FastifyReply) => {
-      const { input, exclusions, quality_bar } = request.body;
+      const prompt = request.body.prompt || request.body.input;
+      if (!prompt || !prompt.trim()) {
+        reply.code(400).send({
+          error: "Bad request",
+          message: "Either 'prompt' or 'input' field is required",
+        });
+        return;
+      }
 
-      // Submit to coordinator (non-blocking — returns immediately with IDs)
-      const runPromise = ctx().coordinator.submit({
-        input,
-        exclusions,
+      const taskId = `task_${randomUUID().slice(0, 8)}`;
+      const tracked: TrackedRun = {
+        taskId,
+        runId: null,
+        status: "queued",
+        prompt: prompt.trim(),
+        submittedAt: new Date().toISOString(),
+        completedAt: null,
+        receipt: null,
+        error: null,
+      };
+      trackedRuns.set(taskId, tracked);
+
+      // Emit queued event immediately so WebSocket subscribers see it
+      ctx().eventBus.emit({
+        type: "run_started",
+        payload: { taskId, prompt: tracked.prompt, status: "queued" },
       });
 
-      // Generate tracking IDs immediately
-      // The Coordinator will populate these during execution
-      const taskId = `task_${Date.now().toString(36)}`;
-      const runId = `run_${Date.now().toString(36)}`;
+      // Fire coordinator — runs async, updates tracked state
+      ctx().coordinator.submit({
+        input: tracked.prompt,
+        exclusions: request.body.exclusions,
+      }).then((receipt) => {
+        tracked.runId = receipt.runId;
+        tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
+        tracked.completedAt = new Date().toISOString();
+        tracked.receipt = receipt;
 
-      // Fire and forget — client tracks via WebSocket or polling
-      runPromise.then((receipt) => {
-        ctx().eventBus.emit({
-          type: "receipt_generated",
-          payload: { taskId, runId: receipt.runId, receiptId: receipt.id },
-        });
-      }).catch((err) => {
         ctx().eventBus.emit({
           type: "run_complete",
           payload: {
             taskId,
-            runId,
+            runId: receipt.runId,
+            verdict: receipt.verdict,
+            totalCostUsd: receipt.totalCost.estimatedCostUsd,
+            durationMs: receipt.durationMs,
+          },
+        });
+
+        ctx().eventBus.emit({
+          type: "receipt_generated",
+          payload: { taskId, runId: receipt.runId, receiptId: receipt.id, receipt },
+        });
+      }).catch((err) => {
+        tracked.status = "failed";
+        tracked.completedAt = new Date().toISOString();
+        tracked.error = err instanceof Error ? err.message : String(err);
+
+        ctx().eventBus.emit({
+          type: "run_complete",
+          payload: {
+            taskId,
             verdict: "failed",
-            error: err instanceof Error ? err.message : String(err),
+            error: tracked.error,
           },
         });
       });
 
       reply.code(202).send({
         task_id: taskId,
-        run_id: runId,
-        status: "accepted",
-        message: "Task submitted. Connect to /ws for live updates.",
+        status: "queued",
+        prompt: tracked.prompt,
+        message: "Task submitted. Connect to /ws and subscribe to receive live updates.",
       });
     }
   );
@@ -93,9 +159,30 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id",
     async (request: FastifyRequest<{ Params: TaskParams }>, reply: FastifyReply) => {
       const { id } = request.params;
+      const tracked = trackedRuns.get(id);
 
-      // Check active runs for this task
-      // In a full implementation, this would query a persistence layer
+      if (tracked) {
+        // Check if coordinator has an active run we can query
+        const activeRun = tracked.runId ? ctx().coordinator.getRunStatus(tracked.runId) : null;
+
+        reply.send({
+          task_id: tracked.taskId,
+          run_id: tracked.runId,
+          status: tracked.status,
+          prompt: tracked.prompt,
+          submitted_at: tracked.submittedAt,
+          completed_at: tracked.completedAt,
+          error: tracked.error,
+          active_run: activeRun ? {
+            phase: activeRun.run.phase,
+            task_count: activeRun.run.tasks.length,
+            total_cost: activeRun.run.totalCost,
+          } : null,
+        });
+        return;
+      }
+
+      // Fallback: search event history
       const recentEvents = ctx().eventBus.recentEvents(100);
       const taskEvents = recentEvents.filter(
         (e) => (e.payload as any).taskId === id || (e.payload as any).runId === id
@@ -131,6 +218,14 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     async (request: FastifyRequest<{ Params: TaskParams }>, reply: FastifyReply) => {
       const { id } = request.params;
 
+      // Check tracked runs first
+      const tracked = trackedRuns.get(id);
+      if (tracked?.receipt) {
+        reply.send({ task_id: id, receipt: tracked.receipt });
+        return;
+      }
+
+      // Fallback to event history
       const recentEvents = ctx().eventBus.recentEvents(200);
       const receiptEvent = recentEvents.find(
         (e) =>
@@ -161,21 +256,28 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     async (request: FastifyRequest<{ Params: TaskParams }>, reply: FastifyReply) => {
       const { id } = request.params;
 
-      // Try to cancel via coordinator
-      const cancelled = ctx().coordinator.cancel(id);
-
-      if (cancelled) {
-        reply.send({
-          task_id: id,
-          status: "cancelled",
-          message: "Run cancellation requested",
-        });
-      } else {
-        reply.code(404).send({
-          error: "Not found",
-          message: `No active run found with ID "${id}"`,
-        });
+      const tracked = trackedRuns.get(id);
+      if (tracked && tracked.runId) {
+        const cancelled = ctx().coordinator.cancel(tracked.runId);
+        if (cancelled) {
+          tracked.status = "cancelled";
+          tracked.completedAt = new Date().toISOString();
+          reply.send({ task_id: id, status: "cancelled", message: "Run cancellation requested" });
+          return;
+        }
       }
+
+      // Try cancelling by run ID directly
+      const cancelled = ctx().coordinator.cancel(id);
+      if (cancelled) {
+        reply.send({ task_id: id, status: "cancelled", message: "Run cancellation requested" });
+        return;
+      }
+
+      reply.code(404).send({
+        error: "Not found",
+        message: `No active run found with ID "${id}"`,
+      });
     }
   );
 };

@@ -37,8 +37,8 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
   builder: { model: "qwen3.6-plus", provider: "modelstudio" },
   critic: { model: "qwen3.5:9b", provider: "ollama" },
   verifier: { model: "local", provider: "local" },
-  integrator: { model: "glm-4", provider: "modelstudio" },
-  escalation: { model: "claude-opus-4-6", provider: "anthropic" },
+  integrator: { model: "glm-5.1", provider: "zai" },
+  escalation: { model: "glm-5.1", provider: "zai" },
   coordinator: { model: "xiaomi/mimo-v2-pro", provider: "openrouter" },
 };
 

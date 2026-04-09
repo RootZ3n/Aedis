@@ -26,20 +26,16 @@ function usage(): string {
   ].join("\n");
 }
 
-// ─── HTTP fetch for query commands ───────────────────────────────────
+// ─���─ HTTP helpers ────────────────────────────────────────────────────
 
-async function fetchJson(path: string): Promise<unknown> {
+async function fetchJson(path: string, init?: RequestInit): Promise<any> {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url);
+  const res = await fetch(url, init);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`${res.status} ${res.statusText} — ${url}\n${body}`);
   }
   return res.json();
-}
-
-function formatJson(data: unknown): string {
-  return JSON.stringify(data, null, 2);
 }
 
 function formatHealth(data: any): string {
@@ -97,7 +93,8 @@ function formatWorkers(data: any): string {
 async function main(): Promise<void> {
   const { command, args } = parseArgs(process.argv.slice(2));
 
-  // Commands that use HTTP endpoints directly
+  // ── Query commands (HTTP) ──────────────────────────────────────
+
   if (command === "health") {
     try {
       const data = await fetchJson("/health");
@@ -125,7 +122,7 @@ async function main(): Promise<void> {
   if (command === "runs") {
     try {
       const data = await fetchJson("/runs");
-      process.stdout.write(formatJson(data) + "\n");
+      process.stdout.write(JSON.stringify(data, null, 2) + "\n");
     } catch (err) {
       process.stderr.write(`zendorium runs: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exitCode = 1;
@@ -141,8 +138,8 @@ async function main(): Promise<void> {
       return;
     }
     try {
-      const data = await fetchJson(`/runs/${encodeURIComponent(runId)}`);
-      process.stdout.write(formatJson(data) + "\n");
+      const data = await fetchJson(`/tasks/${encodeURIComponent(runId)}`);
+      process.stdout.write(JSON.stringify(data, null, 2) + "\n");
     } catch (err) {
       process.stderr.write(`zendorium status: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exitCode = 1;
@@ -150,7 +147,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  // "run" command — uses WebSocket for live streaming
+  // ── Run command (POST task → WebSocket stream) ���────────────────
+
   const prompt = args.join(" ").trim();
   if (!prompt) {
     process.stderr.write(usage() + "\n");
@@ -158,20 +156,45 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Step 1: POST to /tasks to submit the build
+  let taskId: string;
+  try {
+    process.stderr.write(`Submitting: ${prompt}\n`);
+    const data = await fetchJson("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        repoPath: process.cwd(),
+      }),
+    });
+    taskId = data.task_id;
+    process.stderr.write(`Task ${taskId} accepted. Connecting to live stream...\n`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`zendorium: failed to submit task: ${msg}\n`);
+    process.stderr.write(`  Is the Zendorium server running at ${API_BASE}?\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Step 2: Connect WebSocket and subscribe to this task's events
   const stream = new TerminalStream();
-  const request = {
-    type: "run",
-    prompt,
-    input: prompt,
-    request: prompt,
-    client: "zendorium-cli",
-  };
 
   try {
     const socket = new WebSocket(WS_URL);
+
     await streamSocket(socket, stream, {
-      request,
-      closeOnComplete: false,
+      // On open, send subscribe message so server filters events for this run
+      request: {
+        type: "subscribe",
+        taskId,
+        client: "zendorium-cli",
+      },
+      // Close when run completes or fails
+      closeOnComplete: true,
+      // Filter: only close on events matching our taskId
+      taskId,
     });
   } catch (error) {
     const msg = error instanceof Error
@@ -179,9 +202,21 @@ async function main(): Promise<void> {
       : typeof error === "object" && error !== null && "message" in error
         ? String((error as any).message)
         : String(error);
-    process.stderr.write(`zendorium: connection failed: ${msg}\n`);
-    process.stderr.write(`  Is the Zendorium server running at ${WS_URL}?\n`);
+    process.stderr.write(`zendorium: stream error: ${msg}\n`);
     process.exitCode = 1;
+  }
+
+  // Step 3: Print final receipt
+  try {
+    const data = await fetchJson(`/tasks/${encodeURIComponent(taskId)}`);
+    if (data.status === "complete" || data.status === "failed") {
+      process.stderr.write(`\nTask ${taskId}: ${data.status}\n`);
+      if (data.error) {
+        process.stderr.write(`Error: ${data.error}\n`);
+      }
+    }
+  } catch {
+    // Non-fatal — final summary already printed by stream
   }
 }
 
