@@ -1,5 +1,7 @@
 import type { RunState, CostEntry, Issue } from "../core/runstate.js";
 import { recordDecision } from "../core/runstate.js";
+import { invokeModel, type Provider } from "../core/model-invoker.js";
+import { loadModelConfig } from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
@@ -12,6 +14,8 @@ import {
 } from "./base.js";
 import type { ModelInvocation, ModelResponse, TaskContract } from "./builder.js";
 
+// ─── Types ───────────────────────────────────────────────────────────
+
 export interface CriticResult extends WorkerResult {
   readonly output: CriticOutput & {
     readonly status: "approved" | "rejected" | "needs-revision";
@@ -22,32 +26,38 @@ export interface CriticResult extends WorkerResult {
 }
 
 export interface CriticWorkerConfig {
+  readonly projectRoot?: string;
   readonly eventBus?: EventBus;
   readonly runState?: RunState;
   readonly defaultModel?: string;
-  readonly invokeModel?: (request: ModelInvocation) => Promise<ModelResponse>;
+  readonly defaultProvider?: Provider;
 }
+
+// ─── Critic Worker ───────────────────────────────────────────────────
 
 export class CriticWorker extends AbstractWorker {
   readonly type = "critic" as const;
   readonly name = "Critic Worker";
 
+  private readonly projectRoot: string;
   private readonly eventBus: EventBus | null;
   private readonly runState: RunState | null;
   private readonly defaultModel: string;
-  private readonly invokeModel: ((request: ModelInvocation) => Promise<ModelResponse>) | null;
+  private readonly defaultProvider: Provider;
 
   constructor(config: CriticWorkerConfig = {}) {
     super();
+    this.projectRoot = config.projectRoot ?? process.cwd();
     this.eventBus = config.eventBus ?? null;
     this.runState = config.runState ?? null;
     this.defaultModel = config.defaultModel ?? "qwen3.5:9b";
-    this.invokeModel = config.invokeModel ?? null;
+    this.defaultProvider = config.defaultProvider ?? "ollama";
   }
 
   async estimateCost(assignment: WorkerAssignment): Promise<CostEntry> {
+    const { model } = this.getActiveModelConfig();
     return {
-      model: this.defaultModel,
+      model,
       inputTokens: Math.ceil((assignment.task.description.length + JSON.stringify(assignment.upstreamResults).length) / 4),
       outputTokens: 600,
       estimatedCostUsd: 0.0006,
@@ -56,34 +66,46 @@ export class CriticWorker extends AbstractWorker {
 
   async execute(assignment: WorkerAssignment): Promise<CriticResult> {
     const startedAt = Date.now();
-    const builderResult = assignment.upstreamResults.find((result) => result.workerType === "builder" && result.success);
+    const builderResult = assignment.upstreamResults.find((r) => r.workerType === "builder" && r.success);
 
     try {
       if (!builderResult || builderResult.output.kind !== "builder") {
         throw new Error("Critic requires a successful BuilderResult upstream");
       }
 
+      const { model, provider } = this.getActiveModelConfig();
       const builderOutput = builderResult.output as BuilderOutput & { contract?: TaskContract };
       const changes = builderOutput.changes;
       const contract = builderOutput.contract ?? null;
       const heuristicIssues = this.runHeuristicChecks(changes, contract, assignment);
       const heuristicComments = this.toComments(heuristicIssues, changes[0]?.path ?? assignment.task.targetFiles[0] ?? "unknown");
 
+      // Model review via unified invoker
       let rawModelReview: string | undefined;
-      if (this.invokeModel && contract) {
-        const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment);
-        const modelResponse = await this.invokeModel({
-          model: this.defaultModel,
+      let modelTokensIn = 0;
+      let modelTokensOut = 0;
+      let modelCostUsd = 0;
+
+      if (contract) {
+        const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment, model);
+
+        const response = await invokeModel({
+          provider: provider as Provider,
+          model,
           prompt,
-          contract,
-          assignment,
+          systemPrompt: "You are the Critic worker in Zendorium. Review code changes for correctness, style, and contract compliance. Be terse. Report blockers clearly.",
+          maxTokens: 2048,
         });
-        rawModelReview = modelResponse.content;
+
+        rawModelReview = response.text;
+        modelTokensIn = response.tokensIn;
+        modelTokensOut = response.tokensOut;
+        modelCostUsd = response.costUsd;
       }
 
-      const status: CriticResult["output"]["status"] = heuristicIssues.some((issue) => issue.severity === "critical")
+      const status: CriticResult["output"]["status"] = heuristicIssues.some((i) => i.severity === "critical")
         ? "rejected"
-        : heuristicIssues.some((issue) => issue.severity === "error" || issue.severity === "warning")
+        : heuristicIssues.some((i) => i.severity === "error" || i.severity === "warning")
           ? "needs-revision"
           : "approved";
 
@@ -100,7 +122,7 @@ export class CriticWorker extends AbstractWorker {
       };
 
       if (status !== "approved") {
-        this.noteDecision(assignment.task.id, `Critic flagged ${status}`, heuristicIssues.map((issue) => issue.message).join(" | "));
+        this.noteDecision(assignment.task.id, `Critic flagged ${status}`, heuristicIssues.map((i) => i.message).join(" | "));
       }
 
       this.eventBus?.emit({
@@ -108,17 +130,20 @@ export class CriticWorker extends AbstractWorker {
         payload: {
           taskId: assignment.task.id,
           workerType: this.type,
+          model,
+          provider,
           status,
           issues: heuristicIssues.length,
+          costUsd: modelCostUsd,
         },
       });
 
       return this.success(assignment, output, {
         cost: {
-          model: this.defaultModel,
-          inputTokens: Math.ceil((JSON.stringify(builderOutput).length + assignment.task.description.length) / 4),
-          outputTokens: rawModelReview ? Math.ceil(rawModelReview.length / 4) : 0,
-          estimatedCostUsd: rawModelReview ? 0.0007 : 0,
+          model,
+          inputTokens: modelTokensIn,
+          outputTokens: modelTokensOut,
+          estimatedCostUsd: modelCostUsd,
         },
         confidence: status === "approved" ? 0.84 : 0.71,
         touchedFiles: [],
@@ -134,10 +159,11 @@ export class CriticWorker extends AbstractWorker {
           error: error instanceof Error ? error.message : String(error),
         },
       });
+      const { model } = this.getActiveModelConfig();
       return this.failure(
         assignment,
         error instanceof Error ? error.message : String(error),
-        { model: this.defaultModel, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        { model, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
         Date.now() - startedAt,
       ) as CriticResult;
     }
@@ -152,6 +178,19 @@ export class CriticWorker extends AbstractWorker {
       intentAlignment: 0,
     };
   }
+
+  // ─── Model Resolution ────────────────────────────────────────────
+
+  private getActiveModelConfig(): { model: string; provider: string } {
+    try {
+      const config = loadModelConfig(this.projectRoot);
+      return { model: config.critic.model, provider: config.critic.provider };
+    } catch {
+      return { model: this.defaultModel, provider: this.defaultProvider };
+    }
+  }
+
+  // ─── Heuristic Checks ───────────────────────────────────────────
 
   private runHeuristicChecks(changes: readonly FileChange[], contract: TaskContract | null, assignment: WorkerAssignment): Issue[] {
     const issues: Issue[] = [];
@@ -198,16 +237,16 @@ export class CriticWorker extends AbstractWorker {
     }));
   }
 
-  private buildPrompt(contract: TaskContract, changes: readonly FileChange[], issues: readonly Issue[], assignment: WorkerAssignment): string {
+  private buildPrompt(contract: TaskContract, changes: readonly FileChange[], issues: readonly Issue[], assignment: WorkerAssignment, model: string): string {
     return [
-      `You are the Critic worker on model ${this.defaultModel}.`,
+      `You are the Critic worker on model ${model}.`,
       "Review only. Do not rewrite code.",
       `Task: ${assignment.task.description}`,
       `Contract file: ${contract.file}`,
       `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
       `Interface rules: ${contract.interfaceRules.join(" | ")}`,
-      `Heuristic issues: ${issues.map((issue) => issue.message).join(" | ") || "none"}`,
-      `Diffs: ${changes.map((change) => change.diff ?? `${change.path} changed`).join("\n\n")}`,
+      `Heuristic issues: ${issues.map((i) => i.message).join(" | ") || "none"}`,
+      `Diffs: ${changes.map((c) => c.diff ?? `${c.path} changed`).join("\n\n")}`,
       "Return a terse review summary and any blockers.",
     ].join("\n\n");
   }

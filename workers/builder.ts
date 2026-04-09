@@ -3,6 +3,9 @@ import { relative, resolve, sep } from "node:path";
 
 import type { RunState, CostEntry } from "../core/runstate.js";
 import { recordDecision, recordFileTouch } from "../core/runstate.js";
+import { invokeModel, type Provider } from "../core/model-invoker.js";
+import { DiffApplier } from "../core/diff-applier.js";
+import { loadModelConfig } from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
@@ -12,6 +15,8 @@ import {
   type WorkerAssignment,
   type WorkerResult,
 } from "./base.js";
+
+// ─── Contract Types (exported for Critic) ────────────────────────────
 
 export interface TaskContract {
   readonly file: string;
@@ -48,8 +53,10 @@ export interface BuilderWorkerConfig {
   readonly eventBus?: EventBus;
   readonly runState?: RunState;
   readonly defaultModel?: string;
-  readonly invokeModel?: (request: ModelInvocation) => Promise<ModelResponse>;
+  readonly defaultProvider?: Provider;
 }
+
+// ─── Builder Worker ──────────────────────────────────────────────────
 
 export class BuilderWorker extends AbstractWorker {
   readonly type = "builder" as const;
@@ -59,7 +66,8 @@ export class BuilderWorker extends AbstractWorker {
   private readonly eventBus: EventBus | null;
   private readonly runState: RunState | null;
   private readonly defaultModel: string;
-  private readonly invokeModel: ((request: ModelInvocation) => Promise<ModelResponse>) | null;
+  private readonly defaultProvider: Provider;
+  private readonly diffApplier: DiffApplier;
 
   constructor(config: BuilderWorkerConfig) {
     super();
@@ -67,7 +75,8 @@ export class BuilderWorker extends AbstractWorker {
     this.eventBus = config.eventBus ?? null;
     this.runState = config.runState ?? null;
     this.defaultModel = config.defaultModel ?? "qwen3.6-plus";
-    this.invokeModel = config.invokeModel ?? null;
+    this.defaultProvider = config.defaultProvider ?? "modelstudio";
+    this.diffApplier = new DiffApplier();
   }
 
   canHandle(assignment: WorkerAssignment): boolean {
@@ -81,8 +90,9 @@ export class BuilderWorker extends AbstractWorker {
     );
     const inputTokens = Math.ceil((contextChars + assignment.task.description.length * 2) / 4);
     const outputTokens = Math.min(assignment.tokenBudget, 1800);
+    const { model } = this.getActiveModelConfig();
     return {
-      model: this.defaultModel,
+      model,
       inputTokens,
       outputTokens,
       estimatedCostUsd: Number(((inputTokens * 0.00000035) + (outputTokens * 0.0000012)).toFixed(6)),
@@ -97,32 +107,36 @@ export class BuilderWorker extends AbstractWorker {
       if (!this.canHandle(assignment)) {
         throw new Error("Builder requires an exact single-file contract scope");
       }
-      if (!this.invokeModel) {
-        throw new Error("Builder model invoker is not configured");
-      }
 
+      const { model, provider } = this.getActiveModelConfig();
       const contract = this.buildContract(assignment);
       const targetPath = this.resolveTarget(contract.file);
       const relativePath = this.toRelative(targetPath);
       const originalContent = await readFile(targetPath, "utf8");
       this.logFileTouch(taskId, relativePath, "read");
 
-      const prompt = this.buildPrompt(contract, assignment, originalContent);
-      const response = await this.invokeModel({
-        model: this.defaultModel,
+      const prompt = this.buildPrompt(contract, assignment, originalContent, model);
+
+      // Real model call via unified invoker
+      const response = await invokeModel({
+        provider: provider as Provider,
+        model,
         prompt,
-        contract,
-        assignment,
+        systemPrompt: "You are the Builder worker in Zendorium. Obey the contract exactly. Return ONLY the full final file content. No markdown fences. No explanations.",
+        maxTokens: assignment.tokenBudget,
       });
 
-      const updatedContent = this.extractUpdatedContent(response.content);
+      const updatedContent = this.extractUpdatedContent(response.text);
       this.enforceForbiddenChanges(contract, updatedContent);
 
       if (updatedContent === originalContent) {
         throw new Error("Model returned no effective file changes");
       }
 
+      // Build diff and apply via DiffApplier
       const diff = this.buildUnifiedDiff(relativePath, originalContent, updatedContent);
+
+      // Write directly for single-file (DiffApplier used for multi-file future)
       await writeFile(targetPath, updatedContent, "utf8");
       this.logFileTouch(taskId, relativePath, "modify");
       this.noteDecision(taskId, `Applied builder patch to ${relativePath}`, `Contract goal: ${contract.goal}`);
@@ -141,19 +155,12 @@ export class BuilderWorker extends AbstractWorker {
         alternatives: ["Refuse patch outside scope", "Request narrower contract"],
       }];
 
-      const cost = {
-        model: this.defaultModel,
-        inputTokens: response.inputTokens ?? Math.ceil(prompt.length / 4),
-        outputTokens: response.outputTokens ?? Math.ceil(updatedContent.length / 4),
-        estimatedCostUsd:
-          response.estimatedCostUsd ??
-          Number(
-            (
-              ((response.inputTokens ?? Math.ceil(prompt.length / 4)) * 0.00000035) +
-              ((response.outputTokens ?? Math.ceil(updatedContent.length / 4)) * 0.0000012)
-            ).toFixed(6),
-          ),
-      } satisfies CostEntry;
+      const cost: CostEntry = {
+        model,
+        inputTokens: response.tokensIn,
+        outputTokens: response.tokensOut,
+        estimatedCostUsd: response.costUsd,
+      };
 
       const output: BuilderResult["output"] = {
         kind: "builder",
@@ -162,7 +169,7 @@ export class BuilderWorker extends AbstractWorker {
         needsCriticReview: true,
         contract,
         prompt,
-        rawModelResponse: response.content,
+        rawModelResponse: response.text,
       };
 
       this.eventBus?.emit({
@@ -171,8 +178,11 @@ export class BuilderWorker extends AbstractWorker {
           taskId,
           workerType: this.type,
           file: relativePath,
-          model: this.defaultModel,
+          model,
+          provider,
           costUsd: cost.estimatedCostUsd,
+          tokensIn: response.tokensIn,
+          tokensOut: response.tokensOut,
         },
       });
 
@@ -196,10 +206,11 @@ export class BuilderWorker extends AbstractWorker {
           error: error instanceof Error ? error.message : String(error),
         },
       });
+      const { model } = this.getActiveModelConfig();
       return this.failure(
         assignment,
         error instanceof Error ? error.message : String(error),
-        { model: this.defaultModel, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        { model, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
         Date.now() - startedAt,
       ) as BuilderResult;
     }
@@ -214,31 +225,38 @@ export class BuilderWorker extends AbstractWorker {
     };
   }
 
+  // ─── Model Resolution ────────────────────────────────────────────
+
+  private getActiveModelConfig(): { model: string; provider: string } {
+    try {
+      const config = loadModelConfig(this.projectRoot);
+      return { model: config.builder.model, provider: config.builder.provider };
+    } catch {
+      return { model: this.defaultModel, provider: this.defaultProvider };
+    }
+  }
+
+  // ─── Contract & Prompt ───────────────────────────────────────────
+
   private buildContract(assignment: WorkerAssignment): TaskContract {
     const file = assignment.task.targetFiles[0];
-    const constraints = assignment.intent.constraints.map((constraint) => constraint.description);
+    const constraints = assignment.intent.constraints.map((c) => c.description);
     const forbiddenChanges = assignment.intent.exclusions ?? [];
     const interfaceRules = [
       "Do not change public names unless the task explicitly requires it.",
       "Preserve file-local style and module shape.",
       "Do not touch files outside the exact contract file.",
     ];
-    return {
-      file,
-      goal: assignment.task.description,
-      constraints,
-      forbiddenChanges,
-      interfaceRules,
-    };
+    return { file, goal: assignment.task.description, constraints, forbiddenChanges, interfaceRules };
   }
 
-  private buildPrompt(contract: TaskContract, assignment: WorkerAssignment, originalContent: string): string {
+  private buildPrompt(contract: TaskContract, assignment: WorkerAssignment, originalContent: string, model: string): string {
     const context = assignment.context.layers
       .flatMap((layer) => layer.files.map((file) => `FILE: ${file.path}\n${file.content}`))
       .join("\n\n---\n\n");
 
     return [
-      `You are the Builder worker on model ${this.defaultModel}.`,
+      `You are the Builder worker on model ${model}.`,
       "You must obey the contract exactly.",
       `Target file: ${contract.file}`,
       `Goal: ${contract.goal}`,
@@ -273,9 +291,9 @@ export class BuilderWorker extends AbstractWorker {
     const updatedLines = updatedContent.split(/\r?\n/);
     const max = Math.max(originalLines.length, updatedLines.length);
     const body: string[] = [];
-    for (let index = 0; index < max; index += 1) {
-      const before = originalLines[index];
-      const after = updatedLines[index];
+    for (let i = 0; i < max; i++) {
+      const before = originalLines[i];
+      const after = updatedLines[i];
       if (before === after) {
         if (before !== undefined) body.push(` ${before}`);
         continue;

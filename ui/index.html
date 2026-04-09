@@ -31,6 +31,8 @@
       --critic: #ffbf5b;
       --verifier: #ff6a74;
       --integrator: #b38fff;
+      --escalation: #ff83db;
+      --coordinator: #dce7f7;
       --shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
       --shadow-soft: 0 14px 40px rgba(2, 7, 18, 0.56);
       --mono: 'JetBrains Mono', monospace;
@@ -134,7 +136,8 @@
     .eyebrow,
     .section-label,
     .mini-label,
-    .metric-label {
+    .metric-label,
+    .field-label {
       font-family: var(--mono);
       font-size: 11px;
       text-transform: uppercase;
@@ -181,14 +184,34 @@
       animation: pulse 1.8s ease-in-out infinite;
     }
 
+    .prompt-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .repo-row,
     .prompt-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
       gap: 14px;
       align-items: center;
     }
 
+    .repo-row {
+      grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+    }
+
+    .prompt-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .repo-wrap {
+      display: grid;
+      gap: 8px;
+    }
+
+    .repo-input,
     .prompt-input,
+    .config-select,
     .button {
       border-radius: 18px;
       border: 1px solid var(--line-strong);
@@ -197,13 +220,17 @@
       font: inherit;
     }
 
+    .repo-input,
     .prompt-input {
       padding: 16px 18px;
       font-size: 15px;
-      min-height: 58px;
+      min-height: 56px;
+      width: 100%;
     }
 
-    .prompt-input:focus {
+    .repo-input:focus,
+    .prompt-input:focus,
+    .config-select:focus {
       outline: none;
       border-color: rgba(83,243,206,0.32);
       box-shadow: 0 0 0 3px rgba(83,243,206,0.08);
@@ -227,6 +254,18 @@
       opacity: 0.6;
       cursor: not-allowed;
       transform: none;
+    }
+
+    .button-sm {
+      min-width: auto;
+      padding: 10px 16px;
+      font-size: 11px;
+    }
+
+    .repo-hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
     }
 
     .main {
@@ -273,7 +312,9 @@
     .approval-row,
     .cost-row,
     .worker-meta,
-    .intent-meta {
+    .intent-meta,
+    .settings-head,
+    .config-status-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -292,10 +333,7 @@
       gap: 22px;
     }
 
-    .grid-top {
-      grid-template-columns: 1.1fr 0.9fr;
-    }
-
+    .grid-top,
     .grid-mid {
       grid-template-columns: 1.1fr 0.9fr;
     }
@@ -388,10 +426,20 @@
     .coherence-detail,
     .history-sub,
     .approval-sub,
-    .cost-sub {
+    .cost-sub,
+    .settings-note,
+    .config-fixed {
       color: var(--muted);
       font-size: 13px;
       line-height: 1.6;
+    }
+
+    .worker-model-assigned {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      padding-top: 8px;
+      border-top: 1px solid rgba(110,144,194,0.1);
     }
 
     .metrics {
@@ -438,6 +486,52 @@
     .bad { color: var(--red); }
     .live { color: var(--glow); }
 
+    .settings-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .settings-row {
+      display: grid;
+      grid-template-columns: 128px minmax(0, 1fr) 150px;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(10, 18, 32, 0.82);
+      border: 1px solid rgba(110, 144, 194, 0.14);
+    }
+
+    .settings-role {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .config-select {
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%2395a5c0' stroke-width='1.5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .settings-provider {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      justify-self: end;
+    }
+
     @media (max-width: 1320px) {
       .main,
       .grid-top,
@@ -445,13 +539,17 @@
       .grid-bottom { grid-template-columns: 1fr; }
       .rail { position: static; }
       .worker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .settings-row { grid-template-columns: 110px minmax(0, 1fr); }
+      .settings-provider { justify-self: start; }
     }
 
     @media (max-width: 760px) {
       .app { padding: 16px; }
-      .prompt-row { grid-template-columns: 1fr; }
+      .repo-row,
+      .prompt-row,
       .worker-grid,
-      .metrics { grid-template-columns: 1fr; }
+      .metrics,
+      .settings-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -465,11 +563,20 @@
             <h1 class="hero-title">Build orchestration in motion</h1>
             <p class="hero-sub">Intent locks first. Workers fan out. Task graph pulses as the run moves. Receipts, coherence, merge approval, and cost stay visible the whole time.</p>
           </div>
-          <div class="status-pill"><span class="dot"></span><span id="socket-status">Connecting to ws://localhost:18796</span></div>
+          <div class="status-pill"><span class="dot"></span><span id="socket-status">Connecting to ws://localhost:18796/ws</span></div>
         </div>
-        <form class="prompt-row" id="prompt-form">
-          <input id="prompt-input" class="prompt-input" type="text" placeholder="What do you want to build?" autocomplete="off" />
-          <button id="submit-button" class="button" type="submit">Submit Run</button>
+        <form class="prompt-stack" id="prompt-form">
+          <div class="repo-row">
+            <div class="repo-wrap">
+              <label for="repo-input" class="field-label">Repo To Build In</label>
+              <div class="repo-hint">Passed with every task submission.</div>
+            </div>
+            <input id="repo-input" class="repo-input" type="text" placeholder="." autocomplete="off" />
+          </div>
+          <div class="prompt-row">
+            <input id="prompt-input" class="prompt-input" type="text" placeholder="What do you want to build?" autocomplete="off" />
+            <button id="submit-button" class="button" type="submit">Submit Run</button>
+          </div>
         </form>
       </section>
 
@@ -521,6 +628,21 @@
             </section>
           </div>
 
+          <section class="panel">
+            <div class="settings-head">
+              <div>
+                <div class="section-label">Settings</div>
+                <h2 style="margin-top:8px;font-family:var(--mono);font-size:18px;letter-spacing:0.08em;">Worker model assignments</h2>
+              </div>
+              <div class="settings-note">GET/POST /config/models</div>
+            </div>
+            <div id="settings-grid" class="settings-grid"></div>
+            <div class="config-status-row">
+              <span id="config-status" class="settings-note">Loading model config...</span>
+              <button id="config-save" class="button button-sm" type="button">Save Settings</button>
+            </div>
+          </section>
+
           <div class="grid-bottom">
             <section class="panel">
               <div class="section-label">Live receipt feed</div>
@@ -538,14 +660,64 @@
   </div>
 
   <script>
-    const WS_URL = 'ws://localhost:18796';
+    const API_BASE = 'http://localhost:18796';
+    const WS_URL = 'ws://localhost:18796/ws';
     const ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator'];
+    const CONFIG_ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator', 'escalation', 'coordinator'];
+    const STORAGE_KEYS = {
+      repoPath: 'zendorium.repoPath',
+      modelConfig: 'zendorium.modelConfig',
+    };
+
     const ROLE_COLORS = {
       scout: '#53f3ce',
       builder: '#69abff',
       critic: '#ffbf5b',
       verifier: '#ff6a74',
       integrator: '#b38fff',
+      escalation: '#ff83db',
+      coordinator: '#dce7f7',
+    };
+
+    const MODEL_OPTIONS = {
+      scout: [{ model: 'local', provider: 'local', label: 'local' }],
+      builder: [
+        { model: 'qwen3.6-plus', provider: 'modelstudio', label: 'qwen3.6-plus' },
+        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+        { model: 'minimax-coding', provider: 'minimax', label: 'minimax-coding' },
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
+      ],
+      critic: [
+        { model: 'qwen3.5:9b', provider: 'ollama', label: 'qwen3.5:9b' },
+        { model: 'qwen3.5:4b', provider: 'ollama', label: 'qwen3.5:4b' },
+        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+      ],
+      verifier: [{ model: 'local', provider: 'local', label: 'local' }],
+      integrator: [
+        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
+      ],
+      escalation: [
+        { model: 'claude-opus-4-6', provider: 'anthropic', label: 'claude-opus-4-6' },
+        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
+        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
+      ],
+      coordinator: [
+        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
+        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
+      ],
+    };
+
+    const DEFAULT_MODEL_CONFIG = {
+      scout: { model: 'local', provider: 'local' },
+      builder: { model: 'qwen3.6-plus', provider: 'modelstudio' },
+      critic: { model: 'qwen3.5:9b', provider: 'ollama' },
+      verifier: { model: 'local', provider: 'local' },
+      integrator: { model: 'glm-4', provider: 'modelstudio' },
+      escalation: { model: 'claude-opus-4-6', provider: 'anthropic' },
+      coordinator: { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter' },
     };
 
     const state = {
@@ -555,12 +727,15 @@
       runs: [],
       history: [],
       active: createEmptyRun(),
+      modelConfig: { ...DEFAULT_MODEL_CONFIG },
+      repoPath: '.',
     };
 
     function createEmptyRun() {
       return {
         id: null,
         prompt: '',
+        repoPath: '.',
         status: 'idle',
         startedAt: null,
         completedAt: null,
@@ -593,6 +768,20 @@
     function setSocketStatus(label, ok = false) {
       document.getElementById('socket-status').textContent = label;
       document.querySelector('.status-pill').style.color = ok ? 'var(--glow)' : 'var(--amber)';
+    }
+
+    function loadRepoPath() {
+      const saved = window.localStorage.getItem(STORAGE_KEYS.repoPath);
+      state.repoPath = saved && saved.trim() ? saved.trim() : '.';
+      document.getElementById('repo-input').value = state.repoPath;
+    }
+
+    function persistRepoPath() {
+      const input = document.getElementById('repo-input');
+      const value = input.value.trim() || '.';
+      state.repoPath = value;
+      input.value = value;
+      window.localStorage.setItem(STORAGE_KEYS.repoPath, value);
     }
 
     function connect() {
@@ -631,6 +820,7 @@
 
     function submitPrompt(event) {
       event.preventDefault();
+      persistRepoPath();
       const input = document.getElementById('prompt-input');
       const prompt = input.value.trim();
       if (!prompt || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
@@ -639,6 +829,7 @@
       const run = createEmptyRun();
       run.id = syntheticId;
       run.prompt = prompt;
+      run.repoPath = state.repoPath;
       run.status = 'queued';
       run.startedAt = new Date().toISOString();
       state.active = run;
@@ -652,6 +843,8 @@
         input: prompt,
         request: prompt,
         runId: syntheticId,
+        repoPath: state.repoPath,
+        repo_path: state.repoPath,
         client: 'zendorium-ui',
       }));
 
@@ -685,15 +878,10 @@
       run.stream.push(JSON.stringify(payload, null, 2));
       if (run.stream.length > 28) run.stream.shift();
 
-      if (payload.prompt || payload.request || payload.input) {
-        run.prompt = payload.prompt || payload.request || payload.input;
-      }
-      if (payload.startedAt || payload.started_at) {
-        run.startedAt = payload.startedAt || payload.started_at;
-      }
-      if (payload.completedAt || payload.completed_at) {
-        run.completedAt = payload.completedAt || payload.completed_at;
-      }
+      if (payload.prompt || payload.request || payload.input) run.prompt = payload.prompt || payload.request || payload.input;
+      if (payload.repoPath || payload.repo_path) run.repoPath = payload.repoPath || payload.repo_path;
+      if (payload.startedAt || payload.started_at) run.startedAt = payload.startedAt || payload.started_at;
+      if (payload.completedAt || payload.completed_at) run.completedAt = payload.completedAt || payload.completed_at;
       if (payload.totalCostUsd != null || payload.total_cost_usd != null) {
         run.totalCostUsd = Number(payload.totalCostUsd ?? payload.total_cost_usd ?? run.totalCostUsd);
       }
@@ -702,24 +890,16 @@
         run.receiptCount = run.receipts.length;
         run.totalCostUsd = run.receipts.reduce((sum, receipt) => sum + (Number(receipt.costUsd) || 0), run.totalCostUsd || 0);
       }
-      if (payload.intent || payload.intentObject || payload.intent_object) {
-        run.intent = payload.intent || payload.intentObject || payload.intent_object;
-      }
-      if (payload.graph || payload.taskGraph || payload.task_graph) {
-        run.graph = normalizeGraph(payload.graph || payload.taskGraph || payload.task_graph);
-      }
+      if (payload.intent || payload.intentObject || payload.intent_object) run.intent = payload.intent || payload.intentObject || payload.intent_object;
+      if (payload.graph || payload.taskGraph || payload.task_graph) run.graph = normalizeGraph(payload.graph || payload.taskGraph || payload.task_graph);
       if (Array.isArray(payload.coherenceChecks || payload.coherence_checks)) {
         run.coherenceChecks = (payload.coherenceChecks || payload.coherence_checks).map(normalizeCoherence);
       }
       if (payload.mergeApproval || payload.merge_approval || payload.approval) {
         run.mergeApproval = normalizeApproval(payload.mergeApproval || payload.merge_approval || payload.approval);
       }
-      if (Array.isArray(payload.workers)) {
-        applyWorkers(run, payload.workers);
-      }
-      if (payload.worker || payload.workerStatus || payload.worker_status) {
-        applyWorkers(run, [payload.worker || payload.workerStatus || payload.worker_status]);
-      }
+      if (Array.isArray(payload.workers)) applyWorkers(run, payload.workers);
+      if (payload.worker || payload.workerStatus || payload.worker_status) applyWorkers(run, [payload.worker || payload.workerStatus || payload.worker_status]);
 
       if (type.includes('receipt')) {
         const receipt = normalizeReceipt(payload.receipt || payload);
@@ -729,23 +909,15 @@
         run.totalCostUsd += Number(receipt.costUsd || 0);
       }
 
-      if (type === 'run_started' || type === 'start' || type === 'run') {
-        run.status = 'running';
-      } else if (type.includes('complete') || type === 'done') {
+      if (type === 'run_started' || type === 'start' || type === 'run') run.status = 'running';
+      else if (type.includes('complete') || type === 'done') {
         run.status = payload.status || 'complete';
         run.completedAt = payload.completedAt || payload.completed_at || new Date().toISOString();
-      } else if (type.includes('error') || type.includes('failed')) {
-        run.status = 'failed';
-      } else if (payload.status) {
-        run.status = payload.status;
-      }
+      } else if (type.includes('error') || type.includes('failed')) run.status = 'failed';
+      else if (payload.status) run.status = payload.status;
 
-      if (payload.task && !payload.graph) {
-        mergeTaskIntoGraph(run, payload.task, type);
-      }
-      if (payload.node) {
-        mergeTaskIntoGraph(run, payload.node, type);
-      }
+      if (payload.task && !payload.graph) mergeTaskIntoGraph(run, payload.task, type);
+      if (payload.node) mergeTaskIntoGraph(run, payload.node, type);
 
       render();
     }
@@ -789,16 +961,12 @@
 
       const upstream = task.dependsOn || task.depends_on || task.from;
       if (Array.isArray(upstream)) {
-        for (const source of upstream) {
-          addGraphEdge(run.graph, String(source), id);
-        }
+        for (const source of upstream) addGraphEdge(run.graph, String(source), id);
       }
     }
 
     function addGraphEdge(graph, from, to) {
-      if (!graph.edges.find((edge) => edge.from === from && edge.to === to)) {
-        graph.edges.push({ from, to });
-      }
+      if (!graph.edges.find((edge) => edge.from === from && edge.to === to)) graph.edges.push({ from, to });
     }
 
     function eventStatusFromType(type) {
@@ -848,6 +1016,120 @@
       }
     }
 
+    async function loadModelConfig() {
+      const cached = window.localStorage.getItem(STORAGE_KEYS.modelConfig);
+      if (cached) {
+        try {
+          state.modelConfig = mergeModelConfig(JSON.parse(cached));
+        } catch {
+          state.modelConfig = { ...DEFAULT_MODEL_CONFIG };
+        }
+      }
+      renderSettings();
+
+      try {
+        const res = await fetch(`${API_BASE}/config/models`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        state.modelConfig = mergeModelConfig(data.models || data);
+        window.localStorage.setItem(STORAGE_KEYS.modelConfig, JSON.stringify(state.modelConfig));
+        setConfigStatus('Model config loaded.', false);
+      } catch (err) {
+        setConfigStatus(`Using local defaults. ${err.message}`, true);
+      }
+      renderSettings();
+      renderWorkers();
+    }
+
+    async function saveModelConfig() {
+      const payload = {};
+      for (const role of CONFIG_ROLE_ORDER) {
+        const current = readSetting(role);
+        payload[role] = current;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/config/models`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: payload }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.message || body.error || `${res.status}`);
+        }
+        const data = await res.json().catch(() => ({ models: payload }));
+        state.modelConfig = mergeModelConfig(data.models || payload);
+        window.localStorage.setItem(STORAGE_KEYS.modelConfig, JSON.stringify(state.modelConfig));
+        setConfigStatus('Saved. New assignments will apply on the next run.', false);
+      } catch (err) {
+        state.modelConfig = mergeModelConfig(payload);
+        window.localStorage.setItem(STORAGE_KEYS.modelConfig, JSON.stringify(state.modelConfig));
+        setConfigStatus(`Save failed. Kept local selection. ${err.message}`, true);
+      }
+      renderSettings();
+      renderWorkers();
+    }
+
+    function mergeModelConfig(input) {
+      const merged = { ...DEFAULT_MODEL_CONFIG };
+      for (const role of CONFIG_ROLE_ORDER) {
+        if (input && input[role] && input[role].model) {
+          merged[role] = {
+            model: String(input[role].model),
+            provider: String(input[role].provider || findProvider(role, input[role].model) || 'unknown'),
+          };
+        }
+      }
+      return merged;
+    }
+
+    function findProvider(role, model) {
+      const option = (MODEL_OPTIONS[role] || []).find((entry) => entry.model === model);
+      return option ? option.provider : null;
+    }
+
+    function readSetting(role) {
+      if (role === 'scout' || role === 'verifier') return MODEL_OPTIONS[role][0];
+      const select = document.getElementById(`model-${role}`);
+      const model = select ? select.value : state.modelConfig[role].model;
+      return {
+        model,
+        provider: findProvider(role, model) || state.modelConfig[role].provider,
+      };
+    }
+
+    function setConfigStatus(message, isError) {
+      const node = document.getElementById('config-status');
+      node.textContent = message;
+      node.style.color = isError ? 'var(--amber)' : 'var(--green)';
+    }
+
+    function renderSettings() {
+      const grid = document.getElementById('settings-grid');
+      grid.innerHTML = CONFIG_ROLE_ORDER.map((role) => {
+        const current = state.modelConfig[role] || DEFAULT_MODEL_CONFIG[role];
+        const color = ROLE_COLORS[role] || 'var(--text)';
+        const options = MODEL_OPTIONS[role] || [];
+        const fixed = role === 'scout' || role === 'verifier';
+
+        return `
+          <div class="settings-row">
+            <div class="settings-role" style="color:${color}">${esc(role)}</div>
+            ${fixed
+              ? `<div class="config-fixed">${esc(current.model)}</div>`
+              : `<select id="model-${role}" class="config-select">${options.map((entry) => `<option value="${esc(entry.model)}" ${entry.model === current.model ? 'selected' : ''}>${esc(entry.label)}</option>`).join('')}</select>`}
+            <div class="settings-provider">${esc(current.provider)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function getAssignedModel(role) {
+      const cfg = state.modelConfig[role];
+      return cfg ? `${cfg.model} [${cfg.provider}]` : 'unassigned';
+    }
+
     function render() {
       renderMetrics();
       renderIntent();
@@ -868,7 +1150,7 @@
         ['Run status', run.status || 'idle', run.status === 'failed' ? 'bad' : run.status === 'complete' ? 'ok' : 'live'],
         ['Receipts', String(run.receiptCount || run.receipts.length || 0), 'live'],
         ['Total cost', `$${Number(run.totalCostUsd || 0).toFixed(4)}`, 'warn'],
-        ['Merge gate', run.mergeApproval?.status || 'pending', run.mergeApproval?.status === 'approved' ? 'ok' : run.mergeApproval?.status === 'blocked' ? 'bad' : 'warn'],
+        ['Repo path', run.repoPath || state.repoPath || '.', 'live'],
       ];
       document.getElementById('metric-cards').innerHTML = cards.map(([label, value, cls]) => `
         <div class="metric-card">
@@ -884,6 +1166,7 @@
       document.getElementById('intent-title').textContent = title;
       document.getElementById('intent-json').textContent = JSON.stringify(run.intent || {
         prompt: run.prompt || 'No active run yet.',
+        repoPath: run.repoPath || state.repoPath,
         locked: true,
         version: 1,
       }, null, 2);
@@ -920,6 +1203,7 @@
       const html = ROLE_ORDER.map((role) => {
         const worker = state.active.workers[role];
         const active = /active|running|busy|assigned/.test(worker.status);
+        const configured = getAssignedModel(role);
         return `
           <article class="worker-card ${active ? 'active' : ''}" data-role="${esc(role)}">
             <div class="worker-head">
@@ -928,9 +1212,10 @@
             </div>
             <div class="worker-task">${esc(worker.currentTask)}</div>
             <div class="worker-meta">
-              <span class="worker-model">${esc(worker.model)}</span>
+              <span class="worker-model">Runtime: ${esc(worker.model)}</span>
               <span class="mini-label">${esc(role)}</span>
             </div>
+            <div class="worker-model-assigned">Assigned: ${esc(configured)}</div>
             ${worker.note ? `<div class="worker-model">${esc(worker.note)}</div>` : ''}
           </article>
         `;
@@ -972,6 +1257,7 @@
             <span class="worker-badge ${run.status === 'complete' ? 'ok' : run.status === 'failed' ? 'bad' : 'warn'}">${esc(run.status)}</span>
           </div>
           <div class="history-sub" style="margin-top:8px;">${esc(run.prompt || 'Waiting for prompt...')}</div>
+          <div class="history-sub">${esc(run.repoPath || '.')}</div>
         </button>
       `).join('');
     }
@@ -980,6 +1266,7 @@
       const run = state.active;
       const rows = [
         ['Active run', run.id || 'none'],
+        ['Repo path', run.repoPath || state.repoPath || '.'],
         ['Started', run.startedAt ? new Date(run.startedAt).toLocaleString() : 'not started'],
         ['Completed', run.completedAt ? new Date(run.completedAt).toLocaleString() : 'in progress'],
         ['Accumulated cost', `$${Number(run.totalCostUsd || 0).toFixed(4)}`],
@@ -996,7 +1283,7 @@
       const graph = state.active.graph || { nodes: [], edges: [] };
       const svg = document.getElementById('task-graph');
       if (!graph.nodes.length) {
-        svg.innerHTML = `<text x="24" y="40" fill="${'var(--dim)'}" font-family="${'var(--mono)'}" font-size="13">No task graph yet. Submit a run or wait for the server to publish one.</text>`;
+        svg.innerHTML = `<text x="24" y="40" fill="var(--dim)" font-family="var(--mono)" font-size="13">No task graph yet. Submit a run or wait for the server to publish one.</text>`;
         return;
       }
 
@@ -1026,16 +1313,16 @@
       }).join('');
 
       const nodeMarkup = graph.nodes.map((node) => {
-        const { x, y } = layout.get(node.id) || { x: 100, y: 100 };
+        const pos = layout.get(node.id) || { x: 100, y: 100 };
         const color = ROLE_COLORS[node.workerType] || '#69abff';
         const active = /active|running|ready/.test(node.status);
         const fill = node.status === 'completed' ? 'rgba(73,209,125,0.16)' : node.status === 'failed' ? 'rgba(255,106,116,0.12)' : 'rgba(9,17,31,0.92)';
         return `
           <g>
-            <circle cx="${x}" cy="${y}" r="20" fill="${fill}" stroke="${color}" stroke-width="2.5" class="node-ring ${active ? 'active' : ''}" />
-            <circle cx="${x}" cy="${y}" r="8" fill="${color}" opacity="0.94" />
-            <text x="${x}" y="${y + 42}" text-anchor="middle" fill="#dce7f7" font-family="var(--mono)" font-size="11">${esc(node.label).slice(0, 22)}</text>
-            <text x="${x}" y="${y + 58}" text-anchor="middle" fill="${color}" font-family="var(--mono)" font-size="10">${esc(node.status)}</text>
+            <circle cx="${pos.x}" cy="${pos.y}" r="20" fill="${fill}" stroke="${color}" stroke-width="2.5" class="node-ring ${active ? 'active' : ''}" />
+            <circle cx="${pos.x}" cy="${pos.y}" r="8" fill="${color}" opacity="0.94" />
+            <text x="${pos.x}" y="${pos.y + 42}" text-anchor="middle" fill="#dce7f7" font-family="var(--mono)" font-size="11">${esc(node.label).slice(0, 22)}</text>
+            <text x="${pos.x}" y="${pos.y + 58}" text-anchor="middle" fill="${color}" font-family="var(--mono)" font-size="10">${esc(node.status)}</text>
           </g>
         `;
       }).join('');
@@ -1066,8 +1353,15 @@
 
     window.selectRun = selectRun;
     document.getElementById('prompt-form').addEventListener('submit', submitPrompt);
+    document.getElementById('config-save').addEventListener('click', saveModelConfig);
+    document.getElementById('repo-input').addEventListener('change', persistRepoPath);
+    document.getElementById('repo-input').addEventListener('blur', persistRepoPath);
+
+    loadRepoPath();
+    renderSettings();
     render();
     connect();
+    loadModelConfig();
   </script>
 </body>
 </html>

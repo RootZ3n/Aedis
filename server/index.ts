@@ -8,6 +8,8 @@
  * Can be run directly: node server/index.js
  */
 
+import "dotenv/config";
+
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -26,6 +28,7 @@ import { taskRoutes } from "./routes/tasks.js";
 import { runRoutes } from "./routes/runs.js";
 import { workerRoutes } from "./routes/workers.js";
 import { healthRoutes } from "./routes/health.js";
+import { configRoutes } from "./routes/config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -163,6 +166,7 @@ export async function createServer(
   await server.register(runRoutes, { prefix: "/runs" });
   await server.register(workerRoutes, { prefix: "/workers" });
   await server.register(healthRoutes);
+  await server.register(configRoutes, { prefix: "/config" });
 
   // ─── WebSocket endpoint ────────────────────────────────────────
 
