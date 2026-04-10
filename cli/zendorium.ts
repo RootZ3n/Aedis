@@ -207,8 +207,9 @@ async function main(): Promise<void> {
   // Step 3: Print final receipt
   try {
     const data = await fetchJson(`/tasks/${encodeURIComponent(taskId)}`);
-    if (data.status === "complete" || data.status === "failed") {
-      process.stderr.write(`\nTask ${taskId}: ${data.status}\n`);
+    if (data.status === "complete" || data.status === "failed" || data.status === "partial") {
+      const display = data.status === "partial" ? "complete (partial)" : data.status;
+      process.stderr.write(`\nTask ${taskId}: ${display}\n`);
       if (data.error) {
         process.stderr.write(`Error: ${data.error}\n`);
       }

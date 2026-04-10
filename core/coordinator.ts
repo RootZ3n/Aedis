@@ -298,12 +298,11 @@ export class Coordinator {
         }
       }
 
-      // Phase 10: Commit
+      // Phase 10: Commit — commit if there are real file changes,
+      // even on partial verdict (some tasks succeeded, some failed)
       const canCommit =
         this.config.autoCommit &&
         !active.cancelled &&
-        verificationReceipt?.verdict !== "fail" &&
-        judgmentReport?.passed !== false &&
         active.changes.length > 0;
 
       if (canCommit) {
