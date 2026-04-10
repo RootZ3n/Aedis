@@ -2,8 +2,11 @@
 
 import { TerminalStream, streamSocket } from "./stream.js";
 
-const API_BASE = "http://localhost:18796";
-const WS_URL = "ws://localhost:18796/ws";
+// Override either via env to point at a remote Zendorium (e.g. tailscale-served).
+// WS_URL defaults to API_BASE with the scheme swapped + /ws appended.
+//   ZENDORIUM_API_BASE=https://mushin.tail8bb475.ts.net/zendorium zendorium health
+const API_BASE = process.env["ZENDORIUM_API_BASE"] ?? "http://localhost:18796";
+const WS_URL = process.env["ZENDORIUM_WS_URL"] ?? API_BASE.replace(/^http(s?):/, "ws$1:") + "/ws";
 
 type Command = "run" | "status" | "runs" | "workers" | "health";
 
@@ -86,6 +89,25 @@ function formatWorkers(data: any): string {
   }
 
   return lines.join("\n");
+}
+
+function extractCostUsd(payload: any): number {
+  const candidates = [
+    payload?.receipt?.totalCost?.estimatedCostUsd,
+    payload?.receipt?.total_cost?.estimatedCostUsd,
+    payload?.active_run?.total_cost?.estimatedCostUsd,
+    payload?.tracked?.cost?.estimatedCostUsd,
+    payload?.tracked?.total_cost?.estimatedCostUsd,
+    payload?.total_cost?.estimatedCostUsd,
+    payload?.cost?.estimatedCostUsd,
+  ];
+
+  for (const value of candidates) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return 0;
 }
 
 // ─── Main ────────────────────────────────────────────────────────────
@@ -206,12 +228,24 @@ async function main(): Promise<void> {
 
   // Step 3: Print final receipt
   try {
-    const data = await fetchJson(`/tasks/${encodeURIComponent(taskId)}`);
-    if (data.status === "complete" || data.status === "failed" || data.status === "partial") {
-      const display = data.status === "partial" ? "complete (partial)" : data.status;
-      process.stderr.write(`\nTask ${taskId}: ${display}\n`);
-      if (data.error) {
-        process.stderr.write(`Error: ${data.error}\n`);
+    const [statusResult, receiptResult] = await Promise.allSettled([
+      fetchJson(`/tasks/${encodeURIComponent(taskId)}`),
+      fetchJson(`/tasks/${encodeURIComponent(taskId)}/receipts`),
+    ]);
+
+    const statusData = statusResult.status === "fulfilled" ? statusResult.value : null;
+    const receiptData = receiptResult.status === "fulfilled" ? receiptResult.value : null;
+    const finalCostUsd = extractCostUsd(receiptData) || extractCostUsd(statusData);
+
+    if (statusData && (statusData.status === "complete" || statusData.status === "failed" || statusData.status === "partial" || statusData.status === "cancelled")) {
+      const display = statusData.status === "partial" ? "complete (partial)" : statusData.status;
+      process.stderr.write(`
+Task ${taskId}: ${display}
+`);
+      process.stderr.write(`Cost: $${finalCostUsd.toFixed(4)}\n`);
+      if (statusData.error) {
+        process.stderr.write(`Error: ${statusData.error}
+`);
       }
     }
   } catch {

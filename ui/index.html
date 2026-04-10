@@ -182,7 +182,7 @@
             <h1 class="hero-title">Build orchestration in motion</h1>
             <p class="hero-sub">Intent locks first. Workers fan out. Task graph pulses as the run moves. Receipts, coherence, merge approval, and cost stay visible the whole time.</p>
           </div>
-          <div class="status-pill"><span class="dot"></span><span id="socket-status">Connecting to ws://localhost:18796/ws</span></div>
+          <div class="status-pill"><span class="dot"></span><span id="socket-status">Connecting...</span></div>
         </div>
         <form class="prompt-stack" id="prompt-form">
           <div class="repo-row">
@@ -276,8 +276,30 @@
   </div>
 
   <script>
-    const API_BASE = 'http://localhost:18796';
-    const WS_URL = 'ws://localhost:18796/ws';
+    // Base URL detection — works under file://, http://localhost:18796, and any
+    // reverse-proxied mount (e.g. tailscale serve --set-path=/zendorium 18796).
+    // The page asks for whatever prefix it was served from, so the proxy can strip
+    // or preserve it transparently. Override either via window.ZENDORIUM_API_BASE /
+    // window.ZENDORIUM_WS_URL before this script runs if you need to pin a target.
+    const __zd = (() => {
+      const loc = window.location;
+      const overrideApi = (typeof window !== 'undefined' && window.ZENDORIUM_API_BASE) || null;
+      const overrideWs  = (typeof window !== 'undefined' && window.ZENDORIUM_WS_URL)  || null;
+      // file:// or no host — fall back to localhost defaults
+      if (!loc.host || loc.protocol === 'file:') {
+        return { api: overrideApi || 'http://localhost:18796', ws: overrideWs || 'ws://localhost:18796/ws' };
+      }
+      // Strip a trailing filename (foo.html) and any trailing slash to get the prefix
+      let basePath = loc.pathname.replace(/\/[^\/]*\.html?$/i, '');
+      if (basePath.endsWith('/')) basePath = basePath.slice(0, -1);
+      const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      return {
+        api: overrideApi || `${loc.protocol}//${loc.host}${basePath}`,
+        ws:  overrideWs  || `${wsProtocol}//${loc.host}${basePath}/ws`,
+      };
+    })();
+    const API_BASE = __zd.api;
+    const WS_URL = __zd.ws;
     const ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator'];
     const CONFIG_ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator', 'escalation', 'coordinator'];
     const STORAGE_KEYS = { repoPath: 'zendorium.repoPath', modelConfig: 'zendorium.modelConfig' };

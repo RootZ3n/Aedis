@@ -24,6 +24,7 @@ import { randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { resolve } from "path";
+import { existsSync } from "fs";
 
 import {
   createIntent,
@@ -32,6 +33,7 @@ import {
   type IntentObject,
   type CreateIntentParams,
   type Assumption,
+  type Deliverable,
 } from "./intent.js";
 import {
   CharterGenerator,
@@ -363,12 +365,10 @@ export class Coordinator {
   // ─── Graph Construction ────────────────────────────────────────────
 
   private buildTaskGraph(active: ActiveRun, analysis: RequestAnalysis): void {
-    const { graph, intent } = active;
-    const deliverables = intent.charter.deliverables;
+    const { graph } = active;
+    const deliverables = this.prepareDeliverablesForGraph(active, analysis);
 
-    // Scout node for each target area
     const targetFiles = deliverables.flatMap((d) => d.targetFiles);
-    const uniqueDirs = [...new Set(targetFiles.map((f) => f.split("/").slice(0, -1).join("/")))];
 
     const scoutNode = addNode(graph, {
       label: "Scout: gather context and assess risk",
@@ -377,7 +377,6 @@ export class Coordinator {
       metadata: { category: analysis.category, scopeEstimate: analysis.scopeEstimate },
     });
 
-    // Builder node per deliverable
     const builderNodes: TaskNode[] = [];
     for (const deliverable of deliverables) {
       const builder = addNode(graph, {
@@ -390,7 +389,6 @@ export class Coordinator {
       builderNodes.push(builder);
     }
 
-    // Critic node reviews all builder outputs
     const criticNode = addNode(graph, {
       label: "Critic: review all builder outputs",
       workerType: "critic",
@@ -401,7 +399,6 @@ export class Coordinator {
       addEdge(graph, builder.id, criticNode.id, "data");
     }
 
-    // Verifier node runs after Critic
     const verifierNode = addNode(graph, {
       label: "Verifier: tests, types, lint",
       workerType: "verifier",
@@ -410,7 +407,6 @@ export class Coordinator {
     });
     addEdge(graph, criticNode.id, verifierNode.id, "data");
 
-    // Integrator node merges everything
     const integratorNode = addNode(graph, {
       label: "Integrator: merge and final coherence",
       workerType: "integrator",
@@ -419,7 +415,6 @@ export class Coordinator {
     });
     addEdge(graph, verifierNode.id, integratorNode.id, "data");
 
-    // Merge group for all builders
     if (builderNodes.length > 1) {
       addMergeGroup(
         graph,
@@ -429,7 +424,6 @@ export class Coordinator {
       );
     }
 
-    // Verification checkpoint between Critic and Verifier
     addCheckpoint(graph, {
       label: "Post-review checkpoint",
       upstreamNodeIds: [criticNode.id],
@@ -441,7 +435,6 @@ export class Coordinator {
       allowsIntentRevision: true,
     });
 
-    // Escalation boundaries from risk signals
     if (analysis.riskSignals.length > 0) {
       for (const builder of builderNodes) {
         addEscalationBoundary(
@@ -454,8 +447,181 @@ export class Coordinator {
       }
     }
 
-    // Mark scout as ready (no dependencies)
     markReady(graph, scoutNode.id);
+  }
+
+  private prepareDeliverablesForGraph(
+    active: ActiveRun,
+    analysis: RequestAnalysis
+  ): readonly Deliverable[] {
+    const explicitTestRequest = this.userExplicitlyAskedForTests(analysis.raw);
+
+    // Build a normalized set of explicitly-mentioned targets. Match by BOTH
+    // exact path AND basename so a deliverable for "core/recovery-engine.ts"
+    // matches a request that just said "recovery-engine.ts" (and vice versa).
+    const explicitlyMentioned = new Set<string>();
+    for (const target of analysis.targets) {
+      const trimmed = target.trim();
+      if (!trimmed) continue;
+      explicitlyMentioned.add(trimmed);
+      explicitlyMentioned.add(trimmed.replace(/^.*\//, ""));
+    }
+    const isExplicit = (file: string): boolean =>
+      explicitlyMentioned.has(file) || explicitlyMentioned.has(file.replace(/^.*\//, ""));
+
+    const totalBefore = active.intent.charter.deliverables.length;
+    const decisions: string[] = [];
+    let didFilter = false;
+
+    console.log(`[coordinator] prepareDeliverablesForGraph: ${totalBefore} deliverable(s) before filter`);
+
+    // ── PHASE 1 — Upstream empty guard ──────────────────────────────────
+    // Drop deliverables that arrive with no target files at all. These come
+    // from charter's placeholder fallback (charter.ts:259) or from upstream
+    // auto-generation paths that never populate targetFiles. Catching them
+    // here means downstream phases never see "ghost" deliverables that would
+    // produce empty builder nodes.
+    const guarded: Deliverable[] = [];
+    for (const d of active.intent.charter.deliverables) {
+      if (!d.targetFiles || d.targetFiles.length === 0) {
+        const label = d.id ?? "<unnamed>";
+        console.warn(`[coordinator] WARN: dropping deliverable "${label}" upstream — no target files (charter placeholder or upstream bug)`);
+        decisions.push(`  drop deliverable "${label}" (no target files at all — upstream guard)`);
+        didFilter = true;
+        continue;
+      }
+      guarded.push(d);
+    }
+
+    // ── PHASE 2 — Test/non-existent filter ──────────────────────────────
+    // Rule 1: explicitly mentioned files are sacrosanct, kept unconditionally.
+    // Rule 2: drop only auto-generated test tasks for non-existent files.
+    // Everything else stays — workers may create non-existent files, and
+    // tests for existing files may be legitimate follow-up work.
+    const filtered: Deliverable[] = [];
+    for (const deliverable of guarded) {
+      const verifiedTargets = deliverable.targetFiles.filter((file) => {
+        if (!file) {
+          decisions.push(`  drop empty file path in deliverable "${deliverable.id ?? "<unnamed>"}"`);
+          return false;
+        }
+
+        const exists = this.fileExists(file);
+        const isTest = this.isTestFile(file);
+        const wasExplicit = isExplicit(file);
+
+        if (wasExplicit) {
+          decisions.push(`  keep ${file} (explicitly mentioned in request)`);
+          return true;
+        }
+
+        if (isTest && !explicitTestRequest && !exists) {
+          decisions.push(`  drop ${file} (auto-generated test for non-existent file)`);
+          didFilter = true;
+          return false;
+        }
+
+        decisions.push(`  keep ${file}${exists ? "" : " (will be created)"}`);
+        return true;
+      });
+
+      if (deliverable.targetFiles.length > 0 && verifiedTargets.length === 0) {
+        decisions.push(`  drop deliverable "${deliverable.id ?? "<unnamed>"}" (all target files were filtered)`);
+        didFilter = true;
+        continue;
+      }
+
+      if (verifiedTargets.length !== deliverable.targetFiles.length) {
+        didFilter = true;
+      }
+
+      filtered.push({
+        ...deliverable,
+        targetFiles: verifiedTargets,
+      });
+    }
+
+    // ── PHASE 3 — Deduplicate by resolved absolute path ─────────────────
+    // The same file may appear under multiple deliverables (e.g. one with
+    // "/mnt/ai/Zendorium/core/recovery-engine.ts" and one with
+    // "core/recovery-engine.ts"). Resolve each target file to an absolute
+    // path against projectRoot, then skip files whose absolute path was
+    // already seen by an earlier deliverable. First-occurrence wins.
+    const seenPaths = new Set<string>();
+    const deduped: Deliverable[] = [];
+    for (const d of filtered) {
+      const uniqueFiles: string[] = [];
+      for (const f of d.targetFiles) {
+        const abs = resolve(this.config.projectRoot, f);
+        if (seenPaths.has(abs)) {
+          decisions.push(`  dedupe ${f} (already covered by earlier deliverable as ${abs})`);
+          didFilter = true;
+          continue;
+        }
+        seenPaths.add(abs);
+        uniqueFiles.push(f);
+      }
+
+      // ── PHASE 4 — Post-dedup empty guard ──
+      // After dedup a deliverable may have lost all its target files.
+      // Drop it with a warning rather than carry it forward as a no-op.
+      if (uniqueFiles.length === 0) {
+        const label = d.id ?? "<unnamed>";
+        console.warn(`[coordinator] WARN: dropping deliverable "${label}" after dedup — all target files were duplicates of earlier deliverables`);
+        decisions.push(`  drop deliverable "${label}" (all target files were duplicates)`);
+        didFilter = true;
+        continue;
+      }
+
+      deduped.push({ ...d, targetFiles: uniqueFiles });
+    }
+
+    console.log(`[coordinator] prepareDeliverablesForGraph: ${deduped.length} deliverable(s) after filter+dedup`);
+    for (const decision of decisions) {
+      console.log(`[coordinator]${decision}`);
+    }
+
+    // SAFETY NET — the filter must NEVER zero out a non-empty input.
+    // If it would, log a loud warning and return the original list unchanged.
+    if (deduped.length === 0 && totalBefore > 0) {
+      console.warn(
+        `[coordinator] WARNING: filter would have produced 0 deliverables from ${totalBefore}; ` +
+        `returning original deliverables unchanged to avoid empty task graph. ` +
+        `Decisions: ${decisions.join("; ")}`
+      );
+      return active.intent.charter.deliverables;
+    }
+
+    if (decisions.length > 0) {
+      recordDecision(active.run, {
+        description: `Filtered deliverables (${totalBefore} → ${deduped.length})`,
+        madeBy: "coordinator",
+        taskId: null,
+        alternatives: ["Keep original deliverables unchanged"],
+        rationale: decisions.join(" | "),
+      });
+    }
+
+    if (didFilter || deduped.length !== totalBefore) {
+      active.intent = reviseIntent(active.intent, {
+        reason: "Filtered, deduplicated, and dropped empty deliverables",
+        charter: { deliverables: deduped },
+      });
+    }
+
+    return deduped;
+  }
+
+  private userExplicitlyAskedForTests(request: string): boolean {
+    return /\b(add tests|test file|test files|tests)\b/i.test(request);
+  }
+
+  private isTestFile(filePath: string): boolean {
+    return /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(filePath);
+  }
+
+  private fileExists(filePath: string): boolean {
+    return existsSync(resolve(this.config.projectRoot, filePath));
   }
 
   // ─── Execution Engine ──────────────────────────────────────────────
