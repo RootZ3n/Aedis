@@ -99,34 +99,52 @@ Every model call produces a cost entry: model name, input tokens, output tokens,
 
 Default model assignments are defined in `server/routes/config.ts` (`DEFAULT_MODEL_CONFIG`) and overridden per-project by `.zendorium/model-config.json` if present. Workers read the active assignment via `loadModelConfig()` on every execute, so configuration changes take effect on the next run without a process restart.
 
+Per-role fallbacks are NOT stored in `model-config.json` — they are hardcoded in each worker's constructor (`workers/builder.ts`, `workers/critic.ts`) via the `fallbackModel` field. Both Builder and Critic use the same `invokeModelWithFallback()` mechanism in `core/model-invoker.ts`. The default request timeout is **5 minutes** (300_000 ms) — raised from 2 minutes after ModelStudio was identified as slow but functional under heavy load.
+
 ### Builder
+
+- **Primary:** `qwen3.6-plus` (ModelStudio via `MODELSTUDIO_API_KEY`)
+- **Fallback:** `claude-sonnet-4-6` (Anthropic direct via `ANTHROPIC_API_KEY`)
+
+ModelStudio's qwen3.6-plus is the Builder's workhorse. It is significantly cheaper per token than Sonnet and produces solid diff-application output for the contract scope the Builder enforces. It is also slow — calls regularly run 60–180 seconds, occasionally pushing toward the 5-minute timeout cap. That latency is acceptable; the previous 2-minute timeout was not.
+
+If ModelStudio times out, returns an HTTP error, or is otherwise unreachable, the chain promotes Anthropic Sonnet 4.6 — same model the Critic uses as primary. The fallback exists so a transient ModelStudio outage cannot stall the entire pipeline, and so quality stays high when the cheap path fails.
+
+### Critic
 
 - **Primary:** `claude-sonnet-4-6` (Anthropic direct via `ANTHROPIC_API_KEY`)
 - **Fallback:** `qwen3.5:9b` (local Ollama, free)
 
-The Builder uses a fallback chain via `invokeModelWithFallback()` in `core/model-invoker.ts`. If the primary times out, the timeout is recorded in the per-run blacklist and the local fallback is invoked. **A timed-out provider is never retried within the same Coordinator run** — the blacklist persists across multiple `Builder.execute()` calls within that run, scoped by `intent.runId`.
+The Critic gates the entire pipeline — its verdict decides whether work reaches Verify and Apply, or gets sent back to the Builder for rework. A stronger model here pays for itself by catching issues that would otherwise burn a verification cycle (or worse, ship a broken build). Sonnet has measurably better track record on the diff-review and contract-compliance checks the Critic runs.
 
-Builder primary was previously `qwen3.6-plus`/`modelstudio`, which timed out at 120s on essentially every call. Sonnet 4.6 typically responds in 2–30s for builder-sized prompts and has a stronger track record on the diff-application contract Builder enforces. The local Ollama fallback exists so a transient Anthropic outage cannot stall the entire pipeline.
+If Anthropic is down, the chain falls back to the local qwen3.5:9b on Ollama. Local Ollama has no API key, no rate limit, no auth check — it is the floor. The Critic's verdicts under fallback are still better than no review at all.
 
 ### Other Roles
 
 - **Scout:** `local` (mock, zero-cost — pure context assembly, no model needed)
-- **Critic:** `qwen3.5:9b` (local Ollama, free — review work fits in a 9B model)
 - **Verifier:** `local` (mock — runs deterministic tests/types/lint, not a model)
 - **Integrator:** `glm-5.1` (ZhipuAI — strong at multi-file conflict resolution)
 - **Escalation:** `glm-5.1` (ZhipuAI — same model used when standard tier fails)
 - **Coordinator:** `xiaomi/mimo-v2-pro` (OpenRouter — used for orchestration prompts when needed)
 
+These roles do not currently have fallback chains. If they need that discipline later, the same `invokeModelWithFallback()` + per-run blacklist pattern from Builder/Critic can be ported in.
+
 ### Fallback Discipline
 
-The fallback chain is intentionally short — primary plus one local backup. This is by design:
+The fallback chain is intentionally short — primary plus exactly one backup. This is by design:
 
-1. **No silent escalation.** If Anthropic fails, the local fallback handles it. We do not silently chain through three paid providers and run up the bill.
-2. **No retry-the-same-thing.** A provider that times out once in a run is blacklisted for the rest of that run. Retrying a timed-out provider wastes the timeout window again.
-3. **Local always works.** The local fallback has no API key, no rate limit, no auth check. It is the floor.
-4. **Cost transparency holds.** The cost entry on the receipt records the provider that *actually succeeded*, not the one that was attempted first.
+1. **No silent escalation.** If the primary fails, exactly one fallback handles it. We do not silently chain through three paid providers and run up the bill.
+2. **No retry-the-same-thing.** A provider that times out once in a run is blacklisted for the rest of that run. The blacklist is shared across both Builder and Critic via per-run scoping (keyed by `intent.runId`), so a ModelStudio timeout in the Builder is also remembered if the Critic happens to need ModelStudio later in the same run.
+3. **Quality and local both have a place.** Builder's fallback is the Critic's primary (Sonnet) — quality backstop for the cheap path. Critic's fallback is local Ollama — availability floor for the quality path. Together they cover the two failure modes that matter: paid provider down, or local-only environment.
+4. **Cost transparency holds.** The cost entry on the receipt records the provider that *actually succeeded*, not the one that was attempted first. The `builder_complete` and `critic_review` events both carry a `fellBack: boolean` so the UI and receipt stream can flag fallback events.
 
-If a build run consistently falls through to the local fallback, that is a signal — either the primary provider has a real problem (rate limits, regional outage, key revoked) or the prompts are exceeding what Sonnet can handle in the timeout window. Either way, the receipt stream will show it, and the operator can act.
+If a build run consistently falls through to the Builder fallback, that is a signal — ModelStudio is having a real outage, the API key is invalid, or rate limits are biting. The receipt stream will show it as a flood of `fellBack: true` events, and the operator can act.
+
+### Timeout Discipline
+
+`fetchWithTimeout` in `core/model-invoker.ts` defaults to 300_000 ms (5 minutes). This is the per-request hard cap — anything still pending at that point is aborted, the provider is blacklisted for the run, and the chain falls through to the fallback. Workers that need a tighter bound can pass an explicit `timeoutMs` to the underlying provider call, but Builder and Critic both rely on the default.
+
+The previous 2-minute cap was tripping ModelStudio on essentially every Builder call. The fix was the longer cap, not a different model — ModelStudio works fine when you let it finish.
 
 ---
 
@@ -162,3 +180,7 @@ If a build run consistently falls through to the local fallback, that is a signa
 > "Coherence is checked, not hoped for."
 
 > "A timed-out provider does not get a second chance in the same run."
+
+> "The Critic gates the pipeline — pay for the better model there."
+
+> "Slow is not the same as broken."

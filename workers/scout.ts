@@ -587,3 +587,329 @@ export class ScoutWorker extends AbstractWorker {
     });
   }
 }
+
+// ─── Section Extraction (exported utility) ───────────────────────────
+//
+// Used by workers/builder.ts when a target file is too large to fit in the
+// prompt budget. Finds the most relevant function/method for a task and
+// returns a windowed section of the file plus surrounding context, with
+// line-number metadata so the Builder can ask the model to generate a
+// unified diff that uses ORIGINAL file line numbers.
+//
+// Pure function — no Scout instance, no I/O, no state. Builder imports
+// it directly without instantiating ScoutWorker. The function is colocated
+// here because Scout owns "context extraction" conceptually, but it is
+// used as a library by Builder, not as a worker capability.
+
+export interface SectionExtraction {
+  /** The extracted section content (newline-joined, original line endings preserved). */
+  readonly section: string;
+  /** First line number of the section in the full file (1-indexed). */
+  readonly startLine: number;
+  /** Last line number of the section in the full file (1-indexed). */
+  readonly endLine: number;
+  /** Total line count of the full file. */
+  readonly totalLines: number;
+  /** Name of the function this section is centered on, or null. */
+  readonly matchedFunction: string | null;
+  /** First line of the matched function in the full file (1-indexed). */
+  readonly funcStart: number;
+  /** Last line of the matched function in the full file (1-indexed). */
+  readonly funcEnd: number;
+  /** How the section was selected. */
+  readonly extractionMethod:
+    | "function-keyword-match"
+    | "longest-function-fallback"
+    | "middle-of-file-fallback";
+  /** Keywords that were extracted from the task description. */
+  readonly keywordsUsed: readonly string[];
+}
+
+interface FunctionLocation {
+  readonly name: string;
+  readonly startLine: number; // 0-indexed internally
+  readonly endLine: number;   // 0-indexed internally
+}
+
+export const SECTION_LARGE_FILE_THRESHOLD = 16_000;
+export const SECTION_MAX_LINES = 150;
+export const SECTION_PADDING_LINES = 100;
+
+const SECTION_STOP_WORDS = new Set([
+  "the", "a", "an", "to", "in", "on", "at", "of", "for", "with", "and", "or",
+  "but", "is", "are", "was", "were", "be", "been", "being", "have", "has",
+  "had", "do", "does", "did", "will", "would", "should", "could", "may",
+  "might", "this", "that", "these", "those", "it", "its", "they", "them",
+  "their", "method", "function", "class", "file", "code", "line", "section",
+  "from", "into", "out", "off", "use", "uses", "using", "all", "any", "some",
+  "add", "remove", "fix", "update", "change", "modify", "edit", "create",
+  "make", "delete", "implement", "implements", "implementation", "new",
+  "very", "much", "more", "less", "than", "then", "when", "where", "what",
+  "which", "who", "whom", "how", "why", "if", "so", "as", "by", "up", "down",
+]);
+
+const FN_REGEX_WORDS_TO_SKIP = new Set([
+  "if", "else", "for", "while", "do", "switch", "case", "return", "throw",
+  "catch", "try", "finally", "await", "async", "yield", "new", "typeof",
+  "instanceof", "void", "delete", "in", "of", "let", "const", "var",
+  "function", "class", "interface", "type", "enum", "import", "export",
+  "from", "as", "default", "public", "private", "protected", "static",
+  "readonly", "abstract", "override", "true", "false", "null", "undefined",
+  "this", "super", "constructor",
+]);
+
+/**
+ * Extract a windowed section of a large file based on the task description.
+ *
+ * Returns null when the file is small enough to send whole — the threshold
+ * is SECTION_LARGE_FILE_THRESHOLD chars (16000 ≈ 4000 tokens) AND the file
+ * has more than SECTION_MAX_LINES lines.
+ *
+ * Algorithm:
+ *   1. Find all function/method declarations via regex + brace matching.
+ *   2. Score each function by keyword match against the task description.
+ *      - Exact name match: +100 per matching keyword
+ *      - Substring name match: +50
+ *      - Body keyword occurrences: +2 each
+ *   3. Pick the highest-scoring function (score > 0).
+ *      Fallback 1: longest function in the file.
+ *      Fallback 2: middle of the file (if no functions found at all).
+ *   4. Pad with up to SECTION_PADDING_LINES (100) lines above and below.
+ *   5. Cap total at SECTION_MAX_LINES (150) lines, centered on function midpoint.
+ */
+export function extractRelevantSection(
+  filePath: string,
+  fullContent: string,
+  taskDescription: string,
+): SectionExtraction | null {
+  if (fullContent.length <= SECTION_LARGE_FILE_THRESHOLD) {
+    return null;
+  }
+
+  const lines = fullContent.split(/\r?\n/);
+  const totalLines = lines.length;
+
+  if (totalLines <= SECTION_MAX_LINES) {
+    // Already small enough to send whole even if char count is large
+    // (e.g. one massive line). Let the Builder handle it.
+    return null;
+  }
+
+  const keywords = extractTaskKeywords(taskDescription);
+  const functions = findFunctionLocations(lines);
+
+  let bestFunction: FunctionLocation | null = null;
+  let bestScore = -1;
+  for (const fn of functions) {
+    const score = scoreFunctionForKeywords(fn, lines, keywords);
+    if (score > bestScore) {
+      bestScore = score;
+      bestFunction = fn;
+    }
+  }
+
+  let funcStart: number; // 0-indexed
+  let funcEnd: number;   // 0-indexed
+  let matchedFunction: string | null = null;
+  let extractionMethod: SectionExtraction["extractionMethod"];
+
+  if (bestFunction && bestScore > 0) {
+    funcStart = bestFunction.startLine;
+    funcEnd = bestFunction.endLine;
+    matchedFunction = bestFunction.name;
+    extractionMethod = "function-keyword-match";
+  } else if (functions.length > 0) {
+    // Fallback: longest function in the file. Most edits target the
+    // largest/most complex function, so this is a sensible default.
+    const longest = functions.reduce((a, b) =>
+      (b.endLine - b.startLine) > (a.endLine - a.startLine) ? b : a,
+    );
+    funcStart = longest.startLine;
+    funcEnd = longest.endLine;
+    matchedFunction = longest.name;
+    extractionMethod = "longest-function-fallback";
+  } else {
+    // No functions found at all — extract the middle of the file as a
+    // last resort. The padding logic below will expand around this point.
+    const mid = Math.floor(totalLines / 2);
+    funcStart = mid;
+    funcEnd = mid;
+    extractionMethod = "middle-of-file-fallback";
+  }
+
+  // Compute section bounds with padding
+  let sectionStart = Math.max(0, funcStart - SECTION_PADDING_LINES);
+  let sectionEnd = Math.min(totalLines - 1, funcEnd + SECTION_PADDING_LINES);
+
+  // Cap at SECTION_MAX_LINES, centered on the function midpoint.
+  // If the function itself is larger than MAX_LINES, the section will
+  // contain only part of the function — that is intentional, the
+  // alternative is to blow the prompt budget.
+  if (sectionEnd - sectionStart + 1 > SECTION_MAX_LINES) {
+    const funcMid = Math.floor((funcStart + funcEnd) / 2);
+    const half = Math.floor(SECTION_MAX_LINES / 2);
+    sectionStart = Math.max(0, funcMid - half);
+    sectionEnd = Math.min(totalLines - 1, sectionStart + SECTION_MAX_LINES - 1);
+    // If we hit the bottom edge, slide the start back so we still get MAX lines
+    if (sectionEnd === totalLines - 1) {
+      sectionStart = Math.max(0, sectionEnd - SECTION_MAX_LINES + 1);
+    }
+  }
+
+  const sectionLines = lines.slice(sectionStart, sectionEnd + 1);
+  const section = sectionLines.join("\n");
+
+  return {
+    section,
+    startLine: sectionStart + 1, // convert to 1-indexed for human-readable output
+    endLine: sectionEnd + 1,
+    totalLines,
+    matchedFunction,
+    funcStart: funcStart + 1,
+    funcEnd: funcEnd + 1,
+    extractionMethod,
+    keywordsUsed: keywords,
+  };
+}
+
+/**
+ * Extract identifier-like keywords from a task description.
+ * Drops stop words and short tokens; lowercases for case-insensitive matching.
+ */
+function extractTaskKeywords(taskDescription: string): string[] {
+  const tokens = taskDescription
+    .replace(/[()[\]{}.,;:!?'"`/]/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !SECTION_STOP_WORDS.has(t.toLowerCase()));
+  return [...new Set(tokens.map((t) => t.toLowerCase()))];
+}
+
+/**
+ * Find function/method declarations in a TypeScript/JavaScript file.
+ *
+ * Catches:
+ *   - function name(...) { ... }
+ *   - async function name(...) { ... }
+ *   - methodName(...) { ... }     (class methods)
+ *   - async methodName(...) { ... }
+ *   - public/private/protected/static prefixed methods
+ *
+ * Does NOT catch arrow functions assigned to variables (`const x = () => {}`),
+ * or constructor calls. Skips control-flow keywords (if/for/while/etc).
+ *
+ * Returns FunctionLocations in source order with 0-indexed line numbers.
+ */
+function findFunctionLocations(lines: readonly string[]): FunctionLocation[] {
+  const functions: FunctionLocation[] = [];
+  // Match: optional modifiers + identifier + ( ... )
+  const declRegex = /^\s*(?:export\s+)?(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:async\s+)?(?:function\s+)?(\w+)\s*(?:<[^>]*>)?\s*\(/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const match = line.match(declRegex);
+    if (!match) continue;
+
+    const name = match[1];
+    if (FN_REGEX_WORDS_TO_SKIP.has(name)) continue;
+
+    // Skip variable declarations like `const x = something(...)`
+    if (/^\s*(?:const|let|var)\s+\w+\s*=/.test(line)) continue;
+
+    // Filter out plain function calls — line should look like a declaration.
+    // Accept: ends with `{`, ends with `(`, ends with `,`, ends with `:`,
+    // contains `=>`, OR has a `{` within the next few lines.
+    const trimmed = line.trimEnd();
+    const lastChar = trimmed.slice(-1);
+    if (
+      lastChar !== "{" &&
+      lastChar !== "(" &&
+      lastChar !== "," &&
+      lastChar !== ":" &&
+      !trimmed.includes("=>")
+    ) {
+      let foundBrace = false;
+      for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+        const next = lines[j] ?? "";
+        if (next.includes("{")) {
+          foundBrace = true;
+          break;
+        }
+        if (next.trim().endsWith(";")) break;
+      }
+      if (!foundBrace) continue;
+    }
+
+    const endLine = findFunctionEnd(lines, i);
+    if (endLine > i) {
+      functions.push({ name, startLine: i, endLine });
+    }
+  }
+
+  return functions;
+}
+
+/**
+ * Find the closing brace that matches the first opening brace at or after
+ * startLine. Naive — does not handle braces inside strings or comments.
+ * Good enough for clean TypeScript source. If no matching close is found,
+ * returns startLine (caller will skip the entry as zero-length).
+ */
+function findFunctionEnd(lines: readonly string[], startLine: number): number {
+  let braceDepth = 0;
+  let foundOpen = false;
+
+  for (let i = startLine; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    for (const char of line) {
+      if (char === "{") {
+        braceDepth++;
+        foundOpen = true;
+      } else if (char === "}") {
+        braceDepth--;
+        if (foundOpen && braceDepth === 0) {
+          return i;
+        }
+      }
+    }
+  }
+  return startLine;
+}
+
+/**
+ * Score a function by how well it matches the task keywords.
+ *
+ * Scoring:
+ *   - Exact name match (case-insensitive): +100 per keyword
+ *   - Function name contains keyword: +50 per keyword
+ *   - Keyword (≥4 chars) contains function name: +30 per keyword
+ *   - Each keyword occurrence in function body: +2
+ *
+ * Returns 0 if there are no keywords.
+ */
+function scoreFunctionForKeywords(
+  fn: FunctionLocation,
+  lines: readonly string[],
+  keywords: readonly string[],
+): number {
+  if (keywords.length === 0) return 0;
+
+  let score = 0;
+  const nameLower = fn.name.toLowerCase();
+
+  for (const kw of keywords) {
+    if (nameLower === kw) score += 100;
+    else if (nameLower.includes(kw)) score += 50;
+    else if (kw.length >= 4 && kw.includes(nameLower)) score += 30;
+  }
+
+  // Body match: count keyword occurrences
+  const body = lines.slice(fn.startLine, fn.endLine + 1).join("\n").toLowerCase();
+  for (const kw of keywords) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matches = body.match(new RegExp(escaped, "g"));
+    if (matches) score += matches.length * 2;
+  }
+
+  return score;
+}

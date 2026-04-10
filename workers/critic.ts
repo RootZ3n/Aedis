@@ -1,6 +1,12 @@
 import type { RunState, CostEntry, Issue } from "../core/runstate.js";
 import { recordDecision } from "../core/runstate.js";
-import { invokeModel, type Provider } from "../core/model-invoker.js";
+import {
+  invokeModelWithFallback,
+  createRunInvocationContext,
+  type InvokeConfig,
+  type Provider,
+  type RunInvocationContext,
+} from "../core/model-invoker.js";
 import { loadModelConfig } from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
@@ -31,7 +37,23 @@ export interface CriticWorkerConfig {
   readonly runState?: RunState;
   readonly defaultModel?: string;
   readonly defaultProvider?: Provider;
+  /**
+   * Local fallback model for when the primary provider times out or errors.
+   * Defaults to qwen3.5:9b on Ollama. Set to null to disable the fallback.
+   */
+  readonly fallbackModel?: { provider: Provider; model: string } | null;
 }
+
+// Default fallback chain target — local Ollama, free, no API key needed.
+const DEFAULT_FALLBACK: { provider: Provider; model: string } = {
+  provider: "ollama",
+  model: "qwen3.5:9b",
+};
+
+// Maximum number of run contexts to keep in memory. Each entry is tiny
+// (a Set of provider strings), but we cap it to avoid unbounded growth
+// across very long-lived processes.
+const MAX_RUN_CONTEXTS = 50;
 
 // ─── Critic Worker ───────────────────────────────────────────────────
 
@@ -44,14 +66,33 @@ export class CriticWorker extends AbstractWorker {
   private readonly runState: RunState | null;
   private readonly defaultModel: string;
   private readonly defaultProvider: Provider;
+  private readonly fallbackModel: { provider: Provider; model: string } | null;
+
+  /**
+   * Per-run fallback contexts. Keyed by intent.runId so the timeout
+   * blacklist persists across multiple Critic.execute() calls within
+   * a single Coordinator run, but does NOT leak across runs.
+   *
+   * The map is bounded by MAX_RUN_CONTEXTS — when full, the oldest
+   * entry is evicted (insertion order, FIFO).
+   */
+  private readonly runContexts = new Map<string, RunInvocationContext>();
 
   constructor(config: CriticWorkerConfig = {}) {
     super();
     this.projectRoot = config.projectRoot ?? process.cwd();
     this.eventBus = config.eventBus ?? null;
     this.runState = config.runState ?? null;
-    this.defaultModel = config.defaultModel ?? "qwen3.5:9b";
-    this.defaultProvider = config.defaultProvider ?? "ollama";
+    // NEW DEFAULTS: Anthropic Claude Sonnet 4.6 as primary review model.
+    // Critic gates the entire pipeline — using a stronger model here pays
+    // for itself by catching issues before they reach Verify or Apply.
+    // The local Ollama fallback exists so a transient Anthropic outage
+    // cannot stall the entire pipeline. See DOCTRINE.md "Model Assignments".
+    this.defaultModel = config.defaultModel ?? "claude-sonnet-4-6";
+    this.defaultProvider = config.defaultProvider ?? "anthropic";
+    this.fallbackModel = config.fallbackModel === null
+      ? null
+      : (config.fallbackModel ?? DEFAULT_FALLBACK);
   }
 
   async estimateCost(assignment: WorkerAssignment): Promise<CostEntry> {
@@ -73,34 +114,66 @@ export class CriticWorker extends AbstractWorker {
         throw new Error("Critic requires a successful BuilderResult upstream");
       }
 
-      const { model, provider } = this.getActiveModelConfig();
+      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig();
       const builderOutput = builderResult.output as BuilderOutput & { contract?: TaskContract };
       const changes = builderOutput.changes;
       const contract = builderOutput.contract ?? null;
       const heuristicIssues = this.runHeuristicChecks(changes, contract, assignment);
       const heuristicComments = this.toComments(heuristicIssues, changes[0]?.path ?? assignment.task.targetFiles[0] ?? "unknown");
 
-      // Model review via unified invoker
+      // Model review via fallback-aware invoker.
+      // The model call only runs when there's a contract — heuristic-only
+      // reviews skip the model entirely (and report zero model cost).
       let rawModelReview: string | undefined;
       let modelTokensIn = 0;
       let modelTokensOut = 0;
       let modelCostUsd = 0;
+      let usedModel = primaryModel;
+      let usedProvider: Provider = primaryProvider as Provider;
+      let fellBack = false;
 
       if (contract) {
-        const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment, model);
+        const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment, primaryModel);
 
-        const response = await invokeModel({
-          provider: provider as Provider,
-          model,
+        // Build fallback chain: primary first, local Ollama second.
+        // If the primary IS already ollama, the fallback is skipped.
+        const chain = this.buildInvocationChain(
+          primaryProvider as Provider,
+          primaryModel,
           prompt,
-          systemPrompt: "You are the Critic worker in Zendorium. Review code changes for correctness, style, and contract compliance. Be terse. Report blockers clearly.",
-          maxTokens: 2048,
-        });
+          2048,
+        );
+
+        // Look up (or create) the per-run fallback context. The runId comes
+        // from the intent so the blacklist scope = the Coordinator run.
+        const runId = this.extractRunId(assignment);
+        const runCtx = this.getOrCreateRunContext(runId);
+
+        console.log(
+          `[critic] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)}: ${chain.map(c => `${c.provider}/${c.model}`).join(" → ")}`
+        );
+
+        const response = await invokeModelWithFallback(chain, runCtx);
+
+        if (response.usedProvider !== primaryProvider) {
+          console.warn(
+            `[critic] PRIMARY FAILED — used fallback ${response.usedProvider}/${response.usedModel} ` +
+            `instead of ${primaryProvider}/${primaryModel} (attempted: ${response.attemptedProviders.join(", ")})`
+          );
+          this.noteDecision(
+            assignment.task.id,
+            `Critic fell back from ${primaryProvider}/${primaryModel} to ${response.usedProvider}/${response.usedModel}`,
+            `Primary provider failed mid-run; fallback chain promoted next entry`,
+          );
+          fellBack = true;
+        }
 
         rawModelReview = response.text;
         modelTokensIn = response.tokensIn;
         modelTokensOut = response.tokensOut;
         modelCostUsd = response.costUsd;
+        usedModel = response.usedModel;
+        usedProvider = response.usedProvider;
       }
 
       const status: CriticResult["output"]["status"] = heuristicIssues.some((i) => i.severity === "critical")
@@ -130,17 +203,23 @@ export class CriticWorker extends AbstractWorker {
         payload: {
           taskId: assignment.task.id,
           workerType: this.type,
-          model,
-          provider,
+          // Reflect the provider that ACTUALLY succeeded, not the primary,
+          // so the receipt stream and UI show the real cost source.
+          model: usedModel,
+          provider: usedProvider,
           status,
           issues: heuristicIssues.length,
           costUsd: modelCostUsd,
+          fellBack,
         },
       });
 
       return this.success(assignment, output, {
+        // Cost entry reflects the provider that ACTUALLY succeeded, not the
+        // primary. If the fallback path was taken, the model name in the
+        // receipt should match what was actually called.
         cost: {
-          model,
+          model: usedModel,
           inputTokens: modelTokensIn,
           outputTokens: modelTokensOut,
           estimatedCostUsd: modelCostUsd,
@@ -188,6 +267,85 @@ export class CriticWorker extends AbstractWorker {
     } catch {
       return { model: this.defaultModel, provider: this.defaultProvider };
     }
+  }
+
+  // ─── Fallback Chain Construction ────────────────────────────────
+
+  /**
+   * Build the InvokeConfig chain for a single Critic.execute() call.
+   *
+   * Chain order:
+   *   1. Primary (active config — usually anthropic/claude-sonnet-4-6)
+   *   2. Local fallback (qwen3.5:9b on Ollama) — UNLESS the primary
+   *      already IS ollama, in which case the fallback is skipped to
+   *      avoid pointlessly retrying the same provider.
+   *
+   * The fallback can be disabled by passing `fallbackModel: null` in
+   * the CriticWorkerConfig at construction time.
+   *
+   * Mirrors workers/builder.ts buildInvocationChain exactly.
+   */
+  private buildInvocationChain(
+    primaryProvider: Provider,
+    primaryModel: string,
+    prompt: string,
+    tokenBudget: number,
+  ): InvokeConfig[] {
+    const systemPrompt =
+      "You are the Critic worker in Zendorium. Review code changes for correctness, style, and contract compliance. Be terse. Report blockers clearly.";
+
+    const chain: InvokeConfig[] = [{
+      provider: primaryProvider,
+      model: primaryModel,
+      prompt,
+      systemPrompt,
+      maxTokens: tokenBudget,
+    }];
+
+    if (this.fallbackModel && this.fallbackModel.provider !== primaryProvider) {
+      chain.push({
+        provider: this.fallbackModel.provider,
+        model: this.fallbackModel.model,
+        prompt,
+        systemPrompt,
+        maxTokens: tokenBudget,
+      });
+    }
+
+    return chain;
+  }
+
+  // ─── Run Context Management ─────────────────────────────────────
+
+  /**
+   * Pull the runId off the assignment so we can scope the timeout
+   * blacklist correctly. Falls back to the task ID if the intent has no
+   * runId field — this still gives us per-task isolation, just without
+   * cross-task blacklist sharing.
+   *
+   * Mirrors workers/builder.ts extractRunId exactly so both workers
+   * key into the same logical run.
+   */
+  private extractRunId(assignment: WorkerAssignment): string {
+    const intentAny = assignment.intent as { runId?: unknown; id?: unknown };
+    if (typeof intentAny.runId === "string" && intentAny.runId) return intentAny.runId;
+    if (typeof intentAny.id === "string" && intentAny.id) return intentAny.id;
+    return assignment.task.id;
+  }
+
+  private getOrCreateRunContext(runId: string): RunInvocationContext {
+    let ctx = this.runContexts.get(runId);
+    if (!ctx) {
+      ctx = createRunInvocationContext();
+      this.runContexts.set(runId, ctx);
+      // Bounded LRU: when over the cap, drop the oldest entry (insertion order).
+      while (this.runContexts.size > MAX_RUN_CONTEXTS) {
+        const firstKey = this.runContexts.keys().next().value;
+        if (firstKey === undefined) break;
+        this.runContexts.delete(firstKey);
+      }
+    }
+    return ctx;
   }
 
   // ─── Heuristic Checks ───────────────────────────────────────────

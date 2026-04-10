@@ -61,16 +61,19 @@ export interface BuilderWorkerConfig {
   readonly defaultModel?: string;
   readonly defaultProvider?: Provider;
   /**
-   * Local fallback model for when the primary provider times out or errors.
-   * Defaults to qwen3.5:9b on Ollama. Set to null to disable the fallback.
+   * Fallback model for when the primary provider times out or errors.
+   * Defaults to claude-sonnet-4-6 on Anthropic. Set to null to disable
+   * the fallback.
    */
   readonly fallbackModel?: { provider: Provider; model: string } | null;
 }
 
-// Default fallback chain target — local Ollama, free, no API key needed.
+// Default fallback chain target — Anthropic Claude Sonnet 4.6 as the
+// quality backstop when ModelStudio (the Builder primary) is unreachable
+// or rate-limited. Sonnet is also the Critic's primary model.
 const DEFAULT_FALLBACK: { provider: Provider; model: string } = {
-  provider: "ollama",
-  model: "qwen3.5:9b",
+  provider: "anthropic",
+  model: "claude-sonnet-4-6",
 };
 
 // Maximum number of run contexts to keep in memory. Each entry is tiny
@@ -161,12 +164,13 @@ export class BuilderWorker extends AbstractWorker {
     this.projectRoot = resolve(config.projectRoot);
     this.eventBus = config.eventBus ?? null;
     this.runState = config.runState ?? null;
-    // NEW DEFAULTS: Anthropic Claude Sonnet 4.6 as primary.
-    // Previously qwen3.6-plus / modelstudio, which was timing out at 120s
-    // consistently. Sonnet 4.6 typically responds in 2-30s for builder-sized
-    // prompts. See DOCTRINE.md "Model Assignments" for the rationale.
-    this.defaultModel = config.defaultModel ?? "claude-sonnet-4-6";
-    this.defaultProvider = config.defaultProvider ?? "anthropic";
+    // CURRENT DEFAULTS: ModelStudio qwen3.6-plus as primary.
+    // ModelStudio is slow (often near the 5-minute timeout cap) but reliable
+    // and cheap on a per-token basis. The Anthropic Sonnet fallback is the
+    // quality backstop for when ModelStudio is unreachable or rate-limited.
+    // See DOCTRINE.md "Model Assignments" for the rationale.
+    this.defaultModel = config.defaultModel ?? "qwen3.6-plus";
+    this.defaultProvider = config.defaultProvider ?? "modelstudio";
     this.fallbackModel = config.fallbackModel === null
       ? null
       : (config.fallbackModel ?? DEFAULT_FALLBACK);
@@ -244,8 +248,8 @@ export class BuilderWorker extends AbstractWorker {
         `[builder] prompt size: ~${built.estimatedTokens} tokens (${built.chars} chars)`
       );
 
-      // Build fallback chain: primary first, local Ollama second.
-      // If the primary IS already ollama, don't append a duplicate fallback.
+      // Build fallback chain: primary first, Anthropic Sonnet second.
+      // If the primary IS already anthropic, don't append a duplicate fallback.
       const chain = this.buildInvocationChain(
         primaryProvider as Provider,
         primaryModel,
@@ -400,10 +404,10 @@ export class BuilderWorker extends AbstractWorker {
    * Build the InvokeConfig chain for a single Builder.execute() call.
    *
    * Chain order:
-   *   1. Primary (active config — usually anthropic/claude-sonnet-4-6)
-   *   2. Local fallback (qwen3.5:9b on Ollama) — UNLESS the primary
-   *      already IS ollama, in which case the fallback is skipped to
-   *      avoid pointlessly retrying the same provider.
+   *   1. Primary (active config — usually modelstudio/qwen3.6-plus)
+   *   2. Quality fallback (anthropic/claude-sonnet-4-6) — UNLESS the
+   *      primary already IS anthropic, in which case the fallback is
+   *      skipped to avoid pointlessly retrying the same provider.
    *
    * The fallback can be disabled by passing `fallbackModel: null` in
    * the BuilderWorkerConfig at construction time.

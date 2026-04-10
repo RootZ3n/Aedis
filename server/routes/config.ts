@@ -36,17 +36,29 @@ export interface ModelConfig {
 // root will OVERRIDE these defaults via loadModelConfig() below. Changing
 // the defaults here only affects projects that have no saved config.
 // To change an active build's model selection, either delete that file or
-// edit its `builder` block directly.
+// edit its `builder` / `critic` block directly.
+//
+// Per-role fallbacks (Builder + Critic) are NOT in this config — they
+// are hardcoded in the worker constructors (workers/builder.ts and
+// workers/critic.ts). The fallback chain logic lives in
+// core/model-invoker.ts (invokeModelWithFallback).
 //
 // Builder default change history:
-//   - was: qwen3.6-plus / modelstudio (timed out at 120s consistently)
-//   - now: claude-sonnet-4-6 / anthropic (with ollama qwen3.5:9b fallback,
-//          configured in workers/builder.ts)
+//   - was: claude-sonnet-4-6 / anthropic (briefly tried as primary, but
+//          ModelStudio turned out to be slow rather than broken)
+//   - now: qwen3.6-plus / modelstudio (with anthropic/claude-sonnet-4-6
+//          as the worker-level fallback)
+//
+// Critic default change history:
+//   - was: qwen3.5:9b / ollama
+//   - now: claude-sonnet-4-6 / anthropic (with ollama/qwen3.5:9b as the
+//          worker-level fallback) — Critic gates the pipeline so a stronger
+//          model here pays for itself by catching issues before Verify.
 
 const DEFAULT_MODEL_CONFIG: ModelConfig = {
   scout: { model: "local", provider: "local" },
-  builder: { model: "claude-sonnet-4-6", provider: "anthropic" },
-  critic: { model: "qwen3.5:9b", provider: "ollama" },
+  builder: { model: "qwen3.6-plus", provider: "modelstudio" },
+  critic: { model: "claude-sonnet-4-6", provider: "anthropic" },
   verifier: { model: "local", provider: "local" },
   integrator: { model: "glm-5.1", provider: "zai" },
   escalation: { model: "glm-5.1", provider: "zai" },
