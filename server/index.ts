@@ -22,11 +22,6 @@ import { createTailscaleAuth } from "./middleware/auth.js";
 import { createEventBus, type EventBus } from "./websocket.js";
 import { Coordinator, type CoordinatorConfig } from "../core/coordinator.js";
 import { WorkerRegistry } from "../workers/base.js";
-import { ScoutWorker } from "../workers/scout.js";
-import { BuilderWorker } from "../workers/builder.js";
-import { CriticWorker } from "../workers/critic.js";
-import { VerifierWorker } from "../workers/verifier.js";
-import { IntegratorWorker } from "../workers/integrator.js";
 import type { TrustProfile } from "../router/trust-router.js";
 
 import { taskRoutes } from "./routes/tasks.js";
@@ -73,25 +68,6 @@ function defaultTrustProfile(): TrustProfile {
   };
 }
 
-/**
- * Build a WorkerRegistry with all 5 worker types registered.
- * Called at startup so the Coordinator has workers to dispatch to.
- */
-function buildDefaultRegistry(projectRoot: string, eventBus?: EventBus): WorkerRegistry {
-  const registry = new WorkerRegistry();
-
-  registry.register(new ScoutWorker({ projectRoot }));
-  registry.register(new BuilderWorker({ projectRoot }));
-  registry.register(new CriticWorker({ projectRoot }));
-  registry.register(new VerifierWorker());
-  registry.register(new IntegratorWorker());
-
-  const types = registry.getAllWorkers().map((w) => w.type);
-  console.log(`[server] WorkerRegistry: ${types.length} workers registered — ${types.join(", ")}`);
-
-  return registry;
-}
-
 // ─── Resolve ui/ directory relative to this file ─────────────────────
 
 const __filename = fileURLToPath(import.meta.url);
@@ -106,9 +82,10 @@ export async function createServer(
   workerRegistry?: WorkerRegistry
 ): Promise<ReturnType<typeof Fastify>> {
   const cfg: ServerConfig = { ...DEFAULT_CONFIG, ...config };
-  const eventBus = createEventBus();
-  const registry = workerRegistry ?? buildDefaultRegistry(cfg.projectRoot, eventBus);
+  const registry = workerRegistry ?? new WorkerRegistry();
   const profile = trustProfile ?? defaultTrustProfile();
+
+  const eventBus = createEventBus();
 
   const coordinator = new Coordinator(
     {
@@ -129,6 +106,8 @@ export async function createServer(
   };
 
   // ─── Fastify instance ──────────────────────────────────────────
+  // Use basic logger — pino-pretty is optional and crashes silently
+  // if not installed. Safe to add back after `pnpm add pino-pretty`.
 
   const server = Fastify({
     logger: {
@@ -153,6 +132,7 @@ export async function createServer(
   });
 
   // ─── GET / → serve ui/index.html directly ─────────────────────
+  // Read with fs instead of reply.sendFile to avoid decorator issues.
 
   const indexHtmlPath = join(UI_ROOT, "index.html");
   let indexHtml: string;
@@ -167,20 +147,13 @@ export async function createServer(
   });
 
   // ─── Auth middleware ───────────────────────────────────────────
-  // Skip auth for WebSocket upgrade requests
 
   server.addHook(
     "onRequest",
-    (request, reply, done) => {
-      if (request.headers.upgrade?.toLowerCase() === "websocket") {
-        done();
-        return;
-      }
-      createTailscaleAuth({
-        enabled: !cfg.disableAuth,
-        allowedCidrs: cfg.allowedCidrs ?? [],
-      })(request, reply, done);
-    }
+    createTailscaleAuth({
+      enabled: !cfg.disableAuth,
+      allowedCidrs: cfg.allowedCidrs ?? [],
+    })
   );
 
   // ─── Decorate with context ────────────────────────────────────
@@ -196,11 +169,11 @@ export async function createServer(
   await server.register(configRoutes, { prefix: "/config" });
 
   // ─── WebSocket endpoint ────────────────────────────────────────
-  // @fastify/websocket v11: handler receives (socket, request)
-  // where socket IS the WebSocket instance directly.
 
   server.register(async function (fastify) {
-    fastify.get("/ws", { websocket: true }, (socket /* WebSocket */, req) => {
+    fastify.get("/ws", { websocket: true }, (connection, req) => {
+      const socket = connection.socket;
+
       // Parse optional event filter from query
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const filterParam = url.searchParams.get("events");
@@ -208,58 +181,22 @@ export async function createServer(
         ? (filterParam.split(",") as any[])
         : undefined;
 
-      // Register with EventBus
       eventBus.addClient(socket as any, filter);
 
-      // Send welcome message so client knows connection is live
-      try {
-        socket.send(JSON.stringify({
-          type: "connected",
-          timestamp: new Date().toISOString(),
-          message: "Zendorium WebSocket connected",
-          clients: eventBus.clientCount(),
-        }));
-      } catch {
-        // Socket may have closed between upgrade and here
-      }
-
-      // Keepalive: ping every 30s to prevent idle timeout
-      const keepalive = setInterval(() => {
-        try {
-          if (socket.readyState === 1 /* OPEN */) {
-            socket.ping();
-          } else {
-            clearInterval(keepalive);
-          }
-        } catch {
-          clearInterval(keepalive);
-        }
-      }, 30_000);
-
       socket.on("close", () => {
-        clearInterval(keepalive);
         eventBus.removeClient(socket as any);
       });
 
       socket.on("error", () => {
-        clearInterval(keepalive);
         eventBus.removeClient(socket as any);
       });
 
-      // Handle client messages
+      // Client can send ping, we respond with pong
       socket.on("message", (data: Buffer) => {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === "ping") {
             socket.send(JSON.stringify({ type: "pong", timestamp: new Date().toISOString() }));
-          }
-          if (msg.type === "subscribe") {
-            socket.send(JSON.stringify({
-              type: "subscribed",
-              taskId: msg.taskId,
-              runId: msg.runId,
-              timestamp: new Date().toISOString(),
-            }));
           }
         } catch {
           // Ignore malformed messages

@@ -13,13 +13,9 @@
  *
  * Each layer is optional and budget-aware. The assembler respects
  * a token budget and fills from Layer 1 outward.
- *
- * Safety: every file access checks existence before reading.
- * Missing files are silently skipped — never included in context.
  */
 
-import { readFile, stat, access } from "fs/promises";
-import { constants as fsConstants } from "fs";
+import { readFile, stat } from "fs/promises";
 import { resolve, dirname, extname } from "path";
 import { glob } from "glob";
 
@@ -87,7 +83,6 @@ export class ContextAssembler {
   /**
    * Assemble context for a set of target files, respecting token budget.
    * Fills layers in priority order, stopping when budget is exhausted.
-   * Missing files are silently skipped at every layer.
    */
   async assemble(targetFiles: string[]): Promise<AssembledContext> {
     const layers: ContextLayer[] = [];
@@ -141,7 +136,6 @@ export class ContextAssembler {
   private async buildTargetLayer(targetFiles: string[]): Promise<ContextLayer> {
     const files: ContextFile[] = [];
     for (const filePath of targetFiles) {
-      if (!await this.fileExists(filePath)) continue;
       const content = await this.safeReadFile(filePath);
       if (content !== null) {
         files.push({
@@ -167,12 +161,7 @@ export class ContextAssembler {
       const content = await this.safeReadFile(filePath);
       if (content) {
         const imports = this.extractImports(content, filePath);
-        // Only add imports that actually exist on disk
-        for (const imp of imports) {
-          if (await this.fileExistsAbsolute(imp)) {
-            depPaths.add(imp);
-          }
-        }
+        imports.forEach((imp) => depPaths.add(imp));
       }
     }
 
@@ -218,7 +207,6 @@ export class ContextAssembler {
 
     for (const file of allSourceFiles) {
       if (targetFiles.includes(file)) continue;
-      if (!await this.fileExists(file)) continue;
       const content = await this.safeReadFile(file);
       if (content && new RegExp(`\\b(${pattern})\\b`).test(content)) {
         matchingFiles.push(file);
@@ -243,7 +231,7 @@ export class ContextAssembler {
       const ext = extname(filePath);
       const base = filePath.slice(0, -ext.length);
 
-      // Common test file patterns — only add if the file actually exists
+      // Common test file patterns
       const candidates = [
         `${base}.test${ext}`,
         `${base}.spec${ext}`,
@@ -354,39 +342,18 @@ export class ContextAssembler {
     return files;
   }
 
-  /**
-   * Read a file safely. Returns null if the file doesn't exist or can't be read.
-   * Never throws ENOENT.
-   */
   private async safeReadFile(filePath: string): Promise<string | null> {
     try {
       const absolute = resolve(this.config.projectRoot, filePath);
-      // Check existence first to avoid noisy ENOENT in logs
-      await access(absolute, fsConstants.R_OK);
       return await readFile(absolute, "utf-8");
     } catch {
       return null;
     }
   }
 
-  /**
-   * Check if a file exists (relative to projectRoot).
-   */
   private async fileExists(filePath: string): Promise<boolean> {
     try {
-      await access(resolve(this.config.projectRoot, filePath), fsConstants.R_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Check if an absolute path exists.
-   */
-  private async fileExistsAbsolute(absPath: string): Promise<boolean> {
-    try {
-      await access(absPath, fsConstants.R_OK);
+      await stat(resolve(this.config.projectRoot, filePath));
       return true;
     } catch {
       return false;
@@ -395,15 +362,11 @@ export class ContextAssembler {
 
   private async findSourceFiles(): Promise<string[]> {
     const pattern = `**/*{${this.config.sourceExtensions.join(",")}}`;
-    try {
-      const matches = await glob(pattern, {
-        cwd: this.config.projectRoot,
-        ignore: this.config.ignoreDirs.map((d) => `**/${d}/**`),
-      });
-      return matches;
-    } catch {
-      return [];
-    }
+    const matches = await glob(pattern, {
+      cwd: this.config.projectRoot,
+      ignore: this.config.ignoreDirs.map((d) => `**/${d}/**`),
+    });
+    return matches;
   }
 
   private estimateTokens(content: string): number {

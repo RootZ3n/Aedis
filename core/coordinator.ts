@@ -172,10 +172,7 @@ export class Coordinator {
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.charterGen = new CharterGenerator(this.config.charterConfig);
-    this.contextAssembler = new ContextAssembler({
-      projectRoot: this.config.projectRoot,
-      tokenBudget: 8_000, // Cap context to 8K tokens — builder prompt adds its own budget control
-    });
+    this.contextAssembler = new ContextAssembler({ projectRoot: this.config.projectRoot });
     this.judge = new IntegrationJudge();
     this.verifier = new VerificationPipeline();
     this.trustRouter = new TrustRouter(trustProfile);
@@ -195,66 +192,36 @@ export class Coordinator {
     let verificationReceipt: VerificationReceipt | null = null;
     let judgmentReport: JudgmentReport | null = null;
 
-    console.log(`[Coordinator] ──────────────────────────────────────────`);
-    console.log(`[Coordinator] submit() called with input: "${submission.input.slice(0, 100)}"`);
-
     // Phase 1: Charter
-    console.log(`[Coordinator] Phase 1: generating charter`);
     this.emit({ type: "run_started", payload: { input: submission.input } });
 
-    let analysis: RequestAnalysis;
-    try {
-      analysis = this.charterGen.analyzeRequest(submission.input);
-      console.log(`[Coordinator] Charter analysis: category=${analysis.category}, scope=${analysis.scopeEstimate}, targets=${analysis.targets.length}`);
-    } catch (err) {
-      console.error(`[Coordinator] FAILED at charter analysis:`, err);
-      throw err;
-    }
-
-    let charter;
-    let constraints;
-    try {
-      charter = this.charterGen.generateCharter(analysis);
-      constraints = [
-        ...this.charterGen.generateDefaultConstraints(analysis),
-        ...(submission.extraConstraints ?? []),
-      ];
-      console.log(`[Coordinator] Charter generated: ${charter.deliverables.length} deliverables, quality=${charter.qualityBar}`);
-    } catch (err) {
-      console.error(`[Coordinator] FAILED at charter generation:`, err);
-      throw err;
-    }
+    const analysis = this.charterGen.analyzeRequest(submission.input);
+    const charter = this.charterGen.generateCharter(analysis);
+    const constraints = [
+      ...this.charterGen.generateDefaultConstraints(analysis),
+      ...(submission.extraConstraints ?? []),
+    ];
 
     this.emit({ type: "charter_generated", payload: { charter, analysis } });
 
     // Phase 2: Intent
-    console.log(`[Coordinator] Phase 2: creating intent object`);
-    let intent: IntentObject;
-    try {
-      intent = createIntent({
-        runId: randomUUID(),
-        userRequest: submission.input,
-        charter,
-        constraints,
-        exclusions: submission.exclusions,
-      });
+    const intent = createIntent({
+      runId: randomUUID(),
+      userRequest: submission.input,
+      charter,
+      constraints,
+      exclusions: submission.exclusions,
+    });
 
-      const intentErrors = validateIntent(intent);
-      if (intentErrors.length > 0) {
-        throw new CoordinatorError(`Invalid intent: ${intentErrors.join(", ")}`);
-      }
-      console.log(`[Coordinator] Intent locked: id=${intent.id}, runId=${intent.runId}`);
-    } catch (err) {
-      console.error(`[Coordinator] FAILED at intent creation:`, err);
-      throw err;
+    const intentErrors = validateIntent(intent);
+    if (intentErrors.length > 0) {
+      throw new CoordinatorError(`Invalid intent: ${intentErrors.join(", ")}`);
     }
 
     this.emit({ type: "intent_locked", payload: { intentId: intent.id, version: intent.version } });
 
     // Phase 3: RunState
-    console.log(`[Coordinator] Phase 3: creating run state`);
     const run = createRunState(intent.id);
-    console.log(`[Coordinator] Run created: id=${run.id}`);
 
     const active: ActiveRun = {
       intent,
@@ -268,30 +235,22 @@ export class Coordinator {
 
     try {
       // Phase 4: Build TaskGraph
-      console.log(`[Coordinator] Phase 4: building task graph`);
       advancePhase(run, "planning");
       this.buildTaskGraph(active, analysis);
-      const graphSummary = getGraphSummary(active.graph);
-      console.log(`[Coordinator] Task graph built: ${graphSummary.totalNodes} nodes, ${graphSummary.edgeCount} edges`);
       this.emit({
         type: "task_graph_built",
-        payload: { runId: run.id, summary: graphSummary },
+        payload: { runId: run.id, summary: getGraphSummary(active.graph) },
       });
 
       // Phase 5: Pre-Build Coherence
-      console.log(`[Coordinator] Phase 5: pre-build coherence check`);
       advancePhase(run, "scouting");
       await this.runPreBuildCoherence(active);
-      console.log(`[Coordinator] Pre-build coherence passed`);
 
       // Phase 6–7: Execute (Scout → Build → Rehearsal Loop)
-      console.log(`[Coordinator] Phase 6-7: executing task graph`);
       await this.executeGraph(active);
-      console.log(`[Coordinator] Task graph execution complete. Failed nodes: ${hasFailedNodes(active.graph)}`);
 
       // Phase 8: Post-Build IntegrationJudge
       if (!active.cancelled && !hasFailedNodes(active.graph)) {
-        console.log(`[Coordinator] Phase 8: post-build integration judge`);
         this.emit({ type: "integration_check", payload: { runId: run.id, phase: "post-build" } });
         judgmentReport = this.judge.judge(
           active.intent,
@@ -309,7 +268,6 @@ export class Coordinator {
             message: c.details,
           })),
         });
-        console.log(`[Coordinator] Integration judge: passed=${judgmentReport.passed}, score=${judgmentReport.coherenceScore}`);
 
         if (!judgmentReport.passed) {
           this.emit({
@@ -321,14 +279,12 @@ export class Coordinator {
 
       // Phase 9: Verification Pipeline
       if (judgmentReport?.passed && !active.cancelled) {
-        console.log(`[Coordinator] Phase 9: verification pipeline`);
         verificationReceipt = await this.verifier.verify(
           active.intent,
           run,
           active.changes,
           active.workerResults
         );
-        console.log(`[Coordinator] Verification: verdict=${verificationReceipt.verdict}, confidence=${verificationReceipt.confidenceScore}`);
 
         if (verificationReceipt.verdict === "fail") {
           this.emit({
@@ -349,21 +305,14 @@ export class Coordinator {
         active.changes.length > 0;
 
       if (canCommit) {
-        console.log(`[Coordinator] Phase 10: git commit`);
         commitSha = await this.gitCommit(active);
         if (commitSha) {
-          console.log(`[Coordinator] Committed: ${commitSha}`);
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
-        } else {
-          console.log(`[Coordinator] Git commit skipped or failed`);
         }
-      } else {
-        console.log(`[Coordinator] Phase 10: skipping commit (canCommit=${canCommit}, changes=${active.changes.length})`);
       }
 
       // Finalize
       const verdict = this.determineVerdict(active, verificationReceipt, judgmentReport);
-      console.log(`[Coordinator] Final verdict: ${verdict}`);
       if (verdict === "success" || verdict === "partial") {
         advancePhase(run, "complete");
       } else {
@@ -381,39 +330,10 @@ export class Coordinator {
       this.emit({ type: "run_complete", payload: { runId: run.id, verdict } });
       this.emit({ type: "receipt_generated", payload: { receiptId: receipt.id } });
 
-      console.log(`[Coordinator] Run complete: ${verdict} in ${Date.now() - startTime}ms, cost=$${receipt.totalCost.estimatedCostUsd}`);
-      console.log(`[Coordinator] ──────────────────────────────────────────`);
-
       return receipt;
     } catch (err) {
-      // Log the FULL error with stack trace before building failure receipt
-      console.error(`[Coordinator] ═══ RUN FAILED ═══`);
-      console.error(`[Coordinator] Run ID: ${run.id}`);
-      console.error(`[Coordinator] Input: "${submission.input.slice(0, 200)}"`);
-      console.error(`[Coordinator] Phase at failure: ${run.phase}`);
-      if (err instanceof Error) {
-        console.error(`[Coordinator] Error: ${err.message}`);
-        console.error(`[Coordinator] Stack:\n${err.stack}`);
-      } else {
-        console.error(`[Coordinator] Error:`, err);
-      }
-      console.error(`[Coordinator] ═══════════════════`);
-
       failRun(run, err instanceof Error ? err.message : String(err));
-      const failReceipt = this.buildReceipt(active, verificationReceipt, judgmentReport, null, Date.now() - startTime);
-
-      // Emit failure events so WebSocket clients see what happened
-      this.emit({
-        type: "run_complete",
-        payload: {
-          runId: run.id,
-          verdict: "failed",
-          error: err instanceof Error ? err.message : String(err),
-          phase: run.phase,
-        },
-      });
-
-      return failReceipt;
+      return this.buildReceipt(active, verificationReceipt, judgmentReport, null, Date.now() - startTime);
     } finally {
       this.activeRuns.delete(run.id);
     }
@@ -545,20 +465,15 @@ export class Coordinator {
 
     while (!isGraphComplete(graph) && !active.cancelled) {
       const dispatchable = getDispatchableNodes(graph);
-      console.log(`[Coordinator] executeGraph loop: ${dispatchable.length} dispatchable, complete=${isGraphComplete(graph)}`);
 
       if (dispatchable.length === 0) {
         if (hasFailedNodes(graph)) {
-          console.log(`[Coordinator] Has failed nodes, attempting recovery`);
+          // Attempt recovery
           const recovered = await this.attemptRecovery(active);
-          if (!recovered) {
-            console.log(`[Coordinator] Recovery failed, breaking`);
-            break;
-          }
+          if (!recovered) break;
           continue;
         }
         // No dispatchable nodes and no failures — deadlock
-        console.error(`[Coordinator] DEADLOCK: no dispatchable nodes, no failed nodes`);
         failRun(run, "Task graph deadlocked: no dispatchable nodes");
         break;
       }
@@ -578,7 +493,6 @@ export class Coordinator {
       }
 
       // Dispatch all ready nodes in parallel
-      console.log(`[Coordinator] Dispatching ${dispatchable.length} nodes: ${dispatchable.map((n) => `${n.workerType}(${n.label.slice(0, 30)})`).join(", ")}`);
       const results = await Promise.all(
         dispatchable.map((node) => this.dispatchNode(active, node))
       );
@@ -586,7 +500,6 @@ export class Coordinator {
       // Process results
       for (const { node, result } of results) {
         if (result.success) {
-          console.log(`[Coordinator] Node completed: ${node.workerType} — confidence=${result.confidence}`);
           markCompleted(graph, node.id);
           this.collectChanges(active, result);
           this.emit({
@@ -594,7 +507,6 @@ export class Coordinator {
             payload: { runId: run.id, taskId: node.id, confidence: result.confidence },
           });
         } else {
-          console.error(`[Coordinator] Node FAILED: ${node.workerType} — ${result.issues[0]?.message ?? "unknown error"}`);
           markFailed(graph, node.id);
           this.emit({
             type: "task_failed",
@@ -621,11 +533,11 @@ export class Coordinator {
           rehearsalRound < this.config.maxRehearsalRounds
         ) {
           rehearsalRound++;
-          console.log(`[Coordinator] Rehearsal round ${rehearsalRound}: Critic requested changes`);
           this.emit({
             type: "critic_review",
             payload: { runId: run.id, verdict: "request-changes", round: rehearsalRound },
           });
+          // Re-queue builders with Critic feedback — handled by graph readiness
           recordDecision(run, {
             description: `Rehearsal round ${rehearsalRound}: Critic requested changes`,
             madeBy: "coordinator",
@@ -663,14 +575,11 @@ export class Coordinator {
     });
 
     // Assemble context
-    console.log(`[Coordinator] Assembling context for ${node.workerType}: ${node.targetFiles.join(", ")}`);
     const context = await this.contextAssembler.assemble([...node.targetFiles]);
-    console.log(`[Coordinator] Context assembled: ${context.fileCount} files, ${context.totalTokens} tokens`);
 
     // Route through TrustRouter
     const routingDecision = this.trustRouter.route(runTask, intent, context);
     node.assignedTier = routingDecision.tier;
-    console.log(`[Coordinator] Routed ${node.workerType} to tier=${routingDecision.tier}`);
 
     this.emit({
       type: "worker_assigned",
@@ -707,7 +616,6 @@ export class Coordinator {
     // Find and execute worker
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
     if (!worker) {
-      console.error(`[Coordinator] No worker registered for type "${node.workerType}"`);
       const failResult: WorkerResult = {
         workerType: node.workerType as WorkerType,
         taskId: runTask.id,
@@ -725,49 +633,28 @@ export class Coordinator {
       return { node, result: failResult };
     }
 
-    console.log(`[Coordinator] Executing worker: ${worker.name} (${node.workerType})`);
-    try {
-      const result = await worker.execute(assignment);
-      console.log(`[Coordinator] Worker ${node.workerType} returned: success=${result.success}, confidence=${result.confidence}`);
+    const result = await worker.execute(assignment);
 
-      // Record to RunState
-      const taskResult: TaskResult = {
-        success: result.success,
-        output: JSON.stringify(result.output),
-        artifacts: result.touchedFiles.map((f) => f.path),
-        issues: [...result.issues],
-      };
-      completeTask(run, runTask.id, taskResult, result.cost);
+    // Record to RunState
+    const taskResult: TaskResult = {
+      success: result.success,
+      output: JSON.stringify(result.output),
+      artifacts: result.touchedFiles.map((f) => f.path),
+      issues: [...result.issues],
+    };
+    completeTask(run, runTask.id, taskResult, result.cost);
 
-      // Record file touches
-      for (const touch of result.touchedFiles) {
-        recordFileTouch(run, {
-          filePath: touch.path,
-          operation: touch.operation,
-          taskId: runTask.id,
-        });
-      }
-
-      active.workerResults.push(result);
-      return { node, result };
-    } catch (workerErr) {
-      console.error(`[Coordinator] Worker ${node.workerType} THREW:`, workerErr);
-      const failResult: WorkerResult = {
-        workerType: node.workerType as WorkerType,
+    // Record file touches
+    for (const touch of result.touchedFiles) {
+      recordFileTouch(run, {
+        filePath: touch.path,
+        operation: touch.operation,
         taskId: runTask.id,
-        success: false,
-        output: { kind: "scout", dependencies: [], patterns: [], riskAssessment: { level: "low", factors: [], mitigations: [] }, suggestedApproach: "" },
-        issues: [{ severity: "error", message: workerErr instanceof Error ? workerErr.message : String(workerErr) }],
-        cost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
-        confidence: 0,
-        touchedFiles: [],
-        assumptions: [],
-        durationMs: Date.now(),
-      };
-      completeTask(run, runTask.id, { success: false, output: failResult.issues[0].message, artifacts: [], issues: failResult.issues });
-      active.workerResults.push(failResult);
-      return { node, result: failResult };
+      });
     }
+
+    active.workerResults.push(result);
+    return { node, result };
   }
 
   // ─── Pre-Build Coherence ───────────────────────────────────────────
@@ -799,42 +686,19 @@ export class Coordinator {
       checks.push({ name: "Graph acyclicity", passed: false, message: "Cycle detected in task graph" });
     }
 
-    // Check: worker availability — warn on missing workers, hard-fail only if registry is empty
+    // Check: all worker types are available
     const requiredTypes = [...new Set(graph.nodes.map((n) => n.workerType))];
-    const totalRegistered = this.workerRegistry.getAllWorkers().length;
-    const missingWorkers: string[] = [];
-
     for (const type of requiredTypes) {
       const available = this.workerRegistry.hasWorker(type as WorkerType);
-      if (!available) missingWorkers.push(type);
       checks.push({
         name: `Worker availability: ${type}`,
-        // Soft pass if registry has some workers — the missing ones will fail at dispatch
-        // Hard fail only if registry is completely empty
-        passed: available || totalRegistered > 0,
-        message: available
-          ? "Worker registered"
-          : totalRegistered > 0
-            ? `WARNING: No worker for "${type}" — will fail at dispatch`
-            : `No worker for "${type}" — registry is empty`,
+        passed: available,
+        message: available ? "Worker registered" : `No worker for "${type}"`,
       });
-    }
-
-    if (missingWorkers.length > 0 && totalRegistered > 0) {
-      console.warn(`[Coordinator] Missing workers (will fail at dispatch): ${missingWorkers.join(", ")}. ${totalRegistered} workers registered.`);
     }
 
     const allPassed = checks.every((c) => c.passed);
     recordCoherenceCheck(run, { phase: "pre-build", passed: allPassed, checks });
-
-    console.log(`[Coordinator] Pre-build coherence: ${checks.length} checks, allPassed=${allPassed}, registeredWorkers=${totalRegistered}`);
-    for (const check of checks) {
-      if (!check.passed) {
-        console.error(`[Coordinator]   FAILED: ${check.name} — ${check.message}`);
-      } else if (check.message.startsWith("WARNING")) {
-        console.warn(`[Coordinator]   WARN: ${check.name} — ${check.message}`);
-      }
-    }
 
     if (allPassed) {
       this.emit({ type: "coherence_check_passed", payload: { runId: run.id, phase: "pre-build" } });
@@ -867,6 +731,7 @@ export class Coordinator {
 
       for (const check of checkpoint.checks) {
         if (check.type === "coherence") {
+          // Run a mini integration check on work so far
           const partialReport = this.judge.judge(
             active.intent,
             run,
@@ -878,6 +743,7 @@ export class Coordinator {
             passed = false;
           }
         }
+        // Cost gates, approvals, etc. can be added here
       }
 
       checkpoint.status = passed ? "passed" : "failed";
@@ -950,7 +816,6 @@ export class Coordinator {
       const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: this.config.projectRoot });
       return stdout.trim();
     } catch (err) {
-      console.error(`[Coordinator] Git commit failed:`, err);
       recordDecision(active.run, {
         description: "Git commit failed",
         madeBy: "coordinator",
@@ -968,6 +833,7 @@ export class Coordinator {
     if (result.output.kind === "builder") {
       active.changes.push(...result.output.changes);
     } else if (result.output.kind === "integrator") {
+      // Integrator replaces the full changeset
       active.changes = [...result.output.finalChanges];
     }
   }

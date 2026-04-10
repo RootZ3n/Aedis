@@ -1,10 +1,9 @@
 import { execFile } from "node:child_process";
-import { readFile, readdir, stat, access } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import { relative, resolve, sep } from "node:path";
 
-import type { RunState, CostEntry, Issue } from "../core/runstate.js";
+import type { RunState, CostEntry } from "../core/runstate.js";
 import { recordDecision, recordFileTouch } from "../core/runstate.js";
 import type { EventBus } from "../server/websocket.js";
 import {
@@ -131,7 +130,6 @@ export class ScoutWorker extends AbstractWorker {
   async execute(assignment: WorkerAssignment): Promise<ScoutResult> {
     const startedAt = Date.now();
     const touchedFiles: TouchedFile[] = [];
-    const warnings: Issue[] = [];
 
     try {
       const targetFiles = assignment.task.targetFiles.length > 0
@@ -143,34 +141,9 @@ export class ScoutWorker extends AbstractWorker {
       const complexity: ComplexityEstimate[] = [];
       const dependencies: DependencyEdge[] = [];
       const patterns: CodePattern[] = [];
-      let primaryTargetFound = false;
 
       for (const file of targetFiles.slice(0, 8)) {
-        // Check if file exists before reading — skip missing files with a warning
-        if (!await this.fileExistsSafe(file)) {
-          console.warn(`[Scout] Skipping missing file: ${file}`);
-          warnings.push({
-            severity: "warning",
-            message: `File not found, skipped: ${file}`,
-            file,
-          });
-          continue;
-        }
-
-        const fileRead = await this.safeReadFile(file);
-        if (!fileRead) {
-          console.warn(`[Scout] Could not read file: ${file}`);
-          warnings.push({
-            severity: "warning",
-            message: `Could not read file, skipped: ${file}`,
-            file,
-          });
-          continue;
-        }
-
-        // At least one file was successfully read
-        primaryTargetFound = true;
-
+        const fileRead = await this.readFile(file);
         reads.push(fileRead);
         touchedFiles.push({ path: fileRead.path, operation: "read" });
         this.logFileTouch(assignment.task.id, fileRead.path, "read");
@@ -196,22 +169,11 @@ export class ScoutWorker extends AbstractWorker {
         }
       }
 
-      // Only hard-fail if NO target files could be read at all
-      if (!primaryTargetFound && targetFiles.length > 0) {
-        const msg = `Scout could not read any target files: ${targetFiles.join(", ")}`;
-        console.error(`[Scout] ${msg}`);
-        this.eventBus?.emit({
-          type: "task_failed",
-          payload: { taskId: assignment.task.id, workerType: this.type, error: msg },
-        });
-        return this.failure(assignment, msg, this.zeroCost(), Date.now() - startedAt) as ScoutResult;
-      }
-
       const grepPattern = this.buildTaskPattern(assignment.task.description);
       const directorySeed = this.inferDirectorySeed(targetFiles);
       const [directoryListing, grepMatches, gitStatus, gitDiff] = await Promise.all([
-        directorySeed ? this.listDir(directorySeed).catch(() => null) : Promise.resolve<DirectoryListingEntry | null>(null),
-        grepPattern ? this.grepFiles(grepPattern, directorySeed ?? ".").catch(() => []) : Promise.resolve<GrepMatch[]>([]),
+        directorySeed ? this.listDir(directorySeed) : Promise.resolve<DirectoryListingEntry | null>(null),
+        grepPattern ? this.grepFiles(grepPattern, directorySeed ?? ".") : Promise.resolve<GrepMatch[]>([]),
         this.gitStatus(this.projectRoot).catch(() => null),
         this.gitDiff(this.projectRoot).catch(() => null),
       ]);
@@ -247,19 +209,17 @@ export class ScoutWorker extends AbstractWorker {
           workerType: this.type,
           touchedFiles: touchedFiles.map((file) => file.path),
           risk: riskAssessment.level,
-          warnings: warnings.length,
         },
       });
 
       return this.success(assignment, output, {
         cost: this.zeroCost(),
-        confidence: warnings.length > 0 ? 0.78 : 0.92,
+        confidence: 0.92,
         touchedFiles,
-        issues: warnings,
+        issues: [],
         durationMs: Date.now() - startedAt,
       }) as ScoutResult;
     } catch (error) {
-      console.error(`[Scout] Unexpected error:`, error);
       this.eventBus?.emit({
         type: "task_failed",
         payload: {
@@ -277,47 +237,14 @@ export class ScoutWorker extends AbstractWorker {
     }
   }
 
-  /**
-   * Safe file read — returns null on ENOENT or any read error.
-   * Never throws for missing files.
-   */
-  async safeReadFile(path: string): Promise<ScoutFileRead | null> {
-    try {
-      const safePath = this.resolvePath(path);
-      const content = await readFile(safePath, "utf8");
-      return {
-        path: this.toRelative(safePath),
-        content,
-        lineCount: content.length === 0 ? 0 : content.split(/\r?\n/).length,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Hard file read — throws on missing files. Use only when the caller
-   * explicitly needs the file to exist (e.g., public API methods).
-   */
   async readFile(path: string): Promise<ScoutFileRead> {
-    const result = await this.safeReadFile(path);
-    if (!result) {
-      throw new Error(`Scout: file not found or unreadable: ${path}`);
-    }
-    return result;
-  }
-
-  /**
-   * Check if a file exists without throwing.
-   */
-  async fileExistsSafe(path: string): Promise<boolean> {
-    try {
-      const safePath = this.resolvePath(path);
-      await access(safePath, fsConstants.R_OK);
-      return true;
-    } catch {
-      return false;
-    }
+    const safePath = this.resolvePath(path);
+    const content = await readFile(safePath, "utf8");
+    return {
+      path: this.toRelative(safePath),
+      content,
+      lineCount: content.length === 0 ? 0 : content.split(/\r?\n/).length,
+    };
   }
 
   summarizeFileContent(path: string, content: string): FileSymbolSummary {
@@ -340,20 +267,10 @@ export class ScoutWorker extends AbstractWorker {
     const matches: GrepMatch[] = [];
 
     const visit = async (current: string): Promise<void> => {
-      let info;
-      try {
-        info = await stat(current);
-      } catch {
-        return; // Skip files/dirs that don't exist
-      }
+      const info = await stat(current);
       if (info.isDirectory()) {
         if (this.ignoreDirs.has(current.split(sep).pop() ?? "")) return;
-        let entries;
-        try {
-          entries = await readdir(current, { withFileTypes: true });
-        } catch {
-          return; // Skip unreadable directories
-        }
+        const entries = await readdir(current, { withFileTypes: true });
         for (const entry of entries) {
           await visit(resolve(current, entry.name));
         }
@@ -547,22 +464,12 @@ export class ScoutWorker extends AbstractWorker {
   }
 
   private async walkDirectory(dirPath: string): Promise<DirectoryListingEntry> {
-    let info;
-    try {
-      info = await stat(dirPath);
-    } catch {
-      return { path: this.toRelative(dirPath), type: "directory", children: [] };
-    }
+    const info = await stat(dirPath);
     if (!info.isDirectory()) {
       return { path: this.toRelative(dirPath), type: "file" };
     }
 
-    let entries;
-    try {
-      entries = await readdir(dirPath, { withFileTypes: true });
-    } catch {
-      return { path: this.toRelative(dirPath), type: "directory", children: [] };
-    }
+    const entries = await readdir(dirPath, { withFileTypes: true });
     const children: DirectoryListingEntry[] = [];
     for (const entry of entries) {
       if (this.ignoreDirs.has(entry.name)) continue;

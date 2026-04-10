@@ -302,7 +302,7 @@ export class TerminalStream {
 export async function streamSocket(
   socket: WebSocket,
   stream: TerminalStream,
-  opts: { request?: Record<string, unknown>; closeOnComplete?: boolean; taskId?: string } = {},
+  opts: { request?: Record<string, unknown>; closeOnComplete?: boolean } = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -320,17 +320,6 @@ export async function streamSocket(
       } catch {
         payload = { type: "log", message: String(event.data) };
       }
-
-      // If taskId filter is set, only ingest events matching this task
-      if (opts.taskId) {
-        const eventTaskId = payload.taskId || payload.task_id || (payload.payload as any)?.taskId;
-        const eventRunId = payload.runId || payload.run_id || (payload.payload as any)?.runId;
-        // Accept events that match our taskId, or have no taskId (system events)
-        if (eventTaskId && eventTaskId !== opts.taskId && eventRunId && eventRunId !== opts.taskId) {
-          return; // skip events from other runs
-        }
-      }
-
       stream.ingest(payload);
       const type = String(payload.type || payload.event || payload.kind || "").toLowerCase();
       if (opts.closeOnComplete && (type.includes("complete") || type === "done" || type.includes("failed") || type.includes("error"))) {

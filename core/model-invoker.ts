@@ -125,8 +125,8 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         break;
       case "modelstudio":
         result = await invokeOpenAICompatible(
-          process.env.MODELSTUDIO_BASE_URL ?? "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
-          process.env.MODELSTUDIO_API_KEY ?? requireEnv("DASHSCOPE_API_KEY"),
+          process.env.MODELSTUDIO_BASE_URL ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          requireEnv("MODELSTUDIO_API_KEY"),
           model, prompt, systemPrompt, maxTokens,
         );
         break;
