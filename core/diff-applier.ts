@@ -7,15 +7,13 @@
  *   - Never apply diffs outside repoPath
  *   - Return rollback snapshot always
  *   - Use git apply if available, fallback to manual patch
+ *   - Verify output is real content, not raw diff text
  */
 
 import { readFile, writeFile, mkdir } from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { resolve, dirname, relative, sep } from "path";
+import { spawn } from "child_process";
+import { resolve, dirname, sep } from "path";
 import { existsSync } from "fs";
-
-const exec = promisify(execFile);
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -31,6 +29,7 @@ export interface ApplyResult {
 export class DiffApplier {
   /**
    * Apply a unified diff to files within repoPath.
+   * Reads the original file, applies hunks, writes the patched content.
    * Returns a rollback snapshot regardless of success/failure.
    */
   async apply(diff: string, repoPath: string): Promise<ApplyResult> {
@@ -73,16 +72,34 @@ export class DiffApplier {
       }
     }
 
-    // Try git apply first
+    // Try git apply first (piping diff via stdin properly)
     const gitResult = await this.tryGitApply(diff, absRepo);
     if (gitResult.success) {
-      return { success: true, filesChanged: changedFiles, errors: [], rollbackSnapshot };
+      // Verify the files contain real content, not raw diff
+      const verifyResult = await this.verifyAppliedFiles(changedFiles, absRepo, rollbackSnapshot);
+      if (verifyResult.ok) {
+        return { success: true, filesChanged: changedFiles, errors: [], rollbackSnapshot };
+      }
+      // git apply wrote bad content — rollback and try manual
+      console.warn(`[diff-applier] git apply produced invalid content, rolling back and trying manual apply`);
+      await this.rollback(rollbackSnapshot, absRepo);
     }
 
-    // Fallback: manual patch
+    // Fallback: manual patch — read original, apply hunks, write patched content
     const manualResult = await this.manualApply(diff, absRepo);
     if (manualResult.errors.length > 0) {
       errors.push(...manualResult.errors);
+    }
+
+    // Verify manual apply produced valid content
+    if (manualResult.filesChanged.length > 0) {
+      const verifyResult = await this.verifyAppliedFiles(manualResult.filesChanged, absRepo, rollbackSnapshot);
+      if (!verifyResult.ok) {
+        errors.push(...verifyResult.errors);
+        console.error(`[diff-applier] Manual apply produced invalid content, rolling back`);
+        await this.rollback(rollbackSnapshot, absRepo);
+        return { success: false, filesChanged: [], errors, rollbackSnapshot };
+      }
     }
 
     return {
@@ -94,21 +111,64 @@ export class DiffApplier {
   }
 
   /**
+   * Apply a diff to a string in memory (no file I/O).
+   * Returns the patched content.
+   */
+  applyToString(diff: string, originalContent: string): string {
+    const hunks = this.parseAllHunks(diff);
+    if (hunks.length === 0) {
+      console.warn(`[diff-applier] No hunks found in diff, returning original`);
+      return originalContent;
+    }
+
+    const lines = originalContent.split("\n");
+
+    // Apply hunks in reverse order so line numbers stay valid
+    const sorted = [...hunks].sort((a, b) => b.oldStart - a.oldStart);
+
+    for (const hunk of sorted) {
+      const { oldStart, removals, additions, contextBefore } = hunk;
+      let pos = oldStart - 1; // 0-indexed
+
+      // Use context lines to find exact position
+      if (contextBefore.length > 0) {
+        const found = this.findContextPosition(lines, contextBefore, pos);
+        if (found >= 0) {
+          pos = found + contextBefore.length;
+        }
+      }
+
+      if (removals.length > 0) {
+        // Find the removal block
+        const removePos = this.findSequence(lines, removals, pos);
+        if (removePos >= 0) {
+          lines.splice(removePos, removals.length, ...additions);
+        } else {
+          console.warn(`[diff-applier] Could not find removal block at ~line ${pos + 1}, skipping hunk`);
+        }
+      } else if (additions.length > 0) {
+        // Pure insertion
+        lines.splice(pos, 0, ...additions);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
    * Rollback files to their snapshot state.
    */
-  async rollback(snapshot: Record<string, string>): Promise<void> {
+  async rollback(snapshot: Record<string, string>, repoPath?: string): Promise<void> {
     for (const [file, content] of Object.entries(snapshot)) {
       try {
-        if (content === "") {
-          // File was new — we could delete it, but safer to leave as-is
-          // and let git clean handle it
-          continue;
-        }
-        const dir = dirname(file);
-        if (dir && !existsSync(dir)) {
+        if (content === "") continue; // Was a new file — leave as-is
+
+        const absFile = repoPath ? resolve(repoPath, file) : file;
+        const dir = dirname(absFile);
+        if (!existsSync(dir)) {
           await mkdir(dir, { recursive: true });
         }
-        await writeFile(file, content, "utf-8");
+        await writeFile(absFile, content, "utf-8");
       } catch (err) {
         console.error(`[diff-applier] Rollback failed for ${file}: ${err}`);
       }
@@ -123,11 +183,10 @@ export class DiffApplier {
     const trimmed = diff.trim();
     if (trimmed.length === 0) return false;
 
-    // Must have at least one --- / +++ pair or @@ hunk header
     const hasFilePair = /^---\s+\S/m.test(trimmed) && /^\+\+\+\s+\S/m.test(trimmed);
     const hasHunkHeader = /^@@\s+-\d+/m.test(trimmed);
 
-    return hasFilePair || hasHunkHeader;
+    return hasFilePair && hasHunkHeader;
   }
 
   /**
@@ -136,18 +195,8 @@ export class DiffApplier {
   extractChangedFiles(diff: string): string[] {
     const files = new Set<string>();
 
-    // Match +++ b/path or +++ path lines
     const plusLines = diff.matchAll(/^\+\+\+\s+(?:b\/)?(.+)$/gm);
     for (const match of plusLines) {
-      const path = match[1].trim();
-      if (path && path !== "/dev/null") {
-        files.add(path);
-      }
-    }
-
-    // Also check --- lines for deleted files
-    const minusLines = diff.matchAll(/^---\s+(?:a\/)?(.+)$/gm);
-    for (const match of minusLines) {
       const path = match[1].trim();
       if (path && path !== "/dev/null") {
         files.add(path);
@@ -157,29 +206,70 @@ export class DiffApplier {
     return [...files];
   }
 
-  // ─── git apply ─────────────────────────────────────────────────
+  /**
+   * Check if text looks like raw diff content (not valid source code).
+   */
+  static looksLikeRawDiff(content: string): boolean {
+    const first100 = content.slice(0, 100).trimStart();
+    return (
+      first100.startsWith("--- a/") ||
+      first100.startsWith("+++ b/") ||
+      first100.startsWith("@@ -") ||
+      first100.startsWith("diff --git")
+    );
+  }
+
+  // ─── git apply via stdin pipe ──────────────────────────────────
 
   private async tryGitApply(diff: string, repoPath: string): Promise<{ success: boolean; error?: string }> {
     try {
-      // Check if git is available and we're in a repo
-      await exec("git", ["rev-parse", "--git-dir"], { cwd: repoPath });
+      // Check if we're in a git repo
+      await this.spawnCommand("git", ["rev-parse", "--git-dir"], repoPath);
 
-      // Try to apply with --check first (dry run)
-      await exec("git", ["apply", "--check", "-"], {
-        cwd: repoPath,
-        input: diff,
-      } as any);
+      // Dry run first
+      await this.spawnCommand("git", ["apply", "--check", "-"], repoPath, diff);
 
       // Actually apply
-      await exec("git", ["apply", "-"], {
-        cwd: repoPath,
-        input: diff,
-      } as any);
+      await this.spawnCommand("git", ["apply", "-"], repoPath, diff);
 
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.stderr ?? err.message ?? String(err) };
+      return { success: false, error: String(err) };
     }
+  }
+
+  /**
+   * Spawn a command with optional stdin input.
+   * Unlike execFile, this properly pipes stdin.
+   */
+  private spawnCommand(cmd: string, args: string[], cwd: string, stdin?: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+
+      proc.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+      proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+      proc.on("close", (code) => {
+        if (code === 0) {
+          resolve(stdout);
+        } else {
+          reject(new Error(stderr || `${cmd} exited with code ${code}`));
+        }
+      });
+
+      proc.on("error", (err) => {
+        reject(err);
+      });
+
+      if (stdin) {
+        proc.stdin.write(stdin);
+        proc.stdin.end();
+      } else {
+        proc.stdin.end();
+      }
+    });
   }
 
   // ─── Manual Patch ──────────────────────────────────────────────
@@ -216,7 +306,6 @@ export class DiffApplier {
     for (const line of lines) {
       const plusMatch = line.match(/^\+\+\+\s+(?:b\/)?(.+)/);
       if (plusMatch) {
-        // Save previous chunk
         if (currentFile && currentHunk.length > 0) {
           const existing = chunks.find((c) => c.file === currentFile);
           if (existing) existing.hunks.push(currentHunk.join("\n"));
@@ -228,10 +317,9 @@ export class DiffApplier {
         continue;
       }
 
-      if (line.startsWith("--- ")) continue; // skip minus header
+      if (line.startsWith("--- ")) continue;
 
       if (line.startsWith("@@ ")) {
-        // Save previous hunk
         if (currentHunk.length > 0 && currentFile) {
           const existing = chunks.find((c) => c.file === currentFile);
           if (existing) existing.hunks.push(currentHunk.join("\n"));
@@ -247,7 +335,6 @@ export class DiffApplier {
       }
     }
 
-    // Flush last chunk
     if (currentFile && currentHunk.length > 0) {
       const existing = chunks.find((c) => c.file === currentFile);
       if (existing) existing.hunks.push(currentHunk.join("\n"));
@@ -257,12 +344,16 @@ export class DiffApplier {
     return chunks;
   }
 
+  /**
+   * Apply hunks to a single file: READ original → apply hunks → WRITE patched content.
+   */
   private async applyFileChunk(
     chunk: { file: string; hunks: string[] },
     repoPath: string
   ): Promise<{ file: string; changed: boolean }> {
     const absFile = resolve(repoPath, chunk.file);
 
+    // Step 1: Read the ORIGINAL file content
     let original: string;
     try {
       original = await readFile(absFile, "utf-8");
@@ -270,6 +361,7 @@ export class DiffApplier {
       original = "";
     }
 
+    // Step 2: Apply hunks to produce new content
     let content = original;
 
     for (const hunkStr of chunk.hunks) {
@@ -281,56 +373,164 @@ export class DiffApplier {
       const contentLines = content.split("\n");
       const removals: string[] = [];
       const additions: string[] = [];
+      const contextBefore: string[] = [];
+      let seenChange = false;
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
         if (line.startsWith("-")) {
+          seenChange = true;
           removals.push(line.slice(1));
         } else if (line.startsWith("+")) {
+          seenChange = true;
           additions.push(line.slice(1));
+        } else if (line.startsWith(" ")) {
+          if (!seenChange) {
+            contextBefore.push(line.slice(1));
+          }
+          // Context after changes is ignored for positioning
         }
-        // Context lines (starting with space) are skipped for simplicity
       }
 
-      // Find and replace the removal block with the addition block
+      // Use context to find the right position
+      let pos = oldStart;
+      if (contextBefore.length > 0) {
+        const found = this.findContextPosition(contentLines, contextBefore, oldStart);
+        if (found >= 0) {
+          pos = found + contextBefore.length;
+        }
+      }
+
       if (removals.length > 0) {
-        const removeStart = this.findSequence(contentLines, removals, oldStart);
+        const removeStart = this.findSequence(contentLines, removals, pos);
         if (removeStart >= 0) {
           contentLines.splice(removeStart, removals.length, ...additions);
           content = contentLines.join("\n");
         } else {
-          throw new Error(`Could not locate removal block at line ${oldStart + 1} in ${chunk.file}`);
+          throw new Error(`Could not locate removal block at ~line ${oldStart + 1} in ${chunk.file}`);
         }
       } else if (additions.length > 0) {
-        // Pure insertion at oldStart
-        contentLines.splice(oldStart, 0, ...additions);
+        contentLines.splice(pos, 0, ...additions);
         content = contentLines.join("\n");
       }
     }
 
+    // Step 3: Verify we're not about to write raw diff text
+    if (content !== original && DiffApplier.looksLikeRawDiff(content)) {
+      throw new Error(`Patch produced raw diff output instead of source code for ${chunk.file}`);
+    }
+
+    // Step 4: Write the PATCHED content (not the diff)
     if (content !== original) {
       const dir = dirname(absFile);
       if (!existsSync(dir)) {
         await mkdir(dir, { recursive: true });
       }
       await writeFile(absFile, content, "utf-8");
+      console.log(`[diff-applier] Patched ${chunk.file} (${original.split("\n").length} → ${content.split("\n").length} lines)`);
       return { file: chunk.file, changed: true };
     }
 
     return { file: chunk.file, changed: false };
   }
 
+  // ─── Verification ──────────────────────────────────────────────
+
+  /**
+   * Verify that applied files contain valid content, not raw diff text.
+   */
+  private async verifyAppliedFiles(
+    files: string[],
+    repoPath: string,
+    snapshot: Record<string, string>
+  ): Promise<{ ok: boolean; errors: string[] }> {
+    const errors: string[] = [];
+
+    for (const file of files) {
+      const absFile = resolve(repoPath, file);
+      try {
+        const content = await readFile(absFile, "utf-8");
+        if (DiffApplier.looksLikeRawDiff(content)) {
+          errors.push(`${file} contains raw diff headers instead of patched content`);
+        }
+      } catch {
+        // File might not exist — that's OK for deletions
+      }
+    }
+
+    return { ok: errors.length === 0, errors };
+  }
+
+  // ─── Hunk Parsing ─────────────────────────────────────────────
+
+  private parseAllHunks(diff: string): Array<{
+    oldStart: number;
+    removals: string[];
+    additions: string[];
+    contextBefore: string[];
+  }> {
+    const hunks: Array<{
+      oldStart: number;
+      removals: string[];
+      additions: string[];
+      contextBefore: string[];
+    }> = [];
+
+    const lines = diff.split("\n");
+    let i = 0;
+
+    while (i < lines.length) {
+      const headerMatch = lines[i].match(/^@@\s+-(\d+)(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/);
+      if (!headerMatch) { i++; continue; }
+
+      const oldStart = parseInt(headerMatch[1], 10);
+      const removals: string[] = [];
+      const additions: string[] = [];
+      const contextBefore: string[] = [];
+      let seenChange = false;
+      i++;
+
+      while (i < lines.length && !lines[i].startsWith("@@") && !lines[i].startsWith("--- ")) {
+        const line = lines[i];
+        if (line.startsWith("-")) {
+          seenChange = true;
+          removals.push(line.slice(1));
+        } else if (line.startsWith("+")) {
+          seenChange = true;
+          additions.push(line.slice(1));
+        } else if (line.startsWith(" ") || line === "") {
+          if (!seenChange) {
+            contextBefore.push(line.startsWith(" ") ? line.slice(1) : line);
+          }
+        }
+        i++;
+      }
+
+      hunks.push({ oldStart, removals, additions, contextBefore });
+    }
+
+    return hunks;
+  }
+
+  // ─── Sequence Matching ─────────────────────────────────────────
+
+  private findContextPosition(lines: string[], context: string[], hint: number): number {
+    if (this.matchesAt(lines, context, hint)) return hint;
+    for (let offset = 1; offset <= 15; offset++) {
+      if (hint - offset >= 0 && this.matchesAt(lines, context, hint - offset)) return hint - offset;
+      if (hint + offset < lines.length && this.matchesAt(lines, context, hint + offset)) return hint + offset;
+    }
+    return -1;
+  }
+
   private findSequence(haystack: string[], needle: string[], hint: number): number {
-    // Try at the hint position first
     if (this.matchesAt(haystack, needle, hint)) return hint;
 
-    // Search nearby (within 20 lines)
     for (let offset = 1; offset <= 20; offset++) {
       if (hint - offset >= 0 && this.matchesAt(haystack, needle, hint - offset)) return hint - offset;
       if (hint + offset < haystack.length && this.matchesAt(haystack, needle, hint + offset)) return hint + offset;
     }
 
-    // Full scan as last resort
     for (let i = 0; i <= haystack.length - needle.length; i++) {
       if (this.matchesAt(haystack, needle, i)) return i;
     }

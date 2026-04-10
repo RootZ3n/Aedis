@@ -78,6 +78,7 @@ import {
   type TaskNode,
 } from "./task-graph.js";
 import { ContextAssembler, type AssembledContext } from "./context-assembler.js";
+import { DiffApplier } from "./diff-applier.js";
 import {
   IntegrationJudge,
   type JudgmentReport,
@@ -808,6 +809,36 @@ export class Coordinator {
 
   private async gitCommit(active: ActiveRun): Promise<string | null> {
     try {
+      // Pre-commit safety: verify changed files contain source code, not raw diff text.
+      // If a file starts with "--- a/" it was not properly patched — restore from snapshot.
+      const corruptedFiles: string[] = [];
+      for (const change of active.changes) {
+        if (!change.content) continue;
+        if (DiffApplier.looksLikeRawDiff(change.content)) {
+          corruptedFiles.push(change.path);
+        }
+      }
+
+      if (corruptedFiles.length > 0) {
+        console.error(`[Coordinator] SAFETY: ${corruptedFiles.length} files contain raw diff text, restoring originals`);
+        for (const change of active.changes) {
+          if (corruptedFiles.includes(change.path) && change.originalContent) {
+            const absPath = resolve(this.config.projectRoot, change.path);
+            const { writeFile } = await import("fs/promises");
+            await writeFile(absPath, change.originalContent, "utf-8");
+            console.error(`[Coordinator]   Restored: ${change.path}`);
+          }
+        }
+        recordDecision(active.run, {
+          description: `Blocked commit: ${corruptedFiles.length} files contained raw diff text instead of patched source`,
+          madeBy: "coordinator",
+          taskId: null,
+          alternatives: ["Force commit anyway"],
+          rationale: `Corrupted files: ${corruptedFiles.join(", ")}`,
+        });
+        return null;
+      }
+
       const message = `zendorium: ${active.intent.charter.objective}\n\nRun: ${active.run.id}\nIntent: ${active.intent.id} v${active.intent.version}`;
 
       await exec("git", ["add", "-A"], { cwd: this.config.projectRoot });

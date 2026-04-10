@@ -133,10 +133,19 @@ export class BuilderWorker extends AbstractWorker {
         throw new Error("Model returned no effective file changes");
       }
 
+<<<<<<< Updated upstream
       // Build diff and apply via DiffApplier
       const diff = this.buildUnifiedDiff(relativePath, originalContent, updatedContent);
 
       // Write directly for single-file (DiffApplier used for multi-file future)
+=======
+      // Final safety gate: never write raw diff text to a source file
+      if (DiffApplier.looksLikeRawDiff(updatedContent)) {
+        throw new Error(`SAFETY: Refusing to write raw diff text to ${relativePath}`);
+      }
+
+      // Apply the change
+>>>>>>> Stashed changes
       await writeFile(targetPath, updatedContent, "utf8");
       this.logFileTouch(taskId, relativePath, "modify");
       this.noteDecision(taskId, `Applied builder patch to ${relativePath}`, `Contract goal: ${contract.goal}`);
@@ -271,9 +280,209 @@ export class BuilderWorker extends AbstractWorker {
     ].filter(Boolean).join("\n\n");
   }
 
+<<<<<<< Updated upstream
   private extractUpdatedContent(raw: string): string {
     const fenced = raw.match(/```(?:\w+)?\n([\s\S]*?)```/);
     return (fenced?.[1] ?? raw).trimEnd() + "\n";
+=======
+  // ─── Response Processing ─────────────────────────────────────────
+
+  /**
+   * Process model response. Handles three response formats:
+   * 1. Unified diff (preferred) — apply hunks to original content
+   * 2. Full file content in markdown fences — extract and use directly
+   * 3. Raw full file content — use directly
+   *
+   * CRITICAL: Never write raw diff text as file content. Always verify
+   * the result looks like source code, not diff headers.
+   */
+  private processModelResponse(
+    raw: string,
+    relativePath: string,
+    originalContent: string,
+  ): { updatedContent: string; diff: string } {
+    // Strip markdown fences if present
+    const stripped = this.stripMarkdownFences(raw);
+
+    // Check if the response looks like a unified diff
+    if (this.looksLikeDiff(stripped)) {
+      console.log(`[Builder] Response is a unified diff, applying hunks to original content`);
+      const updatedContent = this.diffApplier.applyToString(stripped, originalContent);
+
+      // Safety: verify the result is source code, not diff text
+      if (DiffApplier.looksLikeRawDiff(updatedContent)) {
+        console.error(`[Builder] SAFETY: applyToString produced raw diff output, falling back to original`);
+        throw new Error("Diff application produced raw diff text instead of patched source code");
+      }
+
+      const finalContent = updatedContent.trimEnd() + "\n";
+      return { updatedContent: finalContent, diff: stripped };
+    }
+
+    // Fallback: treat as full file content — but verify it's not diff text
+    if (DiffApplier.looksLikeRawDiff(stripped)) {
+      // Model returned a diff but looksLikeDiff didn't catch it (malformed headers)
+      // Try to apply it anyway
+      console.warn(`[Builder] Response looks like malformed diff, attempting to apply`);
+      try {
+        const updatedContent = this.diffApplier.applyToString(stripped, originalContent);
+        if (!DiffApplier.looksLikeRawDiff(updatedContent)) {
+          const finalContent = updatedContent.trimEnd() + "\n";
+          return { updatedContent: finalContent, diff: stripped };
+        }
+      } catch {
+        // Fall through
+      }
+      throw new Error("Model returned diff-like output that could not be applied as a patch");
+    }
+
+    console.log(`[Builder] Response is full file content, computing diff`);
+    const updatedContent = stripped.trimEnd() + "\n";
+    const diff = this.buildUnifiedDiff(relativePath, originalContent, updatedContent);
+    return { updatedContent, diff };
+  }
+
+  /**
+   * Strip markdown code fences from model output.
+   * Handles ```diff, ```typescript, ```, etc.
+   */
+  private stripMarkdownFences(raw: string): string {
+    const trimmed = raw.trim();
+
+    // Match opening ``` with optional language tag, then content, then closing ```
+    const fenced = trimmed.match(/^```(?:diff|patch|typescript|ts|javascript|js|text)?\s*\n([\s\S]*?)\n```\s*$/);
+    if (fenced) return fenced[1];
+
+    // Multiple fenced blocks — take the first one
+    const firstBlock = trimmed.match(/```(?:diff|patch|typescript|ts|javascript|js|text)?\s*\n([\s\S]*?)\n```/);
+    if (firstBlock) return firstBlock[1];
+
+    return trimmed;
+  }
+
+  /**
+   * Check if text looks like a unified diff.
+   */
+  private looksLikeDiff(text: string): boolean {
+    return (
+      /^---\s+\S/m.test(text) &&
+      /^\+\+\+\s+\S/m.test(text) &&
+      /^@@\s+-\d+/m.test(text)
+    );
+  }
+
+  /**
+   * Apply a unified diff to original content, returning the updated content.
+   * Simple line-by-line application.
+   */
+  private applyDiffToContent(diff: string, originalContent: string): string {
+    const lines = originalContent.split("\n");
+    const hunks = this.parseHunks(diff);
+
+    // Apply hunks in reverse order so line numbers stay valid
+    const sortedHunks = [...hunks].sort((a, b) => b.oldStart - a.oldStart);
+
+    for (const hunk of sortedHunks) {
+      const { oldStart, removals, additions, contextBefore } = hunk;
+
+      // Find the actual position using context matching
+      let pos = oldStart - 1; // 0-indexed
+      if (contextBefore.length > 0) {
+        const found = this.findContextPosition(lines, contextBefore, pos);
+        if (found >= 0) pos = found + contextBefore.length;
+      }
+
+      // Remove old lines and insert new ones
+      if (removals.length > 0) {
+        // Verify the lines we're removing match
+        let matchPos = pos;
+        for (const removal of removals) {
+          if (matchPos < lines.length && lines[matchPos] === removal) {
+            matchPos++;
+          }
+        }
+        lines.splice(pos, removals.length, ...additions);
+      } else if (additions.length > 0) {
+        // Pure insertion
+        lines.splice(pos, 0, ...additions);
+      }
+    }
+
+    return lines.join("\n").trimEnd() + "\n";
+  }
+
+  private parseHunks(diff: string): Array<{
+    oldStart: number;
+    removals: string[];
+    additions: string[];
+    contextBefore: string[];
+  }> {
+    const hunks: Array<{
+      oldStart: number;
+      removals: string[];
+      additions: string[];
+      contextBefore: string[];
+    }> = [];
+
+    const diffLines = diff.split("\n");
+    let i = 0;
+
+    while (i < diffLines.length) {
+      const headerMatch = diffLines[i].match(/^@@\s+-(\d+)(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/);
+      if (!headerMatch) {
+        i++;
+        continue;
+      }
+
+      const oldStart = parseInt(headerMatch[1], 10);
+      const removals: string[] = [];
+      const additions: string[] = [];
+      const contextBefore: string[] = [];
+      let seenChange = false;
+      i++;
+
+      while (i < diffLines.length && !diffLines[i].startsWith("@@") && !diffLines[i].startsWith("--- ")) {
+        const line = diffLines[i];
+        if (line.startsWith("-")) {
+          seenChange = true;
+          removals.push(line.slice(1));
+        } else if (line.startsWith("+")) {
+          seenChange = true;
+          additions.push(line.slice(1));
+        } else if (line.startsWith(" ") || line === "") {
+          if (!seenChange) {
+            contextBefore.push(line.startsWith(" ") ? line.slice(1) : line);
+          }
+        }
+        i++;
+      }
+
+      hunks.push({ oldStart, removals, additions, contextBefore });
+    }
+
+    return hunks;
+  }
+
+  private findContextPosition(lines: string[], context: string[], hint: number): number {
+    // Try at hint first
+    if (this.matchesAt(lines, context, hint)) return hint;
+
+    // Search nearby
+    for (let offset = 1; offset <= 10; offset++) {
+      if (hint - offset >= 0 && this.matchesAt(lines, context, hint - offset)) return hint - offset;
+      if (hint + offset < lines.length && this.matchesAt(lines, context, hint + offset)) return hint + offset;
+    }
+
+    return -1;
+  }
+
+  private matchesAt(lines: string[], pattern: string[], start: number): boolean {
+    if (start + pattern.length > lines.length) return false;
+    for (let i = 0; i < pattern.length; i++) {
+      if (lines[start + i] !== pattern[i]) return false;
+    }
+    return true;
+>>>>>>> Stashed changes
   }
 
   private enforceForbiddenChanges(contract: TaskContract, updatedContent: string): void {
