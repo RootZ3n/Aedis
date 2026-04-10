@@ -18,6 +18,12 @@
  *
  * The Coordinator never does work itself — it orchestrates workers,
  * enforces governance, and maintains the audit trail.
+ *
+ * INSTRUMENTATION NOTE:
+ * Every phase transition, graph mutation, dispatch decision, and early
+ * exit branch is logged with the [coordinator] prefix. This is intentional —
+ * silent failure modes between Phase 4 (graph build) and Phase 6 (executeGraph)
+ * have been a recurring debugging headache, so we err on the side of noise.
  */
 
 import { randomUUID } from "crypto";
@@ -196,7 +202,10 @@ export class Coordinator {
     let verificationReceipt: VerificationReceipt | null = null;
     let judgmentReport: JudgmentReport | null = null;
 
+    console.log(`[coordinator] ═══ submit() entry — input="${submission.input.slice(0, 80)}${submission.input.length > 80 ? "…" : ""}"`);
+
     // Phase 1: Charter
+    console.log(`[coordinator] PHASE 1: Charter — analyzing request`);
     this.emit({ type: "run_started", payload: { input: submission.input } });
 
     const analysis = this.charterGen.analyzeRequest(submission.input);
@@ -205,10 +214,12 @@ export class Coordinator {
       ...this.charterGen.generateDefaultConstraints(analysis),
       ...(submission.extraConstraints ?? []),
     ];
+    console.log(`[coordinator] PHASE 1 done — category=${analysis.category} scope=${analysis.scopeEstimate} deliverables=${charter.deliverables.length} targets=[${analysis.targets.slice(0, 5).join(", ")}${analysis.targets.length > 5 ? "…" : ""}]`);
 
     this.emit({ type: "charter_generated", payload: { charter, analysis } });
 
     // Phase 2: Intent
+    console.log(`[coordinator] PHASE 2: Intent — creating and validating`);
     const intent = createIntent({
       runId: randomUUID(),
       userRequest: submission.input,
@@ -219,12 +230,15 @@ export class Coordinator {
 
     const intentErrors = validateIntent(intent);
     if (intentErrors.length > 0) {
+      console.error(`[coordinator] PHASE 2 FAIL — invalid intent: ${intentErrors.join(", ")}`);
       throw new CoordinatorError(`Invalid intent: ${intentErrors.join(", ")}`);
     }
+    console.log(`[coordinator] PHASE 2 done — intent ${intent.id} v${intent.version} locked`);
 
     this.emit({ type: "intent_locked", payload: { intentId: intent.id, version: intent.version } });
 
     // Phase 3: RunState
+    console.log(`[coordinator] PHASE 3: RunState — creating`);
     const run = createRunState(intent.id);
 
     const active: ActiveRun = {
@@ -236,25 +250,40 @@ export class Coordinator {
       cancelled: false,
     };
     this.activeRuns.set(run.id, active);
+    console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active`);
 
     try {
       // Phase 4: Build TaskGraph
+      console.log(`[coordinator] PHASE 4: BuildTaskGraph — entering`);
       advancePhase(run, "planning");
       this.buildTaskGraph(active, analysis);
+      const summaryAfterBuild = getGraphSummary(active.graph);
+      console.log(`[coordinator] PHASE 4 done — graph summary: ${JSON.stringify(summaryAfterBuild)}`);
+      console.log(`[coordinator] PHASE 4 done — graph has ${active.graph.nodes.length} node(s): ${active.graph.nodes.map(n => `${n.workerType}(${n.id.slice(0, 6)}:${n.status})`).join(", ")}`);
+
+      if (active.graph.nodes.length === 0) {
+        console.error(`[coordinator] PHASE 4 FAIL — buildTaskGraph produced ZERO nodes. This is the early-exit bug. Graph state will be empty so executeGraph will exit immediately and verdict will fall through to "partial" via hasFailedNodes/empty fallthrough.`);
+      }
+
       this.emit({
         type: "task_graph_built",
-        payload: { runId: run.id, summary: getGraphSummary(active.graph) },
+        payload: { runId: run.id, summary: summaryAfterBuild },
       });
 
       // Phase 5: Pre-Build Coherence
+      console.log(`[coordinator] PHASE 5: Pre-Build Coherence — entering`);
       advancePhase(run, "scouting");
       await this.runPreBuildCoherence(active);
+      console.log(`[coordinator] PHASE 5 done — coherence passed`);
 
       // Phase 6–7: Execute (Scout → Build → Rehearsal Loop)
+      console.log(`[coordinator] PHASE 6: ExecuteGraph — entering with ${active.graph.nodes.length} node(s)`);
       await this.executeGraph(active);
+      console.log(`[coordinator] PHASE 6 done — graph state: ${JSON.stringify(getGraphSummary(active.graph))}`);
 
       // Phase 8: Post-Build IntegrationJudge
       if (!active.cancelled && !hasFailedNodes(active.graph)) {
+        console.log(`[coordinator] PHASE 8: IntegrationJudge — entering`);
         this.emit({ type: "integration_check", payload: { runId: run.id, phase: "post-build" } });
         judgmentReport = this.judge.judge(
           active.intent,
@@ -272,6 +301,7 @@ export class Coordinator {
             message: c.details,
           })),
         });
+        console.log(`[coordinator] PHASE 8 done — judgment passed=${judgmentReport.passed}`);
 
         if (!judgmentReport.passed) {
           this.emit({
@@ -279,16 +309,20 @@ export class Coordinator {
             payload: { runId: run.id, blockers: judgmentReport.blockers },
           });
         }
+      } else {
+        console.log(`[coordinator] PHASE 8 SKIPPED — cancelled=${active.cancelled} hasFailedNodes=${hasFailedNodes(active.graph)}`);
       }
 
       // Phase 9: Verification Pipeline
       if (judgmentReport?.passed && !active.cancelled) {
+        console.log(`[coordinator] PHASE 9: Verification — entering`);
         verificationReceipt = await this.verifier.verify(
           active.intent,
           run,
           active.changes,
           active.workerResults
         );
+        console.log(`[coordinator] PHASE 9 done — verdict=${verificationReceipt.verdict}`);
 
         if (verificationReceipt.verdict === "fail") {
           this.emit({
@@ -298,6 +332,8 @@ export class Coordinator {
         } else {
           this.emit({ type: "merge_approved", payload: { runId: run.id } });
         }
+      } else {
+        console.log(`[coordinator] PHASE 9 SKIPPED — judgmentReport=${judgmentReport ? `passed=${judgmentReport.passed}` : "null"} cancelled=${active.cancelled}`);
       }
 
       // Phase 10: Commit — commit if there are real file changes,
@@ -318,20 +354,24 @@ export class Coordinator {
         changeCount > 0;
 
       if (canCommit) {
-        console.log(`[coordinator] committing ${changeCount} change(s) (active.changes=${active.changes.length}, filesTouched=${active.run.filesTouched.length})...`);
+        console.log(`[coordinator] PHASE 10: committing ${changeCount} change(s) (active.changes=${active.changes.length}, filesTouched=${active.run.filesTouched.length})...`);
         commitSha = await this.gitCommit(active);
         if (commitSha) {
-          console.log(`[coordinator] commit ${commitSha.slice(0, 8)} created`);
+          console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
         } else {
-          console.warn(`[coordinator] gitCommit returned null — see prior errors or recordDecision entries`);
+          console.warn(`[coordinator] PHASE 10 — gitCommit returned null — see prior errors or recordDecision entries`);
         }
       } else if (this.config.autoCommit && !active.cancelled) {
-        console.log(`[coordinator] commit skipped: no changes to commit (active.changes=0, filesTouched=0)`);
+        console.log(`[coordinator] PHASE 10 SKIPPED — no changes to commit (active.changes=0, filesTouched=0)`);
+      } else {
+        console.log(`[coordinator] PHASE 10 SKIPPED — autoCommit=${this.config.autoCommit} cancelled=${active.cancelled} changeCount=${changeCount}`);
       }
 
       // Finalize
       const verdict = this.determineVerdict(active, verificationReceipt, judgmentReport);
+      console.log(`[coordinator] FINALIZE — verdict=${verdict} (cancelled=${active.cancelled} phase=${run.phase} hasFailedNodes=${hasFailedNodes(active.graph)} workerResults=${active.workerResults.length})`);
+
       if (verdict === "success" || verdict === "partial") {
         advancePhase(run, "complete");
       } else {
@@ -346,13 +386,33 @@ export class Coordinator {
         Date.now() - startTime
       );
 
+      console.log(`[coordinator] ═══ submit() exit — verdict=${verdict} duration=${Date.now() - startTime}ms`);
       this.emit({ type: "run_complete", payload: { runId: run.id, verdict } });
       this.emit({ type: "receipt_generated", payload: { receiptId: receipt.id } });
 
       return receipt;
     } catch (err) {
-      failRun(run, err instanceof Error ? err.message : String(err));
-      return this.buildReceipt(active, verificationReceipt, judgmentReport, null, Date.now() - startTime);
+      // SILENT-FAILURE FIX: previously this catch swallowed errors completely,
+      // making it impossible to see why the run aborted. Now we log everything
+      // we can about the error AND the live graph/run state before failing.
+      const errMessage = err instanceof Error ? err.message : String(err);
+      const errStack = err instanceof Error ? err.stack : undefined;
+      console.error(`[coordinator] ═══ submit() CAUGHT EXCEPTION — ${errMessage}`);
+      if (errStack) {
+        console.error(`[coordinator] stack trace:\n${errStack}`);
+      }
+      console.error(`[coordinator]   run.phase at catch:        ${active.run.phase}`);
+      console.error(`[coordinator]   graph.nodes at catch:      ${active.graph.nodes.length}`);
+      console.error(`[coordinator]   graph.nodes statuses:      ${active.graph.nodes.map(n => `${n.workerType}=${n.status}`).join(", ") || "(none)"}`);
+      console.error(`[coordinator]   active.changes at catch:   ${active.changes.length}`);
+      console.error(`[coordinator]   active.workerResults:      ${active.workerResults.length}`);
+      console.error(`[coordinator]   intent.deliverables:       ${active.intent.charter.deliverables.length}`);
+      console.error(`[coordinator]   duration before failure:   ${Date.now() - startTime}ms`);
+
+      failRun(run, errMessage);
+      const receipt = this.buildReceipt(active, verificationReceipt, judgmentReport, null, Date.now() - startTime);
+      console.log(`[coordinator] ═══ submit() exit (failed) — verdict=${receipt.verdict} duration=${Date.now() - startTime}ms`);
+      return receipt;
     } finally {
       this.activeRuns.delete(run.id);
     }
@@ -381,10 +441,19 @@ export class Coordinator {
   // ─── Graph Construction ────────────────────────────────────────────
 
   private buildTaskGraph(active: ActiveRun, analysis: RequestAnalysis): void {
+    console.log(`[coordinator] buildTaskGraph: entering with ${active.intent.charter.deliverables.length} deliverable(s) on intent`);
     const { graph } = active;
     const deliverables = this.prepareDeliverablesForGraph(active, analysis);
+    console.log(`[coordinator] buildTaskGraph: prepareDeliverablesForGraph returned ${deliverables.length} deliverable(s)`);
+
+    if (deliverables.length === 0) {
+      console.error(`[coordinator] buildTaskGraph: ABORT — 0 deliverables after prepare. Graph will be empty. This is a fatal early-exit condition.`);
+      // Don't silently produce an empty graph — fail loudly so the catch handler logs the cause.
+      throw new CoordinatorError("buildTaskGraph received 0 deliverables — refusing to build empty graph");
+    }
 
     const targetFiles = deliverables.flatMap((d) => d.targetFiles);
+    console.log(`[coordinator] buildTaskGraph: total target files across deliverables = ${targetFiles.length}`);
 
     const scoutNode = addNode(graph, {
       label: "Scout: gather context and assess risk",
@@ -392,6 +461,7 @@ export class Coordinator {
       targetFiles,
       metadata: { category: analysis.category, scopeEstimate: analysis.scopeEstimate },
     });
+    console.log(`[coordinator] buildTaskGraph: scout node added (${scoutNode.id.slice(0, 6)})`);
 
     const builderNodes: TaskNode[] = [];
     for (const deliverable of deliverables) {
@@ -404,6 +474,7 @@ export class Coordinator {
       addEdge(graph, scoutNode.id, builder.id, "data");
       builderNodes.push(builder);
     }
+    console.log(`[coordinator] buildTaskGraph: ${builderNodes.length} builder node(s) added`);
 
     const criticNode = addNode(graph, {
       label: "Critic: review all builder outputs",
@@ -452,6 +523,7 @@ export class Coordinator {
     });
 
     if (analysis.riskSignals.length > 0) {
+      console.log(`[coordinator] buildTaskGraph: adding escalation boundaries for ${builderNodes.length} builder(s) due to risk signals: ${analysis.riskSignals.join(", ")}`);
       for (const builder of builderNodes) {
         addEscalationBoundary(
           graph,
@@ -464,6 +536,7 @@ export class Coordinator {
     }
 
     markReady(graph, scoutNode.id);
+    console.log(`[coordinator] buildTaskGraph: complete — total nodes=${graph.nodes.length} edges=${graph.edges.length} scout marked ready`);
   }
 
   private prepareDeliverablesForGraph(
@@ -598,13 +671,31 @@ export class Coordinator {
     }
 
     // SAFETY NET — the filter must NEVER zero out a non-empty input.
-    // If it would, log a loud warning and return the original list unchanged.
+    // Previously, this branch returned the original deliverables BUT the
+    // intent revision below would still run (didFilter is true in this case),
+    // causing the intent to drop to empty deliverables while the function
+    // returned the original list. That divergence meant runPreBuildCoherence
+    // would later check intent.charter.deliverables (now empty/wrong) against
+    // graph nodes built from the original list — silent corruption.
+    //
+    // Fix: when the safety net trips, also short-circuit the intent revision
+    // by clearing didFilter. We log loudly so the operator can see why the
+    // filter blew up.
     if (deduped.length === 0 && totalBefore > 0) {
       console.warn(
-        `[coordinator] WARNING: filter would have produced 0 deliverables from ${totalBefore}; ` +
+        `[coordinator] SAFETY NET TRIPPED: filter would have produced 0 deliverables from ${totalBefore}; ` +
         `returning original deliverables unchanged to avoid empty task graph. ` +
         `Decisions: ${decisions.join("; ")}`
       );
+      // Record this as a decision for the audit trail, then return the
+      // original deliverables WITHOUT revising the intent.
+      recordDecision(active.run, {
+        description: `Safety net: filter zeroed out ${totalBefore} deliverable(s); kept originals`,
+        madeBy: "coordinator",
+        taskId: null,
+        alternatives: ["Allow empty graph and fail downstream"],
+        rationale: decisions.join(" | "),
+      });
       return active.intent.charter.deliverables;
     }
 
@@ -619,10 +710,18 @@ export class Coordinator {
     }
 
     if (didFilter || deduped.length !== totalBefore) {
-      active.intent = reviseIntent(active.intent, {
-        reason: "Filtered, deduplicated, and dropped empty deliverables",
-        charter: { deliverables: deduped },
-      });
+      try {
+        active.intent = reviseIntent(active.intent, {
+          reason: "Filtered, deduplicated, and dropped empty deliverables",
+          charter: { deliverables: deduped },
+        });
+        console.log(`[coordinator] prepareDeliverablesForGraph: intent revised to v${active.intent.version} with ${deduped.length} deliverable(s)`);
+      } catch (err) {
+        // reviseIntent has its own validation that can throw — surface it
+        // loudly instead of letting the caller's catch block swallow it.
+        console.error(`[coordinator] prepareDeliverablesForGraph: reviseIntent FAILED — ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
     }
 
     return deduped;
@@ -645,24 +744,39 @@ export class Coordinator {
   private async executeGraph(active: ActiveRun): Promise<void> {
     const { graph, run, intent } = active;
     let rehearsalRound = 0;
+    let iteration = 0;
+
+    console.log(`[coordinator] executeGraph: entering — graph has ${graph.nodes.length} nodes, isComplete=${isGraphComplete(graph)} hasFailedNodes=${hasFailedNodes(graph)}`);
+
+    if (isGraphComplete(graph)) {
+      console.warn(`[coordinator] executeGraph: graph is ALREADY COMPLETE on entry — loop will not execute. Node statuses: ${graph.nodes.map(n => `${n.workerType}=${n.status}`).join(", ")}`);
+    }
 
     while (!isGraphComplete(graph) && !active.cancelled) {
+      iteration++;
       const dispatchable = getDispatchableNodes(graph);
+      console.log(`[coordinator] executeGraph: iteration ${iteration} — ${dispatchable.length} dispatchable, isComplete=${isGraphComplete(graph)} hasFailedNodes=${hasFailedNodes(graph)}`);
 
       if (dispatchable.length === 0) {
         if (hasFailedNodes(graph)) {
+          console.log(`[coordinator] executeGraph: 0 dispatchable + has failed nodes → attempting recovery`);
           // Attempt recovery
           const recovered = await this.attemptRecovery(active);
-          if (!recovered) break;
+          if (!recovered) {
+            console.log(`[coordinator] executeGraph: recovery returned false — breaking loop`);
+            break;
+          }
           continue;
         }
         // No dispatchable nodes and no failures — deadlock
+        console.error(`[coordinator] executeGraph: DEADLOCK — 0 dispatchable, 0 failed. Node statuses: ${graph.nodes.map(n => `${n.workerType}=${n.status}`).join(", ")}`);
         failRun(run, "Task graph deadlocked: no dispatchable nodes");
         break;
       }
 
       // Advance phase based on what we're dispatching
       const phases = dispatchable.map((n) => n.workerType);
+      console.log(`[coordinator] executeGraph: dispatching ${dispatchable.length} node(s) of type(s) [${phases.join(", ")}]`);
       if (phases.includes("scout") && run.phase === "scouting") {
         // already in scouting
       } else if (phases.includes("builder")) {
@@ -690,6 +804,7 @@ export class Coordinator {
             payload: { runId: run.id, taskId: node.id, confidence: result.confidence },
           });
         } else {
+          console.warn(`[coordinator] executeGraph: marking node ${node.id.slice(0, 6)} (${node.workerType}) as FAILED — issue: ${result.issues[0]?.message ?? "(no message)"}`);
           markFailed(graph, node.id);
           this.emit({
             type: "task_failed",
@@ -716,6 +831,7 @@ export class Coordinator {
           rehearsalRound < this.config.maxRehearsalRounds
         ) {
           rehearsalRound++;
+          console.log(`[coordinator] executeGraph: rehearsal round ${rehearsalRound}/${this.config.maxRehearsalRounds} — Critic requested changes`);
           this.emit({
             type: "critic_review",
             payload: { runId: run.id, verdict: "request-changes", round: rehearsalRound },
@@ -734,6 +850,8 @@ export class Coordinator {
       // Evaluate checkpoints
       await this.evaluateCheckpoints(active);
     }
+
+    console.log(`[coordinator] executeGraph: loop exited after ${iteration} iteration(s) — isComplete=${isGraphComplete(graph)} hasFailedNodes=${hasFailedNodes(graph)} cancelled=${active.cancelled}`);
   }
 
   private async dispatchNode(
@@ -741,6 +859,8 @@ export class Coordinator {
     node: TaskNode
   ): Promise<{ node: TaskNode; result: WorkerResult }> {
     const { run, intent, graph } = active;
+
+    console.log(`[coordinator] dispatchNode: ${node.workerType} (${node.id.slice(0, 6)}) — ${node.targetFiles.length} target file(s)`);
 
     // Create RunTask
     const runTask = addTask(run, {
@@ -763,6 +883,7 @@ export class Coordinator {
     // Route through TrustRouter
     const routingDecision = this.trustRouter.route(runTask, intent, context);
     node.assignedTier = routingDecision.tier;
+    console.log(`[coordinator] dispatchNode: ${node.workerType} routed to tier=${routingDecision.tier}`);
 
     this.emit({
       type: "worker_assigned",
@@ -799,6 +920,7 @@ export class Coordinator {
     // Find and execute worker
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
     if (!worker) {
+      console.error(`[coordinator] dispatchNode: NO WORKER REGISTERED for type "${node.workerType}". This is a hidden silent-failure path — runPreBuildCoherence may have used hasWorker() which disagrees with getWorker().`);
       const failResult: WorkerResult = {
         workerType: node.workerType as WorkerType,
         taskId: runTask.id,
@@ -816,7 +938,32 @@ export class Coordinator {
       return { node, result: failResult };
     }
 
-    const result = await worker.execute(assignment);
+    let result: WorkerResult;
+    try {
+      result = await worker.execute(assignment);
+      console.log(`[coordinator] dispatchNode: ${node.workerType} returned success=${result.success} confidence=${result.confidence} touchedFiles=${result.touchedFiles.length} issues=${result.issues.length}`);
+    } catch (err) {
+      // Worker.execute threw — previously this propagated up and got swallowed
+      // by submit's catch block with no context. Log, then convert to a failed
+      // WorkerResult so the graph can record the failure properly.
+      const errMessage = err instanceof Error ? err.message : String(err);
+      console.error(`[coordinator] dispatchNode: ${node.workerType} EXECUTE THREW — ${errMessage}`);
+      if (err instanceof Error && err.stack) {
+        console.error(`[coordinator] dispatchNode: stack:\n${err.stack}`);
+      }
+      result = {
+        workerType: node.workerType as WorkerType,
+        taskId: runTask.id,
+        success: false,
+        output: { kind: "scout", dependencies: [], patterns: [], riskAssessment: { level: "low", factors: [], mitigations: [] }, suggestedApproach: "" },
+        issues: [{ severity: "error", message: `Worker threw: ${errMessage}` }],
+        cost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        confidence: 0,
+        touchedFiles: [],
+        assumptions: [],
+        durationMs: 0,
+      };
+    }
 
     // Record to RunState
     const taskResult: TaskResult = {
@@ -845,6 +992,7 @@ export class Coordinator {
   private async runPreBuildCoherence(active: ActiveRun): Promise<void> {
     const { run, intent, graph } = active;
 
+    console.log(`[coordinator] runPreBuildCoherence: entering — ${intent.charter.deliverables.length} deliverables, ${graph.nodes.length} graph nodes`);
     this.emit({ type: "coherence_check_started", payload: { runId: run.id, phase: "pre-build" } });
 
     const checks = [];
@@ -859,14 +1007,17 @@ export class Coordinator {
         passed: hasNode,
         message: hasNode ? "Covered by task graph" : "No task node covers this deliverable",
       });
+      console.log(`[coordinator] runPreBuildCoherence: check "deliverable coverage: ${deliverable.description}" → ${hasNode ? "PASS" : "FAIL"}`);
     }
 
     // Check: graph is acyclic (already enforced, but verify)
     try {
       topologicalSort(graph);
       checks.push({ name: "Graph acyclicity", passed: true, message: "DAG verified" });
+      console.log(`[coordinator] runPreBuildCoherence: check "graph acyclicity" → PASS`);
     } catch {
       checks.push({ name: "Graph acyclicity", passed: false, message: "Cycle detected in task graph" });
+      console.error(`[coordinator] runPreBuildCoherence: check "graph acyclicity" → FAIL (cycle detected)`);
     }
 
     // Check: all worker types are available
@@ -878,17 +1029,21 @@ export class Coordinator {
         passed: available,
         message: available ? "Worker registered" : `No worker for "${type}"`,
       });
+      console.log(`[coordinator] runPreBuildCoherence: check "worker availability: ${type}" → ${available ? "PASS" : "FAIL"}`);
     }
 
     const allPassed = checks.every((c) => c.passed);
     recordCoherenceCheck(run, { phase: "pre-build", passed: allPassed, checks });
 
     if (allPassed) {
+      console.log(`[coordinator] runPreBuildCoherence: ALL ${checks.length} checks passed`);
       this.emit({ type: "coherence_check_passed", payload: { runId: run.id, phase: "pre-build" } });
     } else {
+      const failedChecks = checks.filter((c) => !c.passed);
+      console.error(`[coordinator] runPreBuildCoherence: ${failedChecks.length} of ${checks.length} checks FAILED — ${failedChecks.map((c) => c.message).join("; ")}`);
       this.emit({ type: "coherence_check_failed", payload: { runId: run.id, phase: "pre-build", checks } });
       throw new CoordinatorError(
-        `Pre-build coherence failed: ${checks.filter((c) => !c.passed).map((c) => c.message).join("; ")}`
+        `Pre-build coherence failed: ${failedChecks.map((c) => c.message).join("; ")}`
       );
     }
   }
@@ -944,13 +1099,19 @@ export class Coordinator {
 
   private async attemptRecovery(active: ActiveRun): Promise<boolean> {
     const failedNodes = active.graph.nodes.filter((n) => n.status === "failed");
-    if (failedNodes.length === 0) return false;
+    if (failedNodes.length === 0) {
+      console.log(`[coordinator] attemptRecovery: no failed nodes — nothing to recover`);
+      return false;
+    }
 
     const recoveryAttempts = active.run.decisions.filter(
       (d) => d.description.startsWith("Recovery attempt")
     ).length;
 
+    console.log(`[coordinator] attemptRecovery: ${failedNodes.length} failed node(s), attempt ${recoveryAttempts + 1}/${this.config.maxRecoveryAttempts}`);
+
     if (recoveryAttempts >= this.config.maxRecoveryAttempts) {
+      console.warn(`[coordinator] attemptRecovery: max recovery attempts (${this.config.maxRecoveryAttempts}) reached — giving up`);
       this.emit({
         type: "recovery_attempted",
         payload: { runId: active.run.id, success: false, reason: "Max recovery attempts reached" },
