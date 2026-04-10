@@ -45,7 +45,7 @@ export type ZendoriumEventType =
 
 export interface WireMessage {
   /** Event type */
-  type: ZendoriumEventType;
+  type: ZendoriumEventType | string;
   /** Event payload */
   payload: Record<string, unknown>;
   /** ISO timestamp */
@@ -90,6 +90,18 @@ export function createEventBus(historySize: number = 100): EventBus {
   const history: WireMessage[] = [];
   let globalSeq = 0;
 
+  function safeSend(ws: WebSocket, message: string): boolean {
+    try {
+      if (ws.readyState === 1 /* WebSocket.OPEN */) {
+        ws.send(message);
+        return true;
+      }
+    } catch {
+      // Dead socket
+    }
+    return false;
+  }
+
   function emit(event: ZendoriumEvent): void {
     globalSeq++;
 
@@ -131,14 +143,8 @@ export function createEventBus(historySize: number = 100): EventBus {
     const message = JSON.stringify(wire);
     for (const [ws, entry] of clients) {
       if (entry.filter && !entry.filter.has(event.type)) continue;
-
-      try {
-        if (ws.readyState === 1 /* WebSocket.OPEN */) {
-          entry.seq++;
-          ws.send(message);
-        }
-      } catch {
-        // Dead socket — will be cleaned up on close
+      if (safeSend(ws, message)) {
+        entry.seq++;
       }
     }
   }
@@ -171,15 +177,16 @@ export function createEventBus(historySize: number = 100): EventBus {
       seq: 0,
     });
 
-    // Send recent history as catchup
+    // Send recent history as catchup — delay slightly to let the
+    // connection fully stabilize (avoids send-before-open race).
     const catchup = recentEvents(20);
-    for (const msg of catchup) {
-      if (filter && !filter.includes(msg.type)) continue;
-      try {
-        ws.send(JSON.stringify(msg));
-      } catch {
-        break;
-      }
+    if (catchup.length > 0) {
+      setTimeout(() => {
+        for (const msg of catchup) {
+          if (filter && !filter.includes(msg.type as ZendoriumEventType)) continue;
+          if (!safeSend(ws, JSON.stringify(msg))) break;
+        }
+      }, 50);
     }
   }
 
