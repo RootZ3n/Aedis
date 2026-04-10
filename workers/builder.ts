@@ -126,26 +126,20 @@ export class BuilderWorker extends AbstractWorker {
         maxTokens: assignment.tokenBudget,
       });
 
-      const updatedContent = this.extractUpdatedContent(response.text);
+      // Process model response — handles diff, fenced content, or raw content
+      const { updatedContent, diff } = this.processModelResponse(response.text, relativePath, originalContent);
       this.enforceForbiddenChanges(contract, updatedContent);
 
       if (updatedContent === originalContent) {
         throw new Error("Model returned no effective file changes");
       }
 
-<<<<<<< Updated upstream
-      // Build diff and apply via DiffApplier
-      const diff = this.buildUnifiedDiff(relativePath, originalContent, updatedContent);
-
-      // Write directly for single-file (DiffApplier used for multi-file future)
-=======
       // Final safety gate: never write raw diff text to a source file
       if (DiffApplier.looksLikeRawDiff(updatedContent)) {
         throw new Error(`SAFETY: Refusing to write raw diff text to ${relativePath}`);
       }
 
       // Apply the change
->>>>>>> Stashed changes
       await writeFile(targetPath, updatedContent, "utf8");
       this.logFileTouch(taskId, relativePath, "modify");
       this.noteDecision(taskId, `Applied builder patch to ${relativePath}`, `Contract goal: ${contract.goal}`);
@@ -280,11 +274,6 @@ export class BuilderWorker extends AbstractWorker {
     ].filter(Boolean).join("\n\n");
   }
 
-<<<<<<< Updated upstream
-  private extractUpdatedContent(raw: string): string {
-    const fenced = raw.match(/```(?:\w+)?\n([\s\S]*?)```/);
-    return (fenced?.[1] ?? raw).trimEnd() + "\n";
-=======
   // ─── Response Processing ─────────────────────────────────────────
 
   /**
@@ -482,7 +471,6 @@ export class BuilderWorker extends AbstractWorker {
       if (lines[start + i] !== pattern[i]) return false;
     }
     return true;
->>>>>>> Stashed changes
   }
 
   private enforceForbiddenChanges(contract: TaskContract, updatedContent: string): void {
