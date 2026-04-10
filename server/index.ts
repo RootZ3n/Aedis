@@ -22,6 +22,11 @@ import { createTailscaleAuth } from "./middleware/auth.js";
 import { createEventBus, type EventBus } from "./websocket.js";
 import { Coordinator, type CoordinatorConfig } from "../core/coordinator.js";
 import { WorkerRegistry } from "../workers/base.js";
+import { ScoutWorker } from "../workers/scout.js";
+import { BuilderWorker } from "../workers/builder.js";
+import { CriticWorker } from "../workers/critic.js";
+import { VerifierWorker } from "../workers/verifier.js";
+import { IntegratorWorker } from "../workers/integrator.js";
 import type { TrustProfile } from "../router/trust-router.js";
 
 import { taskRoutes } from "./routes/tasks.js";
@@ -68,6 +73,20 @@ function defaultTrustProfile(): TrustProfile {
   };
 }
 
+/**
+ * Build a WorkerRegistry with all 5 worker types registered.
+ */
+function buildDefaultRegistry(projectRoot: string): WorkerRegistry {
+  const registry = new WorkerRegistry();
+  registry.register(new ScoutWorker({ projectRoot }));
+  registry.register(new BuilderWorker({ projectRoot }));
+  registry.register(new CriticWorker({ projectRoot }));
+  registry.register(new VerifierWorker());
+  registry.register(new IntegratorWorker());
+  console.log("[server] WorkerRegistry: 5 workers registered — scout, builder, critic, verifier, integrator");
+  return registry;
+}
+
 // ─── Resolve ui/ directory relative to this file ─────────────────────
 
 const __filename = fileURLToPath(import.meta.url);
@@ -82,7 +101,7 @@ export async function createServer(
   workerRegistry?: WorkerRegistry
 ): Promise<ReturnType<typeof Fastify>> {
   const cfg: ServerConfig = { ...DEFAULT_CONFIG, ...config };
-  const registry = workerRegistry ?? new WorkerRegistry();
+  const registry = workerRegistry ?? buildDefaultRegistry(cfg.projectRoot);
   const profile = trustProfile ?? defaultTrustProfile();
 
   const eventBus = createEventBus();
@@ -106,8 +125,6 @@ export async function createServer(
   };
 
   // ─── Fastify instance ──────────────────────────────────────────
-  // Use basic logger — pino-pretty is optional and crashes silently
-  // if not installed. Safe to add back after `pnpm add pino-pretty`.
 
   const server = Fastify({
     logger: {
@@ -132,7 +149,6 @@ export async function createServer(
   });
 
   // ─── GET / → serve ui/index.html directly ─────────────────────
-  // Read with fs instead of reply.sendFile to avoid decorator issues.
 
   const indexHtmlPath = join(UI_ROOT, "index.html");
   let indexHtml: string;
@@ -171,8 +187,7 @@ export async function createServer(
   // ─── WebSocket endpoint ────────────────────────────────────────
 
   server.register(async function (fastify) {
-    fastify.get("/ws", { websocket: true }, (connection, req) => {
-      const socket = connection.socket;
+    fastify.get("/ws", { websocket: true }, (socket /* WebSocket */, req) => {
 
       // Parse optional event filter from query
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -183,20 +198,55 @@ export async function createServer(
 
       eventBus.addClient(socket as any, filter);
 
+      // Send welcome message
+      try {
+        socket.send(JSON.stringify({
+          type: "connected",
+          timestamp: new Date().toISOString(),
+          message: "Zendorium WebSocket connected",
+          clients: eventBus.clientCount(),
+        }));
+      } catch {
+        // Socket may have closed
+      }
+
+      // Keepalive ping every 30s
+      const keepalive = setInterval(() => {
+        try {
+          if (socket.readyState === 1) {
+            socket.ping();
+          } else {
+            clearInterval(keepalive);
+          }
+        } catch {
+          clearInterval(keepalive);
+        }
+      }, 30_000);
+
       socket.on("close", () => {
+        clearInterval(keepalive);
         eventBus.removeClient(socket as any);
       });
 
       socket.on("error", () => {
+        clearInterval(keepalive);
         eventBus.removeClient(socket as any);
       });
 
-      // Client can send ping, we respond with pong
+      // Handle client messages
       socket.on("message", (data: Buffer) => {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === "ping") {
             socket.send(JSON.stringify({ type: "pong", timestamp: new Date().toISOString() }));
+          }
+          if (msg.type === "subscribe") {
+            socket.send(JSON.stringify({
+              type: "subscribed",
+              taskId: msg.taskId,
+              runId: msg.runId,
+              timestamp: new Date().toISOString(),
+            }));
           }
         } catch {
           // Ignore malformed messages

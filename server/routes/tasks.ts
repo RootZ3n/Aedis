@@ -76,6 +76,9 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request: FastifyRequest<{ Body: SubmitBody }>, reply: FastifyReply) => {
       const prompt = request.body.prompt || request.body.input;
+      const repoPath = request.body.repoPath;
+      console.log("[tasks] POST /tasks received:", { prompt: prompt?.slice(0, 80), repoPath });
+
       if (!prompt || !prompt.trim()) {
         reply.code(400).send({
           error: "Bad request",
@@ -104,10 +107,12 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       // Fire coordinator — runs async, updates tracked state
+      console.log(`[tasks] calling coordinator.submit for taskId=${taskId}...`);
       ctx().coordinator.submit({
         input: tracked.prompt,
         exclusions: request.body.exclusions,
       }).then((receipt) => {
+        console.log(`[tasks] coordinator.submit resolved: taskId=${taskId}, verdict=${receipt.verdict}, cost=$${receipt.totalCost.estimatedCostUsd}`);
         tracked.runId = receipt.runId;
         tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
         tracked.completedAt = new Date().toISOString();
@@ -129,6 +134,13 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           payload: { taskId, runId: receipt.runId, receiptId: receipt.id, receipt },
         });
       }).catch((err) => {
+        console.error("═══ COORDINATOR SUBMIT FAILED ═══");
+        console.error("taskId:", taskId);
+        console.error("prompt:", tracked.prompt.slice(0, 200));
+        console.error("error:", err instanceof Error ? err.message : err);
+        console.error("stack:", err instanceof Error ? err.stack : "");
+        console.error("═════════════════════════════════");
+
         tracked.status = "failed";
         tracked.completedAt = new Date().toISOString();
         tracked.error = err instanceof Error ? err.message : String(err);

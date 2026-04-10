@@ -193,8 +193,6 @@ async function main(): Promise<void> {
       },
       // Close when run completes or fails
       closeOnComplete: true,
-      // Filter: only close on events matching our taskId
-      taskId,
     });
   } catch (error) {
     const msg = error instanceof Error

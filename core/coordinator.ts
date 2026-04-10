@@ -23,6 +23,7 @@
 import { randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { resolve } from "path";
 
 import {
   createIntent,
