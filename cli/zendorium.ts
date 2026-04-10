@@ -92,7 +92,14 @@ function formatWorkers(data: any): string {
 }
 
 function extractCostUsd(payload: any): number {
+  // GET /tasks/:id/receipts returns a DOUBLE-NESTED shape:
+  //   { task_id, receipt: { taskId, runId, receiptId, receipt: { totalCost: {...} } } }
+  // The outer wrapper is added by the route handler; the inner is the
+  // receipt event payload. The first check below targets that real shape.
+  // The remaining checks are kept as defensive fallbacks for older code paths.
   const candidates = [
+    payload?.receipt?.receipt?.totalCost?.estimatedCostUsd,
+    payload?.receipt?.receipt?.total_cost?.estimatedCostUsd,
     payload?.receipt?.totalCost?.estimatedCostUsd,
     payload?.receipt?.total_cost?.estimatedCostUsd,
     payload?.active_run?.total_cost?.estimatedCostUsd,
@@ -102,9 +109,12 @@ function extractCostUsd(payload: any): number {
     payload?.cost?.estimatedCostUsd,
   ];
 
+  // Look for a positive value, not just any finite value. Otherwise a
+  // shallow `0` from an unpopulated field short-circuits the lookup before
+  // a deeper path with real data gets a chance to match.
   for (const value of candidates) {
     const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
 
   return 0;

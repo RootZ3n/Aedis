@@ -301,17 +301,33 @@ export class Coordinator {
       }
 
       // Phase 10: Commit — commit if there are real file changes,
-      // even on partial verdict (some tasks succeeded, some failed)
+      // even on partial verdict (some tasks succeeded, some failed).
+      //
+      // We check BOTH active.changes (populated by collectChanges() from
+      // builder/integrator outputs) AND run.filesTouched (populated by the
+      // diff applier when it actually writes to disk). On partial runs the
+      // diff often lands on disk via the recovery/escalation path without
+      // ever reaching collectChanges, so active.changes can be empty even
+      // though files were modified. gitCommit uses `git add -A` so it
+      // doesn't need active.changes to know what to stage — git's view
+      // of the working tree is the source of truth for staging.
+      const changeCount = Math.max(active.changes.length, active.run.filesTouched.length);
       const canCommit =
         this.config.autoCommit &&
         !active.cancelled &&
-        active.changes.length > 0;
+        changeCount > 0;
 
       if (canCommit) {
+        console.log(`[coordinator] committing ${changeCount} change(s) (active.changes=${active.changes.length}, filesTouched=${active.run.filesTouched.length})...`);
         commitSha = await this.gitCommit(active);
         if (commitSha) {
+          console.log(`[coordinator] commit ${commitSha.slice(0, 8)} created`);
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
+        } else {
+          console.warn(`[coordinator] gitCommit returned null — see prior errors or recordDecision entries`);
         }
+      } else if (this.config.autoCommit && !active.cancelled) {
+        console.log(`[coordinator] commit skipped: no changes to commit (active.changes=0, filesTouched=0)`);
       }
 
       // Finalize
@@ -1044,6 +1060,59 @@ export class Coordinator {
     commitSha: string | null,
     durationMs: number
   ): RunReceipt {
+    // Aggregate cost from worker results — run.totalCost is not auto-updated
+    // by the executor (collectChanges only collects diffs, not costs), so it
+    // stays at zero unless we sum it here. WorkerResult.cost shape varies
+    // across worker types, so we probe several candidate field paths.
+    // The diagnostic log below dumps the first WorkerResult's keys when no
+    // cost data is found, so the unknown field path becomes obvious.
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let estimatedCostUsd = 0;
+    let model = active.run.totalCost?.model ?? "";
+
+    for (const wr of active.workerResults) {
+      const candidates: unknown[] = [
+        (wr as any).cost,
+        (wr as any).usage,
+        (wr as any).output?.cost,
+        (wr as any).output?.usage,
+        (wr as any).output?.totalCost,
+        (wr as any).metadata?.cost,
+      ];
+      for (const c of candidates) {
+        if (!c || typeof c !== "object") continue;
+        const obj = c as Record<string, unknown>;
+        const inT = (obj["inputTokens"] as number) ?? (obj["input_tokens"] as number);
+        const outT = (obj["outputTokens"] as number) ?? (obj["output_tokens"] as number);
+        const costUsd = (obj["estimatedCostUsd"] as number)
+          ?? (obj["costUsd"] as number)
+          ?? (obj["cost_usd"] as number);
+        const m = obj["model"] as string | undefined;
+        let matched = false;
+        if (typeof inT === "number") { inputTokens += inT; matched = true; }
+        if (typeof outT === "number") { outputTokens += outT; matched = true; }
+        if (typeof costUsd === "number") { estimatedCostUsd += costUsd; matched = true; }
+        if (!model && typeof m === "string") model = m;
+        if (matched) break; // first matching shape wins per WorkerResult
+      }
+    }
+
+    if (active.workerResults.length > 0) {
+      console.log(`[coordinator] aggregateCost: ${active.workerResults.length} worker result(s) → $${estimatedCostUsd.toFixed(6)} (${inputTokens}/${outputTokens} tokens)`);
+      if (estimatedCostUsd === 0 && (active.run.totalCost?.estimatedCostUsd ?? 0) === 0) {
+        const sample = active.workerResults[0] ?? {};
+        console.warn(`[coordinator] aggregateCost: WARN — no cost field found in any WorkerResult. First result keys: [${Object.keys(sample).join(", ")}]. output keys: [${Object.keys(((sample as any).output ?? {})).join(", ")}]`);
+      }
+    }
+
+    // Use whichever number is larger — if some other code path I haven't
+    // traced does populate run.totalCost, don't clobber it with a smaller
+    // aggregated value.
+    const aggregatedCost = estimatedCostUsd > (active.run.totalCost?.estimatedCostUsd ?? 0)
+      ? { model: model || "unknown", inputTokens, outputTokens, estimatedCostUsd }
+      : active.run.totalCost;
+
     return {
       id: randomUUID(),
       runId: active.run.id,
@@ -1054,7 +1123,7 @@ export class Coordinator {
       graphSummary: getGraphSummary(active.graph),
       verificationReceipt,
       judgmentReport,
-      totalCost: active.run.totalCost,
+      totalCost: aggregatedCost,
       commitSha,
       durationMs,
     };
