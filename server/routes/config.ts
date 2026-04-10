@@ -31,10 +31,21 @@ export interface ModelConfig {
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────
+//
+// IMPORTANT: a persisted .zendorium/model-config.json file at the project
+// root will OVERRIDE these defaults via loadModelConfig() below. Changing
+// the defaults here only affects projects that have no saved config.
+// To change an active build's model selection, either delete that file or
+// edit its `builder` block directly.
+//
+// Builder default change history:
+//   - was: qwen3.6-plus / modelstudio (timed out at 120s consistently)
+//   - now: claude-sonnet-4-6 / anthropic (with ollama qwen3.5:9b fallback,
+//          configured in workers/builder.ts)
 
 const DEFAULT_MODEL_CONFIG: ModelConfig = {
   scout: { model: "local", provider: "local" },
-  builder: { model: "qwen3.6-plus", provider: "modelstudio" },
+  builder: { model: "claude-sonnet-4-6", provider: "anthropic" },
   critic: { model: "qwen3.5:9b", provider: "ollama" },
   verifier: { model: "local", provider: "local" },
   integrator: { model: "glm-5.1", provider: "zai" },

@@ -95,6 +95,41 @@ Every model call produces a cost entry: model name, input tokens, output tokens,
 
 ---
 
+## Model Assignments
+
+Default model assignments are defined in `server/routes/config.ts` (`DEFAULT_MODEL_CONFIG`) and overridden per-project by `.zendorium/model-config.json` if present. Workers read the active assignment via `loadModelConfig()` on every execute, so configuration changes take effect on the next run without a process restart.
+
+### Builder
+
+- **Primary:** `claude-sonnet-4-6` (Anthropic direct via `ANTHROPIC_API_KEY`)
+- **Fallback:** `qwen3.5:9b` (local Ollama, free)
+
+The Builder uses a fallback chain via `invokeModelWithFallback()` in `core/model-invoker.ts`. If the primary times out, the timeout is recorded in the per-run blacklist and the local fallback is invoked. **A timed-out provider is never retried within the same Coordinator run** — the blacklist persists across multiple `Builder.execute()` calls within that run, scoped by `intent.runId`.
+
+Builder primary was previously `qwen3.6-plus`/`modelstudio`, which timed out at 120s on essentially every call. Sonnet 4.6 typically responds in 2–30s for builder-sized prompts and has a stronger track record on the diff-application contract Builder enforces. The local Ollama fallback exists so a transient Anthropic outage cannot stall the entire pipeline.
+
+### Other Roles
+
+- **Scout:** `local` (mock, zero-cost — pure context assembly, no model needed)
+- **Critic:** `qwen3.5:9b` (local Ollama, free — review work fits in a 9B model)
+- **Verifier:** `local` (mock — runs deterministic tests/types/lint, not a model)
+- **Integrator:** `glm-5.1` (ZhipuAI — strong at multi-file conflict resolution)
+- **Escalation:** `glm-5.1` (ZhipuAI — same model used when standard tier fails)
+- **Coordinator:** `xiaomi/mimo-v2-pro` (OpenRouter — used for orchestration prompts when needed)
+
+### Fallback Discipline
+
+The fallback chain is intentionally short — primary plus one local backup. This is by design:
+
+1. **No silent escalation.** If Anthropic fails, the local fallback handles it. We do not silently chain through three paid providers and run up the bill.
+2. **No retry-the-same-thing.** A provider that times out once in a run is blacklisted for the rest of that run. Retrying a timed-out provider wastes the timeout window again.
+3. **Local always works.** The local fallback has no API key, no rate limit, no auth check. It is the floor.
+4. **Cost transparency holds.** The cost entry on the receipt records the provider that *actually succeeded*, not the one that was attempted first.
+
+If a build run consistently falls through to the local fallback, that is a signal — either the primary provider has a real problem (rate limits, regional outage, key revoked) or the prompts are exceeding what Sonnet can handle in the timeout window. Either way, the receipt stream will show it, and the operator can act.
+
+---
+
 ## Governance Rules
 
 1. **No raw shell access** — Workers cannot execute arbitrary commands. The Verifier runs tests through a controlled harness.
@@ -125,3 +160,5 @@ Every model call produces a cost entry: model name, input tokens, output tokens,
 > "Workers see purpose, not just tasks."
 
 > "Coherence is checked, not hoped for."
+
+> "A timed-out provider does not get a second chance in the same run."

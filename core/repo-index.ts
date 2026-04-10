@@ -122,6 +122,44 @@ export class RepoIndex {
     }
   }
 
+  stopWatcher(): void {
+    if (this.watcherAbort) {
+      this.watcherAbort.abort();
+      this.watcherAbort = null;
+    }
+  }
+
+  getFile(filePath: string): IndexedFile | undefined {
+    return this.files.get(this.normalizePath(filePath));
+  }
+
+  getAllFiles(): IndexedFile[] {
+    return [...this.files.values()].sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  async loadFromDisk(repoPath: string): Promise<RepoIndexSnapshot | null> {
+    const indexPath = join(resolve(repoPath), ".zendorium", "repo-index.json");
+    try {
+      const raw = await readFile(indexPath, "utf-8");
+      const snapshot: RepoIndexSnapshot = JSON.parse(raw);
+      this.repoPath = snapshot.repoPath;
+      this.files.clear();
+      this.reverseDeps.clear();
+      this.generatedPatterns.clear();
+
+      for (const file of snapshot.files) {
+        this.files.set(file.path, file);
+      }
+      for (const pattern of snapshot.generatedPatterns) {
+        this.generatedPatterns.add(pattern);
+      }
+      this.rebuildReverseDeps([...this.files.values()]);
+      return snapshot;
+    } catch {
+      return null;
+    }
+  }
+
   private async ensureWatcher(): Promise<void> {
     if (!this.repoPath || this.watcherAbort) return;
     this.watcherAbort = new AbortController();

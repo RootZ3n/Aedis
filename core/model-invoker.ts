@@ -12,6 +12,17 @@
  *   - minimax: MiniMax chat completions + MINIMAX_API_KEY
  *   - zai: OpenAI-compatible, ZAI_BASE_URL + ZAI_API_KEY
  *   - local: mock response, zero cost
+ *
+ * Fallback chain:
+ *   invokeModelWithFallback() walks a chain of InvokeConfigs, trying each
+ *   in order. If a provider times out, it is added to the run's blacklist
+ *   and never retried within the same run. Other errors fall through to
+ *   the next chain entry without blacklisting (e.g. transient HTTP errors
+ *   on a different provider may still be worth a future attempt).
+ *
+ * Default timeout: 5 minutes (300_000 ms). Builders sending large prompts
+ * to slower providers were tripping the previous 2-minute cap. Workers
+ * that need a tighter bound can pass an explicit timeoutMs.
  */
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -39,6 +50,33 @@ export interface InvokeResult {
   tokensIn: number;
   tokensOut: number;
   costUsd: number;
+}
+
+export interface FallbackInvokeResult extends InvokeResult {
+  /** The provider that actually returned the result. */
+  readonly usedProvider: Provider;
+  /** The model that actually returned the result. */
+  readonly usedModel: string;
+  /** Every provider that was attempted, in order, including the one that succeeded. */
+  readonly attemptedProviders: readonly Provider[];
+  /** Whether at least one provider was skipped due to a prior timeout in the same run. */
+  readonly skippedDueToBlacklist: boolean;
+}
+
+/**
+ * Per-run state for fallback invocation. Holds the set of providers that
+ * have timed out within the current run so they are never retried.
+ *
+ * Callers (Coordinator, BuilderWorker) own the lifecycle: create one per
+ * run, pass it to every invokeModelWithFallback call within that run,
+ * discard it when the run ends.
+ */
+export interface RunInvocationContext {
+  readonly timedOutProviders: Set<Provider>;
+}
+
+export function createRunInvocationContext(): RunInvocationContext {
+  return { timedOutProviders: new Set<Provider>() };
 }
 
 // ─── Cost Table (per 1K tokens) ──────────────────────────────────────
@@ -165,7 +203,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         );
         break;
       default:
-        throw new InvokerError(`Unknown provider "${provider}"`);
+        throw new InvokerError(`Unknown provider "${provider}"`, "config");
     }
 
     logCall({
@@ -191,7 +229,83 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
   }
 }
 
-// ─── Local (Mock) ─────────────────────────────────────��──────────────
+/**
+ * Invoke a model with a fallback chain.
+ *
+ * Walks `chain` in order. For each entry:
+ *   - If the provider is in `runContext.timedOutProviders`, skip it and log.
+ *   - Otherwise call invokeModel(). On success, return immediately.
+ *   - On InvokerError of kind "timeout": add provider to blacklist, continue.
+ *   - On any other error: continue to next entry without blacklisting.
+ *
+ * If every entry fails, throws an aggregated InvokerError listing each
+ * provider's error message.
+ *
+ * The runContext is mutated in place — callers can pass the same context
+ * across multiple invokeModelWithFallback calls within a single run, and
+ * the timeout blacklist accumulates across the whole run.
+ */
+export async function invokeModelWithFallback(
+  chain: readonly InvokeConfig[],
+  runContext?: RunInvocationContext,
+): Promise<FallbackInvokeResult> {
+  if (chain.length === 0) {
+    throw new InvokerError("invokeModelWithFallback: chain is empty", "config");
+  }
+
+  const ctx = runContext ?? createRunInvocationContext();
+  const attemptedProviders: Provider[] = [];
+  const errors: string[] = [];
+  let skippedDueToBlacklist = false;
+
+  for (const cfg of chain) {
+    if (ctx.timedOutProviders.has(cfg.provider)) {
+      console.warn(
+        `[model-invoker] fallback: skipping ${cfg.provider}/${cfg.model} — provider is blacklisted (timed out earlier in this run)`
+      );
+      skippedDueToBlacklist = true;
+      continue;
+    }
+
+    attemptedProviders.push(cfg.provider);
+    console.log(`[model-invoker] fallback: attempting ${cfg.provider}/${cfg.model}`);
+
+    try {
+      const result = await invokeModel(cfg);
+      console.log(`[model-invoker] fallback: ${cfg.provider}/${cfg.model} succeeded`);
+      return {
+        ...result,
+        usedProvider: cfg.provider,
+        usedModel: cfg.model,
+        attemptedProviders,
+        skippedDueToBlacklist,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const kind = err instanceof InvokerError ? err.kind : "unknown";
+      errors.push(`${cfg.provider}/${cfg.model} (${kind}): ${msg}`);
+
+      if (kind === "timeout") {
+        console.warn(
+          `[model-invoker] fallback: ${cfg.provider}/${cfg.model} TIMED OUT — blacklisting provider for the rest of this run`
+        );
+        ctx.timedOutProviders.add(cfg.provider);
+      } else {
+        console.warn(
+          `[model-invoker] fallback: ${cfg.provider}/${cfg.model} failed (${kind}) — trying next in chain`
+        );
+      }
+      // Continue to next chain entry
+    }
+  }
+
+  throw new InvokerError(
+    `All fallback providers failed (${attemptedProviders.length} attempted, ${chain.length - attemptedProviders.length} skipped via blacklist): ${errors.join(" | ")}`,
+    "unknown",
+  );
+}
+
+// ─── Local (Mock) ────────────────────────────────────────────────────
 
 function invokeLocal(prompt: string): InvokeResult {
   return {
@@ -223,7 +337,10 @@ async function invokeOllama(
   });
 
   if (!res.ok) {
-    throw new InvokerError(`Ollama ${model}: ${res.status} ${await res.text().catch(() => "")}`);
+    throw new InvokerError(
+      `Ollama ${model}: ${res.status} ${await res.text().catch(() => "")}`,
+      "http",
+    );
   }
 
   const data = await res.json() as any;
@@ -264,7 +381,10 @@ async function invokeOpenAICompatible(
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
-    throw new InvokerError(`${model} via ${baseUrl}: ${res.status} ${res.statusText}\n${errBody}`);
+    throw new InvokerError(
+      `${model} via ${baseUrl}: ${res.status} ${res.statusText}\n${errBody}`,
+      "http",
+    );
   }
 
   const data = await res.json() as any;
@@ -304,7 +424,10 @@ async function invokeAnthropic(
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
-    throw new InvokerError(`Anthropic ${model}: ${res.status} ${res.statusText}\n${errBody}`);
+    throw new InvokerError(
+      `Anthropic ${model}: ${res.status} ${res.statusText}\n${errBody}`,
+      "http",
+    );
   }
 
   const data = await res.json() as any;
@@ -322,14 +445,14 @@ async function invokeAnthropic(
 
 function requireEnv(name: string): string {
   const val = process.env[name];
-  if (!val) throw new InvokerError(`Missing environment variable: ${name}`);
+  if (!val) throw new InvokerError(`Missing environment variable: ${name}`, "config");
   return val;
 }
 
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
-  timeoutMs: number = 120_000,
+  timeoutMs: number = 300_000,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -337,9 +460,9 @@ async function fetchWithTimeout(
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (err: any) {
     if (err.name === "AbortError") {
-      throw new InvokerError(`Request to ${url} timed out after ${timeoutMs}ms`);
+      throw new InvokerError(`Request to ${url} timed out after ${timeoutMs}ms`, "timeout");
     }
-    throw new InvokerError(`Network error calling ${url}: ${err.message ?? err}`);
+    throw new InvokerError(`Network error calling ${url}: ${err.message ?? err}`, "network");
   } finally {
     clearTimeout(timer);
   }
@@ -347,9 +470,13 @@ async function fetchWithTimeout(
 
 // ─── Errors ──────────────────────────────────────────────────────────
 
+export type InvokerErrorKind = "timeout" | "http" | "network" | "config" | "unknown";
+
 export class InvokerError extends Error {
-  constructor(message: string) {
+  readonly kind: InvokerErrorKind;
+  constructor(message: string, kind: InvokerErrorKind = "unknown") {
     super(message);
     this.name = "InvokerError";
+    this.kind = kind;
   }
 }
