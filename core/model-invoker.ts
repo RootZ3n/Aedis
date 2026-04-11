@@ -21,6 +21,13 @@
  *   the next chain entry without blacklisting (e.g. transient HTTP errors
  *   on a different provider may still be worth a future attempt).
  *
+ *   After the caller-provided chain is exhausted, a final last-resort
+ *   attempt is made against portum/qwen3.6-plus. Portum is the local
+ *   OpenAI-compatible gateway at localhost:18797 — it serves as a universal
+ *   safety net for every worker without each worker needing to know about
+ *   it. The last-resort attempt is skipped if portum was already in the
+ *   caller's chain or if it was blacklisted (timed out) earlier in the run.
+ *
  * Default timeout: 5 minutes (300_000 ms). Builders sending large prompts
  * to slower providers were tripping the previous 2-minute cap. Workers
  * that need a tighter bound can pass an explicit timeoutMs.
@@ -80,6 +87,19 @@ export interface RunInvocationContext {
 export function createRunInvocationContext(): RunInvocationContext {
   return { timedOutProviders: new Set<Provider>() };
 }
+
+// ─── Last-resort fallback ────────────────────────────────────────────
+
+/**
+ * Universal last-resort entry appended after every caller-provided chain.
+ * Portum is the local OpenAI-compatible gateway running on port 18797 and
+ * has no API-key requirement, so it can be reached unconditionally as long
+ * as the local service is up.
+ */
+const PORTUM_LAST_RESORT: { provider: Provider; model: string } = {
+  provider: "portum",
+  model: "qwen3.6-plus",
+};
 
 // ─── Cost Table (per 1K tokens) ──────────────────────────────────────
 
@@ -247,8 +267,12 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
  *   - On InvokerError of kind "timeout": add provider to blacklist, continue.
  *   - On any other error: continue to next entry without blacklisting.
  *
- * If every entry fails, throws an aggregated InvokerError listing each
- * provider's error message.
+ * After the caller-provided chain is fully exhausted, a final last-resort
+ * attempt is made against portum/qwen3.6-plus (the local OpenAI-compatible
+ * gateway). The last-resort is skipped if portum was already in the chain
+ * (no point in double-attempting) or if portum is in the blacklist
+ * (timed out earlier in this run). If every entry — including the
+ * last-resort — fails, throws an aggregated InvokerError.
  *
  * The runContext is mutated in place — callers can pass the same context
  * across multiple invokeModelWithFallback calls within a single run, and
@@ -308,8 +332,78 @@ export async function invokeModelWithFallback(
     }
   }
 
+  // Snapshot how many of the original chain entries were tried vs. skipped
+  // BEFORE we add Portum to attemptedProviders. The error message below
+  // reports both numbers, and we don't want Portum's last-resort entry to
+  // skew the chain-skip count.
+  const chainEntriesAttempted = attemptedProviders.length;
+  const chainEntriesSkipped = chain.length - chainEntriesAttempted;
+
+  // ─── Last resort: Portum ──────────────────────────────────────────
+  // Portum is the local OpenAI-compatible gateway at localhost:18797 and
+  // requires no API key, so it can be reached unconditionally as long as
+  // the local service is up. We try it once after the caller's chain is
+  // exhausted — but only if Portum wasn't already in the chain (avoid
+  // double-attempting) and isn't blacklisted from a prior timeout.
+  const portumInChain = chain.some((cfg) => cfg.provider === PORTUM_LAST_RESORT.provider);
+  const portumBlacklisted = ctx.timedOutProviders.has(PORTUM_LAST_RESORT.provider);
+
+  if (!portumInChain && !portumBlacklisted) {
+    // Inherit prompt/systemPrompt/maxTokens from the most recent chain
+    // entry — in current usage every chain entry shares the same prompt,
+    // and the last entry is the most recently constructed so it tends to
+    // reflect any per-run adjustments.
+    const template = chain[chain.length - 1]!;
+    const portumCfg: InvokeConfig = {
+      provider: PORTUM_LAST_RESORT.provider,
+      model: PORTUM_LAST_RESORT.model,
+      prompt: template.prompt,
+      systemPrompt: template.systemPrompt,
+      maxTokens: template.maxTokens,
+    };
+
+    attemptedProviders.push(PORTUM_LAST_RESORT.provider);
+    console.log(
+      `[model-invoker] fallback: chain exhausted — last-resort attempt ${PORTUM_LAST_RESORT.provider}/${PORTUM_LAST_RESORT.model}`
+    );
+
+    try {
+      const result = await invokeModel(portumCfg);
+      console.log(
+        `[model-invoker] fallback: ${PORTUM_LAST_RESORT.provider}/${PORTUM_LAST_RESORT.model} succeeded as last resort`
+      );
+      return {
+        ...result,
+        usedProvider: PORTUM_LAST_RESORT.provider,
+        usedModel: PORTUM_LAST_RESORT.model,
+        attemptedProviders,
+        skippedDueToBlacklist,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const kind = err instanceof InvokerError ? err.kind : "unknown";
+      errors.push(`${PORTUM_LAST_RESORT.provider}/${PORTUM_LAST_RESORT.model} (${kind}): ${msg}`);
+      if (kind === "timeout") {
+        ctx.timedOutProviders.add(PORTUM_LAST_RESORT.provider);
+      }
+      console.warn(
+        `[model-invoker] fallback: portum last-resort failed (${kind}) — giving up`
+      );
+    }
+  } else if (portumInChain) {
+    console.warn(
+      "[model-invoker] fallback: chain exhausted — portum was already in caller chain, skipping last-resort"
+    );
+  } else {
+    // portum is blacklisted from an earlier timeout
+    console.warn(
+      "[model-invoker] fallback: chain exhausted — portum is blacklisted (timed out earlier in this run), skipping last-resort"
+    );
+    skippedDueToBlacklist = true;
+  }
+
   throw new InvokerError(
-    `All fallback providers failed (${attemptedProviders.length} attempted, ${chain.length - attemptedProviders.length} skipped via blacklist): ${errors.join(" | ")}`,
+    `All fallback providers failed (${chainEntriesAttempted} chain entries attempted, ${chainEntriesSkipped} skipped via blacklist, plus portum last-resort): ${errors.join(" | ")}`,
     "unknown",
   );
 }
