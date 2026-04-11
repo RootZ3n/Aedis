@@ -47,6 +47,13 @@ export class VerifierWorker extends AbstractWorker {
   constructor(config: VerifierWorkerConfig = {}) {
     super();
     this.eventBus = config.eventBus ?? null;
+    // NOTE: this.runState is almost always null in production. Workers are
+    // constructed once at boot via WorkerRegistry, BEFORE any run exists,
+    // so config.runState is null at construction time. The per-run RunState
+    // must flow through the WorkerAssignment instead — see resolveRunState
+    // below. The constructor field is preserved for the rare path where a
+    // VerifierWorker IS constructed per-run (tests, stand-alone harnesses
+    // that bypass the registry).
     this.runState = config.runState ?? null;
     const hooks = [config.lintHook, config.typecheckHook, config.testHook, ...(config.hooks ?? [])].filter((hook): hook is ToolHook => Boolean(hook));
     this.pipeline = new VerificationPipeline({ hooks });
@@ -59,13 +66,19 @@ export class VerifierWorker extends AbstractWorker {
   async execute(assignment: WorkerAssignment): Promise<VerifierResult> {
     const startedAt = Date.now();
     try {
-      if (!this.runState) {
+      // Resolve the active RunState from the assignment first, falling back
+      // to the constructor field. Coordinator.dispatchNode attaches the
+      // active run's RunState onto the assignment via structural typing
+      // right after trustRouter.buildAssignment, so assignment-attached is
+      // the canonical source for production runs.
+      const runState = this.resolveRunState(assignment);
+      if (!runState) {
         throw new Error("Verifier requires RunState to record receipts and checks");
       }
       const changes = this.collectChanges(assignment);
       const receipt = await this.pipeline.verify(
         assignment.intent,
-        this.runState,
+        runState,
         changes,
         assignment.upstreamResults,
       );
@@ -96,12 +109,12 @@ export class VerifierWorker extends AbstractWorker {
         checks,
       };
 
-      recordCoherenceCheck(this.runState, {
+      recordCoherenceCheck(runState, {
         phase: "post-build",
         passed: receipt.verdict !== "fail",
         checks: checks.map((check) => ({ name: check.name, passed: check.passed, message: check.summary })),
       });
-      recordDecision(this.runState, {
+      recordDecision(runState, {
         description: `Verifier completed ${receipt.verdict}`,
         madeBy: this.name,
         taskId: assignment.task.id,
@@ -153,6 +166,29 @@ export class VerifierWorker extends AbstractWorker {
       buildPassed: false,
       passed: false,
     };
+  }
+
+  /**
+   * Resolve the RunState for this execution.
+   *
+   * Lookup order:
+   *   1. assignment.runState — attached by Coordinator.dispatchNode right
+   *      after building the assignment via trustRouter.buildAssignment.
+   *      This is the per-run canonical source for production runs.
+   *   2. this.runState — the constructor-time fallback. Almost always null
+   *      in production because workers are constructed at boot before any
+   *      run exists. Used by tests and stand-alone harnesses that pass a
+   *      RunState explicitly to the constructor.
+   *
+   * Uses structural typing (the cast through `unknown`) so we don't need
+   * to add a `runState` field to WorkerAssignment in workers/base.ts.
+   * The Coordinator attaches the field via the same cast pattern, and
+   * TypeScript's structural typing covers the read on this side.
+   */
+  private resolveRunState(assignment: WorkerAssignment): RunState | null {
+    const attached = (assignment as unknown as { runState?: RunState }).runState;
+    if (attached) return attached;
+    return this.runState;
   }
 
   private collectChanges(assignment: WorkerAssignment): FileChange[] {

@@ -918,6 +918,18 @@ export class Coordinator {
       upstreamResults
     );
 
+    // Attach the active run's RunState to the assignment so workers that
+    // need it as a hard input (specifically VerifierWorker, which calls
+    // pipeline.verify(intent, runState, ...) and records coherence checks
+    // and decisions against it) can read it. Workers are constructed once
+    // at boot via WorkerRegistry, so the constructor-time config.runState
+    // is ALWAYS null in production — the per-run state must flow through
+    // the assignment. Uses structural typing (cast through unknown) to
+    // avoid touching the WorkerAssignment type definition in
+    // workers/base.ts; VerifierWorker.resolveRunState reads it via the
+    // same cast pattern.
+    (assignment as unknown as { runState?: RunState }).runState = run;
+
     // Find and execute worker
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
     if (!worker) {
