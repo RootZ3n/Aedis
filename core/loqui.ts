@@ -7,7 +7,7 @@
  *      from core/context-gate.ts)
  *   3. building a single prompt that includes language, gated files, and
  *      the last three task summaries
- *   4. calling a local Ollama model (qwen3.5:9b, non-streaming) and
+ *   4. calling a local Ollama model (qwen3.6-plus, non-streaming) and
  *      returning the response text
  *
  * Designed to never throw. Any failure — empty question, missing memory,
@@ -19,7 +19,7 @@ import { gateContext, type GatedContext } from "./context-gate.js";
 import { loadMemory, type TaskSummary } from "./project-memory.js";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
-const MODEL = "qwen3.5:9b";
+const MODEL = "qwen3.6-plus";
 const REQUEST_TIMEOUT_MS = 120_000;
 
 interface OllamaGenerateResponse {
