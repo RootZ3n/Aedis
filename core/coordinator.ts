@@ -19,11 +19,23 @@
  * The Coordinator never does work itself — it orchestrates workers,
  * enforces governance, and maintains the audit trail.
  *
+ * PROJECT ROOT THREADING:
+ * The Coordinator's `config.projectRoot` is the boot-time default. Per-task
+ * submissions can override via `TaskSubmission.projectRoot` — the API
+ * server's POST /tasks route handler passes the request body's `repoPath`
+ * field through. The effective projectRoot is computed at the top of
+ * submit() and stored on `ActiveRun.projectRoot`. From there it flows to:
+ *   - `active.contextAssembler` and `active.judge` (constructed fresh per
+ *     submit() so they honor the per-task projectRoot)
+ *   - `assignment.projectRoot` in dispatchNode (workers read this and
+ *     thread it to all their helpers)
+ *   - `gitCommit` (cwd for `git add -A` / `git commit`)
+ *   - `prepareDeliverablesForGraph` (path resolution for dedup)
+ *   - `fileExists` (existence check for deliverable files)
+ *
  * INSTRUMENTATION NOTE:
  * Every phase transition, graph mutation, dispatch decision, and early
- * exit branch is logged with the [coordinator] prefix. This is intentional —
- * silent failure modes between Phase 4 (graph build) and Phase 6 (executeGraph)
- * have been a recurring debugging headache, so we err on the side of noise.
+ * exit branch is logged with the [coordinator] prefix.
  */
 
 import { randomUUID } from "crypto";
@@ -143,6 +155,17 @@ export interface TaskSubmission {
   extraConstraints?: CreateIntentParams["constraints"];
   /** Optional exclusions */
   exclusions?: string[];
+  /**
+   * Optional per-task project root override. Defaults to the Coordinator's
+   * boot-time config.projectRoot. When provided, the Coordinator constructs
+   * a fresh ContextAssembler and IntegrationJudge for this submission with
+   * the override, attaches it to ActiveRun.projectRoot, and propagates it
+   * to workers via assignment.projectRoot in dispatchNode. The route
+   * handler at server/routes/tasks.ts passes the request body's `repoPath`
+   * field through this option so callers can target any local repo via the
+   * --repo CLI flag or the repoPath field on POST /tasks.
+   */
+  projectRoot?: string;
 }
 
 export interface RunReceipt {
@@ -165,8 +188,10 @@ export interface RunReceipt {
 export class Coordinator {
   private config: CoordinatorConfig;
   private charterGen: CharterGenerator;
-  private contextAssembler: ContextAssembler;
-  private judge: IntegrationJudge;
+  // ContextAssembler and IntegrationJudge are NOT class fields. They are
+  // constructed fresh per submit() call so they can honor per-task
+  // projectRoot overrides from TaskSubmission. See submit() and the
+  // ActiveRun.contextAssembler / .judge fields.
   private verifier: VerificationPipeline;
   private trustRouter: TrustRouter;
   private workerRegistry: WorkerRegistry;
@@ -183,13 +208,10 @@ export class Coordinator {
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.charterGen = new CharterGenerator(this.config.charterConfig);
-    this.contextAssembler = new ContextAssembler({ projectRoot: this.config.projectRoot });
-    // Pass projectRoot to the IntegrationJudge so its checkIntentAlignment
-    // path-normalization helper resolves deliverable and change paths
-    // against the same root the Builder uses (BuilderWorker.toRelative).
-    // Without this, the judge falls back to its process.cwd() default,
-    // which is correct only when cwd === projectRoot.
-    this.judge = new IntegrationJudge({ projectRoot: this.config.projectRoot });
+    // ContextAssembler and IntegrationJudge are constructed per-submit so
+    // they can pick up per-task projectRoot overrides. The constructor
+    // intentionally does not create boot-time defaults — there's no use
+    // case for a "default" assembler or judge that uses the wrong root.
     this.verifier = new VerificationPipeline();
     this.trustRouter = new TrustRouter(trustProfile);
     this.workerRegistry = workerRegistry;
@@ -209,6 +231,27 @@ export class Coordinator {
     let judgmentReport: JudgmentReport | null = null;
 
     console.log(`[coordinator] ═══ submit() entry — input="${submission.input.slice(0, 80)}${submission.input.length > 80 ? "…" : ""}"`);
+
+    // Resolve effective projectRoot for this submission. The Coordinator's
+    // own config.projectRoot is the boot-time default; per-task submissions
+    // can override via TaskSubmission.projectRoot. Workers receive the
+    // effective root via assignment.projectRoot in dispatchNode.
+    const effectiveProjectRoot = submission.projectRoot ?? this.config.projectRoot;
+    console.log(
+      `[coordinator] effective projectRoot for this submission: ${effectiveProjectRoot}` +
+      (submission.projectRoot ? " (overridden via submission)" : " (Coordinator default)")
+    );
+
+    // Construct per-submit ContextAssembler and IntegrationJudge so they
+    // honor the effective projectRoot. These can't be class fields because
+    // the projectRoot may differ per submission. The IntegrationJudge in
+    // particular needs the right projectRoot for its checkIntentAlignment
+    // path normalization — without it, deliverable paths from the Charter
+    // (which may be absolute, relative, or basenames) won't match the
+    // Builder's relative-to-projectRoot change paths and the judge fails
+    // on every successful build.
+    const contextAssembler = new ContextAssembler({ projectRoot: effectiveProjectRoot });
+    const judge = new IntegrationJudge({ projectRoot: effectiveProjectRoot });
 
     // Phase 1: Charter
     console.log(`[coordinator] PHASE 1: Charter — analyzing request`);
@@ -254,9 +297,12 @@ export class Coordinator {
       changes: [],
       workerResults: [],
       cancelled: false,
+      projectRoot: effectiveProjectRoot,
+      contextAssembler,
+      judge,
     };
     this.activeRuns.set(run.id, active);
-    console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active`);
+    console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
 
     try {
       // Phase 4: Build TaskGraph
@@ -291,7 +337,7 @@ export class Coordinator {
       if (!active.cancelled && !hasFailedNodes(active.graph)) {
         console.log(`[coordinator] PHASE 8: IntegrationJudge — entering`);
         this.emit({ type: "integration_check", payload: { runId: run.id, phase: "post-build" } });
-        judgmentReport = this.judge.judge(
+        judgmentReport = active.judge.judge(
           active.intent,
           run,
           active.changes,
@@ -342,17 +388,7 @@ export class Coordinator {
         console.log(`[coordinator] PHASE 9 SKIPPED — judgmentReport=${judgmentReport ? `passed=${judgmentReport.passed}` : "null"} cancelled=${active.cancelled}`);
       }
 
-      // Phase 10: Commit — commit if there are real file changes,
-      // even on partial verdict (some tasks succeeded, some failed).
-      //
-      // We check BOTH active.changes (populated by collectChanges() from
-      // builder/integrator outputs) AND run.filesTouched (populated by the
-      // diff applier when it actually writes to disk). On partial runs the
-      // diff often lands on disk via the recovery/escalation path without
-      // ever reaching collectChanges, so active.changes can be empty even
-      // though files were modified. gitCommit uses `git add -A` so it
-      // doesn't need active.changes to know what to stage — git's view
-      // of the working tree is the source of truth for staging.
+      // Phase 10: Commit
       const changeCount = Math.max(active.changes.length, active.run.filesTouched.length);
       const canCommit =
         this.config.autoCommit &&
@@ -360,7 +396,7 @@ export class Coordinator {
         changeCount > 0;
 
       if (canCommit) {
-        console.log(`[coordinator] PHASE 10: committing ${changeCount} change(s) (active.changes=${active.changes.length}, filesTouched=${active.run.filesTouched.length})...`);
+        console.log(`[coordinator] PHASE 10: committing ${changeCount} change(s) (active.changes=${active.changes.length}, filesTouched=${active.run.filesTouched.length}) in ${active.projectRoot}...`);
         commitSha = await this.gitCommit(active);
         if (commitSha) {
           console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
@@ -398,9 +434,6 @@ export class Coordinator {
 
       return receipt;
     } catch (err) {
-      // SILENT-FAILURE FIX: previously this catch swallowed errors completely,
-      // making it impossible to see why the run aborted. Now we log everything
-      // we can about the error AND the live graph/run state before failing.
       const errMessage = err instanceof Error ? err.message : String(err);
       const errStack = err instanceof Error ? err.stack : undefined;
       console.error(`[coordinator] ═══ submit() CAUGHT EXCEPTION — ${errMessage}`);
@@ -413,6 +446,7 @@ export class Coordinator {
       console.error(`[coordinator]   active.changes at catch:   ${active.changes.length}`);
       console.error(`[coordinator]   active.workerResults:      ${active.workerResults.length}`);
       console.error(`[coordinator]   intent.deliverables:       ${active.intent.charter.deliverables.length}`);
+      console.error(`[coordinator]   active.projectRoot:        ${active.projectRoot}`);
       console.error(`[coordinator]   duration before failure:   ${Date.now() - startTime}ms`);
 
       failRun(run, errMessage);
@@ -454,7 +488,6 @@ export class Coordinator {
 
     if (deliverables.length === 0) {
       console.error(`[coordinator] buildTaskGraph: ABORT — 0 deliverables after prepare. Graph will be empty. This is a fatal early-exit condition.`);
-      // Don't silently produce an empty graph — fail loudly so the catch handler logs the cause.
       throw new CoordinatorError("buildTaskGraph received 0 deliverables — refusing to build empty graph");
     }
 
@@ -543,7 +576,6 @@ export class Coordinator {
 
     markReady(graph, scoutNode.id);
     console.log(`[coordinator] buildTaskGraph: complete — total nodes=${graph.nodes.length} edges=${graph.edges.length} scout marked ready`);
-    // Graph construction finished; execution will begin once scheduler picks up scoutNode
   }
 
   private prepareDeliverablesForGraph(
@@ -552,9 +584,6 @@ export class Coordinator {
   ): readonly Deliverable[] {
     const explicitTestRequest = this.userExplicitlyAskedForTests(analysis.raw);
 
-    // Build a normalized set of explicitly-mentioned targets. Match by BOTH
-    // exact path AND basename so a deliverable for "core/recovery-engine.ts"
-    // matches a request that just said "recovery-engine.ts" (and vice versa).
     const explicitlyMentioned = new Set<string>();
     for (const target of analysis.targets) {
       const trimmed = target.trim();
@@ -569,14 +598,9 @@ export class Coordinator {
     const decisions: string[] = [];
     let didFilter = false;
 
-    console.log(`[coordinator] prepareDeliverablesForGraph: ${totalBefore} deliverable(s) before filter`);
+    console.log(`[coordinator] prepareDeliverablesForGraph: ${totalBefore} deliverable(s) before filter (projectRoot=${active.projectRoot})`);
 
     // ── PHASE 1 — Upstream empty guard ──────────────────────────────────
-    // Drop deliverables that arrive with no target files at all. These come
-    // from charter's placeholder fallback (charter.ts:259) or from upstream
-    // auto-generation paths that never populate targetFiles. Catching them
-    // here means downstream phases never see "ghost" deliverables that would
-    // produce empty builder nodes.
     const guarded: Deliverable[] = [];
     for (const d of active.intent.charter.deliverables) {
       if (!d.targetFiles || d.targetFiles.length === 0) {
@@ -590,10 +614,6 @@ export class Coordinator {
     }
 
     // ── PHASE 2 — Test/non-existent filter ──────────────────────────────
-    // Rule 1: explicitly mentioned files are sacrosanct, kept unconditionally.
-    // Rule 2: drop only auto-generated test tasks for non-existent files.
-    // Everything else stays — workers may create non-existent files, and
-    // tests for existing files may be legitimate follow-up work.
     const filtered: Deliverable[] = [];
     for (const deliverable of guarded) {
       const verifiedTargets = deliverable.targetFiles.filter((file) => {
@@ -602,7 +622,7 @@ export class Coordinator {
           return false;
         }
 
-        const exists = this.fileExists(file);
+        const exists = this.fileExists(file, active.projectRoot);
         const isTest = this.isTestFile(file);
         const wasExplicit = isExplicit(file);
 
@@ -638,17 +658,15 @@ export class Coordinator {
     }
 
     // ── PHASE 3 — Deduplicate by resolved absolute path ─────────────────
-    // The same file may appear under multiple deliverables (e.g. one with
-    // "/mnt/ai/Zendorium/core/recovery-engine.ts" and one with
-    // "core/recovery-engine.ts"). Resolve each target file to an absolute
-    // path against projectRoot, then skip files whose absolute path was
-    // already seen by an earlier deliverable. First-occurrence wins.
     const seenPaths = new Set<string>();
     const deduped: Deliverable[] = [];
     for (const d of filtered) {
       const uniqueFiles: string[] = [];
       for (const f of d.targetFiles) {
-        const abs = resolve(this.config.projectRoot, f);
+        // Resolve against active.projectRoot (the per-task effective root)
+        // so dedup honors the per-task projectRoot rather than the
+        // Coordinator's boot-time default.
+        const abs = resolve(active.projectRoot, f);
         if (seenPaths.has(abs)) {
           decisions.push(`  dedupe ${f} (already covered by earlier deliverable as ${abs})`);
           didFilter = true;
@@ -658,9 +676,6 @@ export class Coordinator {
         uniqueFiles.push(f);
       }
 
-      // ── PHASE 4 — Post-dedup empty guard ──
-      // After dedup a deliverable may have lost all its target files.
-      // Drop it with a warning rather than carry it forward as a no-op.
       if (uniqueFiles.length === 0) {
         const label = d.id ?? "<unnamed>";
         console.warn(`[coordinator] WARN: dropping deliverable "${label}" after dedup — all target files were duplicates of earlier deliverables`);
@@ -677,25 +692,12 @@ export class Coordinator {
       console.log(`[coordinator]${decision}`);
     }
 
-    // SAFETY NET — the filter must NEVER zero out a non-empty input.
-    // Previously, this branch returned the original deliverables BUT the
-    // intent revision below would still run (didFilter is true in this case),
-    // causing the intent to drop to empty deliverables while the function
-    // returned the original list. That divergence meant runPreBuildCoherence
-    // would later check intent.charter.deliverables (now empty/wrong) against
-    // graph nodes built from the original list — silent corruption.
-    //
-    // Fix: when the safety net trips, also short-circuit the intent revision
-    // by clearing didFilter. We log loudly so the operator can see why the
-    // filter blew up.
     if (deduped.length === 0 && totalBefore > 0) {
       console.warn(
         `[coordinator] SAFETY NET TRIPPED: filter would have produced 0 deliverables from ${totalBefore}; ` +
         `returning original deliverables unchanged to avoid empty task graph. ` +
         `Decisions: ${decisions.join("; ")}`
       );
-      // Record this as a decision for the audit trail, then return the
-      // original deliverables WITHOUT revising the intent.
       recordDecision(active.run, {
         description: `Safety net: filter zeroed out ${totalBefore} deliverable(s); kept originals`,
         madeBy: "coordinator",
@@ -724,8 +726,6 @@ export class Coordinator {
         });
         console.log(`[coordinator] prepareDeliverablesForGraph: intent revised to v${active.intent.version} with ${deduped.length} deliverable(s)`);
       } catch (err) {
-        // reviseIntent has its own validation that can throw — surface it
-        // loudly instead of letting the caller's catch block swallow it.
         console.error(`[coordinator] prepareDeliverablesForGraph: reviseIntent FAILED — ${err instanceof Error ? err.message : String(err)}`);
         throw err;
       }
@@ -742,8 +742,13 @@ export class Coordinator {
     return /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(filePath);
   }
 
-  private fileExists(filePath: string): boolean {
-    return existsSync(resolve(this.config.projectRoot, filePath));
+  /**
+   * Check if a file exists relative to the supplied projectRoot. Takes
+   * projectRoot as a parameter (rather than reading this.config.projectRoot)
+   * so per-task overrides via active.projectRoot work correctly.
+   */
+  private fileExists(filePath: string, projectRoot: string): boolean {
+    return existsSync(resolve(projectRoot, filePath));
   }
 
   // ─── Execution Engine ──────────────────────────────────────────────
@@ -767,7 +772,6 @@ export class Coordinator {
       if (dispatchable.length === 0) {
         if (hasFailedNodes(graph)) {
           console.log(`[coordinator] executeGraph: 0 dispatchable + has failed nodes → attempting recovery`);
-          // Attempt recovery
           const recovered = await this.attemptRecovery(active);
           if (!recovered) {
             console.log(`[coordinator] executeGraph: recovery returned false — breaking loop`);
@@ -775,13 +779,11 @@ export class Coordinator {
           }
           continue;
         }
-        // No dispatchable nodes and no failures — deadlock
         console.error(`[coordinator] executeGraph: DEADLOCK — 0 dispatchable, 0 failed. Node statuses: ${graph.nodes.map(n => `${n.workerType}=${n.status}`).join(", ")}`);
         failRun(run, "Task graph deadlocked: no dispatchable nodes");
         break;
       }
 
-      // Advance phase based on what we're dispatching
       const phases = dispatchable.map((n) => n.workerType);
       console.log(`[coordinator] executeGraph: dispatching ${dispatchable.length} node(s) of type(s) [${phases.join(", ")}]`);
       if (phases.includes("scout") && run.phase === "scouting") {
@@ -796,12 +798,10 @@ export class Coordinator {
         if (run.phase !== "integrating") advancePhase(run, "integrating");
       }
 
-      // Dispatch all ready nodes in parallel
       const results = await Promise.all(
         dispatchable.map((node) => this.dispatchNode(active, node))
       );
 
-      // Process results
       for (const { node, result } of results) {
         if (result.success) {
           markCompleted(graph, node.id);
@@ -819,7 +819,6 @@ export class Coordinator {
           });
         }
 
-        // Record assumptions from workers
         for (const assumption of result.assumptions) {
           recordAssumption(run, {
             statement: assumption,
@@ -829,7 +828,6 @@ export class Coordinator {
         }
       }
 
-      // Rehearsal loop: if Critic requested changes and we haven't exceeded rounds
       const criticResults = results.filter((r) => r.node.workerType === "critic");
       for (const { result } of criticResults) {
         if (
@@ -843,7 +841,6 @@ export class Coordinator {
             type: "critic_review",
             payload: { runId: run.id, verdict: "request-changes", round: rehearsalRound },
           });
-          // Re-queue builders with Critic feedback — handled by graph readiness
           recordDecision(run, {
             description: `Rehearsal round ${rehearsalRound}: Critic requested changes`,
             madeBy: "coordinator",
@@ -854,7 +851,6 @@ export class Coordinator {
         }
       }
 
-      // Evaluate checkpoints
       await this.evaluateCheckpoints(active);
     }
 
@@ -869,7 +865,6 @@ export class Coordinator {
 
     console.log(`[coordinator] dispatchNode: ${node.workerType} (${node.id.slice(0, 6)}) — ${node.targetFiles.length} target file(s)`);
 
-    // Create RunTask
     const runTask = addTask(run, {
       workerType: node.workerType,
       description: node.label,
@@ -884,10 +879,10 @@ export class Coordinator {
       payload: { runId: run.id, taskId: node.id, workerType: node.workerType },
     });
 
-    // Assemble context
-    const context = await this.contextAssembler.assemble([...node.targetFiles]);
+    // Use the per-submit ContextAssembler from active so the per-task
+    // projectRoot is honored.
+    const context = await active.contextAssembler.assemble([...node.targetFiles]);
 
-    // Route through TrustRouter
     const routingDecision = this.trustRouter.route(runTask, intent, context);
     node.assignedTier = routingDecision.tier;
     console.log(`[coordinator] dispatchNode: ${node.workerType} routed to tier=${routingDecision.tier}`);
@@ -897,7 +892,6 @@ export class Coordinator {
       payload: { runId: run.id, taskId: node.id, tier: routingDecision.tier, workerType: node.workerType },
     });
 
-    // Check escalation boundaries
     const escalation = active.graph.escalationBoundaries.find((b) => b.nodeId === node.id);
     if (escalation) {
       const tierOrder = ["fast", "standard", "premium"] as const;
@@ -911,7 +905,6 @@ export class Coordinator {
       }
     }
 
-    // Build assignment
     const upstreamResults = active.workerResults.filter((r) =>
       graph.edges.some((e) => e.to === node.id && e.from === graph.nodes.find((n) => n.runTaskId === r.taskId)?.id)
     );
@@ -924,41 +917,35 @@ export class Coordinator {
       upstreamResults
     );
 
-    // Decorate the base assignment with per-run state. These three fields
-    // (runState, changes, workerResults) are declared as optional on
-    // WorkerAssignment in workers/base.ts and are populated here for every
-    // dispatch so workers can read them via direct field access — no cast
-    // pattern required.
+    // Decorate the base assignment with per-run state. These four fields
+    // (runState, changes, workerResults, projectRoot) are declared as
+    // optional on WorkerAssignment in workers/base.ts and are populated
+    // here for every dispatch so workers can read them via direct field
+    // access — no cast pattern required.
     //
     //   runState        — passed to VerifierWorker and IntegratorWorker
-    //                     for pipeline.verify() and recordCoherenceCheck;
-    //                     workers cannot get RunState through their
-    //                     constructor because they are constructed at
-    //                     boot via WorkerRegistry, before any run exists.
-    //   changes         — the running tally of Builder outputs from
-    //                     collectChanges() after each Builder.execute()
-    //                     succeeds; the Verifier reads this because its
-    //                     direct upstream in the task graph is Critic,
-    //                     not Builder, and the upstreamResults walk for
-    //                     `output.kind === "builder"` returns empty.
-    //   workerResults   — every WorkerResult produced so far in this run,
-    //                     in dispatch order; the Integrator reads this to
-    //                     find the successful Builder results because its
-    //                     direct upstream is Verifier, not Builder.
+    //   changes         — running tally of Builder outputs
+    //   workerResults   — every WorkerResult so far in dispatch order
+    //   projectRoot     — per-task effective project root for Builder/
+    //                     Scout/Critic/Integrator file ops and config
+    //                     lookup. Without this, workers would always use
+    //                     their constructor-time projectRoot (the API
+    //                     server's cwd) regardless of which repo the
+    //                     task targets.
     //
-    // Both arrays are shallow-copied at attach time so workers cannot
-    // mutate the Coordinator's running tallies. The new fields are
-    // declared `readonly` on the interface, so we build the assignment
-    // via spread (rather than mutating after construction) to respect
-    // the readonly contract for the existing fields too.
+    // The arrays are shallow-copied at attach time so workers cannot
+    // mutate the Coordinator's running tallies. The fields are declared
+    // `readonly` on the interface, so we build the assignment via spread
+    // (rather than mutating after construction) to respect the readonly
+    // contract for the existing fields too.
     const assignment: WorkerAssignment = {
       ...baseAssignment,
       runState: run,
       changes: [...active.changes],
       workerResults: [...active.workerResults],
+      projectRoot: active.projectRoot,
     };
 
-    // Find and execute worker
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
     if (!worker) {
       console.error(`[coordinator] dispatchNode: NO WORKER REGISTERED for type "${node.workerType}". This is a hidden silent-failure path — runPreBuildCoherence may have used hasWorker() which disagrees with getWorker().`);
@@ -984,9 +971,6 @@ export class Coordinator {
       result = await worker.execute(assignment);
       console.log(`[coordinator] dispatchNode: ${node.workerType} returned success=${result.success} confidence=${result.confidence} touchedFiles=${result.touchedFiles.length} issues=${result.issues.length}`);
     } catch (err) {
-      // Worker.execute threw — previously this propagated up and got swallowed
-      // by submit's catch block with no context. Log, then convert to a failed
-      // WorkerResult so the graph can record the failure properly.
       const errMessage = err instanceof Error ? err.message : String(err);
       console.error(`[coordinator] dispatchNode: ${node.workerType} EXECUTE THREW — ${errMessage}`);
       if (err instanceof Error && err.stack) {
@@ -1006,7 +990,6 @@ export class Coordinator {
       };
     }
 
-    // Record to RunState
     const taskResult: TaskResult = {
       success: result.success,
       output: JSON.stringify(result.output),
@@ -1015,7 +998,6 @@ export class Coordinator {
     };
     completeTask(run, runTask.id, taskResult, result.cost);
 
-    // Record file touches
     for (const touch of result.touchedFiles) {
       recordFileTouch(run, {
         filePath: touch.path,
@@ -1038,7 +1020,6 @@ export class Coordinator {
 
     const checks = [];
 
-    // Check: all deliverables have corresponding graph nodes
     for (const deliverable of intent.charter.deliverables) {
       const hasNode = graph.nodes.some((n) =>
         n.targetFiles.some((f) => deliverable.targetFiles.includes(f))
@@ -1051,7 +1032,6 @@ export class Coordinator {
       console.log(`[coordinator] runPreBuildCoherence: check "deliverable coverage: ${deliverable.description}" → ${hasNode ? "PASS" : "FAIL"}`);
     }
 
-    // Check: graph is acyclic (already enforced, but verify)
     try {
       topologicalSort(graph);
       checks.push({ name: "Graph acyclicity", passed: true, message: "DAG verified" });
@@ -1061,7 +1041,6 @@ export class Coordinator {
       console.error(`[coordinator] runPreBuildCoherence: check "graph acyclicity" → FAIL (cycle detected)`);
     }
 
-    // Check: all worker types are available
     const requiredTypes = [...new Set(graph.nodes.map((n) => n.workerType))];
     for (const type of requiredTypes) {
       const available = this.workerRegistry.hasWorker(type as WorkerType);
@@ -1097,7 +1076,6 @@ export class Coordinator {
     for (const checkpoint of graph.checkpoints) {
       if (checkpoint.status !== "pending") continue;
 
-      // Check if all upstream nodes are done
       const allUpstreamDone = checkpoint.upstreamNodeIds.every((id) => {
         const node = graph.nodes.find((n) => n.id === id);
         return node && (node.status === "completed" || node.status === "skipped");
@@ -1110,8 +1088,9 @@ export class Coordinator {
 
       for (const check of checkpoint.checks) {
         if (check.type === "coherence") {
-          // Run a mini integration check on work so far
-          const partialReport = this.judge.judge(
+          // Use the per-submit judge from active so the per-task
+          // projectRoot is honored.
+          const partialReport = active.judge.judge(
             active.intent,
             run,
             active.changes,
@@ -1122,7 +1101,6 @@ export class Coordinator {
             passed = false;
           }
         }
-        // Cost gates, approvals, etc. can be added here
       }
 
       checkpoint.status = passed ? "passed" : "failed";
@@ -1173,7 +1151,6 @@ export class Coordinator {
       rationale: "Attempting recovery before declaring failure",
     });
 
-    // Simple recovery: re-queue failed nodes as ready with escalated tier
     for (const node of failedNodes) {
       (node as any).status = "planned";
       addEscalationBoundary(
@@ -1194,7 +1171,6 @@ export class Coordinator {
   private async gitCommit(active: ActiveRun): Promise<string | null> {
     try {
       // Pre-commit safety: verify changed files contain source code, not raw diff text.
-      // If a file starts with "--- a/" it was not properly patched — restore from snapshot.
       const corruptedFiles: string[] = [];
       for (const change of active.changes) {
         if (!change.content) continue;
@@ -1207,7 +1183,9 @@ export class Coordinator {
         console.error(`[Coordinator] SAFETY: ${corruptedFiles.length} files contain raw diff text, restoring originals`);
         for (const change of active.changes) {
           if (corruptedFiles.includes(change.path) && change.originalContent) {
-            const absPath = resolve(this.config.projectRoot, change.path);
+            // Resolve restore path against active.projectRoot so the
+            // restore writes to the correct repo.
+            const absPath = resolve(active.projectRoot, change.path);
             const { writeFile } = await import("fs/promises");
             await writeFile(absPath, change.originalContent, "utf-8");
             console.error(`[Coordinator]   Restored: ${change.path}`);
@@ -1225,10 +1203,14 @@ export class Coordinator {
 
       const message = `zendorium: ${active.intent.charter.objective}\n\nRun: ${active.run.id}\nIntent: ${active.intent.id} v${active.intent.version}`;
 
-      await exec("git", ["add", "-A"], { cwd: this.config.projectRoot });
-      await exec("git", ["commit", "-m", message], { cwd: this.config.projectRoot });
+      // All git commands run with cwd=active.projectRoot so they target
+      // the per-task effective root rather than the API server's cwd.
+      // This is the difference between committing to the right repo vs.
+      // committing to /mnt/ai/Zendorium accidentally.
+      await exec("git", ["add", "-A"], { cwd: active.projectRoot });
+      await exec("git", ["commit", "-m", message], { cwd: active.projectRoot });
 
-      const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: this.config.projectRoot });
+      const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: active.projectRoot });
       return stdout.trim();
     } catch (err) {
       recordDecision(active.run, {
@@ -1248,7 +1230,6 @@ export class Coordinator {
     if (result.output.kind === "builder") {
       active.changes.push(...result.output.changes);
     } else if (result.output.kind === "integrator") {
-      // Integrator replaces the full changeset
       active.changes = [...result.output.finalChanges];
     }
   }
@@ -1263,34 +1244,12 @@ export class Coordinator {
     durationMs: number
   ): RunReceipt {
     // Aggregate cost from worker results.
-    //
-    // CostEntry lives at the TOP LEVEL of WorkerResult:
-    //   { workerType, taskId, success, output, issues,
-    //     cost, confidence, touchedFiles, assumptions, durationMs }
-    //
-    // The previous version probed several nested paths because we weren't
-    // sure where cost lived; the diagnostic WARN log dumped the actual
-    // shape and confirmed it's always `wr.cost` directly. CostEntry shape:
-    //   { model, inputTokens, outputTokens, estimatedCostUsd }
-    //
-    // FALLBACK: if all WorkerResult.cost values are 0 (the model call may
-    // not have populated usage stats, or every worker in the graph was
-    // Scout/Verifier which report zero), we pull the actual dollar amounts
-    // from the model-invoker call log. The call log is the source of truth
-    // — every model call is logged with real token counts and dollar
-    // amounts via model-invoker's estimateCost(). We filter call log
-    // entries by timestamp to include only those within THIS run's window
-    // (Date.now() - durationMs to Date.now()) so concurrent runs don't
-    // double-count.
     let inputTokens = 0;
     let outputTokens = 0;
     let estimatedCostUsd = 0;
     let model = active.run.totalCost?.model ?? "";
 
     for (const wr of active.workerResults) {
-      // wr.cost is top-level on WorkerResult. Cast to a structural type
-      // for safe field access without depending on the exact CostEntry
-      // import path here.
       const c = wr.cost as
         | { model?: string; inputTokens?: number; outputTokens?: number; estimatedCostUsd?: number }
         | undefined;
@@ -1309,10 +1268,6 @@ export class Coordinator {
       );
     }
 
-    // Call-log fallback: pull from model-invoker if WorkerResult costs
-    // were all 0. The model-invoker tracks every call with real token
-    // counts and dollar amounts via estimateCost(); the call log is the
-    // canonical source of truth.
     if (estimatedCostUsd === 0) {
       const runStartMs = Date.now() - durationMs;
       const log = getCallLog();
@@ -1351,9 +1306,6 @@ export class Coordinator {
       }
     }
 
-    // Use whichever number is larger — if some other code path I haven't
-    // traced does populate run.totalCost, don't clobber it with a smaller
-    // aggregated value.
     const aggregatedCost = estimatedCostUsd > (active.run.totalCost?.estimatedCostUsd ?? 0)
       ? { model: model || "unknown", inputTokens, outputTokens, estimatedCostUsd }
       : active.run.totalCost;
@@ -1415,6 +1367,32 @@ interface ActiveRun {
   changes: FileChange[];
   workerResults: WorkerResult[];
   cancelled: boolean;
+  /**
+   * Effective project root for this submission. Resolved as
+   * `submission.projectRoot ?? this.config.projectRoot` at the top of
+   * submit(). Used by:
+   *   - dispatchNode (attached to assignment.projectRoot)
+   *   - prepareDeliverablesForGraph (path resolution for dedup)
+   *   - fileExists (existence check for deliverable files)
+   *   - gitCommit (cwd for git commands)
+   *   - the per-submit ContextAssembler and IntegrationJudge constructed
+   *     in submit() with this projectRoot
+   */
+  projectRoot: string;
+  /**
+   * Per-submit ContextAssembler constructed in submit() with the per-task
+   * projectRoot. Used by dispatchNode to assemble context for each worker.
+   * Not a class field on Coordinator because the projectRoot may differ
+   * per submission.
+   */
+  contextAssembler: ContextAssembler;
+  /**
+   * Per-submit IntegrationJudge constructed in submit() with the per-task
+   * projectRoot. Used by Phase 8 (post-build) and evaluateCheckpoints
+   * (per-checkpoint mini-judge). Not a class field on Coordinator because
+   * the projectRoot affects checkIntentAlignment path normalization.
+   */
+  judge: IntegrationJudge;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────

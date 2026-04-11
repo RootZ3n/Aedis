@@ -80,6 +80,11 @@ export class CriticWorker extends AbstractWorker {
 
   constructor(config: CriticWorkerConfig = {}) {
     super();
+    // NOTE: this.projectRoot is the constructor-time default. In production
+    // it's the API server's cwd (typically /mnt/ai/Zendorium). Per-task
+    // submissions can override via assignment.projectRoot, which is what
+    // execute() reads first; this field is the fallback for tests and
+    // stand-alone harnesses that bypass the assignment-based wiring.
     this.projectRoot = config.projectRoot ?? process.cwd();
     this.eventBus = config.eventBus ?? null;
     this.runState = config.runState ?? null;
@@ -96,7 +101,10 @@ export class CriticWorker extends AbstractWorker {
   }
 
   async estimateCost(assignment: WorkerAssignment): Promise<CostEntry> {
-    const { model } = this.getActiveModelConfig();
+    // Resolve effective projectRoot from the assignment first; the
+    // constructor-time field is the fallback for tests/standalone use.
+    const projectRoot = assignment.projectRoot ?? this.projectRoot;
+    const { model } = this.getActiveModelConfig(projectRoot);
     return {
       model,
       inputTokens: Math.ceil((assignment.task.description.length + JSON.stringify(assignment.upstreamResults).length) / 4),
@@ -109,12 +117,18 @@ export class CriticWorker extends AbstractWorker {
     const startedAt = Date.now();
     const builderResult = assignment.upstreamResults.find((r) => r.workerType === "builder" && r.success);
 
+    // Resolve the effective projectRoot for this submission. Coordinator.dispatchNode
+    // populates assignment.projectRoot for every production dispatch. Falls
+    // back to this.projectRoot (constructor-time, the API server's cwd) when
+    // no override is provided — the test/standalone-harness path.
+    const projectRoot = assignment.projectRoot ?? this.projectRoot;
+
     try {
       if (!builderResult || builderResult.output.kind !== "builder") {
         throw new Error("Critic requires a successful BuilderResult upstream");
       }
 
-      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig();
+      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(projectRoot);
       const builderOutput = builderResult.output as BuilderOutput & { contract?: TaskContract };
       const changes = builderOutput.changes;
       const contract = builderOutput.contract ?? null;
@@ -238,7 +252,7 @@ export class CriticWorker extends AbstractWorker {
           error: error instanceof Error ? error.message : String(error),
         },
       });
-      const { model } = this.getActiveModelConfig();
+      const { model } = this.getActiveModelConfig(projectRoot);
       return this.failure(
         assignment,
         error instanceof Error ? error.message : String(error),
@@ -260,9 +274,15 @@ export class CriticWorker extends AbstractWorker {
 
   // ─── Model Resolution ────────────────────────────────────────────
 
-  private getActiveModelConfig(): { model: string; provider: string } {
+  /**
+   * Resolve the active model configuration for a given projectRoot.
+   * Each call reads .zendorium/model-config.json from the supplied root,
+   * so per-task projectRoot overrides honor per-repo model configurations
+   * if the user has them.
+   */
+  private getActiveModelConfig(projectRoot: string): { model: string; provider: string } {
     try {
-      const config = loadModelConfig(this.projectRoot);
+      const config = loadModelConfig(projectRoot);
       return { model: config.critic.model, provider: config.critic.provider };
     } catch {
       return { model: this.defaultModel, provider: this.defaultProvider };

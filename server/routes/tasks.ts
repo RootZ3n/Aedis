@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from "crypto";
+import { existsSync } from "fs";
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerContext } from "../index.js";
 
@@ -57,6 +58,14 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
    * Calls coordinator.submit() and tracks the run.
    * Returns immediately with task_id. The run executes async.
    * Client should subscribe on WebSocket with { type: "subscribe", runId }.
+   *
+   * The optional `repoPath` field in the body lets the caller target a
+   * specific local repo as the project root for this build. The Coordinator
+   * uses it as the effective projectRoot — workers see it via
+   * assignment.projectRoot, gitCommit runs with cwd=repoPath, and the
+   * IntegrationJudge normalizes deliverable paths against it. When omitted,
+   * the Coordinator falls back to its own boot-time config.projectRoot
+   * (typically the API server's cwd).
    */
   fastify.post<{ Body: SubmitBody }>(
     "/",
@@ -87,6 +96,22 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
+      // Validate repoPath if provided. The CLI does its own existsSync check
+      // but we re-validate at the API boundary as defense-in-depth — a
+      // misconfigured client (or a direct curl) might send a path that
+      // doesn't exist on this host. Failing here gives a clear error
+      // instead of letting the Coordinator throw mid-build.
+      if (repoPath !== undefined && repoPath.length > 0) {
+        if (!existsSync(repoPath)) {
+          console.warn(`[tasks] rejecting POST: repoPath does not exist: ${repoPath}`);
+          reply.code(400).send({
+            error: "Bad request",
+            message: `repoPath does not exist on this host: ${repoPath}`,
+          });
+          return;
+        }
+      }
+
       const taskId = `task_${randomUUID().slice(0, 8)}`;
       const tracked: TrackedRun = {
         taskId,
@@ -103,14 +128,20 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       // Emit queued event immediately so WebSocket subscribers see it
       ctx().eventBus.emit({
         type: "run_started",
-        payload: { taskId, prompt: tracked.prompt, status: "queued" },
+        payload: { taskId, prompt: tracked.prompt, status: "queued", repoPath: repoPath ?? null },
       });
 
-      // Fire coordinator — runs async, updates tracked state
-      console.log(`[tasks] calling coordinator.submit for taskId=${taskId}...`);
+      // Fire coordinator — runs async, updates tracked state.
+      // Pass repoPath through as projectRoot so the Coordinator and
+      // workers operate against the requested repo, not against the API
+      // server's cwd. When repoPath is undefined, projectRoot is omitted
+      // from the submission and the Coordinator falls back to its
+      // config.projectRoot default.
+      console.log(`[tasks] calling coordinator.submit for taskId=${taskId} (projectRoot=${repoPath ?? "(default)"})...`);
       ctx().coordinator.submit({
         input: tracked.prompt,
         exclusions: request.body.exclusions,
+        ...(repoPath ? { projectRoot: repoPath } : {}),
       }).then((receipt) => {
         console.log(`[tasks] coordinator.submit resolved: taskId=${taskId}, verdict=${receipt.verdict}, cost=$${receipt.totalCost.estimatedCostUsd}`);
         tracked.runId = receipt.runId;
@@ -137,6 +168,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         console.error("═══ COORDINATOR SUBMIT FAILED ═══");
         console.error("taskId:", taskId);
         console.error("prompt:", tracked.prompt.slice(0, 200));
+        console.error("repoPath:", repoPath ?? "(default)");
         console.error("error:", err instanceof Error ? err.message : err);
         console.error("stack:", err instanceof Error ? err.stack : "");
         console.error("═════════════════════════════════");
@@ -159,6 +191,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         task_id: taskId,
         status: "queued",
         prompt: tracked.prompt,
+        repo_path: repoPath ?? null,
         message: "Task submitted. Connect to /ws and subscribe to receive live updates.",
       });
     }

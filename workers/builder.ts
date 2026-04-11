@@ -101,12 +101,6 @@ const MAX_RUN_CONTEXTS = 50;
 //     model to produce a unified diff with original line numbers, and
 //     applies that diff to the full file on disk. This keeps coordinator.ts
 //     (54k+ chars) and similar large files editable without blowing the cap.
-//
-// The context block is truncated when it would exceed CONTEXT_CHAR_CAP
-// OR when it would push the total prompt over PROMPT_CHAR_CAP, whichever
-// is tighter. The originalContent and instructions are NEVER truncated by
-// the context-budget logic — but in section-edit mode, the section IS
-// the originalContent, so the practical effect is similar.
 const PROMPT_TOKEN_CAP = 8_000;
 const PROMPT_CHAR_CAP = PROMPT_TOKEN_CAP * 4;     // 32_000
 const CONTEXT_TOKEN_CAP = 6_000;
@@ -122,32 +116,6 @@ const CONTEXT_OVERHEAD_CHARS = 64;
 // These gates exist because the previous 50% length threshold let a
 // real corruption through: coordinator.ts went from 1343 to 1298 lines
 // (96.6% retained) and the looser check waved it through to a commit.
-//
-//   SECTION_LENGTH_RETAIN_FLOOR — minimum char ratio after diff apply.
-//     Catches catastrophic truncations. 95% means the diff cannot shrink
-//     the file by more than 5% — anything more aggressive than that in
-//     a single Builder edit is almost certainly a misapplied diff.
-//
-// The end-of-file structural check (last non-blank line must end with
-// a closing brace, semicolon, paren, bracket, or block comment terminator)
-// catches the SUBTLE truncations that pass the length check — like the
-// 1343 to 1298 case which retained 96.6%. A file truncated mid-function
-// will end with a partial statement, never with a clean closing token.
-//
-// Gate 3 (brace balance) compares the result's imbalance to the ORIGINAL
-// file's imbalance. We can't use absolute imbalance because some files
-// legitimately have unbalanced braces from string literals or template
-// literals (workers/scout.ts has 175 open vs 169 close = delta 6 from
-// braces inside its regex strings). The previous absolute-threshold
-// check false-positived on every correct diff to such files. Delta-based
-// preserves the corruption signal (a truncating diff increases the delta
-// sharply because closing braces drop out without their matching opens)
-// without false-positiving on inherent string-literal noise.
-//
-//   SECTION_BRACE_DELTA_TOLERANCE — how much MORE imbalanced the result
-//     can be relative to the original before we throw. 2 = "the diff
-//     can shift the brace count by at most 2 in either direction", which
-//     covers normal edits that add or remove a small block.
 const SECTION_LENGTH_RETAIN_FLOOR = 0.95;
 const SECTION_BRACE_DELTA_TOLERANCE = 2;
 
@@ -198,22 +166,22 @@ export class BuilderWorker extends AbstractWorker {
    * Per-run fallback contexts. Keyed by intent.runId so the timeout
    * blacklist persists across multiple Builder.execute() calls within
    * a single Coordinator run, but does NOT leak across runs.
-   *
-   * The map is bounded by MAX_RUN_CONTEXTS — when full, the oldest
-   * entry is evicted (insertion order, FIFO).
    */
   private readonly runContexts = new Map<string, RunInvocationContext>();
 
   constructor(config: BuilderWorkerConfig) {
     super();
+    // NOTE: this.projectRoot is the constructor-time default. In production
+    // it's the API server's cwd (typically /mnt/ai/Zendorium). Per-task
+    // submissions can override via assignment.projectRoot, which is what
+    // execute() and estimateCost() read first; this field is the fallback
+    // for tests and stand-alone harnesses that bypass the assignment-based
+    // wiring. All path operations (resolveTarget, toRelative,
+    // getActiveModelConfig) take projectRoot as a parameter so they can
+    // honor the per-task override without depending on this field.
     this.projectRoot = resolve(config.projectRoot);
     this.eventBus = config.eventBus ?? null;
     this.runState = config.runState ?? null;
-    // CURRENT DEFAULTS: ModelStudio qwen3.6-plus as primary.
-    // ModelStudio is slow (often near the 5-minute timeout cap) but reliable
-    // and cheap on a per-token basis. The Anthropic Sonnet fallback is the
-    // quality backstop for when ModelStudio is unreachable or rate-limited.
-    // See DOCTRINE.md "Model Assignments" for the rationale.
     this.defaultModel = config.defaultModel ?? "qwen3.6-plus";
     this.defaultProvider = config.defaultProvider ?? "modelstudio";
     this.fallbackModel = config.fallbackModel === null
@@ -227,13 +195,15 @@ export class BuilderWorker extends AbstractWorker {
   }
 
   async estimateCost(assignment: WorkerAssignment): Promise<CostEntry> {
+    // Resolve effective projectRoot from assignment first.
+    const projectRoot = assignment.projectRoot ?? this.projectRoot;
     const contextChars = assignment.context.layers.reduce(
       (sum, layer) => sum + layer.files.reduce((inner, file) => inner + file.content.length, 0),
       0,
     );
     const inputTokens = Math.ceil((contextChars + assignment.task.description.length * 2) / 4);
     const outputTokens = Math.min(assignment.tokenBudget, 1800);
-    const { model } = this.getActiveModelConfig();
+    const { model } = this.getActiveModelConfig(projectRoot);
     return {
       model,
       inputTokens,
@@ -246,15 +216,24 @@ export class BuilderWorker extends AbstractWorker {
     const startedAt = Date.now();
     const taskId = assignment.task.id;
 
+    // Resolve the effective projectRoot for this task. Coordinator.dispatchNode
+    // populates assignment.projectRoot per-submission so the Builder can target
+    // any repo, not just the one it was constructed with. Falls back to
+    // this.projectRoot (constructor-time, the API server's cwd) when no
+    // override is provided — the test/standalone-harness path. Declared
+    // outside the try block so the catch handler can use it too without
+    // re-resolving.
+    const projectRoot = assignment.projectRoot ?? this.projectRoot;
+
     try {
       if (!this.canHandle(assignment)) {
         throw new Error("Builder requires an exact single-file contract scope");
       }
 
-      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig();
+      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(projectRoot);
       const contract = this.buildContract(assignment);
-      const targetPath = this.resolveTarget(contract.file);
-      const relativePath = this.toRelative(targetPath);
+      const targetPath = this.resolveTarget(contract.file, projectRoot);
+      const relativePath = this.toRelative(targetPath, projectRoot);
 
       // ALWAYS read the full file. In section-edit mode we use a windowed
       // slice for the prompt, but the diff is applied back to the FULL
@@ -263,24 +242,14 @@ export class BuilderWorker extends AbstractWorker {
       this.logFileTouch(taskId, relativePath, "read");
 
       // ─── LARGE FILE HANDLING ─────────────────────────────────────────
-      // If the full file exceeds LARGE_FILE_CHAR_THRESHOLD (16k chars),
-      // call extractRelevantSection from scout.ts to get a windowed slice
-      // centered on the function/method most relevant to the task. The
-      // section becomes the prompt content, but downstream processing
-      // (diff application, change records, write) all use fullContent.
       let promptContent = fullContent;
       let sectionInfo: SectionExtraction | null = null;
 
       if (fullContent.length > LARGE_FILE_CHAR_THRESHOLD) {
         // contract.goal is a charter-generated summary that often loses key
-        // phrases from the original user prompt — particularly the
-        // "top of file" / "at the top" / "file header" / "beginning of file"
-        // triggers that the top-of-file pre-check in extractRelevantSection
-        // looks for. Concatenate intent.userRequest (the original verbatim
-        // prompt) with contract.goal so the trigger phrase is matched no
-        // matter which source contains it. The regex doesn't care about
-        // extra text. userRequest is a required string on IntentObject
-        // (intent.ts:26) so no null check is needed.
+        // phrases from the original user prompt. Concatenate intent.userRequest
+        // with contract.goal so the trigger phrase is matched no matter
+        // which source contains it. The regex doesn't care about extra text.
         const taskDesc = `${assignment.intent.userRequest} ${contract.goal}`;
         sectionInfo = extractRelevantSection(targetPath, fullContent, taskDesc);
         if (sectionInfo) {
@@ -324,9 +293,7 @@ export class BuilderWorker extends AbstractWorker {
         );
       }
 
-      // Hard-ceiling check — if the fixed sections alone exceed PROMPT_CHAR_CAP,
-      // we cannot truncate further without corrupting the patch. Log loudly
-      // so the operator knows the model may refuse.
+      // Hard-ceiling check
       if (built.chars > PROMPT_CHAR_CAP) {
         console.warn(
           `[builder] WARN: prompt is ${built.chars} chars (~${built.estimatedTokens} tokens), ` +
@@ -343,8 +310,7 @@ export class BuilderWorker extends AbstractWorker {
           : "")
       );
 
-      // Build fallback chain: primary first, configured fallback second.
-      // If the primary IS already anthropic, don't append a duplicate fallback.
+      // Build fallback chain
       const chain = this.buildInvocationChain(
         primaryProvider as Provider,
         primaryModel,
@@ -353,21 +319,16 @@ export class BuilderWorker extends AbstractWorker {
         sectionInfo !== null,
       );
 
-      // Look up (or create) the per-run fallback context. The runId comes
-      // from the intent so the blacklist scope = the Coordinator run.
+      // Look up (or create) the per-run fallback context.
       const runId = this.extractRunId(assignment);
       const runCtx = this.getOrCreateRunContext(runId);
 
       console.log(
-        `[builder] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)}: ${chain.map(c => `${c.provider}/${c.model}`).join(" → ")}`
+        `[builder] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)} (projectRoot=${projectRoot}): ${chain.map(c => `${c.provider}/${c.model}`).join(" → ")}`
       );
 
       // Real model call via fallback-aware invoker
       const response = await invokeModelWithFallback(chain, runCtx);
-
-      console.log(
-        `[builder] model response: ${response.text.length} chars from ${response.usedProvider}/${response.usedModel}`
-      );
 
       if (response.usedProvider !== primaryProvider) {
         console.warn(
@@ -381,9 +342,7 @@ export class BuilderWorker extends AbstractWorker {
         );
       }
 
-      // Process model response — handles diff, fenced content, or raw content.
-      // ALWAYS pass fullContent (not promptContent) — the diff applies to
-      // the full file on disk, not to the section we showed the model.
+      // Process model response
       const { updatedContent, diff } = this.processModelResponse(
         response.text,
         relativePath,
@@ -410,9 +369,6 @@ export class BuilderWorker extends AbstractWorker {
         path: relativePath,
         operation: "modify",
         diff,
-        // originalContent is the FULL file before the diff was applied,
-        // not the section. Downstream consumers (Critic, integrator,
-        // gitCommit) need the full original to compute coherent diffs.
         originalContent: fullContent,
         content: updatedContent,
       }];
@@ -424,9 +380,6 @@ export class BuilderWorker extends AbstractWorker {
         alternatives: ["Refuse patch outside scope", "Request narrower contract"],
       }];
 
-      // Cost entry reflects the provider that ACTUALLY succeeded, not the
-      // primary. If the fallback path was taken, the model name in the
-      // receipt should match what was actually called.
       const cost: CostEntry = {
         model: response.usedModel,
         inputTokens: response.tokensIn,
@@ -483,7 +436,7 @@ export class BuilderWorker extends AbstractWorker {
           error: error instanceof Error ? error.message : String(error),
         },
       });
-      const { model } = this.getActiveModelConfig();
+      const { model } = this.getActiveModelConfig(projectRoot);
       return this.failure(
         assignment,
         error instanceof Error ? error.message : String(error),
@@ -504,9 +457,15 @@ export class BuilderWorker extends AbstractWorker {
 
   // ─── Model Resolution ────────────────────────────────────────────
 
-  private getActiveModelConfig(): { model: string; provider: string } {
+  /**
+   * Resolve the active model configuration for a given projectRoot.
+   * Each call reads .zendorium/model-config.json from the supplied root,
+   * so per-task projectRoot overrides honor per-repo model configurations
+   * if the user has them.
+   */
+  private getActiveModelConfig(projectRoot: string): { model: string; provider: string } {
     try {
-      const config = loadModelConfig(this.projectRoot);
+      const config = loadModelConfig(projectRoot);
       return { model: config.builder.model, provider: config.builder.provider };
     } catch {
       return { model: this.defaultModel, provider: this.defaultProvider };
@@ -515,23 +474,6 @@ export class BuilderWorker extends AbstractWorker {
 
   // ─── Fallback Chain Construction ────────────────────────────────
 
-  /**
-   * Build the InvokeConfig chain for a single Builder.execute() call.
-   *
-   * Chain order:
-   *   1. Primary (active config — usually modelstudio/qwen3.6-plus)
-   *   2. Quality fallback (anthropic/claude-sonnet-4-6) — UNLESS the
-   *      primary already IS anthropic, in which case the fallback is
-   *      skipped to avoid pointlessly retrying the same provider.
-   *
-   * The fallback can be disabled by passing `fallbackModel: null` in
-   * the BuilderWorkerConfig at construction time.
-   *
-   * In section-edit mode, the system prompt is different — it tells the
-   * model to return a unified diff with original line numbers, NOT full
-   * file content. Returning full content in section mode would replace
-   * the entire file with just the section and is unrecoverable.
-   */
   private buildInvocationChain(
     primaryProvider: Provider,
     primaryModel: string,
@@ -566,12 +508,6 @@ export class BuilderWorker extends AbstractWorker {
 
   // ─── Run Context Management ─────────────────────────────────────
 
-  /**
-   * Pull the runId off the assignment so we can scope the timeout
-   * blacklist correctly. Falls back to the task ID if the intent has no
-   * runId field — this still gives us per-task isolation, just without
-   * cross-task blacklist sharing.
-   */
   private extractRunId(assignment: WorkerAssignment): string {
     const intentAny = assignment.intent as { runId?: unknown; id?: unknown };
     if (typeof intentAny.runId === "string" && intentAny.runId) return intentAny.runId;
@@ -584,7 +520,6 @@ export class BuilderWorker extends AbstractWorker {
     if (!ctx) {
       ctx = createRunInvocationContext();
       this.runContexts.set(runId, ctx);
-      // Bounded LRU: when over the cap, drop the oldest entry (insertion order).
       while (this.runContexts.size > MAX_RUN_CONTEXTS) {
         const firstKey = this.runContexts.keys().next().value;
         if (firstKey === undefined) break;
@@ -608,28 +543,6 @@ export class BuilderWorker extends AbstractWorker {
     return { file, goal: assignment.task.description, constraints, forbiddenChanges, interfaceRules };
   }
 
-  /**
-   * Build the full Builder prompt with hard size enforcement.
-   *
-   * Returns a BuiltPrompt object containing the assembled prompt text plus
-   * size accounting (chars, estimated tokens, what was truncated, how
-   * many context layers survived). The caller is responsible for emitting
-   * the truncation warning and the prompt-size log line.
-   *
-   * Two prompt formats:
-   *   - NORMAL MODE (sectionInfo == null): show the full file as
-   *     "Current file:" and instruct the model to return full file content.
-   *   - SECTION-EDIT MODE (sectionInfo != null): show only the windowed
-   *     section with line numbers prefixed, instruct the model to return
-   *     a unified diff with ORIGINAL file line numbers, and provide an
-   *     example diff template using the actual section line range.
-   *
-   * Budget hierarchy is the same in both modes:
-   *   1. Fixed sections (instructions + content/section) — never truncated.
-   *   2. Context block — capped at min(remaining_budget, CONTEXT_CHAR_CAP).
-   *      Truncated by dropping later layers and later files within a layer
-   *      first.
-   */
   private buildPrompt(
     contract: TaskContract,
     assignment: WorkerAssignment,
@@ -640,7 +553,6 @@ export class BuilderWorker extends AbstractWorker {
     let fixedParts: string[];
 
     if (sectionInfo) {
-      // SECTION-EDIT MODE — windowed slice + diff-only output
       fixedParts = [
         `You are the Builder worker on model ${model}.`,
         "You must obey the contract exactly.",
@@ -659,6 +571,7 @@ export class BuilderWorker extends AbstractWorker {
         "",
         "OUTPUT FORMAT — CRITICAL:",
         "You MUST return a UNIFIED DIFF only. Do NOT return full file content.",
+        "You MUST add or modify content to satisfy the goal. Deleting existing code is FORBIDDEN unless the contract explicitly requires removal.",
         "Returning the section as full content would replace the entire file with just this section",
         "and would lose the rest of the file. This is unrecoverable.",
         "",
@@ -680,7 +593,6 @@ export class BuilderWorker extends AbstractWorker {
         this.numberSectionLines(promptContent, sectionInfo.startLine),
       ];
     } else {
-      // NORMAL MODE — full file, return full file content
       fixedParts = [
         `You are the Builder worker on model ${model}.`,
         "You must obey the contract exactly.",
@@ -690,7 +602,7 @@ export class BuilderWorker extends AbstractWorker {
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
         "Return ONLY the full final file content for the target file. No markdown fences. No explanations.",
-        "If the contract cannot be satisfied without leaving scope, return the original file unchanged.",
+        "You MUST make the change described in the Goal. Do not return the file unchanged — if you do, the task fails and costs are wasted.",
         "Current file:",
         promptContent,
       ];
@@ -699,11 +611,6 @@ export class BuilderWorker extends AbstractWorker {
     const fixedJoined = fixedParts.join("\n\n");
     const fixedChars = fixedJoined.length;
 
-    // Compute the context budget. The TOTAL prompt cannot exceed
-    // PROMPT_CHAR_CAP. The CONTEXT block additionally cannot exceed
-    // CONTEXT_CHAR_CAP. Whichever is tighter wins. If the fixed sections
-    // alone are already over the cap, the context budget is 0 and
-    // EVERYTHING gets logged as truncated.
     const remainingForContext = PROMPT_CHAR_CAP - fixedChars - CONTEXT_OVERHEAD_CHARS;
     const contextBudget = Math.min(Math.max(remainingForContext, 0), CONTEXT_CHAR_CAP);
 
@@ -721,8 +628,6 @@ export class BuilderWorker extends AbstractWorker {
       truncated.push(...built.truncated);
       layersIncluded = built.layersIncluded;
     } else if (layersTotal > 0) {
-      // Zero budget — log every file as truncated so the operator can see
-      // the prompt was over budget before context even got a chance.
       const reason = contextBudget <= 0
         ? "fixed sections (instructions + content) consumed entire prompt budget"
         : "no context layers requested";
@@ -761,13 +666,6 @@ export class BuilderWorker extends AbstractWorker {
     };
   }
 
-  /**
-   * Prefix each line of a section with its file line number, padded to 5 chars.
-   * Used in section-edit mode so the model has explicit line-number guidance
-   * when generating the diff hunk headers.
-   *
-   * Format: "  245: function submit(input) {"
-   */
   private numberSectionLines(content: string, startLineNum: number): string {
     return content
       .split("\n")
@@ -775,19 +673,6 @@ export class BuilderWorker extends AbstractWorker {
       .join("\n");
   }
 
-  /**
-   * Assemble the context block under a hard char budget.
-   *
-   * Walks layers in priority order. For each file, computes its serialized
-   * cost ("FILE: path\\ncontent" plus separator overhead). If adding the
-   * file would exceed the budget, the file is recorded as truncated and
-   * skipped. Files within a layer are walked in order, so earlier files
-   * win when budget is tight.
-   *
-   * Returns the joined context string (separators included), the list of
-   * truncated files, and the count of layers that contributed at least
-   * one file.
-   */
   private assembleContextWithBudget(
     layers: ContextLayers,
     charBudget: number,
@@ -828,46 +713,20 @@ export class BuilderWorker extends AbstractWorker {
   }
 
   // ─── Response Processing ─────────────────────────────────────────
-
   //
   // Process model response. Handles three response formats:
   //   1. Unified diff (preferred) — apply hunks to the FULL file content
   //   2. Full file content in markdown fences — extract and use directly
   //   3. Raw full file content — use directly
   //
-  // In SECTION-EDIT MODE (sectionMode=true), only path 1 is acceptable:
-  //   - Non-diff responses are HARD REJECTED with an explicit error,
-  //     because using the section content as full file content would
-  //     replace the entire file with just the section.
-  //   - After diff application, three safety gates run:
-  //       (a) Length-ratio check: result must be at least 95% of the
-  //           original file length. Catches catastrophic truncations.
-  //       (b) End-of-file structural check: the last non-blank line must
-  //           end with a closing brace, semicolon, paren, bracket, or
-  //           block comment terminator. Catches subtle mid-function
-  //           truncations that pass the length check. This gate exists
-  //           because coordinator.ts went from 1343 to 1298 lines
-  //           (96.6% retained) and committed corrupted; the old 50%
-  //           threshold waved it through.
-  //       (c) Brace balance, DELTA-VS-ORIGINAL: the result's brace
-  //           imbalance can exceed the ORIGINAL's by at most
-  //           SECTION_BRACE_DELTA_TOLERANCE (2). Catches the brace-imbalance
-  //           shape of mid-function truncation without false-positiving
-  //           on files that legitimately have unbalanced braces in string
-  //           literals or template literals.
+  // In SECTION-EDIT MODE, only path 1 is acceptable. Three safety gates
+  // run: length retention, end-of-file structural check, and brace balance
+  // delta-vs-original. See SECTION_LENGTH_RETAIN_FLOOR and
+  // SECTION_BRACE_DELTA_TOLERANCE constants for thresholds.
   //
-  // fullOriginalContent must ALWAYS be the full file content read from
-  // disk, never the extracted section. The diff is applied to the full
-  // file regardless of whether the prompt showed only a section.
-  //
-  // CRITICAL: Never write raw diff text as file content. Always verify
-  // the result looks like source code, not diff headers.
-  //
-  // Note: this comment is intentionally a line-comment block, not a
-  // JSDoc /** ... */ block, because the description references block
-  // comment terminators and we cannot include that character sequence
-  // inside a JSDoc comment without closing it early. esbuild caught
-  // exactly this hazard at build time once already.
+  // Note: this is a line-comment block, not a JSDoc, because the description
+  // would otherwise need to reference block comment terminators which would
+  // close the JSDoc early. esbuild caught exactly that hazard once already.
   //
   private processModelResponse(
     raw: string,
@@ -875,10 +734,8 @@ export class BuilderWorker extends AbstractWorker {
     fullOriginalContent: string,
     sectionMode: boolean,
   ): { updatedContent: string; diff: string } {
-    // Strip markdown fences if present
     const stripped = this.stripMarkdownFences(raw);
 
-    // Check if the response looks like a unified diff
     if (this.looksLikeDiff(stripped)) {
       console.log(
         `[Builder] Response is a unified diff, applying to ` +
@@ -888,35 +745,12 @@ export class BuilderWorker extends AbstractWorker {
       );
       const updatedContent = this.diffApplier.applyToString(stripped, fullOriginalContent);
 
-      // Safety: verify the result is source code, not diff text
       if (DiffApplier.looksLikeRawDiff(updatedContent)) {
         console.error(`[Builder] SAFETY: applyToString produced raw diff output, falling back to original`);
         throw new Error("Diff application produced raw diff text instead of patched source code");
       }
 
       // ─── SECTION-MODE SAFETY GATES ─────────────────────────────────
-      // Three checks. All must pass. All abort with explicit errors so
-      // the corrupted file is never written and never committed.
-      //
-      // Gate 1: Length retention. Result must be at least
-      //   SECTION_LENGTH_RETAIN_FLOOR (95%) of the original file length.
-      //   Catches catastrophic truncations.
-      //
-      // Gate 2: End-of-file structural integrity. The last non-blank
-      //   line must end with a closing brace, semicolon, paren, bracket,
-      //   or block comment terminator. Catches subtle mid-function
-      //   truncations that pass the length check.
-      //
-      // Gate 3: Brace balance, DELTA-VS-ORIGINAL. The result's imbalance
-      //   may exceed the ORIGINAL's imbalance by at most
-      //   SECTION_BRACE_DELTA_TOLERANCE (2). The previous absolute-threshold
-      //   version false-positived on workers/scout.ts (175 open vs 169
-      //   close = delta 6 from braces inside its regex strings); any
-      //   correct diff to it would also have delta 6 and trip the gate.
-      //   Comparing to the original's imbalance preserves the corruption
-      //   signal — a truncating diff drops closing braces sharply,
-      //   pushing the delta WORSE — without false-positiving on inherent
-      //   string-literal noise.
       if (sectionMode) {
         const ratio = updatedContent.length / fullOriginalContent.length;
         if (ratio < SECTION_LENGTH_RETAIN_FLOOR) {
@@ -928,8 +762,6 @@ export class BuilderWorker extends AbstractWorker {
           );
         }
 
-        // End-of-file structural check. Strip trailing whitespace, find
-        // the last non-blank line, check its terminating character.
         const trimmedEnd = updatedContent.replace(/\s+$/, "");
         const lastNewline = trimmedEnd.lastIndexOf("\n");
         const lastLine = (lastNewline >= 0
@@ -955,13 +787,6 @@ export class BuilderWorker extends AbstractWorker {
         }
 
         // Gate 3: brace balance, DELTA-VS-ORIGINAL.
-        // Count braces in BOTH the original file and the result, then
-        // compare imbalances. We allow the result to be at most
-        // SECTION_BRACE_DELTA_TOLERANCE (2) more imbalanced than the
-        // original. Files with legitimate inherent imbalance from string
-        // literals (e.g. workers/scout.ts at delta 6) pass cleanly because
-        // a correct diff preserves their delta; a truncating diff makes
-        // it WORSE.
         let originalOpens = 0;
         let originalCloses = 0;
         for (let i = 0; i < fullOriginalContent.length; i++) {
@@ -1001,10 +826,6 @@ export class BuilderWorker extends AbstractWorker {
       return { updatedContent: finalContent, diff: stripped };
     }
 
-    // In section mode, we MUST get a diff. Non-diff responses are
-    // catastrophic because the "full content" the model returned is
-    // actually only the section content — using it as updatedContent
-    // would replace the entire file with the section. Hard reject.
     if (sectionMode) {
       throw new Error(
         `SECTION-MODE: model returned non-diff content. In section-edit mode, ` +
@@ -1013,10 +834,7 @@ export class BuilderWorker extends AbstractWorker {
       );
     }
 
-    // Fallback: treat as full file content — but verify it's not diff text
     if (DiffApplier.looksLikeRawDiff(stripped)) {
-      // Model returned a diff but looksLikeDiff didn't catch it (malformed headers)
-      // Try to apply it anyway
       console.warn(`[Builder] Response looks like malformed diff, attempting to apply`);
       try {
         const updatedContent = this.diffApplier.applyToString(stripped, fullOriginalContent);
@@ -1036,146 +854,21 @@ export class BuilderWorker extends AbstractWorker {
     return { updatedContent, diff };
   }
 
-  /**
-   * Strip markdown code fences from model output.
-   * Handles diff, typescript, and unmarked fenced blocks.
-   */
   private stripMarkdownFences(raw: string): string {
     const trimmed = raw.trim();
-
-    // Match opening fence with optional language tag, then content, then closing fence
     const fenced = trimmed.match(/^```(?:diff|patch|typescript|ts|javascript|js|text)?\s*\n([\s\S]*?)\n```\s*$/);
     if (fenced) return fenced[1];
-
-    // Multiple fenced blocks — take the first one
     const firstBlock = trimmed.match(/```(?:diff|patch|typescript|ts|javascript|js|text)?\s*\n([\s\S]*?)\n```/);
     if (firstBlock) return firstBlock[1];
-
     return trimmed;
   }
 
-  /**
-   * Check if text looks like a unified diff.
-   */
   private looksLikeDiff(text: string): boolean {
     return (
       /^---\s+\S/m.test(text) &&
       /^\+\+\+\s+\S/m.test(text) &&
       /^@@\s+-\d+/m.test(text)
     );
-  }
-
-  /**
-   * Apply a unified diff to original content, returning the updated content.
-   * Simple line-by-line application.
-   */
-  private applyDiffToContent(diff: string, originalContent: string): string {
-    const lines = originalContent.split("\n");
-    const hunks = this.parseHunks(diff);
-
-    // Apply hunks in reverse order so line numbers stay valid
-    const sortedHunks = [...hunks].sort((a, b) => b.oldStart - a.oldStart);
-
-    for (const hunk of sortedHunks) {
-      const { oldStart, removals, additions, contextBefore } = hunk;
-
-      // Find the actual position using context matching
-      let pos = oldStart - 1; // 0-indexed
-      if (contextBefore.length > 0) {
-        const found = this.findContextPosition(lines, contextBefore, pos);
-        if (found >= 0) pos = found + contextBefore.length;
-      }
-
-      // Remove old lines and insert new ones
-      if (removals.length > 0) {
-        // Verify the lines we're removing match
-        let matchPos = pos;
-        for (const removal of removals) {
-          if (matchPos < lines.length && lines[matchPos] === removal) {
-            matchPos++;
-          }
-        }
-        lines.splice(pos, removals.length, ...additions);
-      } else if (additions.length > 0) {
-        // Pure insertion
-        lines.splice(pos, 0, ...additions);
-      }
-    }
-
-    return lines.join("\n").trimEnd() + "\n";
-  }
-
-  private parseHunks(diff: string): Array<{
-    oldStart: number;
-    removals: string[];
-    additions: string[];
-    contextBefore: string[];
-  }> {
-    const hunks: Array<{
-      oldStart: number;
-      removals: string[];
-      additions: string[];
-      contextBefore: string[];
-    }> = [];
-
-    const diffLines = diff.split("\n");
-    let i = 0;
-
-    while (i < diffLines.length) {
-      const headerMatch = diffLines[i].match(/^@@\s+-(\d+)(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/);
-      if (!headerMatch) {
-        i++;
-        continue;
-      }
-
-      const oldStart = parseInt(headerMatch[1], 10);
-      const removals: string[] = [];
-      const additions: string[] = [];
-      const contextBefore: string[] = [];
-      let seenChange = false;
-      i++;
-
-      while (i < diffLines.length && !diffLines[i].startsWith("@@") && !diffLines[i].startsWith("--- ")) {
-        const line = diffLines[i];
-        if (line.startsWith("-")) {
-          seenChange = true;
-          removals.push(line.slice(1));
-        } else if (line.startsWith("+")) {
-          seenChange = true;
-          additions.push(line.slice(1));
-        } else if (line.startsWith(" ") || line === "") {
-          if (!seenChange) {
-            contextBefore.push(line.startsWith(" ") ? line.slice(1) : line);
-          }
-        }
-        i++;
-      }
-
-      hunks.push({ oldStart, removals, additions, contextBefore });
-    }
-
-    return hunks;
-  }
-
-  private findContextPosition(lines: string[], context: string[], hint: number): number {
-    // Try at hint first
-    if (this.matchesAt(lines, context, hint)) return hint;
-
-    // Search nearby
-    for (let offset = 1; offset <= 10; offset++) {
-      if (hint - offset >= 0 && this.matchesAt(lines, context, hint - offset)) return hint - offset;
-      if (hint + offset < lines.length && this.matchesAt(lines, context, hint + offset)) return hint + offset;
-    }
-
-    return -1;
-  }
-
-  private matchesAt(lines: string[], pattern: string[], start: number): boolean {
-    if (start + pattern.length > lines.length) return false;
-    for (let i = 0; i < pattern.length; i++) {
-      if (lines[start + i] !== pattern[i]) return false;
-    }
-    return true;
   }
 
   private enforceForbiddenChanges(contract: TaskContract, updatedContent: string): void {
@@ -1211,17 +904,28 @@ export class BuilderWorker extends AbstractWorker {
     ].join("\n");
   }
 
-  private resolveTarget(file: string): string {
-    const abs = resolve(this.projectRoot, file);
-    const normalizedRoot = this.projectRoot.endsWith(sep) ? this.projectRoot : `${this.projectRoot}${sep}`;
-    if (abs !== this.projectRoot && !abs.startsWith(normalizedRoot)) {
+  /**
+   * Resolve a contract-relative path against the supplied projectRoot,
+   * verify it stays within projectRoot, return the absolute path.
+   * Takes projectRoot as a parameter (rather than reading this.projectRoot)
+   * so per-task overrides via assignment.projectRoot work correctly.
+   */
+  private resolveTarget(file: string, projectRoot: string): string {
+    const abs = resolve(projectRoot, file);
+    const normalizedRoot = projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`;
+    if (abs !== projectRoot && !abs.startsWith(normalizedRoot)) {
       throw new Error(`Builder refused out-of-scope path: ${file}`);
     }
     return abs;
   }
 
-  private toRelative(absPath: string): string {
-    return relative(this.projectRoot, absPath).replace(/\\/g, "/");
+  /**
+   * Express an absolute path as a forward-slashed path relative to the
+   * supplied projectRoot. Takes projectRoot as a parameter so per-task
+   * overrides work correctly.
+   */
+  private toRelative(absPath: string, projectRoot: string): string {
+    return relative(projectRoot, absPath).replace(/\\/g, "/");
   }
 
   private logFileTouch(taskId: string, path: string, operation: "read" | "create" | "modify" | "delete"): void {

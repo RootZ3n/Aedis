@@ -33,7 +33,6 @@ export class IntegratorWorker extends AbstractWorker {
 
   private readonly eventBus: EventBus | null;
   private readonly runState: RunState | null;
-  private readonly judge: IntegrationJudge;
 
   constructor(config: IntegratorWorkerConfig = {}) {
     super();
@@ -43,11 +42,13 @@ export class IntegratorWorker extends AbstractWorker {
     // so config.runState is null at construction time. The per-run RunState
     // must flow through the WorkerAssignment instead — see the inline
     // resolution in execute() which reads assignment.runState first and
-    // falls back to this constructor field. The constructor field is
-    // preserved for tests and stand-alone harnesses that bypass the
-    // registry and pass a RunState explicitly.
+    // falls back to this constructor field.
     this.runState = config.runState ?? null;
-    this.judge = new IntegrationJudge();
+    // IntegrationJudge used to be a constructor field. It's now constructed
+    // fresh per execute() call so it can pick up the per-task projectRoot
+    // from assignment.projectRoot — workers are boot-time singletons in
+    // WorkerRegistry, so a constructor-time judge would be locked to the
+    // wrong projectRoot for any --repo override. See execute() below.
   }
 
   async estimateCost(_assignment: WorkerAssignment): Promise<CostEntry> {
@@ -58,7 +59,7 @@ export class IntegratorWorker extends AbstractWorker {
     const startedAt = Date.now();
     try {
       // Resolve the active RunState. Coordinator.dispatchNode populates
-      // assignment.runState (now a typed optional field on WorkerAssignment)
+      // assignment.runState (a typed optional field on WorkerAssignment)
       // for every production dispatch. Falls back to this.runState which
       // is the constructor-time field used by tests and stand-alone
       // harnesses that bypass the registry.
@@ -98,7 +99,23 @@ export class IntegratorWorker extends AbstractWorker {
       const changes = approvedBuilderResults.flatMap((result) =>
         result.output.kind === "builder" ? [...result.output.changes] : [],
       );
-      const judgmentReport = this.judge.judge(
+
+      // Construct the IntegrationJudge fresh per execute() call so it
+      // honors the per-task projectRoot from assignment.projectRoot.
+      // The judge's checkIntentAlignment normalizes deliverable paths
+      // against this projectRoot — without it, paths from the Charter
+      // (which may be absolute, relative, or basenames) won't match the
+      // Builder's relative-to-projectRoot change paths and the judge
+      // fails on every successful build.
+      //
+      // When assignment.projectRoot is undefined (test/standalone path),
+      // the IntegrationJudge falls back to its process.cwd() default in
+      // its DEFAULT_CONFIG.
+      const judge = new IntegrationJudge(
+        assignment.projectRoot ? { projectRoot: assignment.projectRoot } : {}
+      );
+
+      const judgmentReport = judge.judge(
         assignment.intent,
         runState,
         changes,

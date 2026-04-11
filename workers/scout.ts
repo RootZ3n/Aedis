@@ -102,6 +102,26 @@ export interface ScoutWorkerConfig {
   readonly ignoreDirs?: readonly string[];
 }
 
+/**
+ * ScoutWorker — context gathering, dependency mapping, risk assessment.
+ *
+ * PROJECT ROOT THREADING (Option A refactor):
+ * Every method that needs a project root takes it as an explicit parameter
+ * rather than reading `this.projectRoot`. The constructor still accepts a
+ * `projectRoot` and stores it as `this.projectRoot`, but that field is
+ * ONLY used as a fallback in execute() when `assignment.projectRoot` is
+ * undefined (the test/standalone-harness path). All internal helpers
+ * (resolvePath, toRelative, walkDirectory) and all public file/git methods
+ * (readFile, listDir, grepFiles, gitStatus, gitDiff, summarizeFile,
+ * getImports, getExports, estimateComplexity) take projectRoot as a
+ * parameter so per-task `assignment.projectRoot` overrides work correctly.
+ *
+ * The Coordinator constructs the ScoutWorker once at boot with the API
+ * server's cwd, but per-task submissions can target any repo via the
+ * `--repo` CLI flag or the `repoPath` field on POST /tasks. Without
+ * threading projectRoot through every helper, Scout would always read
+ * from the API server's cwd regardless of which repo the task targets.
+ */
 export class ScoutWorker extends AbstractWorker {
   readonly type = "scout" as const;
   readonly name = "Scout Worker";
@@ -131,6 +151,13 @@ export class ScoutWorker extends AbstractWorker {
     const startedAt = Date.now();
     const touchedFiles: TouchedFile[] = [];
 
+    // Resolve effective projectRoot for this submission. Coordinator.dispatchNode
+    // populates assignment.projectRoot per-task; this.projectRoot is the
+    // constructor-time fallback for tests and stand-alone harnesses that
+    // bypass the assignment-based wiring. Threaded through every helper
+    // method below so all path operations honor the per-task root.
+    const projectRoot = assignment.projectRoot ?? this.projectRoot;
+
     try {
       const targetFiles = assignment.task.targetFiles.length > 0
         ? assignment.task.targetFiles
@@ -143,7 +170,7 @@ export class ScoutWorker extends AbstractWorker {
       const patterns: CodePattern[] = [];
 
       for (const file of targetFiles.slice(0, 8)) {
-        const fileRead = await this.readFile(file);
+        const fileRead = await this.readFile(file, projectRoot);
         reads.push(fileRead);
         touchedFiles.push({ path: fileRead.path, operation: "read" });
         this.logFileTouch(assignment.task.id, fileRead.path, "read");
@@ -172,14 +199,14 @@ export class ScoutWorker extends AbstractWorker {
       const grepPattern = this.buildTaskPattern(assignment.task.description);
       const directorySeed = this.inferDirectorySeed(targetFiles);
       const [directoryListing, grepMatches, gitStatus, gitDiff] = await Promise.all([
-        directorySeed ? this.listDir(directorySeed) : Promise.resolve<DirectoryListingEntry | null>(null),
-        grepPattern ? this.grepFiles(grepPattern, directorySeed ?? ".") : Promise.resolve<GrepMatch[]>([]),
-        this.gitStatus(this.projectRoot).catch(() => null),
-        this.gitDiff(this.projectRoot).catch(() => null),
+        directorySeed ? this.listDir(directorySeed, projectRoot) : Promise.resolve<DirectoryListingEntry | null>(null),
+        grepPattern ? this.grepFiles(grepPattern, directorySeed ?? ".", projectRoot) : Promise.resolve<GrepMatch[]>([]),
+        this.gitStatus(projectRoot).catch(() => null),
+        this.gitDiff(projectRoot).catch(() => null),
       ]);
 
       if (directoryListing) {
-        this.noteDecision(assignment.task.id, `Scout mapped ${directorySeed}`, "Provides local structure for downstream workers");
+        this.noteDecision(assignment.task.id, `Scout mapped ${directorySeed} (in ${projectRoot})`, "Provides local structure for downstream workers");
       }
 
       const riskAssessment = this.buildRiskAssessment(assignment, complexity, gitStatus, gitDiff);
@@ -237,11 +264,15 @@ export class ScoutWorker extends AbstractWorker {
     }
   }
 
-  async readFile(path: string): Promise<ScoutFileRead> {
-    const safePath = this.resolvePath(path);
+  /**
+   * Read a file relative to projectRoot. The path is resolved against the
+   * supplied projectRoot (not this.projectRoot) so per-task overrides work.
+   */
+  async readFile(path: string, projectRoot: string): Promise<ScoutFileRead> {
+    const safePath = this.resolvePath(path, projectRoot);
     const content = await readFile(safePath, "utf8");
     return {
-      path: this.toRelative(safePath),
+      path: this.toRelative(safePath, projectRoot),
       content,
       lineCount: content.length === 0 ? 0 : content.split(/\r?\n/).length,
     };
@@ -251,18 +282,29 @@ export class ScoutWorker extends AbstractWorker {
     return this.summarizeSource(content, path);
   }
 
-  async summarizeFile(path: string): Promise<FileSymbolSummary> {
-    const read = await this.readFile(path);
+  /**
+   * Read a file via readFile (using the supplied projectRoot) and produce
+   * a symbol summary from its content.
+   */
+  async summarizeFile(path: string, projectRoot: string): Promise<FileSymbolSummary> {
+    const read = await this.readFile(path, projectRoot);
     return this.summarizeSource(read.content, read.path);
   }
 
-  async listDir(path: string): Promise<DirectoryListingEntry> {
-    const safePath = this.resolvePath(path);
-    return this.walkDirectory(safePath);
+  /**
+   * List a directory relative to projectRoot.
+   */
+  async listDir(path: string, projectRoot: string): Promise<DirectoryListingEntry> {
+    const safePath = this.resolvePath(path, projectRoot);
+    return this.walkDirectory(safePath, projectRoot);
   }
 
-  async grepFiles(pattern: string, dir: string): Promise<GrepMatch[]> {
-    const baseDir = this.resolvePath(dir);
+  /**
+   * Grep for a pattern within projectRoot, starting from `dir` (relative
+   * to projectRoot). Honors the configured ignoreDirs.
+   */
+  async grepFiles(pattern: string, dir: string, projectRoot: string): Promise<GrepMatch[]> {
+    const baseDir = this.resolvePath(dir, projectRoot);
     const regex = new RegExp(pattern, "i");
     const matches: GrepMatch[] = [];
 
@@ -277,7 +319,7 @@ export class ScoutWorker extends AbstractWorker {
         return;
       }
 
-      const rel = this.toRelative(current);
+      const rel = this.toRelative(current, projectRoot);
       const content = await readFile(current, "utf8").catch(() => "");
       if (!content) return;
       for (const [index, line] of content.split(/\r?\n/).entries()) {
@@ -292,9 +334,14 @@ export class ScoutWorker extends AbstractWorker {
     return matches;
   }
 
-  async gitStatus(repoPath: string): Promise<GitStatusSummary> {
-    const repoRoot = this.resolvePath(repoPath);
-    const { stdout } = await exec("git", ["-C", repoRoot, "status", "--short", "--branch"], { maxBuffer: 1024 * 1024 });
+  /**
+   * Run `git -C projectRoot status --short --branch` and parse the output.
+   * The signature changed from `gitStatus(repoPath)` to `gitStatus(projectRoot)`
+   * because the previous "repoPath" parameter was always the project root
+   * — there was never a separate repo root. The new name reflects that.
+   */
+  async gitStatus(projectRoot: string): Promise<GitStatusSummary> {
+    const { stdout } = await exec("git", ["-C", projectRoot, "status", "--short", "--branch"], { maxBuffer: 1024 * 1024 });
     const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
     const branch = lines[0]?.startsWith("## ") ? lines[0].replace(/^##\s+/, "") : null;
     const staged: string[] = [];
@@ -326,10 +373,16 @@ export class ScoutWorker extends AbstractWorker {
     };
   }
 
-  async gitDiff(repoPath: string, file?: string): Promise<GitDiffSummary> {
-    const repoRoot = this.resolvePath(repoPath);
-    const args = ["-C", repoRoot, "diff", "--numstat", "--find-renames"];
-    if (file) args.push("--", this.toRelative(this.resolvePath(file)));
+  /**
+   * Run `git -C projectRoot diff --numstat`. The optional `file` argument
+   * scopes the diff to a single file (resolved against projectRoot first).
+   */
+  async gitDiff(projectRoot: string, file?: string): Promise<GitDiffSummary> {
+    const args = ["-C", projectRoot, "diff", "--numstat", "--find-renames"];
+    if (file) {
+      const absFile = this.resolvePath(file, projectRoot);
+      args.push("--", this.toRelative(absFile, projectRoot));
+    }
     const { stdout } = await exec("git", args, { maxBuffer: 1024 * 1024 });
     const files = stdout
       .trim()
@@ -352,18 +405,18 @@ export class ScoutWorker extends AbstractWorker {
     };
   }
 
-  async getImports(path: string): Promise<string[]> {
-    const read = await this.readFile(path);
+  async getImports(path: string, projectRoot: string): Promise<string[]> {
+    const read = await this.readFile(path, projectRoot);
     return this.extractImports(read.content);
   }
 
-  async getExports(path: string): Promise<string[]> {
-    const read = await this.readFile(path);
+  async getExports(path: string, projectRoot: string): Promise<string[]> {
+    const read = await this.readFile(path, projectRoot);
     return this.extractExports(read.content);
   }
 
-  async estimateComplexity(path: string): Promise<ComplexityEstimate> {
-    const read = await this.readFile(path);
+  async estimateComplexity(path: string, projectRoot: string): Promise<ComplexityEstimate> {
+    const read = await this.readFile(path, projectRoot);
     return this.estimateComplexityFromContent(read.path, read.content);
   }
 
@@ -463,10 +516,15 @@ export class ScoutWorker extends AbstractWorker {
     return maxDepth;
   }
 
-  private async walkDirectory(dirPath: string): Promise<DirectoryListingEntry> {
+  /**
+   * Walk a directory tree starting at dirPath. Takes projectRoot as a
+   * parameter so the relative paths in the resulting tree honor the
+   * per-task root rather than this.projectRoot.
+   */
+  private async walkDirectory(dirPath: string, projectRoot: string): Promise<DirectoryListingEntry> {
     const info = await stat(dirPath);
     if (!info.isDirectory()) {
-      return { path: this.toRelative(dirPath), type: "file" };
+      return { path: this.toRelative(dirPath, projectRoot), type: "file" };
     }
 
     const entries = await readdir(dirPath, { withFileTypes: true });
@@ -475,12 +533,12 @@ export class ScoutWorker extends AbstractWorker {
       if (this.ignoreDirs.has(entry.name)) continue;
       const childPath = resolve(dirPath, entry.name);
       if (entry.isDirectory()) {
-        children.push(await this.walkDirectory(childPath));
+        children.push(await this.walkDirectory(childPath, projectRoot));
       } else {
-        children.push({ path: this.toRelative(childPath), type: "file" });
+        children.push({ path: this.toRelative(childPath, projectRoot), type: "file" });
       }
     }
-    return { path: this.toRelative(dirPath), type: "directory", children };
+    return { path: this.toRelative(dirPath, projectRoot), type: "directory", children };
   }
 
   private buildTaskPattern(description: string): string | null {
@@ -524,10 +582,6 @@ export class ScoutWorker extends AbstractWorker {
       factors.push("Task spans multiple files");
       mitigations.push("Scout similar files first and split work if needed");
     }
-    if (assignment.task.targetFiles.length > 5) {
-      factors.push("Task spans many files");
-      mitigations.push("Batch changes carefully and verify each file independently");
-    }
 
     const level = factors.length >= 4 ? "critical" : factors.length >= 3 ? "high" : factors.length >= 2 ? "medium" : "low";
     return { level, factors, mitigations };
@@ -561,17 +615,28 @@ export class ScoutWorker extends AbstractWorker {
     });
   }
 
-  private resolvePath(inputPath: string): string {
-    const abs = resolve(this.projectRoot, inputPath);
-    const normalizedRoot = this.projectRoot.endsWith(sep) ? this.projectRoot : `${this.projectRoot}${sep}`;
-    if (abs !== this.projectRoot && !abs.startsWith(normalizedRoot)) {
+  /**
+   * Resolve a path against the supplied projectRoot, verify it stays
+   * within projectRoot, return the absolute path. Takes projectRoot as
+   * a parameter (rather than reading this.projectRoot) so per-task
+   * overrides via assignment.projectRoot work correctly.
+   */
+  private resolvePath(inputPath: string, projectRoot: string): string {
+    const abs = resolve(projectRoot, inputPath);
+    const normalizedRoot = projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`;
+    if (abs !== projectRoot && !abs.startsWith(normalizedRoot)) {
       throw new Error(`Path outside project root: ${inputPath}`);
     }
     return abs;
   }
 
-  private toRelative(absPath: string): string {
-    const rel = relative(this.projectRoot, absPath);
+  /**
+   * Express an absolute path as a forward-slashed path relative to the
+   * supplied projectRoot. Takes projectRoot as a parameter so per-task
+   * overrides work correctly.
+   */
+  private toRelative(absPath: string, projectRoot: string): string {
+    const rel = relative(projectRoot, absPath);
     return rel === "" ? "." : rel.replace(/\\/g, "/");
   }
 
@@ -606,27 +671,18 @@ export class ScoutWorker extends AbstractWorker {
 // used as a library by Builder, not as a worker capability.
 
 export interface SectionExtraction {
-  /** The extracted section content (newline-joined, original line endings preserved). */
   readonly section: string;
-  /** First line number of the section in the full file (1-indexed). */
   readonly startLine: number;
-  /** Last line number of the section in the full file (1-indexed). */
   readonly endLine: number;
-  /** Total line count of the full file. */
   readonly totalLines: number;
-  /** Name of the function this section is centered on, or null. */
   readonly matchedFunction: string | null;
-  /** First line of the matched function in the full file (1-indexed). */
   readonly funcStart: number;
-  /** Last line of the matched function in the full file (1-indexed). */
   readonly funcEnd: number;
-  /** How the section was selected. */
   readonly extractionMethod:
     | "function-keyword-match"
     | "longest-function-fallback"
     | "middle-of-file-fallback"
     | "top-of-file-keyword";
-  /** Keywords that were extracted from the task description. */
   readonly keywordsUsed: readonly string[];
 }
 
@@ -640,15 +696,6 @@ export const SECTION_LARGE_FILE_THRESHOLD = 16_000;
 export const SECTION_MAX_LINES = 150;
 export const SECTION_PADDING_LINES = 100;
 
-// Top-of-file pre-check. When the task description matches one of these
-// phrases, the section is forced to lines 1..TOP_OF_FILE_LINE_COUNT and
-// function matching is skipped entirely. JSDoc-at-top tasks, file header
-// banners, and import-block edits all live above the first function in
-// the file, so picking a mid-file function for them produces a section
-// that (a) misses the actual edit target and (b) trips the brace-balance
-// safety gate in workers/builder.ts because applying the diff outside
-// any function will leave the file with mismatched braces relative to
-// the section the model was looking at.
 export const TOP_OF_FILE_LINE_COUNT = 50;
 const TOP_OF_FILE_PATTERN = /\b(?:top of (?:the )?file|(?:at|to) the top|file header|beginning of (?:the )?file)\b/i;
 
@@ -675,31 +722,6 @@ const FN_REGEX_WORDS_TO_SKIP = new Set([
   "this", "super", "constructor",
 ]);
 
-/**
- * Extract a windowed section of a large file based on the task description.
- *
- * Returns null when the file is small enough to send whole — the threshold
- * is SECTION_LARGE_FILE_THRESHOLD chars (16000 ≈ 4000 tokens) AND the file
- * has more than SECTION_MAX_LINES lines.
- *
- * Algorithm:
- *   0. PRE-CHECK: if the task description matches TOP_OF_FILE_PATTERN
- *      ("top of file", "at the top", "file header", "beginning of file",
- *      etc.), return lines 1..TOP_OF_FILE_LINE_COUNT immediately. JSDoc
- *      and file-banner tasks are NEVER inside a function, and picking a
- *      mid-file function for them trips the brace-balance safety gate
- *      in workers/builder.ts.
- *   1. Find all function/method declarations via regex + brace matching.
- *   2. Score each function by keyword match against the task description.
- *      - Exact name match: +100 per matching keyword
- *      - Substring name match: +50
- *      - Body keyword occurrences: +2 each
- *   3. Pick the highest-scoring function (score > 0).
- *      Fallback 1: longest function in the file.
- *      Fallback 2: middle of the file (if no functions found at all).
- *   4. Pad with up to SECTION_PADDING_LINES (100) lines above and below.
- *   5. Cap total at SECTION_MAX_LINES (150) lines, centered on function midpoint.
- */
 export function extractRelevantSection(
   filePath: string,
   fullContent: string,
@@ -713,20 +735,10 @@ export function extractRelevantSection(
   const totalLines = lines.length;
 
   if (totalLines <= SECTION_MAX_LINES) {
-    // Already small enough to send whole even if char count is large
-    // (e.g. one massive line). Let the Builder handle it.
     return null;
   }
 
   // ─── STEP 0: TOP-OF-FILE PRE-CHECK ─────────────────────────────────
-  // Tasks that target the file header (JSDoc at top of file, banner
-  // comments, import block edits) are NEVER inside a function. The
-  // function-matching logic below would pick a mid-file function and
-  // the brace-balance check in workers/builder.ts would then reject the
-  // resulting diff because editing a section in the middle of the file
-  // leaves the brace count mismatched relative to what the model saw.
-  // Bypass function matching entirely for these tasks and return the
-  // first TOP_OF_FILE_LINE_COUNT lines directly.
   if (TOP_OF_FILE_PATTERN.test(taskDescription)) {
     const endLineZeroIdx = Math.min(TOP_OF_FILE_LINE_COUNT - 1, totalLines - 1);
     const sectionLines = lines.slice(0, endLineZeroIdx + 1);
@@ -757,8 +769,8 @@ export function extractRelevantSection(
     }
   }
 
-  let funcStart: number; // 0-indexed
-  let funcEnd: number;   // 0-indexed
+  let funcStart: number;
+  let funcEnd: number;
   let matchedFunction: string | null = null;
   let extractionMethod: SectionExtraction["extractionMethod"];
 
@@ -768,8 +780,6 @@ export function extractRelevantSection(
     matchedFunction = bestFunction.name;
     extractionMethod = "function-keyword-match";
   } else if (functions.length > 0) {
-    // Fallback: longest function in the file. Most edits target the
-    // largest/most complex function, so this is a sensible default.
     const longest = functions.reduce((a, b) =>
       (b.endLine - b.startLine) > (a.endLine - a.startLine) ? b : a,
     );
@@ -778,28 +788,20 @@ export function extractRelevantSection(
     matchedFunction = longest.name;
     extractionMethod = "longest-function-fallback";
   } else {
-    // No functions found at all — extract the middle of the file as a
-    // last resort. The padding logic below will expand around this point.
     const mid = Math.floor(totalLines / 2);
     funcStart = mid;
     funcEnd = mid;
     extractionMethod = "middle-of-file-fallback";
   }
 
-  // Compute section bounds with padding
   let sectionStart = Math.max(0, funcStart - SECTION_PADDING_LINES);
   let sectionEnd = Math.min(totalLines - 1, funcEnd + SECTION_PADDING_LINES);
 
-  // Cap at SECTION_MAX_LINES, centered on the function midpoint.
-  // If the function itself is larger than MAX_LINES, the section will
-  // contain only part of the function — that is intentional, the
-  // alternative is to blow the prompt budget.
   if (sectionEnd - sectionStart + 1 > SECTION_MAX_LINES) {
     const funcMid = Math.floor((funcStart + funcEnd) / 2);
     const half = Math.floor(SECTION_MAX_LINES / 2);
     sectionStart = Math.max(0, funcMid - half);
     sectionEnd = Math.min(totalLines - 1, sectionStart + SECTION_MAX_LINES - 1);
-    // If we hit the bottom edge, slide the start back so we still get MAX lines
     if (sectionEnd === totalLines - 1) {
       sectionStart = Math.max(0, sectionEnd - SECTION_MAX_LINES + 1);
     }
@@ -810,7 +812,7 @@ export function extractRelevantSection(
 
   return {
     section,
-    startLine: sectionStart + 1, // convert to 1-indexed for human-readable output
+    startLine: sectionStart + 1,
     endLine: sectionEnd + 1,
     totalLines,
     matchedFunction,
@@ -821,10 +823,6 @@ export function extractRelevantSection(
   };
 }
 
-/**
- * Extract identifier-like keywords from a task description.
- * Drops stop words and short tokens; lowercases for case-insensitive matching.
- */
 function extractTaskKeywords(taskDescription: string): string[] {
   const tokens = taskDescription
     .replace(/[()[\]{}.,;:!?'"`/]/g, " ")
@@ -834,24 +832,8 @@ function extractTaskKeywords(taskDescription: string): string[] {
   return [...new Set(tokens.map((t) => t.toLowerCase()))];
 }
 
-/**
- * Find function/method declarations in a TypeScript/JavaScript file.
- *
- * Catches:
- *   - function name(...) { ... }
- *   - async function name(...) { ... }
- *   - methodName(...) { ... }     (class methods)
- *   - async methodName(...) { ... }
- *   - public/private/protected/static prefixed methods
- *
- * Does NOT catch arrow functions assigned to variables (`const x = () => {}`),
- * or constructor calls. Skips control-flow keywords (if/for/while/etc).
- *
- * Returns FunctionLocations in source order with 0-indexed line numbers.
- */
 function findFunctionLocations(lines: readonly string[]): FunctionLocation[] {
   const functions: FunctionLocation[] = [];
-  // Match: optional modifiers + identifier + ( ... )
   const declRegex = /^\s*(?:export\s+)?(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:async\s+)?(?:function\s+)?(\w+)\s*(?:<[^>]*>)?\s*\(/;
 
   for (let i = 0; i < lines.length; i++) {
@@ -862,12 +844,8 @@ function findFunctionLocations(lines: readonly string[]): FunctionLocation[] {
     const name = match[1];
     if (FN_REGEX_WORDS_TO_SKIP.has(name)) continue;
 
-    // Skip variable declarations like `const x = something(...)`
     if (/^\s*(?:const|let|var)\s+\w+\s*=/.test(line)) continue;
 
-    // Filter out plain function calls — line should look like a declaration.
-    // Accept: ends with `{`, ends with `(`, ends with `,`, ends with `:`,
-    // contains `=>`, OR has a `{` within the next few lines.
     const trimmed = line.trimEnd();
     const lastChar = trimmed.slice(-1);
     if (
@@ -898,12 +876,6 @@ function findFunctionLocations(lines: readonly string[]): FunctionLocation[] {
   return functions;
 }
 
-/**
- * Find the closing brace that matches the first opening brace at or after
- * startLine. Naive — does not handle braces inside strings or comments.
- * Good enough for clean TypeScript source. If no matching close is found,
- * returns startLine (caller will skip the entry as zero-length).
- */
 function findFunctionEnd(lines: readonly string[], startLine: number): number {
   let braceDepth = 0;
   let foundOpen = false;
@@ -925,17 +897,6 @@ function findFunctionEnd(lines: readonly string[], startLine: number): number {
   return startLine;
 }
 
-/**
- * Score a function by how well it matches the task keywords.
- *
- * Scoring:
- *   - Exact name match (case-insensitive): +100 per keyword
- *   - Function name contains keyword: +50 per keyword
- *   - Keyword (≥4 chars) contains function name: +30 per keyword
- *   - Each keyword occurrence in function body: +2
- *
- * Returns 0 if there are no keywords.
- */
 function scoreFunctionForKeywords(
   fn: FunctionLocation,
   lines: readonly string[],
@@ -952,7 +913,6 @@ function scoreFunctionForKeywords(
     else if (kw.length >= 4 && kw.includes(nameLower)) score += 30;
   }
 
-  // Body match: count keyword occurrences
   const body = lines.slice(fn.startLine, fn.endLine + 1).join("\n").toLowerCase();
   for (const kw of keywords) {
     const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

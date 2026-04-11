@@ -97,6 +97,27 @@ export interface WorkerAssignment {
    *     Coordinator's running tally.
    */
   readonly workerResults?: readonly WorkerResult[];
+
+  /**
+   * Effective project root for this submission, attached by
+   * Coordinator.dispatchNode. The Coordinator computes this as
+   * `submission.projectRoot ?? this.config.projectRoot` so that per-task
+   * `projectRoot` overrides from TaskSubmission flow through to workers.
+   *
+   * Optional because:
+   *   - Workers are constructed once at boot via WorkerRegistry with the
+   *     API server's projectRoot (typically `process.cwd()`). For builds
+   *     that target a different repo via the `--repo` CLI flag or the
+   *     `repoPath` field on POST /tasks, the per-task projectRoot must
+   *     flow through the assignment rather than through the constructor.
+   *   - Workers that need projectRoot (Builder, Scout, Critic, Integrator)
+   *     resolve `assignment.projectRoot ?? this.projectRoot` (or
+   *     `?? process.cwd()` for workers without a constructor field) at
+   *     the start of execute() and thread the local value to all helpers.
+   *   - Tests and stand-alone harnesses that bypass the registry may omit
+   *     this field; workers fall back to their constructor-time projectRoot.
+   */
+  readonly projectRoot?: string;
 }
 
 export interface WorkerResult {
