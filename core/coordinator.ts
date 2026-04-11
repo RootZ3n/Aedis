@@ -604,7 +604,7 @@ export class Coordinator {
     const guarded: Deliverable[] = [];
     for (const d of active.intent.charter.deliverables) {
       if (!d.targetFiles || d.targetFiles.length === 0) {
-        const label = d.id ?? "<unnamed>";
+        const label = d.description;
         console.warn(`[coordinator] WARN: dropping deliverable "${label}" upstream — no target files (charter placeholder or upstream bug)`);
         decisions.push(`  drop deliverable "${label}" (no target files at all — upstream guard)`);
         didFilter = true;
@@ -618,7 +618,7 @@ export class Coordinator {
     for (const deliverable of guarded) {
       const verifiedTargets = deliverable.targetFiles.filter((file) => {
         if (!file) {
-          decisions.push(`  drop empty file path in deliverable "${deliverable.id ?? "<unnamed>"}"`);
+          decisions.push(`  drop empty file path in deliverable "${deliverable.description}"`);
           return false;
         }
 
@@ -642,7 +642,7 @@ export class Coordinator {
       });
 
       if (deliverable.targetFiles.length > 0 && verifiedTargets.length === 0) {
-        decisions.push(`  drop deliverable "${deliverable.id ?? "<unnamed>"}" (all target files were filtered)`);
+        decisions.push(`  drop deliverable "${deliverable.description}" (all target files were filtered)`);
         didFilter = true;
         continue;
       }
@@ -677,7 +677,7 @@ export class Coordinator {
       }
 
       if (uniqueFiles.length === 0) {
-        const label = d.id ?? "<unnamed>";
+        const label = d.description;
         console.warn(`[coordinator] WARN: dropping deliverable "${label}" after dedup — all target files were duplicates of earlier deliverables`);
         decisions.push(`  drop deliverable "${label}" (all target files were duplicates)`);
         didFilter = true;
