@@ -162,7 +162,9 @@ export class ScoutWorker extends AbstractWorker {
       const baseTargetFiles = assignment.task.targetFiles.length > 0
         ? assignment.task.targetFiles
         : this.extractContextFiles(assignment);
-      const recentFiles = assignment.recentContext?.relevantFiles ?? [];
+      const recentFiles = (assignment.recentContext?.relevantFiles ?? []).filter(
+        (path) => !path.startsWith(".aedis/") && !path.endsWith(".json")
+      );
       console.log(`[scout] recentContext: ${recentFiles.length} relevant files`);
       const targetFiles = Array.from(new Set([
         ...recentFiles,

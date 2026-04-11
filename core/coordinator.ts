@@ -642,6 +642,13 @@ export class Coordinator {
           return false;
         }
 
+        if (file.startsWith(".aedis/") || file.endsWith(".json")) {
+          console.log(`[coordinator] dropping system file from deliverables: ${file}`);
+          decisions.push(`  drop ${file} (system file excluded from deliverables)`);
+          didFilter = true;
+          return false;
+        }
+
         const exists = this.fileExists(file, active.projectRoot);
         const isTest = this.isTestFile(file);
         const wasExplicit = isExplicit(file);

@@ -35,6 +35,7 @@ export interface ProjectMemory {
   readonly recentFiles: readonly string[];
   readonly recentTasks: readonly TaskSummary[];
   readonly updatedAt: string;
+  readonly schemaVersion: number;
 }
 
 // ─── Internals ───────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ function emptyMemory(projectRoot: string, language: string): ProjectMemory {
     recentFiles: [],
     recentTasks: [],
     updatedAt: new Date().toISOString(),
+    schemaVersion: 1,
   };
 }
 
@@ -130,6 +132,7 @@ export async function loadMemory(projectRoot: string): Promise<ProjectMemory> {
       updatedAt: typeof parsed.updatedAt === "string"
         ? parsed.updatedAt
         : new Date().toISOString(),
+      schemaVersion: typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 1,
     };
   } catch {
     return emptyMemory(root, language);
@@ -155,6 +158,7 @@ export async function saveMemory(
     recentFiles: memory.recentFiles.slice(0, MAX_FILES),
     recentTasks: memory.recentTasks.slice(0, MAX_TASKS),
     updatedAt: new Date().toISOString(),
+    schemaVersion: memory.schemaVersion,
   };
 
   await writeFile(path, JSON.stringify(next, null, 2), "utf8");
@@ -195,6 +199,7 @@ export async function recordTask(
     recentFiles,
     recentTasks,
     updatedAt: new Date().toISOString(),
+    schemaVersion: memory.schemaVersion,
   };
 
   await saveMemory(projectRoot, next);
@@ -214,6 +219,7 @@ export async function clearMemory(projectRoot: string): Promise<ProjectMemory> {
     recentFiles: [],
     recentTasks: [],
     updatedAt: new Date().toISOString(),
+    schemaVersion: memory.schemaVersion,
   };
   await saveMemory(projectRoot, next);
   return next;
