@@ -60,14 +60,8 @@
     }
 
     @keyframes idleBadgePulse {
-      0%, 100% {
-        opacity: 0.74;
-        box-shadow: 0 0 0 rgba(255,255,255,0);
-      }
-      50% {
-        opacity: 1;
-        box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 28%, transparent);
-      }
+      0%, 100% { opacity: 0.74; box-shadow: 0 0 0 rgba(255,255,255,0); }
+      50% { opacity: 1; box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 28%, transparent); }
     }
 
     @keyframes statusPulse {
@@ -942,7 +936,7 @@
       if (payload.totalCostUsd != null || payload.total_cost_usd != null) run.totalCostUsd = Number(payload.totalCostUsd ?? payload.total_cost_usd ?? run.totalCostUsd);
 
       if (Array.isArray(payload.receipts)) {
-        run.receipts = payload.receipts.map(normalizeReceipt);
+        run.receipts = payload.receipts.map((receipt) => normalizeReceipt(receipt));
         run.receiptCount = run.receipts.length;
         run.totalCostUsd = run.receipts.reduce((sum, receipt) => sum + (Number(receipt.costUsd) || 0), 0);
       }
@@ -956,10 +950,12 @@
 
       if (type.includes('receipt')) {
         const receipt = normalizeReceipt(payload.receipt || payload);
-        run.receipts.unshift(receipt);
-        run.receipts = run.receipts.slice(0, 40);
-        run.receiptCount = run.receipts.length;
-        run.totalCostUsd = Number(run.totalCostUsd || 0) + Number(receipt.costUsd || 0);
+        appendReceipt(run, receipt);
+      }
+
+      if (type === 'worker_complete' && payload.payload && payload.payload.cost) {
+        const receipt = normalizeReceipt(payload.payload);
+        appendReceipt(run, receipt);
       }
 
       if (type === 'run_started' || type === 'start' || type === 'run') run.status = 'running';
@@ -974,6 +970,14 @@
       if (payload.node) mergeTaskIntoGraph(run, payload.node, type);
 
       render();
+    }
+
+    function appendReceipt(run, receipt) {
+      if (!receipt) return;
+      run.receipts.unshift(receipt);
+      run.receipts = run.receipts.slice(0, 40);
+      run.receiptCount = run.receipts.length;
+      run.totalCostUsd = Number(run.totalCostUsd || 0) + Number(receipt.costUsd || 0);
     }
 
     function normalizeGraph(graph) {
@@ -1039,22 +1043,42 @@
       return 'planned';
     }
 
-    function normalizeReceipt(receipt) {
-      const inputTokens = Number(receipt.inputTokens ?? receipt.input_tokens ?? receipt.promptTokens ?? receipt.prompt_tokens ?? 0);
-      const outputTokens = Number(receipt.outputTokens ?? receipt.output_tokens ?? receipt.completionTokens ?? receipt.completion_tokens ?? 0);
-      const totalTokens = Number(receipt.totalTokens ?? receipt.total_tokens ?? inputTokens + outputTokens);
-      const durationMs = Number(receipt.durationMs ?? receipt.duration_ms ?? receipt.latencyMs ?? receipt.latency_ms ?? 0);
+    function normalizeReceipt(input) {
+      if (!input) return null;
+      const cost = input.cost || {};
+      const source = input.cost ? cost : input;
+      const worker = String(
+        input.workerType ||
+        input.worker_type ||
+        input.worker ||
+        source.workerType ||
+        source.worker_type ||
+        source.worker ||
+        'system'
+      ).toLowerCase();
+      const inputTokens = Number(source.inputTokens ?? source.input_tokens ?? source.promptTokens ?? source.prompt_tokens ?? 0);
+      const outputTokens = Number(source.outputTokens ?? source.output_tokens ?? source.completionTokens ?? source.completion_tokens ?? 0);
+      const totalTokens = Number(source.totalTokens ?? source.total_tokens ?? (inputTokens + outputTokens));
+      const durationMs = Number(source.durationMs ?? source.duration_ms ?? source.latencyMs ?? source.latency_ms ?? 0);
+      const costUsd = Number(source.estimatedCostUsd ?? source.estimated_cost_usd ?? source.costUsd ?? source.cost_usd ?? source.cost ?? 0);
+
       return {
-        id: String(receipt.id || receipt.receiptId || receipt.receipt_id || `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
-        kind: String(receipt.kind || receipt.type || 'receipt'),
-        worker: String(receipt.worker || receipt.workerType || receipt.worker_type || 'system'),
-        model: String(receipt.model || receipt.modelName || receipt.model_name || receipt.assignedModel || 'unknown'),
+        id: String(
+          input.id ||
+          input.receiptId ||
+          input.receipt_id ||
+          input.taskId ||
+          input.task_id ||
+          `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        ),
+        worker,
+        model: String(source.model || source.modelName || source.model_name || 'unknown'),
         inputTokens,
         outputTokens,
         totalTokens,
         durationMs,
-        at: receipt.at || receipt.timestamp || new Date().toISOString(),
-        costUsd: Number(receipt.costUsd ?? receipt.cost_usd ?? receipt.cost ?? 0),
+        at: input.at || input.timestamp || new Date().toISOString(),
+        costUsd
       };
     }
 
@@ -1247,8 +1271,8 @@
       container.innerHTML = receipts.map((receipt) => `
         <article class="receipt-card">
           <div class="receipt-row">
-            <div class="receipt-model">${esc(receipt.model)}</div>
-            <div class="mini-chip">${esc(receipt.worker)}</div>
+            <div class="receipt-model">${esc(String(receipt.worker || 'system').toUpperCase())}</div>
+            <div class="mini-chip">${esc(receipt.model)}</div>
           </div>
           <div class="receipt-metrics">
             <div class="receipt-metric">
