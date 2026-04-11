@@ -1,5 +1,5 @@
 /**
- * Tailscale auth middleware — Zendorium access control.
+ * Tailscale auth middleware — Aedis access control.
  *
  * Only accepts connections from Tailscale IP range (100.x.x.x).
  * All rejected attempts are logged with source IP and timestamp.

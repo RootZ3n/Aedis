@@ -139,7 +139,7 @@ export class TerminalStream {
         ? color.red
         : color.blue;
     return [
-      `${color.bold}${color.cyan}Zendorium${color.reset} ${statusColor}${this.state.status.toUpperCase()}${color.reset}`,
+      `${color.bold}${color.cyan}Aedis${color.reset} ${statusColor}${this.state.status.toUpperCase()}${color.reset}`,
       `${color.gray}Run:${color.reset} ${this.state.runId || "pending"}`,
       `${color.gray}Cost:${color.reset} ${color.yellow}$${this.state.totalCostUsd.toFixed(4)}${color.reset}`,
       this.state.prompt ? `${color.gray}Prompt:${color.reset} ${this.state.prompt}` : null,

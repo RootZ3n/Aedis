@@ -19,6 +19,14 @@ import {
 
 const exec = promisify(execFile);
 const DEFAULT_IGNORE = new Set(["node_modules", ".git", "dist", "coverage", ".next"]);
+/**
+ * Fixed scout confidence (0..1). Scout is heuristic and does not
+ * invoke a model, so confidence is a calibration constant rather than
+ * a measurement. The same value is used for both the live event emit
+ * and the WorkerResult so the Lumen stream and the receipt always
+ * agree.
+ */
+const SCOUT_CONFIDENCE = 0.92;
 
 export interface ScoutFileRead {
   readonly path: string;
@@ -244,12 +252,13 @@ export class ScoutWorker extends AbstractWorker {
           workerType: this.type,
           touchedFiles: touchedFiles.map((file) => file.path),
           risk: riskAssessment.level,
+          confidence: SCOUT_CONFIDENCE,
         },
       });
 
       return this.success(assignment, output, {
         cost: this.zeroCost(),
-        confidence: 0.92,
+        confidence: SCOUT_CONFIDENCE,
         touchedFiles,
         issues: [],
         durationMs: Date.now() - startedAt,

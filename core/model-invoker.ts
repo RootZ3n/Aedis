@@ -1,5 +1,5 @@
 /**
- * ModelInvoker — Unified model caller for all Zendorium providers.
+ * ModelInvoker — Unified model caller for all Aedis providers.
  *
  * Reads API keys from process.env. Logs every call.
  *

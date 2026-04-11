@@ -1,7 +1,7 @@
 /**
  * RecoveryEngine — failure triage and escalation control.
  *
- * Zendorium should not jump straight to a more expensive model or a human.
+ * Aedis should not jump straight to a more expensive model or a human.
  * This engine classifies what went wrong, chooses the cheapest sane recovery,
  * and records every attempt so the system does not loop itself to death.
  */

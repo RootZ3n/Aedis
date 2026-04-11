@@ -1,7 +1,7 @@
 /**
- * BaseWorker — Contract schema and interface for all Zendorium workers.
+ * BaseWorker — Contract schema and interface for all Aedis workers.
  *
- * Workers are the execution units of Zendorium. Each worker type has a
+ * Workers are the execution units of Aedis. Each worker type has a
  * specific role in the build pipeline, but they all share the same
  * contract: receive an assignment, produce a result, report cost.
  *

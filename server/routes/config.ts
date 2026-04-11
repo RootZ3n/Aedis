@@ -4,8 +4,10 @@
  * GET  /config/models — Return current model assignments
  * POST /config/models — Update model assignments
  *
- * Persists to .zendorium/model-config.json relative to project root.
- * Loads on startup with fallback to defaults if missing.
+ * Persists to .aedis/model-config.json relative to project root.
+ * Falls back to the legacy .zendorium/model-config.json location on
+ * read so existing installs keep working after the rename. New writes
+ * always go to .aedis/.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
@@ -32,10 +34,11 @@ export interface ModelConfig {
 
 // ─── Defaults ────────────────────────────────────────────────────────
 //
-// IMPORTANT: a persisted .zendorium/model-config.json file at the project
-// root will OVERRIDE these defaults via loadModelConfig() below. Changing
-// the defaults here only affects projects that have no saved config.
-// To change an active build's model selection, either delete that file or
+// IMPORTANT: a persisted .aedis/model-config.json file at the project
+// root will OVERRIDE these defaults via loadModelConfig() below (with
+// .zendorium/model-config.json as the legacy fallback). Changing the
+// defaults here only affects projects that have no saved config. To
+// change an active build's model selection, either delete that file or
 // edit its `builder` / `critic` block directly.
 //
 // Per-role fallbacks (Builder + Critic) are NOT in this config — they
@@ -72,7 +75,13 @@ const VALID_ROLES = [
 
 // ─── Persistence ─────────────────────────────────────────────────────
 
+/** Canonical Aedis state directory. Always used for writes. */
 function configDir(projectRoot: string): string {
+  return join(projectRoot, ".aedis");
+}
+
+/** Legacy Zendorium state directory, read-only fallback during the rename. */
+function legacyConfigDir(projectRoot: string): string {
   return join(projectRoot, ".zendorium");
 }
 
@@ -80,17 +89,31 @@ function configPath(projectRoot: string): string {
   return join(configDir(projectRoot), "model-config.json");
 }
 
+function legacyConfigPath(projectRoot: string): string {
+  return join(legacyConfigDir(projectRoot), "model-config.json");
+}
+
 export function loadModelConfig(projectRoot: string): ModelConfig {
-  const path = configPath(projectRoot);
-  try {
-    if (existsSync(path)) {
-      const raw = readFileSync(path, "utf-8");
-      const parsed = JSON.parse(raw);
-      // Merge with defaults so new roles get default values
-      return { ...DEFAULT_MODEL_CONFIG, ...parsed };
+  // Prefer the canonical .aedis/ path. Fall back to the legacy
+  // .zendorium/ path so installs that were configured before the
+  // rename still load their saved assignments. Writes always go to
+  // the canonical path, so the legacy file stops being read the next
+  // time the config is saved.
+  const canonical = configPath(projectRoot);
+  const legacy = legacyConfigPath(projectRoot);
+  const pathsToTry = [canonical, legacy];
+
+  for (const path of pathsToTry) {
+    try {
+      if (existsSync(path)) {
+        const raw = readFileSync(path, "utf-8");
+        const parsed = JSON.parse(raw);
+        // Merge with defaults so new roles get default values
+        return { ...DEFAULT_MODEL_CONFIG, ...parsed };
+      }
+    } catch {
+      // Corrupt file — try the next candidate, or fall through to defaults.
     }
-  } catch {
-    // Corrupt file — fall back to defaults
   }
   return { ...DEFAULT_MODEL_CONFIG };
 }

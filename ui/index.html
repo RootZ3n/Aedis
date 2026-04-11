@@ -1140,12 +1140,36 @@
     const WS_URL = __zd.ws;
     const ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator'];
     const CONFIG_ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator', 'escalation', 'coordinator'];
+    // localStorage keys — the canonical namespace is aedis.*, but old
+    // installs still have values under zendorium.*. We migrate on first
+    // read so nobody loses their repoPath / model config / run history
+    // on upgrade.
     const STORAGE_KEYS = {
+      repoPath: 'aedis.repoPath',
+      modelConfig: 'aedis.modelConfig',
+      runHistory: 'aedis.runHistory',
+      loquiMode: 'aedis.loquiMode',
+    };
+    const LEGACY_STORAGE_KEYS = {
       repoPath: 'zendorium.repoPath',
       modelConfig: 'zendorium.modelConfig',
       runHistory: 'zendorium.runHistory',
       loquiMode: 'zendorium.loquiMode',
     };
+    try {
+      for (const name of Object.keys(STORAGE_KEYS)) {
+        const newKey = STORAGE_KEYS[name];
+        const legacyKey = LEGACY_STORAGE_KEYS[name];
+        if (localStorage.getItem(newKey) == null) {
+          const legacyValue = localStorage.getItem(legacyKey);
+          if (legacyValue != null) {
+            localStorage.setItem(newKey, legacyValue);
+          }
+        }
+      }
+    } catch {
+      // localStorage may be unavailable (private mode etc); ignore.
+    }
     const HISTORY_MAX = 20;
     const LUMEN_MAX = 200;
     const ROLE_COLORS = {
@@ -1331,7 +1355,7 @@
       ws.addEventListener('open', () => {
         state.connected = true;
         setSocketStatus('LIVE', true);
-        try { ws.send(JSON.stringify({ type: 'hello', client: 'zendorium-ui' })); } catch {}
+        try { ws.send(JSON.stringify({ type: 'hello', client: 'aedis-ui' })); } catch {}
         if (state.currentRunId) {
           try { ws.send(JSON.stringify({ type: 'subscribe', taskId: state.currentRunId })); } catch {}
         }
@@ -1653,10 +1677,18 @@
       // Confidence comes off the wire as a 0..1 float (e.g. 0.85). Always
       // multiply by 100 and round to a whole percent — no conditional
       // branching, no edge cases at exactly 1.0.
-      if (raw == null) return '?';
+      //
+      // When confidence isn't available yet (older worker emits, events
+      // that pre-date the calibration constants, or payloads that don't
+      // carry the field) we show "pending" rather than a misleading "?"
+      // placeholder — the user's rule: no fake/placeholder confidence.
+      if (raw == null) return 'pending';
       const num = Number(raw);
-      if (!Number.isFinite(num)) return String(raw);
-      return `${Math.round(num * 100)}%`;
+      if (!Number.isFinite(num)) return 'pending';
+      // Clamp defensively so an upstream bug reporting 1.2 or -0.1
+      // doesn't leak into the display.
+      const clamped = Math.max(0, Math.min(1, num));
+      return `${Math.round(clamped * 100)}%`;
     }
 
     function translateToLumen(run, payload, type) {

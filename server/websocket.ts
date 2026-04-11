@@ -1,5 +1,5 @@
 /**
- * WebSocket event bus — Live event streaming for Zendorium.
+ * WebSocket event bus — Live event streaming for Aedis.
  *
  * The EventBus is the central nervous system for real-time updates.
  * The Coordinator emits events as the build progresses; connected
@@ -11,12 +11,19 @@ import type { WebSocket } from "ws";
 
 // ─── Event Types ─────────────────────────────────────────────────────
 
-export interface ZendoriumEvent {
-  type: ZendoriumEventType;
+export interface AedisEvent {
+  type: AedisEventType;
   payload: Record<string, unknown>;
 }
 
-export type ZendoriumEventType =
+/**
+ * @deprecated Use AedisEvent. Retained as a type alias for source-level
+ * back-compat during the rename cleanup; will be removed in a later
+ * release.
+ */
+export type ZendoriumEvent = AedisEvent;
+
+export type AedisEventType =
   | "run_started"
   | "charter_generated"
   | "intent_locked"
@@ -41,11 +48,18 @@ export type ZendoriumEventType =
   | "run_complete"
   | "receipt_generated";
 
+/**
+ * @deprecated Use AedisEventType. Alias kept for downstream code that
+ * still imports the old name while we finish the Zendorium → Aedis
+ * rename.
+ */
+export type ZendoriumEventType = AedisEventType;
+
 // ─── Wire Protocol ───────────────────────────────────────────────────
 
 export interface WireMessage {
   /** Event type */
-  type: ZendoriumEventType;
+  type: AedisEventType;
   /** Event payload */
   payload: Record<string, unknown>;
   /** ISO timestamp */
@@ -56,17 +70,17 @@ export interface WireMessage {
 
 // ─── Event Bus ───────────────────────────────────────────────────────
 
-export type EventListener = (event: ZendoriumEvent) => void;
+export type EventListener = (event: AedisEvent) => void;
 
 export interface EventBus {
   /** Emit an event to all listeners and connected WebSocket clients */
-  emit(event: ZendoriumEvent): void;
+  emit(event: AedisEvent): void;
   /** Register a listener for all events */
   on(listener: EventListener): () => void;
   /** Register a listener for a specific event type */
-  onType(type: ZendoriumEventType, listener: EventListener): () => void;
+  onType(type: AedisEventType, listener: EventListener): () => void;
   /** Register a WebSocket client for live streaming */
-  addClient(ws: WebSocket, filter?: ZendoriumEventType[]): void;
+  addClient(ws: WebSocket, filter?: AedisEventType[]): void;
   /** Remove a WebSocket client */
   removeClient(ws: WebSocket): void;
   /** Get count of connected clients */
@@ -79,18 +93,18 @@ export interface EventBus {
 
 interface ClientEntry {
   ws: WebSocket;
-  filter: Set<ZendoriumEventType> | null; // null = all events
+  filter: Set<AedisEventType> | null; // null = all events
   seq: number;
 }
 
 export function createEventBus(historySize: number = 100): EventBus {
   const listeners: EventListener[] = [];
-  const typeListeners = new Map<ZendoriumEventType, EventListener[]>();
+  const typeListeners = new Map<AedisEventType, EventListener[]>();
   const clients = new Map<WebSocket, ClientEntry>();
   const history: WireMessage[] = [];
   let globalSeq = 0;
 
-  function emit(event: ZendoriumEvent): void {
+  function emit(event: AedisEvent): void {
     globalSeq++;
 
     const wire: WireMessage = {
@@ -151,7 +165,7 @@ export function createEventBus(historySize: number = 100): EventBus {
     };
   }
 
-  function onType(type: ZendoriumEventType, listener: EventListener): () => void {
+  function onType(type: AedisEventType, listener: EventListener): () => void {
     const existing = typeListeners.get(type) ?? [];
     existing.push(listener);
     typeListeners.set(type, existing);
@@ -164,7 +178,7 @@ export function createEventBus(historySize: number = 100): EventBus {
     };
   }
 
-  function addClient(ws: WebSocket, filter?: ZendoriumEventType[]): void {
+  function addClient(ws: WebSocket, filter?: AedisEventType[]): void {
     clients.set(ws, {
       ws,
       filter: filter ? new Set(filter) : null,

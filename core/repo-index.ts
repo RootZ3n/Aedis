@@ -1,7 +1,7 @@
 /**
- * RepoIndex — living codebase map for Zendorium.
+ * RepoIndex — living codebase map for Aedis.
  *
- * It scans a repo, builds a per-file profile, persists it to .zendorium,
+ * It scans a repo, builds a per-file profile, persists it to .aedis,
  * and can refresh incrementally when files change.
  */
 
@@ -138,9 +138,25 @@ export class RepoIndex {
   }
 
   async loadFromDisk(repoPath: string): Promise<RepoIndexSnapshot | null> {
-    const indexPath = join(resolve(repoPath), ".zendorium", "repo-index.json");
+    // Prefer the canonical .aedis/ location; fall back to .zendorium/
+    // for installs that predate the rename. Writes always land in
+    // .aedis/ via persist().
+    const resolvedRoot = resolve(repoPath);
+    const candidates = [
+      join(resolvedRoot, ".aedis", "repo-index.json"),
+      join(resolvedRoot, ".zendorium", "repo-index.json"),
+    ];
+    let raw: string | null = null;
+    for (const candidate of candidates) {
+      try {
+        raw = await readFile(candidate, "utf-8");
+        if (raw) break;
+      } catch {
+        // try next candidate
+      }
+    }
+    if (!raw) return null;
     try {
-      const raw = await readFile(indexPath, "utf-8");
       const snapshot: RepoIndexSnapshot = JSON.parse(raw);
       this.repoPath = snapshot.repoPath;
       this.files.clear();
@@ -335,7 +351,7 @@ export class RepoIndex {
   }
 
   private shouldIgnore(pathLike: string): boolean {
-    return /(^|\/)(node_modules|\.git|dist|build|coverage|\.next|\.zendorium)(\/|$)/.test(pathLike);
+    return /(^|\/)(node_modules|\.git|dist|build|coverage|\.next|\.aedis|\.zendorium)(\/|$)/.test(pathLike);
   }
 
   private normalizePath(pathLike: string): string {
@@ -346,7 +362,10 @@ export class RepoIndex {
 
   private async persist(): Promise<void> {
     if (!this.repoPath) return;
-    const stateDir = join(this.repoPath, ".zendorium");
+    // Canonical location post-rename is .aedis/. The legacy
+    // .zendorium/ directory is read-only (see loadFromDisk) and
+    // stops being used the moment the next persist completes.
+    const stateDir = join(this.repoPath, ".aedis");
     await mkdir(stateDir, { recursive: true });
     await writeFile(join(stateDir, "repo-index.json"), JSON.stringify(this.snapshot(), null, 2), "utf-8");
   }

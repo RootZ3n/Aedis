@@ -111,13 +111,23 @@ import {
   type VerificationReceipt,
 } from "./verification-pipeline.js";
 import { loadMemory, recordTask } from "./project-memory.js";
-import { gateContext, type GatedContext } from "./context-gate.js";
+import {
+  gateContext,
+  gateContextForWave,
+  type GatedContext,
+} from "./context-gate.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
 import { createChangeSet, type ChangeSet } from "./change-set.js";
 import { extractInvariants } from "./invariant-extractor.js";
-import { planChangeSet, type Plan } from "./multi-file-planner.js";
-import { runRepairPass } from "./repair-pass.js";
+import { planChangeSet, type Plan, type PlanWave } from "./multi-file-planner.js";
+import { runRepairPass, type RepairResult } from "./repair-pass.js";
+import {
+  decideMerge,
+  groupFindingsBySource,
+  type MergeDecision,
+  type MergeFinding,
+} from "./merge-gate.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -127,7 +137,7 @@ import {
   type FileChange,
   WorkerRegistry,
 } from "../workers/base.js";
-import type { EventBus, ZendoriumEvent } from "../server/websocket.js";
+import type { EventBus, AedisEvent } from "../server/websocket.js";
 
 const exec = promisify(execFile);
 
@@ -152,7 +162,7 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   maxRehearsalRounds: 3,
   maxRecoveryAttempts: 2,
   autoCommit: true,
-  workBranch: "zendorium/run",
+  workBranch: "aedis/run",
 };
 
 export interface TaskSubmission {
@@ -186,7 +196,20 @@ export interface RunReceipt {
   readonly summary: ReturnType<typeof getRunSummary>;
   readonly graphSummary: ReturnType<typeof getGraphSummary>;
   readonly verificationReceipt: VerificationReceipt | null;
+  /**
+   * Per-wave verification receipts (P2). Empty for single-file runs.
+   * Each receipt carries a `scope` tag identifying its wave so Lumen
+   * can display wave-scoped findings.
+   */
+  readonly waveVerifications: readonly VerificationReceipt[];
   readonly judgmentReport: JudgmentReport | null;
+  /**
+   * MergeGate decision (P1). Null on exception paths where the gate
+   * never ran. On successful runs this is the primary record of why
+   * the commit was allowed or blocked — Lumen and the receipt feed
+   * read this to surface critical/advisory findings.
+   */
+  readonly mergeDecision: MergeDecision | null;
   readonly totalCost: CostEntry;
   readonly commitSha: string | null;
   readonly durationMs: number;
@@ -251,8 +274,8 @@ export class Coordinator {
       `[coordinator] effective projectRoot for this submission: ${effectiveProjectRoot}` +
       (submission.projectRoot ? " (overridden via submission)" : " (Coordinator default)")
     );
-    const memory = await loadMemory(effectiveProjectRoot);
-    const gatedContext = gateContext(memory, input);
+    const projectMemory = await loadMemory(effectiveProjectRoot);
+    const gatedContext = gateContext(projectMemory, input);
     console.log("[coordinator] gated context:", JSON.stringify(gatedContext));
     const normalizedInput = await normalizePrompt(input, gatedContext, effectiveProjectRoot);
 
@@ -348,11 +371,14 @@ export class Coordinator {
       cancelled: false,
       projectRoot: effectiveProjectRoot,
       gatedContext,
+      projectMemory,
+      normalizedInput,
       contextAssembler,
       judge,
       scopeClassification: scopeClassification ?? null,
       changeSet,
       plan,
+      waveVerifications: [],
     };
     this.activeRuns.set(run.id, active);
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
@@ -388,6 +414,27 @@ export class Coordinator {
       console.log(`[coordinator] PHASE 6 done — graph state: ${JSON.stringify(getGraphSummary(active.graph))}`);
       console.log(`[coordinator] PHASE 6 trace — builder nodes processed: ${active.graph.nodes.filter(n => n.workerType === 'builder').length}`);
 
+      // Phase 7: Per-wave verification (multi-file only).
+      //
+      // Runs the VerificationPipeline once per wave of the plan,
+      // filtered to that wave's files. Failures here surface as
+      // critical merge-gate findings downstream, attributed to the
+      // wave that produced them. Skipped for single-file runs (no
+      // plan) and for runs with failed nodes (recovery path owns the
+      // retry loop).
+      if (
+        active.plan &&
+        active.plan.waves.length > 0 &&
+        !active.cancelled &&
+        !hasFailedNodes(active.graph)
+      ) {
+        console.log(`[coordinator] PHASE 7: PerWaveVerification — ${active.plan.waves.length} wave(s)`);
+        await this.verifyCompletedWaves(active);
+        console.log(`[coordinator] PHASE 7 done — ${active.waveVerifications.length} wave receipt(s) collected`);
+      } else {
+        console.log(`[coordinator] PHASE 7 SKIPPED — plan=${!!active.plan} cancelled=${active.cancelled} failedNodes=${hasFailedNodes(active.graph)}`);
+      }
+
       // Phase 8: Post-Build IntegrationJudge
       if (!active.cancelled && !hasFailedNodes(active.graph)) {
         console.log(`[coordinator] PHASE 8: IntegrationJudge — entering`);
@@ -421,67 +468,136 @@ export class Coordinator {
       }
 
       // Phase 9: Verification Pipeline
+      //
+      // Unlike the previous advisory gate, Phase 9 now ALWAYS runs when
+      // the judge passed — and for multi-file plans it runs the
+      // change-set-level verification, not a loose bag of FileChange
+      // records. The resulting receipt is the primary verification
+      // signal for the MergeGate below. Per-wave verification has
+      // already happened inside executeGraph (see verifyCompletedWaves).
       if (judgmentReport?.passed && !active.cancelled) {
-        console.log(`[coordinator] PHASE 9: Verification — entering`);
-        verificationReceipt = await this.verifier.verify(
-          active.intent,
-          run,
-          active.changes,
-          active.workerResults
+        const isMultiFile = active.changeSet.filesInScope.length > 1;
+        console.log(
+          `[coordinator] PHASE 9: Verification — entering (${isMultiFile ? "change-set" : "single-file"} scope)`,
         );
-        console.log(`[coordinator] PHASE 9 done — verdict=${verificationReceipt.verdict}`);
-
-        if (verificationReceipt.verdict === "fail") {
-          this.emit({
-            type: "merge_blocked",
-            payload: { runId: run.id, reason: verificationReceipt.summary },
-          });
-        } else {
-          this.emit({ type: "merge_approved", payload: { runId: run.id } });
-        }
+        verificationReceipt = isMultiFile
+          ? await this.verifier.verifyChangeSet(
+              active.intent,
+              run,
+              active.changeSet,
+              active.changes,
+              active.workerResults,
+            )
+          : await this.verifier.verify(
+              active.intent,
+              run,
+              active.changes,
+              active.workerResults,
+            );
+        console.log(`[coordinator] PHASE 9 done — verdict=${verificationReceipt.verdict} summary=${verificationReceipt.summary}`);
       } else {
         console.log(`[coordinator] PHASE 9 SKIPPED — judgmentReport=${judgmentReport ? `passed=${judgmentReport.passed}` : "null"} cancelled=${active.cancelled}`);
       }
 
-      const verdict = this.determineVerdict(active, verificationReceipt, judgmentReport);
-      const totalCost = active.run.totalCost?.estimatedCostUsd ?? 0;
-      let repairResult: Awaited<ReturnType<typeof runRepairPass>> | null = null;
+      // Phase 9b: change-set gate (invariants + repair-pass) — only
+      // meaningful for multi-file runs. Output is fed into the
+      // MergeGate alongside judgment and verification.
+      let repairResult: RepairResult | null = null;
+      let changeSetGateInput:
+        | Parameters<typeof decideMerge>[0]["changeSetGate"]
+        | undefined;
 
       if (active.changeSet.filesInScope.length > 1) {
         const plan = active.plan ?? planChangeSet(active.changeSet, normalizedInput);
-        const invariants = await extractInvariants(
-          active.changeSet.filesInScope.map((entry) => entry.path),
-          active.projectRoot,
-        );
+        const invariants = active.changeSet.invariants.length > 0
+          ? [...active.changeSet.invariants]
+          : await extractInvariants(
+              active.changeSet.filesInScope.map((entry) => entry.path),
+              active.projectRoot,
+            );
         repairResult = await runRepairPass(active.changeSet, active.projectRoot);
 
         const allWavesComplete = isGraphComplete(active.graph) && !hasFailedNodes(active.graph);
         const invariantsSatisfied =
           active.changeSet.coherenceVerdict.coherent &&
           (invariants.length > 0 || plan.waves.every((wave) => wave.files.length <= 1));
-        const repairPassClean = repairResult.issues.length === 0;
 
-        if (!allWavesComplete || !invariantsSatisfied || !repairPassClean) {
-          const reasons: string[] = [];
-          if (!allWavesComplete) {
-            reasons.push("all waves complete check failed");
-          }
-          if (!invariantsSatisfied) {
-            reasons.push("invariants satisfied check failed");
-          }
-          if (!repairPassClean) {
-            reasons.push(`repair pass found ${repairResult.issues.length} issue(s)`);
-          }
-          console.warn(`[coordinator] WARN: change-set merge gate — ${reasons.join("; ")}`);
-        }
+        changeSetGateInput = {
+          changeSet: active.changeSet,
+          allWavesComplete,
+          invariantsSatisfied,
+          invariantCount: invariants.length,
+          repairPass: repairResult,
+        };
       }
+
+      // Phase 9c: MergeGate — the single source of truth for "can we
+      // apply / commit". Replaces the old advisory behaviour where
+      // merge_blocked was emitted and the commit happened anyway.
+      const baseDecision = decideMerge({
+        judgment: judgmentReport,
+        verification: verificationReceipt,
+        changeSetGate: changeSetGateInput,
+        cancelled: active.cancelled,
+        hasFailedNodes: hasFailedNodes(active.graph),
+      });
+      // Inject per-wave failures as critical findings — they come
+      // from Phase 7 and are already emitted as merge_blocked events,
+      // but the gate decision needs them so `action` becomes "block"
+      // and the commit is prevented.
+      const waveFailures = this.waveFailureFindings(active);
+      const mergeDecision: MergeDecision =
+        waveFailures.length === 0
+          ? baseDecision
+          : this.mergeInFindings(baseDecision, waveFailures);
+      this.logMergeDecision(mergeDecision);
+      this.recordMergeDecision(active, mergeDecision);
+
+      if (mergeDecision.action === "block") {
+        this.emit({
+          type: "merge_blocked",
+          payload: {
+            runId: run.id,
+            reason: mergeDecision.primaryBlockReason,
+            summary: mergeDecision.summary,
+            findings: mergeDecision.findings,
+            critical: mergeDecision.critical,
+            advisory: mergeDecision.advisory,
+            groups: groupFindingsBySource(mergeDecision.findings),
+          },
+        });
+        // Roll back on-disk changes the builder already wrote so the
+        // repo is left in the state the user started with. This is the
+        // difference between an advisory gate (commit anyway) and a
+        // blocking gate (fail safely).
+        await this.rollbackChanges(active, mergeDecision);
+      } else {
+        this.emit({
+          type: "merge_approved",
+          payload: {
+            runId: run.id,
+            summary: mergeDecision.summary,
+            advisory: mergeDecision.advisory,
+            groups: groupFindingsBySource(mergeDecision.findings),
+          },
+        });
+      }
+
+      const verdict = this.determineVerdict(
+        active,
+        verificationReceipt,
+        judgmentReport,
+        mergeDecision,
+      );
+      const totalCost = active.run.totalCost?.estimatedCostUsd ?? 0;
 
       // Phase 10: Commit
       const changeCount = Math.max(active.changes.length, active.run.filesTouched.length);
       const canCommit =
         this.config.autoCommit &&
         !active.cancelled &&
-        changeCount > 0;
+        changeCount > 0 &&
+        mergeDecision.action === "apply";
 
       if (canCommit) {
         console.log(`[coordinator] PHASE 10: committing ${changeCount} change(s) (active.changes=${active.changes.length}, filesTouched=${active.run.filesTouched.length}) in ${active.projectRoot}...`);
@@ -506,8 +622,7 @@ export class Coordinator {
         console.log(`[coordinator] PHASE 10 SKIPPED — autoCommit=${this.config.autoCommit} cancelled=${active.cancelled} changeCount=${changeCount}`);
       }
 
-      if (active.changeSet.filesInScope.length > 1) {
-        repairResult = repairResult ?? await runRepairPass(active.changeSet, active.projectRoot);
+      if (repairResult) {
         console.log(
           `[coordinator] repair-pass: ${repairResult.repairsAttempted} attempted, ${repairResult.repairsApplied} applied, ${repairResult.issues.length} issues`
         );
@@ -544,7 +659,8 @@ export class Coordinator {
         verificationReceipt,
         judgmentReport,
         commitSha,
-        Date.now() - startTime
+        Date.now() - startTime,
+        mergeDecision,
       );
 
       console.log(`[coordinator] ═══ submit() exit — verdict=${verdict} duration=${Date.now() - startTime}ms`);
@@ -623,11 +739,20 @@ export class Coordinator {
 
     const builderNodes: TaskNode[] = [];
     for (const deliverable of deliverables) {
+      // Tag with wave id (P2) — if the plan exists and this deliverable's
+      // files belong to a wave, attach it to metadata so downstream
+      // verification and UI can attribute work per wave. Picks the
+      // smallest wave id covered so multi-wave deliverables land in the
+      // earliest phase (schema before consumers).
+      const waveId = this.resolveWaveForFiles(active.plan, deliverable.targetFiles);
       const builder = addNode(graph, {
         label: `Build: ${deliverable.description}`,
         workerType: "builder",
         targetFiles: deliverable.targetFiles,
-        metadata: { deliverableType: deliverable.type },
+        metadata: {
+          deliverableType: deliverable.type,
+          ...(waveId != null ? { waveId } : {}),
+        },
       });
       addEdge(graph, scoutNode.id, builder.id, "data");
       builderNodes.push(builder);
@@ -860,6 +985,26 @@ export class Coordinator {
     return deduped;
   }
 
+  /**
+   * Return the smallest wave id that contains at least one of the
+   * given files, or null if no wave matches (single-file runs or
+   * deliverables whose files fell outside the plan).
+   */
+  private resolveWaveForFiles(
+    plan: Plan | undefined,
+    files: readonly string[],
+  ): number | null {
+    if (!plan) return null;
+    let bestWave: number | null = null;
+    for (const wave of plan.waves) {
+      const waveSet = new Set(wave.files);
+      if (files.some((f) => waveSet.has(f))) {
+        if (bestWave == null || wave.id < bestWave) bestWave = wave.id;
+      }
+    }
+    return bestWave;
+  }
+
   private userExplicitlyAskedForTests(request: string): boolean {
     return /\b(add tests|test file|test files|tests)\b/i.test(request);
   }
@@ -965,7 +1110,12 @@ export class Coordinator {
           console.log(`[coordinator] executeGraph: rehearsal round ${rehearsalRound}/${this.config.maxRehearsalRounds} — Critic requested changes`);
           this.emit({
             type: "critic_review",
-            payload: { runId: run.id, verdict: "request-changes", round: rehearsalRound },
+            payload: {
+              runId: run.id,
+              verdict: "request-changes",
+              round: rehearsalRound,
+              confidence: result.confidence,
+            },
           });
           recordDecision(run, {
             description: `Rehearsal round ${rehearsalRound}: Critic requested changes`,
@@ -1064,13 +1214,20 @@ export class Coordinator {
     // `readonly` on the interface, so we build the assignment via spread
     // (rather than mutating after construction) to respect the readonly
     // contract for the existing fields too.
+    // Pick the gated context the worker will see. Scouts get the base
+    // project-memory gate (broad, pre-wave context). Builders inside a
+    // multi-file plan get a wave-aware gate so they see only the
+    // invariants and siblings for their wave — preserving minimal
+    // context discipline. Everything else gets nothing extra.
+    const recentContext = this.resolveRecentContext(active, node);
+
     const assignment: WorkerAssignment = {
       ...baseAssignment,
       runState: run,
       changes: [...active.changes],
       workerResults: [...active.workerResults],
       projectRoot: active.projectRoot,
-      recentContext: node.workerType === "scout" ? active.gatedContext : undefined,
+      recentContext,
     };
 
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
@@ -1293,6 +1450,290 @@ export class Coordinator {
     return true;
   }
 
+  // ─── Wave-aware Context Gate (P3) ──────────────────────────────────
+
+  /**
+   * Choose which GatedContext (if any) to hand to a worker during
+   * dispatch.
+   *
+   *   - Scout             — base project-memory gate (broad, pre-wave).
+   *   - Builder with plan — wave-aware gate that includes only the
+   *                         invariants touching this wave and at most
+   *                         a handful of sibling files from the same
+   *                         wave. Minimal-context discipline: nothing
+   *                         from later waves, nothing from elsewhere
+   *                         in the repo.
+   *   - Everything else   — no recentContext. The context assembler
+   *                         already pulls the actual file contents;
+   *                         layering memory hints on top is wasteful.
+   *
+   * The inclusionLog is written to the coordinator journal so a
+   * reviewer can see exactly which invariants and siblings were
+   * injected and why.
+   */
+  private resolveRecentContext(
+    active: ActiveRun,
+    node: TaskNode,
+  ): GatedContext | undefined {
+    if (node.workerType === "scout") {
+      return active.gatedContext;
+    }
+
+    if (node.workerType !== "builder") {
+      return undefined;
+    }
+
+    if (!active.plan) {
+      return undefined;
+    }
+
+    const waveId = typeof node.metadata.waveId === "number" ? node.metadata.waveId : null;
+    if (waveId == null) return undefined;
+
+    const wave = active.plan.waves.find((w) => w.id === waveId);
+    if (!wave) return undefined;
+
+    const gated = gateContextForWave({
+      memory: active.projectMemory,
+      prompt: active.normalizedInput,
+      changeSet: active.changeSet,
+      wave,
+      targetFiles: node.targetFiles,
+    });
+
+    const log = gated.inclusionLog ?? [];
+    if (log.length > 0) {
+      console.log(
+        `[coordinator] wave-gate (wave ${wave.id} ${wave.name}, node ${node.id.slice(0, 6)}): ${log.length} item(s) injected`,
+      );
+      for (const line of log) {
+        console.log(`[coordinator] wave-gate   ${line}`);
+      }
+    } else {
+      console.log(
+        `[coordinator] wave-gate (wave ${wave.id} ${wave.name}, node ${node.id.slice(0, 6)}): minimal — no invariants or siblings required`,
+      );
+    }
+
+    return gated;
+  }
+
+  // ─── Per-wave Verification (P2) ────────────────────────────────────
+
+  /**
+   * Run the VerificationPipeline once per wave in the plan, filtered to
+   * the wave's files. Results are accumulated on active.waveVerifications
+   * so Phase 9's merge gate can attribute failures to the wave that
+   * produced them.
+   *
+   * Contract:
+   *   - Waves with zero changed files still get a synthetic pass
+   *     receipt via verifyWave(), so the UI can show the wave as
+   *     "nothing to verify" rather than silently absent.
+   *   - A failing wave does NOT short-circuit the loop — we collect
+   *     every wave's receipt so reviewers can see the full picture.
+   *   - A wave with verdict === "fail" is emitted as merge_blocked
+   *     so the Lumen stream shows the block in real time, not only
+   *     after the final gate.
+   */
+  private async verifyCompletedWaves(active: ActiveRun): Promise<void> {
+    if (!active.plan) return;
+
+    for (const wave of active.plan.waves) {
+      const receipt = await this.verifier.verifyWave(
+        active.intent,
+        active.run,
+        wave,
+        active.changes,
+        active.workerResults,
+      );
+      active.waveVerifications.push(receipt);
+      console.log(
+        `[coordinator] wave ${wave.id} (${wave.name}): ${receipt.summary} — files=${
+          receipt.scope && receipt.scope.kind === "wave" ? receipt.scope.fileCount : 0
+        }`,
+      );
+
+      if (receipt.verdict === "fail") {
+        this.emit({
+          type: "merge_blocked",
+          payload: {
+            runId: active.run.id,
+            reason: receipt.summary,
+            wave: { id: wave.id, name: wave.name },
+            blockers: receipt.blockers,
+          },
+        });
+      }
+    }
+  }
+
+  /**
+   * Collect failing wave receipts as synthetic merge findings. These
+   * join the regular findings inside decideMerge so a failing wave
+   * always produces a critical block.
+   */
+  private waveFailureFindings(active: ActiveRun): MergeFinding[] {
+    const findings: MergeFinding[] = [];
+    for (const receipt of active.waveVerifications) {
+      if (receipt.verdict !== "fail") continue;
+      const scope = receipt.scope;
+      const waveId = scope && scope.kind === "wave" ? scope.waveId : 0;
+      const waveName = scope && scope.kind === "wave" ? scope.waveName : "unknown";
+      findings.push({
+        source: "verification-pipeline",
+        severity: "critical",
+        code: `verification:wave-${waveId}`,
+        message: `Wave ${waveId} (${waveName}) verification failed: ${receipt.summary}`,
+        files: Array.from(
+          new Set(
+            receipt.allIssues
+              .map((i) => i.file)
+              .filter((f): f is string => Boolean(f)),
+          ),
+        ),
+      });
+    }
+    return findings;
+  }
+
+  // ─── Merge Gate Helpers ────────────────────────────────────────────
+
+  /**
+   * Fold extra findings into an existing MergeDecision and recompute
+   * the derived fields (critical/advisory arrays, action, primary
+   * block reason, summary). Used to splice wave-failure findings into
+   * the base decision without rerunning decideMerge.
+   */
+  private mergeInFindings(
+    base: MergeDecision,
+    extras: readonly MergeFinding[],
+  ): MergeDecision {
+    const findings = [...base.findings, ...extras];
+    const critical = findings.filter((f) => f.severity === "critical");
+    const advisory = findings.filter((f) => f.severity === "advisory");
+    const action: MergeDecision["action"] = critical.length === 0 ? "apply" : "block";
+    const primaryBlockReason =
+      critical[0]?.message ?? base.primaryBlockReason ?? "";
+    const summary =
+      action === "apply"
+        ? `MERGE APPROVED — ${advisory.length} advisory finding(s), 0 critical`
+        : `MERGE BLOCKED — ${critical.length} critical, ${advisory.length} advisory`;
+    return {
+      action,
+      findings,
+      critical,
+      advisory,
+      primaryBlockReason,
+      summary,
+    };
+  }
+
+  /**
+   * Print the merge decision in structured form so reviewers reading
+   * the journal can see every finding the gate considered. Never
+   * swallowed — critical findings are logged at `error` level so they
+   * stand out in the journal.
+   */
+  private logMergeDecision(decision: MergeDecision): void {
+    console.log(`[coordinator] merge-gate: ${decision.summary}`);
+    for (const finding of decision.findings) {
+      const line = `[coordinator] merge-gate:   ${finding.severity.toUpperCase()} ${finding.source} ${finding.code} — ${finding.message}`;
+      if (finding.severity === "critical") {
+        console.error(line);
+      } else {
+        console.log(line);
+      }
+    }
+  }
+
+  /**
+   * Persist the merge decision as a RunState decision so it appears in
+   * the receipt and run history. Uses a single decision entry with a
+   * rationale that joins every finding — enough context for a reviewer
+   * to understand why commit was blocked without going back to the
+   * journal.
+   */
+  private recordMergeDecision(active: ActiveRun, decision: MergeDecision): void {
+    const rationaleLines = decision.findings.map(
+      (f) => `${f.severity}:${f.source}:${f.code} — ${f.message}`,
+    );
+    recordDecision(active.run, {
+      description: `Merge gate: ${decision.action}`,
+      madeBy: "coordinator",
+      taskId: null,
+      alternatives:
+        decision.action === "block"
+          ? ["Force commit (disabled — critical findings)"]
+          : ["Block commit"],
+      rationale:
+        rationaleLines.length > 0
+          ? rationaleLines.join(" | ")
+          : decision.summary,
+    });
+  }
+
+  /**
+   * Restore on-disk file contents for any FileChange where we have the
+   * originalContent captured. Builder writes happen inline during
+   * execute(); when the MergeGate blocks, we need to leave the repo in
+   * the state the user started with — an aborted build should not
+   * leave half-applied files behind.
+   *
+   * Files without captured originals can't be restored — we log them
+   * explicitly so the operator knows which files need manual review.
+   * Newly-created files (operation === "create") are removed outright.
+   */
+  private async rollbackChanges(active: ActiveRun, decision: MergeDecision): Promise<void> {
+    if (active.changes.length === 0) {
+      console.log(`[coordinator] rollbackChanges: no changes to roll back`);
+      return;
+    }
+
+    const { writeFile, unlink } = await import("fs/promises");
+    let restored = 0;
+    let deleted = 0;
+    const unrestorable: string[] = [];
+
+    for (const change of active.changes) {
+      const absPath = resolve(active.projectRoot, change.path);
+      try {
+        if (change.operation === "create") {
+          if (existsSync(absPath)) {
+            await unlink(absPath);
+            deleted++;
+          }
+          continue;
+        }
+
+        if (change.originalContent !== undefined) {
+          await writeFile(absPath, change.originalContent, "utf-8");
+          restored++;
+        } else {
+          unrestorable.push(change.path);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[coordinator] rollbackChanges: failed to restore ${change.path}: ${msg}`);
+        unrestorable.push(change.path);
+      }
+    }
+
+    console.warn(
+      `[coordinator] rollbackChanges: merge-gate blocked commit — restored ${restored} file(s), removed ${deleted} created file(s), ${unrestorable.length} unrestorable`,
+    );
+
+    if (unrestorable.length > 0) {
+      recordDecision(active.run, {
+        description: `Rollback left ${unrestorable.length} file(s) in builder-modified state`,
+        madeBy: "coordinator",
+        taskId: null,
+        alternatives: ["Manual revert required"],
+        rationale: `No originalContent captured for: ${unrestorable.join(", ")}. Merge block reason: ${decision.primaryBlockReason}`,
+      });
+    }
+  }
+
   // ─── Git Operations ────────────────────────────────────────────────
 
   private async gitCommit(active: ActiveRun): Promise<string | null> {
@@ -1368,7 +1809,8 @@ export class Coordinator {
     verificationReceipt: VerificationReceipt | null,
     judgmentReport: JudgmentReport | null,
     commitSha: string | null,
-    durationMs: number
+    durationMs: number,
+    mergeDecision: MergeDecision | null = null,
   ): RunReceipt {
     // Aggregate cost from worker results.
     let inputTokens = 0;
@@ -1442,11 +1884,13 @@ export class Coordinator {
       runId: active.run.id,
       intentId: active.intent.id,
       timestamp: new Date().toISOString(),
-      verdict: this.determineVerdict(active, verificationReceipt, judgmentReport),
+      verdict: this.determineVerdict(active, verificationReceipt, judgmentReport, mergeDecision),
       summary: getRunSummary(active.run),
       graphSummary: getGraphSummary(active.graph),
       verificationReceipt,
+      waveVerifications: [...active.waveVerifications],
       judgmentReport,
+      mergeDecision,
       totalCost: aggregatedCost,
       commitSha,
       durationMs,
@@ -1456,10 +1900,14 @@ export class Coordinator {
   private determineVerdict(
     active: ActiveRun,
     verificationReceipt: VerificationReceipt | null,
-    judgmentReport: JudgmentReport | null
+    judgmentReport: JudgmentReport | null,
+    mergeDecision: MergeDecision | null = null,
   ): RunReceipt["verdict"] {
     if (active.cancelled) return "aborted";
     if (active.run.phase === "failed") return "failed";
+    // A blocking MergeGate is the final authority — a blocked commit
+    // is a failed run, regardless of how individual stages scored.
+    if (mergeDecision?.action === "block") return "failed";
     if (verificationReceipt?.verdict === "fail") return "failed";
     if (judgmentReport && !judgmentReport.passed) return "failed";
     if (verificationReceipt?.verdict === "pass-with-warnings") return "partial";
@@ -1469,12 +1917,12 @@ export class Coordinator {
 
   // ─── Event Helpers ─────────────────────────────────────────────────
 
-  private emit(event: ZendoriumEvent): void {
+  private emit(event: AedisEvent): void {
     this.eventBus?.emit(event);
   }
 
-  private workerCompleteEvent(type: WorkerType): ZendoriumEvent["type"] {
-    const map: Record<WorkerType, ZendoriumEvent["type"]> = {
+  private workerCompleteEvent(type: WorkerType): AedisEvent["type"] {
+    const map: Record<WorkerType, AedisEvent["type"]> = {
       scout: "scout_complete",
       builder: "builder_complete",
       critic: "critic_review",
@@ -1509,6 +1957,16 @@ interface ActiveRun {
   /** Gated project memory relevant to the current prompt, for Scout context. */
   gatedContext: GatedContext;
   /**
+   * Raw ProjectMemory loaded at submit() time. Held so per-builder
+   * dispatch can re-gate with a wave filter (see
+   * resolveRecentContext). We do not re-read from disk per dispatch
+   * because memory changes during a run are rare and the cost of
+   * re-reading adds up across large graphs.
+   */
+  projectMemory: Awaited<ReturnType<typeof loadMemory>>;
+  /** Normalized prompt from PHASE 1. Used for wave-aware gating. */
+  normalizedInput: string;
+  /**
    * Per-submit ContextAssembler constructed in submit() with the per-task
    * projectRoot. Used by dispatchNode to assemble context for each worker.
    * Not a class field on Coordinator because the projectRoot may differ
@@ -1540,6 +1998,13 @@ interface ActiveRun {
   */
   changeSet: ChangeSet;
   plan?: Plan;
+  /**
+   * Receipts from per-wave verification (P2). One entry per wave of
+   * the plan that actually had changes to verify. Empty when no plan
+   * or when no wave had files. Feeds into the MergeGate so a failing
+   * wave becomes a critical blocking finding attributed to that wave.
+   */
+  waveVerifications: VerificationReceipt[];
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────

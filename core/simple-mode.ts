@@ -1,11 +1,11 @@
 /**
- * SimpleMode — One-sentence entry point for Zendorium.
+ * SimpleMode — One-sentence entry point for Aedis.
  *
  * Takes natural language like "add dark mode to the settings page"
  * and produces a structured Charter input ready for the Coordinator.
  *
  * SimpleMode is the front door for developers who want to describe
- * what they want in plain English and let Zendorium figure out the
+ * what they want in plain English and let Aedis figure out the
  * how. It bridges the gap between human intent and machine-actionable
  * build plans without requiring the user to know the Charter schema.
  *

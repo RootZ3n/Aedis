@@ -1,7 +1,7 @@
 /**
- * Zendorium Server — Fastify + WebSocket on port 18796.
+ * Aedis Server — Fastify + WebSocket on port 18796.
  *
- * Entry point for the Zendorium API. Mounts all route files,
+ * Entry point for the Aedis API. Mounts all route files,
  * connects to the Coordinator, and streams events over WebSocket.
  * Serves ui/ as static files at / and /ui/*.
  *
@@ -155,7 +155,7 @@ export async function createServer(
   try {
     indexHtml = readFileSync(indexHtmlPath, "utf-8");
   } catch {
-    indexHtml = "<html><body><h1>Zendorium</h1><p>ui/index.html not found</p></body></html>";
+    indexHtml = "<html><body><h1>Aedis</h1><p>ui/index.html not found</p></body></html>";
   }
 
   server.get("/", async (_request, reply) => {
@@ -270,7 +270,7 @@ export async function startServer(
 
   try {
     const address = await server.listen({ port: cfg.port, host: cfg.host });
-    server.log.info(`Zendorium server listening on ${address}`);
+    server.log.info(`Aedis server listening on ${address}`);
     server.log.info(`WebSocket available at ws://${cfg.host}:${cfg.port}/ws`);
     server.log.info(`UI available at http://${cfg.host}:${cfg.port}/`);
   } catch (err) {
@@ -280,7 +280,7 @@ export async function startServer(
 
   // Graceful shutdown
   const shutdown = async () => {
-    server.log.info("Shutting down Zendorium server...");
+    server.log.info("Shutting down Aedis server...");
     await server.close();
     process.exit(0);
   };
@@ -297,7 +297,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   startServer().catch((err) => {
-    console.error("Zendorium server failed to start:", err);
+    console.error("Aedis server failed to start:", err);
     process.exit(1);
   });
 }

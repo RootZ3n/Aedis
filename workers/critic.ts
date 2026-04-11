@@ -212,6 +212,11 @@ export class CriticWorker extends AbstractWorker {
         this.noteDecision(assignment.task.id, `Critic flagged ${status}`, heuristicIssues.map((i) => i.message).join(" | "));
       }
 
+      // Calibrated critic confidence — higher when the review approved,
+      // lower when changes were requested. Computed once so the live
+      // event emit and the WorkerResult report the same number.
+      const criticConfidence = status === "approved" ? 0.84 : 0.71;
+
       this.eventBus?.emit({
         type: "critic_review",
         payload: {
@@ -225,6 +230,7 @@ export class CriticWorker extends AbstractWorker {
           issues: heuristicIssues.length,
           costUsd: modelCostUsd,
           fellBack,
+          confidence: criticConfidence,
         },
       });
 
@@ -238,7 +244,7 @@ export class CriticWorker extends AbstractWorker {
           outputTokens: modelTokensOut,
           estimatedCostUsd: modelCostUsd,
         },
-        confidence: status === "approved" ? 0.84 : 0.71,
+        confidence: criticConfidence,
         touchedFiles: [],
         issues: heuristicIssues,
         durationMs: Date.now() - startedAt,
@@ -276,8 +282,9 @@ export class CriticWorker extends AbstractWorker {
 
   /**
    * Resolve the active model configuration for a given projectRoot.
-   * Each call reads .zendorium/model-config.json from the supplied root,
-   * so per-task projectRoot overrides honor per-repo model configurations
+   * Each call reads .aedis/model-config.json from the supplied root
+   * (with .zendorium/model-config.json as a legacy fallback), so
+   * per-task projectRoot overrides honor per-repo model configurations
    * if the user has them.
    */
   private getActiveModelConfig(projectRoot: string): { model: string; provider: string } {
@@ -312,7 +319,7 @@ export class CriticWorker extends AbstractWorker {
     tokenBudget: number,
   ): InvokeConfig[] {
     const systemPrompt =
-      "You are the Critic worker in Zendorium. Review code changes for correctness, style, and contract compliance. Be terse. Report blockers clearly.";
+      "You are the Critic worker in Aedis. Review code changes for correctness, style, and contract compliance. Be terse. Report blockers clearly.";
 
     const chain: InvokeConfig[] = [{
       provider: primaryProvider,

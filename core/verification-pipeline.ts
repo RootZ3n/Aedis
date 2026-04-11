@@ -23,6 +23,8 @@ import {
   type JudgmentReport,
   type IntegrationJudgeConfig,
 } from "./integration-judge.js";
+import type { ChangeSet } from "./change-set.js";
+import type { PlanWave } from "./multi-file-planner.js";
 
 // ─── Stage Types ─────────────────────────────────────────────────────
 
@@ -78,6 +80,18 @@ export interface VerificationReceipt {
   readonly summary: string;
   /** Total verification time */
   readonly totalDurationMs: number;
+  /**
+   * Optional scope tag describing what slice of the change-set this
+   * receipt verified:
+   *   - undefined → legacy/full verification (all changes, single pass)
+   *   - `{kind: "change-set"}` → the entire accepted change-set
+   *   - `{kind: "wave", waveId}` → one wave of the multi-file plan
+   * The Coordinator uses this so a failure can be attributed back to
+   * the wave that produced it.
+   */
+  readonly scope?:
+    | { readonly kind: "change-set"; readonly fileCount: number }
+    | { readonly kind: "wave"; readonly waveId: number; readonly waveName: string; readonly fileCount: number };
 }
 
 // ─── Hook Types ──────────────────────────────────────────────────────
@@ -145,6 +159,104 @@ export class VerificationPipeline {
   constructor(config: Partial<VerificationPipelineConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.judge = new IntegrationJudge(this.config.judgeConfig);
+  }
+
+  /**
+   * Verify the full accepted ChangeSet before final apply/commit.
+   *
+   * This is the Phase 9 entry point in multi-file runs: every wave has
+   * completed, the IntegrationJudge has approved cross-file coherence,
+   * and the Coordinator wants one last sanity pass against the entire
+   * change-set as a unit — not just an ad-hoc bag of FileChange records.
+   *
+   * The receipt is tagged with `scope: {kind: "change-set"}` so the
+   * MergeGate can distinguish change-set-level failures from file-level
+   * ones when building blocking reasons.
+   */
+  async verifyChangeSet(
+    intent: IntentObject,
+    runState: RunState,
+    changeSet: ChangeSet,
+    changes: readonly FileChange[],
+    workerResults: readonly WorkerResult[],
+  ): Promise<VerificationReceipt> {
+    const scopedFiles = new Set(
+      changeSet.filesInScope.map((f) => f.path),
+    );
+    const scopedChanges =
+      scopedFiles.size === 0
+        ? changes
+        : changes.filter((c) => scopedFiles.has(c.path));
+
+    const receipt = await this.verify(intent, runState, scopedChanges, workerResults);
+    return {
+      ...receipt,
+      scope: { kind: "change-set", fileCount: scopedChanges.length },
+      summary: `[change-set] ${receipt.summary}`,
+    };
+  }
+
+  /**
+   * Verify a single wave of a multi-file plan after its builders have
+   * completed. The pipeline runs only against the wave's files and
+   * attaches the wave id to the receipt so the Coordinator can block
+   * downstream waves on the failing one.
+   *
+   * Contract:
+   *   - If the wave contains no changed files, returns a synthetic
+   *     "pass" receipt with zero stages (nothing to verify).
+   *   - Otherwise the full pipeline runs against the filtered change
+   *     set; the IntegrationJudge still sees only the wave's files,
+   *     which keeps cross-wave noise out of per-wave findings.
+   */
+  async verifyWave(
+    intent: IntentObject,
+    runState: RunState,
+    wave: PlanWave,
+    changes: readonly FileChange[],
+    workerResults: readonly WorkerResult[],
+  ): Promise<VerificationReceipt> {
+    const waveFiles = new Set(wave.files);
+    const waveChanges =
+      waveFiles.size === 0
+        ? []
+        : changes.filter((c) => waveFiles.has(c.path));
+
+    if (waveChanges.length === 0) {
+      const now = new Date().toISOString();
+      return {
+        id: randomUUID(),
+        runId: runState.id,
+        intentId: intent.id,
+        timestamp: now,
+        verdict: "pass",
+        confidenceScore: 1,
+        stages: [],
+        judgmentReport: null,
+        allIssues: [],
+        blockers: [],
+        summary: `[wave ${wave.id} ${wave.name}] PASS — no changes to verify`,
+        totalDurationMs: 0,
+        scope: {
+          kind: "wave",
+          waveId: wave.id,
+          waveName: wave.name,
+          fileCount: 0,
+        },
+      };
+    }
+
+    const receipt = await this.verify(intent, runState, waveChanges, workerResults);
+    return {
+      ...receipt,
+      scope: {
+        kind: "wave",
+        waveId: wave.id,
+        waveName: wave.name,
+        fileCount: waveChanges.length,
+      },
+      summary: `[wave ${wave.id} ${wave.name}] ${receipt.summary}`,
+    };
   }
 
   /**

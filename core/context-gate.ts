@@ -1,24 +1,54 @@
 import type { ProjectMemory } from "./project-memory.js";
+import type { ChangeSet } from "./change-set.js";
+import type { PlanWave } from "./multi-file-planner.js";
+import type { Invariant } from "./invariant-extractor.js";
 
 export interface GatedContext {
   relevantFiles: string[];
   recentTaskSummaries: string[];
   language: string;
+  /**
+   * Shared invariants the current wave must respect. Populated only
+   * when gating is wave-aware (see gateContextForWave). Empty on
+   * plain gateContext calls so single-file runs don't see a token
+   * bloat they don't need.
+   */
+  waveInvariants?: WaveInvariantRef[];
+  /**
+   * Sibling files drawn from the same wave — not the whole plan.
+   * Included only when gating is wave-aware AND the sibling is likely
+   * relevant (filename overlap with the prompt, or shared invariant
+   * name). Minimal-context discipline is enforced by
+   * MAX_WAVE_SIBLINGS.
+   */
+  waveSiblings?: string[];
+  /**
+   * Ordered log of reasons for every item we injected. Every entry
+   * maps 1:1 to an item in relevantFiles / waveInvariants /
+   * waveSiblings. The Coordinator prints this so reviewers can audit
+   * what the gate showed the worker and why.
+   */
+  inclusionLog?: string[];
+}
+
+export interface WaveInvariantRef {
+  readonly name: string;
+  readonly type: Invariant["type"];
+  readonly description: string;
 }
 
 const MAX_RELEVANT_FILES = 10;
 const MAX_RECENT_TASKS = 3;
+const MAX_WAVE_INVARIANTS = 12;
+const MAX_WAVE_SIBLINGS = 6;
 
+/**
+ * Base context gate — used when there is no wave context yet (single-file
+ * runs, scouting, pre-charter memory lookups). Keeps a flat, minimal
+ * signature so the hot path stays cheap.
+ */
 export function gateContext(memory: ProjectMemory, prompt: string): GatedContext {
-  const words = Array.from(
-    new Set(
-      prompt
-        .toLowerCase()
-        .split(/\s+/)
-        .map(word => word.replace(/[^a-z0-9_-]/g, ""))
-        .filter(word => word.length >= 4)
-    )
-  );
+  const words = extractPromptWords(prompt);
 
   const recentFiles = memory.recentFiles ?? [];
   const relevantFiles = words.length === 0
@@ -41,4 +71,105 @@ export function gateContext(memory: ProjectMemory, prompt: string): GatedContext
     recentTaskSummaries,
     language: memory.language ?? "unknown",
   };
+}
+
+export interface WaveContextInputs {
+  readonly memory: ProjectMemory;
+  readonly prompt: string;
+  readonly changeSet: ChangeSet;
+  readonly wave: PlanWave;
+  /**
+   * Target files the current worker has been assigned. Used to pick
+   * siblings — we never return the target file itself as a sibling,
+   * and we only pick from the wave's own file list.
+   */
+  readonly targetFiles: readonly string[];
+}
+
+/**
+ * Wave-aware gate — used by the Coordinator when dispatching a builder
+ * inside a multi-file plan. Returns a GatedContext with:
+ *
+ *   - relevantFiles         — same base heuristic as gateContext
+ *   - waveInvariants        — only invariants whose `files` overlap
+ *                             the current wave's file set. Invariants
+ *                             that apply to later waves are deliberately
+ *                             withheld to preserve minimal-context
+ *                             discipline.
+ *   - waveSiblings          — files in the same wave, ranked by filename
+ *                             overlap with the prompt or shared
+ *                             invariant names. Capped at
+ *                             MAX_WAVE_SIBLINGS.
+ *   - inclusionLog          — one line per injected item explaining
+ *                             the reason (for Coordinator logging).
+ */
+export function gateContextForWave(inputs: WaveContextInputs): GatedContext {
+  const { memory, prompt, changeSet, wave, targetFiles } = inputs;
+  const base = gateContext(memory, prompt);
+  const log: string[] = [];
+
+  for (const file of base.relevantFiles) {
+    log.push(`relevant: ${file} — prompt word match on project memory`);
+  }
+
+  const waveFiles = new Set(wave.files);
+  const waveInvariants: WaveInvariantRef[] = [];
+  for (const invariant of changeSet.invariants) {
+    const touchesWave = invariant.files.some((f) => waveFiles.has(f));
+    if (!touchesWave) continue;
+
+    waveInvariants.push({
+      name: invariant.name,
+      type: invariant.type,
+      description: invariant.description,
+    });
+    log.push(
+      `invariant: ${invariant.type}:${invariant.name} — touches ${invariant.files.filter((f) => waveFiles.has(f)).length} file(s) in wave ${wave.id}`,
+    );
+    if (waveInvariants.length >= MAX_WAVE_INVARIANTS) break;
+  }
+
+  const words = extractPromptWords(prompt);
+  const targetSet = new Set(targetFiles);
+  const siblingCandidates = wave.files.filter((f) => !targetSet.has(f));
+
+  const rankedSiblings = siblingCandidates
+    .map((file) => {
+      const normalized = file.toLowerCase();
+      const promptMatch = words.some((w) => normalized.includes(w));
+      const sharesInvariant = waveInvariants.some((inv) =>
+        changeSet.invariants.some(
+          (i) => i.name === inv.name && i.files.includes(file),
+        ),
+      );
+      return { file, promptMatch, sharesInvariant };
+    })
+    .filter((entry) => entry.promptMatch || entry.sharesInvariant)
+    .slice(0, MAX_WAVE_SIBLINGS);
+
+  for (const entry of rankedSiblings) {
+    const reasons: string[] = [];
+    if (entry.promptMatch) reasons.push("prompt word match");
+    if (entry.sharesInvariant) reasons.push("shared invariant");
+    log.push(`sibling: ${entry.file} — ${reasons.join(", ")}`);
+  }
+
+  return {
+    ...base,
+    waveInvariants,
+    waveSiblings: rankedSiblings.map((entry) => entry.file),
+    inclusionLog: log,
+  };
+}
+
+function extractPromptWords(prompt: string): string[] {
+  return Array.from(
+    new Set(
+      prompt
+        .toLowerCase()
+        .split(/\s+/)
+        .map(word => word.replace(/[^a-z0-9_-]/g, ""))
+        .filter(word => word.length >= 4)
+    )
+  );
 }

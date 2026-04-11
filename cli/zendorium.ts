@@ -5,11 +5,19 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 import { TerminalStream, streamSocket } from "./stream.js";
 
-// Override either via env to point at a remote Zendorium (e.g. tailscale-served).
+// Override either via env to point at a remote Aedis (e.g. tailscale-served).
 // WS_URL defaults to API_BASE with the scheme swapped + /ws appended.
-//   ZENDORIUM_API_BASE=https://mushin.tail8bb475.ts.net/zendorium zendorium health
-const API_BASE = process.env["ZENDORIUM_API_BASE"] ?? "http://localhost:18796";
-const WS_URL = process.env["ZENDORIUM_WS_URL"] ?? API_BASE.replace(/^http(s?):/, "ws$1:") + "/ws";
+//   AEDIS_API_BASE=https://mushin.tail8bb475.ts.net/aedis aedis health
+// ZENDORIUM_API_BASE / ZENDORIUM_WS_URL are still read as legacy fallbacks
+// so existing shell profiles keep working after the rename.
+const API_BASE =
+  process.env["AEDIS_API_BASE"] ??
+  process.env["ZENDORIUM_API_BASE"] ??
+  "http://localhost:18796";
+const WS_URL =
+  process.env["AEDIS_WS_URL"] ??
+  process.env["ZENDORIUM_WS_URL"] ??
+  API_BASE.replace(/^http(s?):/, "ws$1:") + "/ws";
 
 type Command = "run" | "status" | "runs" | "workers" | "health";
 
@@ -72,16 +80,16 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function usage(): string {
   return [
-    "zendorium \"fix the auth bug in login.ts\"",
-    "zendorium run \"add dark mode to settings\" [--repo <path>] [--watch]",
-    "zendorium status <run_id>",
-    "zendorium runs",
-    "zendorium workers",
-    "zendorium health",
+    "aedis \"fix the auth bug in login.ts\"",
+    "aedis run \"add dark mode to settings\" [--repo <path>] [--watch]",
+    "aedis status <run_id>",
+    "aedis runs",
+    "aedis workers",
+    "aedis health",
     "",
     "Run options:",
     "  --repo <path>   Build against a specific repo (default: cwd)",
-    "  --watch         Tail systemd journal for zendorium during the run",
+    "  --watch         Tail systemd journal for aedis during the run",
   ].join("\n");
 }
 
@@ -183,7 +191,7 @@ function extractCostUsd(payload: any): number {
 const JOURNAL_FILTER = /req-|favicon|websocket|level/;
 
 /**
- * Spawn `journalctl -u zendorium -f --since now` and stream its stdout
+ * Spawn `journalctl -u aedis -f --since now` and stream its stdout
  * to the CLI's stdout, line-by-line, dropping lines that match the
  * JOURNAL_FILTER regex (req-/favicon/websocket/level noise).
  *
@@ -195,7 +203,10 @@ const JOURNAL_FILTER = /req-|favicon|websocket|level/;
 function startJournalTail(): ChildProcess | null {
   let child: ChildProcess;
   try {
-    child = spawn("journalctl", ["-u", "zendorium", "-f", "--since", "now"], {
+    // Try the new "aedis" unit first, then fall back to "zendorium" for
+    // hosts that haven't renamed the systemd service yet.
+    const unit = process.env["AEDIS_SYSTEMD_UNIT"] ?? "aedis";
+    child = spawn("journalctl", ["-u", unit, "-f", "--since", "now"], {
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (err) {
@@ -257,8 +268,8 @@ async function main(): Promise<void> {
       const data = await fetchJson("/health");
       process.stdout.write(formatHealth(data) + "\n");
     } catch (err) {
-      process.stderr.write(`zendorium health: ${err instanceof Error ? err.message : String(err)}\n`);
-      process.stderr.write(`  Is the Zendorium server running at ${API_BASE}?\n`);
+      process.stderr.write(`aedis health: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`  Is the Aedis server running at ${API_BASE}?\n`);
       process.exitCode = 1;
     }
     return;
@@ -269,8 +280,8 @@ async function main(): Promise<void> {
       const data = await fetchJson("/workers");
       process.stdout.write(formatWorkers(data) + "\n");
     } catch (err) {
-      process.stderr.write(`zendorium workers: ${err instanceof Error ? err.message : String(err)}\n`);
-      process.stderr.write(`  Is the Zendorium server running at ${API_BASE}?\n`);
+      process.stderr.write(`aedis workers: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`  Is the Aedis server running at ${API_BASE}?\n`);
       process.exitCode = 1;
     }
     return;
@@ -281,7 +292,7 @@ async function main(): Promise<void> {
       const data = await fetchJson("/runs");
       process.stdout.write(JSON.stringify(data, null, 2) + "\n");
     } catch (err) {
-      process.stderr.write(`zendorium runs: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`aedis runs: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exitCode = 1;
     }
     return;
@@ -298,7 +309,7 @@ async function main(): Promise<void> {
       const data = await fetchJson(`/tasks/${encodeURIComponent(runId)}`);
       process.stdout.write(JSON.stringify(data, null, 2) + "\n");
     } catch (err) {
-      process.stderr.write(`zendorium status: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`aedis status: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exitCode = 1;
     }
     return;
@@ -319,7 +330,7 @@ async function main(): Promise<void> {
   let repoPath: string;
   if (parsed.repo) {
     if (!existsSync(parsed.repo)) {
-      process.stderr.write(`zendorium: --repo path does not exist: ${parsed.repo}\n`);
+      process.stderr.write(`aedis: --repo path does not exist: ${parsed.repo}\n`);
       process.exitCode = 1;
       return;
     }
@@ -335,7 +346,7 @@ async function main(): Promise<void> {
   // function kills it (handles both success and exception paths).
   let journalTail: ChildProcess | null = null;
   if (parsed.watch) {
-    process.stderr.write(`[watch] tailing systemd journal for zendorium (filter: req-/favicon/websocket/level)\n`);
+    process.stderr.write(`[watch] tailing systemd journal for aedis (filter: req-/favicon/websocket/level)\n`);
     journalTail = startJournalTail();
   }
 
@@ -357,8 +368,8 @@ async function main(): Promise<void> {
       process.stderr.write(`Task ${taskId} accepted. Connecting to live stream...\n`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`zendorium: failed to submit task: ${msg}\n`);
-      process.stderr.write(`  Is the Zendorium server running at ${API_BASE}?\n`);
+      process.stderr.write(`aedis: failed to submit task: ${msg}\n`);
+      process.stderr.write(`  Is the Aedis server running at ${API_BASE}?\n`);
       process.exitCode = 1;
       return;
     }
@@ -374,7 +385,7 @@ async function main(): Promise<void> {
         request: {
           type: "subscribe",
           taskId,
-          client: "zendorium-cli",
+          client: "aedis-cli",
         },
         // Close when run completes or fails
         closeOnComplete: true,
@@ -385,7 +396,7 @@ async function main(): Promise<void> {
         : typeof error === "object" && error !== null && "message" in error
           ? String((error as any).message)
           : String(error);
-      process.stderr.write(`zendorium: stream error: ${msg}\n`);
+      process.stderr.write(`aedis: stream error: ${msg}\n`);
       process.exitCode = 1;
     }
 

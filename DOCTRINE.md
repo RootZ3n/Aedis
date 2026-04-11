@@ -1,10 +1,13 @@
-# Zendorium Doctrine
+# Aedis Doctrine
+
+> Originally written as the Zendorium Doctrine. The system was renamed to
+> Aedis; the doctrine did not change.
 
 ## Prime Directive
 
 **Maximize expected build quality per unit cost, subject to governance and rollback safety.**
 
-Every architectural decision in Zendorium flows from this. Quality is not optional, but overspending on trivial tasks is waste. Safety is non-negotiable.
+Every architectural decision in Aedis flows from this. Quality is not optional, but overspending on trivial tasks is waste. Safety is non-negotiable.
 
 ---
 
@@ -97,7 +100,7 @@ Every model call produces a cost entry: model name, input tokens, output tokens,
 
 ## Model Assignments
 
-Default model assignments are defined in `server/routes/config.ts` (`DEFAULT_MODEL_CONFIG`) and overridden per-project by `.zendorium/model-config.json` if present. Workers read the active assignment via `loadModelConfig()` on every execute, so configuration changes take effect on the next run without a process restart.
+Default model assignments are defined in `server/routes/config.ts` (`DEFAULT_MODEL_CONFIG`) and overridden per-project by `.aedis/model-config.json` if present (with `.zendorium/model-config.json` read as a legacy fallback during the rename). Workers read the active assignment via `loadModelConfig()` on every execute, so configuration changes take effect on the next run without a process restart.
 
 Per-role fallbacks are NOT stored in `model-config.json` — they are hardcoded in each worker's constructor (`workers/builder.ts`, `workers/critic.ts`) via the `fallbackModel` field. Both Builder and Critic use the same `invokeModelWithFallback()` mechanism in `core/model-invoker.ts`. The default request timeout is **5 minutes** (300_000 ms) — raised from 2 minutes after ModelStudio was identified as slow but functional under heavy load.
 
@@ -158,7 +161,7 @@ The previous 2-minute cap was tripping ModelStudio on essentially every Builder 
 
 ---
 
-## What Zendorium Is Not
+## What Aedis Is Not
 
 - **Not a code generator.** It's a build orchestration system that happens to use AI workers.
 - **Not autonomous.** The Coordinator manages the pipeline; the user approves the intent and the final apply.

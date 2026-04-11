@@ -106,6 +106,13 @@ const PROMPT_CHAR_CAP = PROMPT_TOKEN_CAP * 4;     // 32_000
 const CONTEXT_TOKEN_CAP = 6_000;
 const CONTEXT_CHAR_CAP = CONTEXT_TOKEN_CAP * 4;   // 24_000
 const LARGE_FILE_CHAR_THRESHOLD = 16_000;
+/**
+ * Calibrated builder confidence (0..1). Used for both the
+ * builder_complete event emit and the returned WorkerResult so the
+ * Lumen stream and the receipt always agree. Builders that later grow
+ * real per-run confidence should update both sites together.
+ */
+const BUILDER_CONFIDENCE = 0.78;
 
 // Reserved overhead for separators and the "Relevant context:" header
 // when computing the available context budget.
@@ -413,12 +420,17 @@ export class BuilderWorker extends AbstractWorker {
           sectionRange: sectionInfo
             ? { startLine: sectionInfo.startLine, endLine: sectionInfo.endLine, totalLines: sectionInfo.totalLines }
             : null,
+          // Carry the same confidence the WorkerResult will report so
+          // Lumen shows the real number instead of a "?" on live
+          // events. The coordinator also emits a duplicate builder_complete
+          // after the worker returns; both now agree.
+          confidence: BUILDER_CONFIDENCE,
         },
       });
 
       return this.success(assignment, output, {
         cost,
-        confidence: 0.78,
+        confidence: BUILDER_CONFIDENCE,
         touchedFiles: [
           { path: relativePath, operation: "read" },
           { path: relativePath, operation: "modify" },
@@ -459,8 +471,9 @@ export class BuilderWorker extends AbstractWorker {
 
   /**
    * Resolve the active model configuration for a given projectRoot.
-   * Each call reads .zendorium/model-config.json from the supplied root,
-   * so per-task projectRoot overrides honor per-repo model configurations
+   * Each call reads .aedis/model-config.json from the supplied root
+   * (with .zendorium/model-config.json as a legacy fallback), so
+   * per-task projectRoot overrides honor per-repo model configurations
    * if the user has them.
    */
   private getActiveModelConfig(projectRoot: string): { model: string; provider: string } {
@@ -482,8 +495,8 @@ export class BuilderWorker extends AbstractWorker {
     sectionMode: boolean,
   ): InvokeConfig[] {
     const systemPrompt = sectionMode
-      ? "You are the Builder worker in Zendorium. You are editing a SECTION of a large file. Return ONLY a unified diff with ORIGINAL file line numbers (do not restart at 1). No markdown fences. No explanations. No full file content — that would corrupt the file."
-      : "You are the Builder worker in Zendorium. Obey the contract exactly. Return ONLY the full final file content. No markdown fences. No explanations.";
+      ? "You are the Builder worker in Aedis. You are editing a SECTION of a large file. Return ONLY a unified diff with ORIGINAL file line numbers (do not restart at 1). No markdown fences. No explanations. No full file content — that would corrupt the file."
+      : "You are the Builder worker in Aedis. Obey the contract exactly. Return ONLY the full final file content. No markdown fences. No explanations.";
 
     const chain: InvokeConfig[] = [{
       provider: primaryProvider,
