@@ -7,6 +7,7 @@ export interface GatedContext {
 }
 
 const MAX_RELEVANT_FILES = 10;
+const MAX_RECENT_TASKS = 3;
 
 export function gateContext(memory: ProjectMemory, prompt: string): GatedContext {
   const words = Array.from(
@@ -30,13 +31,14 @@ export function gateContext(memory: ProjectMemory, prompt: string): GatedContext
         .sort()
         .slice(0, MAX_RELEVANT_FILES);
 
-  const recentTaskSummaries = memory.recentTasks
-    .slice(0, 3)
+  const recentTasks = memory.recentTasks ?? [];
+  const recentTaskSummaries = recentTasks
+    .slice(0, MAX_RECENT_TASKS)
     .map(task => task.prompt.slice(0, 120));
 
   return {
     relevantFiles,
     recentTaskSummaries,
-    language: memory.language,
+    language: memory.language ?? "unknown",
   };
 }

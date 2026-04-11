@@ -321,3 +321,11 @@ export async function deleteMemory(projectRoot: string): Promise<void> {
     await unlink(path);
   }
 }
+
+/**
+ * Returns the absolute path to the memory file for a given project root.
+ * Useful for external tooling, debugging, or manual inspection.
+ */
+export function getMemoryFilePath(projectRoot: string): string {
+  return memoryPath(projectRoot);
+}
