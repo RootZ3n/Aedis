@@ -49,7 +49,8 @@ export class IntegratorWorker extends AbstractWorker {
   async execute(assignment: WorkerAssignment): Promise<IntegratorResult> {
     const startedAt = Date.now();
     try {
-      if (!this.runState) {
+      const runState = this.resolveRunState(assignment);
+      if (!runState) {
         throw new Error("Integrator requires RunState for coherence tracking");
       }
       const approvedBuilderResults = assignment.upstreamResults.filter(
@@ -64,7 +65,7 @@ export class IntegratorWorker extends AbstractWorker {
       );
       const judgmentReport = this.judge.judge(
         assignment.intent,
-        this.runState,
+        runState,
         changes,
         assignment.upstreamResults,
         "pre-apply",
@@ -95,12 +96,12 @@ export class IntegratorWorker extends AbstractWorker {
         judgmentReport,
       };
 
-      recordCoherenceCheck(this.runState, {
+      recordCoherenceCheck(runState, {
         phase: "post-build",
         passed: judgmentReport.passed,
         checks: coherenceCheck.checks,
       });
-      recordDecision(this.runState, {
+      recordDecision(runState, {
         description: `Integrator reported ${status}`,
         madeBy: this.name,
         taskId: assignment.task.id,
@@ -174,5 +175,28 @@ export class IntegratorWorker extends AbstractWorker {
       ...report.blockers.map((issue) => ({ severity: "critical" as const, message: issue.message, file: issue.files[0] })),
       ...report.warnings.map((issue) => ({ severity: "warning" as const, message: issue.message, file: issue.files[0] })),
     ];
+  }
+
+  /**
+   * Resolve the RunState for this execution.
+   *
+   * Lookup order:
+   *   1. assignment.runState — attached by Coordinator.dispatchNode right
+   *      after building the assignment via trustRouter.buildAssignment.
+   *      This is the per-run canonical source for production runs.
+   *   2. this.runState — the constructor-time fallback. Almost always null
+   *      in production because workers are constructed at boot before any
+   *      run exists. Used by tests and stand-alone harnesses that pass a
+   *      RunState explicitly to the constructor.
+   *
+   * Uses structural typing (the cast through `unknown`) so we don't need
+   * to add a `runState` field to WorkerAssignment in workers/base.ts.
+   * The Coordinator attaches the field via the same cast pattern, and
+   * TypeScript's structural typing covers the read on this side.
+   */
+  private resolveRunState(assignment: WorkerAssignment): RunState | null {
+    const attached = (assignment as unknown as { runState?: RunState }).runState;
+    if (attached) return attached;
+    return this.runState;
   }
 }

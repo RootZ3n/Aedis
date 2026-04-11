@@ -41,6 +41,7 @@ import {
   type Assumption,
   type Deliverable,
 } from "./intent.js";
+import { getCallLog } from "./model-invoker.js";
 import {
   CharterGenerator,
   type RequestAnalysis,
@@ -1234,49 +1235,92 @@ export class Coordinator {
     commitSha: string | null,
     durationMs: number
   ): RunReceipt {
-    // Aggregate cost from worker results — run.totalCost is not auto-updated
-    // by the executor (collectChanges only collects diffs, not costs), so it
-    // stays at zero unless we sum it here. WorkerResult.cost shape varies
-    // across worker types, so we probe several candidate field paths.
-    // The diagnostic log below dumps the first WorkerResult's keys when no
-    // cost data is found, so the unknown field path becomes obvious.
+    // Aggregate cost from worker results.
+    //
+    // CostEntry lives at the TOP LEVEL of WorkerResult:
+    //   { workerType, taskId, success, output, issues,
+    //     cost, confidence, touchedFiles, assumptions, durationMs }
+    //
+    // The previous version probed several nested paths because we weren't
+    // sure where cost lived; the diagnostic WARN log dumped the actual
+    // shape and confirmed it's always `wr.cost` directly. CostEntry shape:
+    //   { model, inputTokens, outputTokens, estimatedCostUsd }
+    //
+    // FALLBACK: if all WorkerResult.cost values are 0 (the model call may
+    // not have populated usage stats, or every worker in the graph was
+    // Scout/Verifier which report zero), we pull the actual dollar amounts
+    // from the model-invoker call log. The call log is the source of truth
+    // — every model call is logged with real token counts and dollar
+    // amounts via model-invoker's estimateCost(). We filter call log
+    // entries by timestamp to include only those within THIS run's window
+    // (Date.now() - durationMs to Date.now()) so concurrent runs don't
+    // double-count.
     let inputTokens = 0;
     let outputTokens = 0;
     let estimatedCostUsd = 0;
     let model = active.run.totalCost?.model ?? "";
 
     for (const wr of active.workerResults) {
-      const candidates: unknown[] = [
-        (wr as any).cost,
-        (wr as any).usage,
-        (wr as any).output?.cost,
-        (wr as any).output?.usage,
-        (wr as any).output?.totalCost,
-        (wr as any).metadata?.cost,
-      ];
-      for (const c of candidates) {
-        if (!c || typeof c !== "object") continue;
-        const obj = c as Record<string, unknown>;
-        const inT = (obj["inputTokens"] as number) ?? (obj["input_tokens"] as number);
-        const outT = (obj["outputTokens"] as number) ?? (obj["output_tokens"] as number);
-        const costUsd = (obj["estimatedCostUsd"] as number)
-          ?? (obj["costUsd"] as number)
-          ?? (obj["cost_usd"] as number);
-        const m = obj["model"] as string | undefined;
-        let matched = false;
-        if (typeof inT === "number") { inputTokens += inT; matched = true; }
-        if (typeof outT === "number") { outputTokens += outT; matched = true; }
-        if (typeof costUsd === "number") { estimatedCostUsd += costUsd; matched = true; }
-        if (!model && typeof m === "string") model = m;
-        if (matched) break; // first matching shape wins per WorkerResult
-      }
+      // wr.cost is top-level on WorkerResult. Cast to a structural type
+      // for safe field access without depending on the exact CostEntry
+      // import path here.
+      const c = wr.cost as
+        | { model?: string; inputTokens?: number; outputTokens?: number; estimatedCostUsd?: number }
+        | undefined;
+      if (!c || typeof c !== "object") continue;
+      if (typeof c.inputTokens === "number") inputTokens += c.inputTokens;
+      if (typeof c.outputTokens === "number") outputTokens += c.outputTokens;
+      if (typeof c.estimatedCostUsd === "number") estimatedCostUsd += c.estimatedCostUsd;
+      if (!model && typeof c.model === "string") model = c.model;
     }
 
     if (active.workerResults.length > 0) {
-      console.log(`[coordinator] aggregateCost: ${active.workerResults.length} worker result(s) → $${estimatedCostUsd.toFixed(6)} (${inputTokens}/${outputTokens} tokens)`);
-      if (estimatedCostUsd === 0 && (active.run.totalCost?.estimatedCostUsd ?? 0) === 0) {
-        const sample = active.workerResults[0] ?? {};
-        console.warn(`[coordinator] aggregateCost: WARN — no cost field found in any WorkerResult. First result keys: [${Object.keys(sample).join(", ")}]. output keys: [${Object.keys(((sample as any).output ?? {})).join(", ")}]`);
+      console.log(
+        `[coordinator] aggregateCost (WorkerResult.cost direct): ` +
+        `${active.workerResults.length} worker result(s) → ` +
+        `$${estimatedCostUsd.toFixed(6)} (${inputTokens}/${outputTokens} tokens)`
+      );
+    }
+
+    // Call-log fallback: pull from model-invoker if WorkerResult costs
+    // were all 0. The model-invoker tracks every call with real token
+    // counts and dollar amounts via estimateCost(); the call log is the
+    // canonical source of truth.
+    if (estimatedCostUsd === 0) {
+      const runStartMs = Date.now() - durationMs;
+      const log = getCallLog();
+      let fallbackCost = 0;
+      let fallbackIn = 0;
+      let fallbackOut = 0;
+      let fallbackModel = "";
+      let entriesUsed = 0;
+      for (const entry of log) {
+        const entryMs = new Date(entry.timestamp).getTime();
+        if (entryMs >= runStartMs) {
+          fallbackCost += entry.costUsd;
+          fallbackIn += entry.tokensIn;
+          fallbackOut += entry.tokensOut;
+          if (!fallbackModel && entry.model) fallbackModel = entry.model;
+          entriesUsed++;
+        }
+      }
+      if (entriesUsed > 0 && fallbackCost > 0) {
+        console.log(
+          `[coordinator] aggregateCost fallback: WorkerResult.cost was 0, ` +
+          `pulled $${fallbackCost.toFixed(6)} from model-invoker call log ` +
+          `(${entriesUsed} entries within ${durationMs}ms run window)`
+        );
+        estimatedCostUsd = fallbackCost;
+        inputTokens = fallbackIn;
+        outputTokens = fallbackOut;
+        if (!model) model = fallbackModel;
+      } else if ((active.run.totalCost?.estimatedCostUsd ?? 0) === 0) {
+        console.warn(
+          `[coordinator] aggregateCost: no cost data anywhere — ` +
+          `WorkerResult.cost was 0 for all ${active.workerResults.length} ` +
+          `workers, model-invoker call log has ${entriesUsed} entry/entries ` +
+          `in the ${durationMs}ms run window. Receipt will report $0.000000.`
+        );
       }
     }
 
