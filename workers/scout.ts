@@ -524,6 +524,10 @@ export class ScoutWorker extends AbstractWorker {
       factors.push("Task spans multiple files");
       mitigations.push("Scout similar files first and split work if needed");
     }
+    if (assignment.task.targetFiles.length > 5) {
+      factors.push("Task spans many files");
+      mitigations.push("Batch changes carefully and verify each file independently");
+    }
 
     const level = factors.length >= 4 ? "critical" : factors.length >= 3 ? "high" : factors.length >= 2 ? "medium" : "low";
     return { level, factors, mitigations };
