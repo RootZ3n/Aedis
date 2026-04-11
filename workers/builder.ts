@@ -21,6 +21,7 @@ import {
   type WorkerAssignment,
   type WorkerResult,
 } from "./base.js";
+import { extractRelevantSection, type SectionExtraction } from "./scout.js";
 
 // ─── Contract Types (exported for Critic) ────────────────────────────
 
@@ -89,23 +90,49 @@ const MAX_RUN_CONTEXTS = 50;
 // tokenization varies by model, but this approximation is intentionally
 // conservative so we never exceed the real limit).
 //
-//   PROMPT_TOKEN_CAP   — hard ceiling on the entire prompt
-//   PROMPT_CHAR_CAP    — same, in chars (TOKEN_CAP * 4)
-//   CONTEXT_TOKEN_CAP  — soft ceiling on the joined context layers block
-//   CONTEXT_CHAR_CAP   — same, in chars
+//   PROMPT_TOKEN_CAP        — hard ceiling on the entire prompt
+//   PROMPT_CHAR_CAP         — same, in chars (TOKEN_CAP * 4)
+//   CONTEXT_TOKEN_CAP       — soft ceiling on the joined context layers block
+//   CONTEXT_CHAR_CAP        — same, in chars
+//   LARGE_FILE_CHAR_THRESHOLD — when originalContent exceeds this, the
+//     Builder switches to SECTION-EDIT MODE: it calls extractRelevantSection
+//     from workers/scout.ts to get a windowed slice of the file, asks the
+//     model to produce a unified diff with original line numbers, and
+//     applies that diff to the full file on disk. This keeps coordinator.ts
+//     (54k+ chars) and similar large files editable without blowing the cap.
 //
 // The context block is truncated when it would exceed CONTEXT_CHAR_CAP
 // OR when it would push the total prompt over PROMPT_CHAR_CAP, whichever
-// is tighter. The originalContent and instructions are NEVER truncated —
-// truncating the file being modified would corrupt the patch.
+// is tighter. The originalContent and instructions are NEVER truncated by
+// the context-budget logic — but in section-edit mode, the section IS
+// the originalContent, so the practical effect is similar.
 const PROMPT_TOKEN_CAP = 8_000;
 const PROMPT_CHAR_CAP = PROMPT_TOKEN_CAP * 4;     // 32_000
 const CONTEXT_TOKEN_CAP = 6_000;
 const CONTEXT_CHAR_CAP = CONTEXT_TOKEN_CAP * 4;   // 24_000
+const LARGE_FILE_CHAR_THRESHOLD = 16_000;
 
 // Reserved overhead for separators and the "Relevant context:" header
 // when computing the available context budget.
 const CONTEXT_OVERHEAD_CHARS = 64;
+
+// ─── Section-Mode Safety Thresholds ──────────────────────────────────
+//
+// These gates exist because the previous 50% length threshold let a
+// real corruption through: coordinator.ts went from 1343 to 1298 lines
+// (96.6% retained) and the looser check waved it through to a commit.
+//
+//   SECTION_LENGTH_RETAIN_FLOOR — minimum char ratio after diff apply.
+//     Catches catastrophic truncations. 95% means the diff cannot shrink
+//     the file by more than 5% — anything more aggressive than that in
+//     a single Builder edit is almost certainly a misapplied diff.
+//
+// The end-of-file structural check (last non-blank line must end with
+// `}`, `;`, `)`, `]`, or `*/`) catches the SUBTLE truncations that pass
+// the length check — like the 1343→1298 case which retained 96.6%. A
+// file truncated mid-function will end with a partial statement, never
+// with a clean closing token.
+const SECTION_LENGTH_RETAIN_FLOOR = 0.95;
 
 // ─── Internal types for prompt assembly ──────────────────────────────
 
@@ -120,6 +147,7 @@ interface BuiltPrompt {
   readonly layersIncluded: number;
   readonly layersTotal: number;
   readonly originalContentChars: number;
+  readonly sectionMode: boolean;
 }
 
 interface TruncatedFile {
@@ -210,13 +238,50 @@ export class BuilderWorker extends AbstractWorker {
       const contract = this.buildContract(assignment);
       const targetPath = this.resolveTarget(contract.file);
       const relativePath = this.toRelative(targetPath);
-      const originalContent = await readFile(targetPath, "utf8");
+
+      // ALWAYS read the full file. In section-edit mode we use a windowed
+      // slice for the prompt, but the diff is applied back to the FULL
+      // content on disk — so fullContent must be the source of truth.
+      const fullContent = await readFile(targetPath, "utf8");
       this.logFileTouch(taskId, relativePath, "read");
+
+      // ─── LARGE FILE HANDLING ─────────────────────────────────────────
+      // If the full file exceeds LARGE_FILE_CHAR_THRESHOLD (16k chars),
+      // call extractRelevantSection from scout.ts to get a windowed slice
+      // centered on the function/method most relevant to the task. The
+      // section becomes the prompt content, but downstream processing
+      // (diff application, change records, write) all use fullContent.
+      let promptContent = fullContent;
+      let sectionInfo: SectionExtraction | null = null;
+
+      if (fullContent.length > LARGE_FILE_CHAR_THRESHOLD) {
+        sectionInfo = extractRelevantSection(targetPath, fullContent, contract.goal);
+        if (sectionInfo) {
+          promptContent = sectionInfo.section;
+          console.log(
+            `[builder] LARGE FILE: ${fullContent.length} chars > ${LARGE_FILE_CHAR_THRESHOLD} threshold. ` +
+            `Extracted lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines} ` +
+            `(method=${sectionInfo.extractionMethod}, function=${sectionInfo.matchedFunction ?? "(none)"}, ` +
+            `keywords=[${sectionInfo.keywordsUsed.join(", ")}], section=${promptContent.length} chars)`
+          );
+          this.noteDecision(
+            taskId,
+            `Section-edit mode: lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines}`,
+            `File too large (${fullContent.length} chars > ${LARGE_FILE_CHAR_THRESHOLD}); ` +
+            `extracted via ${sectionInfo.extractionMethod}, function=${sectionInfo.matchedFunction ?? "(none)"}`,
+          );
+        } else {
+          console.warn(
+            `[builder] LARGE FILE: ${fullContent.length} chars but extractRelevantSection returned null. ` +
+            `Will send full file — prompt may exceed cap.`
+          );
+        }
+      }
 
       // Build prompt using the *primary* model name. The fallback model sees
       // the same prompt — it's not aware of the model identity in the prompt
       // text, so this is purely a label inside the system message.
-      const built = this.buildPrompt(contract, assignment, originalContent, primaryModel);
+      const built = this.buildPrompt(contract, assignment, promptContent, primaryModel, sectionInfo);
       const prompt = built.prompt;
 
       // Truncation log — emit BEFORE the prompt-size log so the operator
@@ -232,20 +297,23 @@ export class BuilderWorker extends AbstractWorker {
         );
       }
 
-      // Hard-ceiling check — if the originalContent + fixed sections alone
-      // exceed PROMPT_CHAR_CAP, we cannot truncate further without corrupting
-      // the patch. Log loudly so the operator knows the model may refuse.
+      // Hard-ceiling check — if the fixed sections alone exceed PROMPT_CHAR_CAP,
+      // we cannot truncate further without corrupting the patch. Log loudly
+      // so the operator knows the model may refuse.
       if (built.chars > PROMPT_CHAR_CAP) {
         console.warn(
           `[builder] WARN: prompt is ${built.chars} chars (~${built.estimatedTokens} tokens), ` +
-          `over the ${PROMPT_CHAR_CAP}-char cap. originalContent alone is ${built.originalContentChars} chars. ` +
+          `over the ${PROMPT_CHAR_CAP}-char cap. originalContent (prompt slice) is ${built.originalContentChars} chars. ` +
           `The Builder will proceed but the model may truncate or refuse.`
         );
       }
 
       // Required log line — emit immediately before the model call.
       console.log(
-        `[builder] prompt size: ~${built.estimatedTokens} tokens (${built.chars} chars)`
+        `[builder] prompt size: ~${built.estimatedTokens} tokens (${built.chars} chars)` +
+        (sectionInfo
+          ? ` [section mode: lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines}]`
+          : "")
       );
 
       // Build fallback chain: primary first, Anthropic Sonnet second.
@@ -255,6 +323,7 @@ export class BuilderWorker extends AbstractWorker {
         primaryModel,
         prompt,
         assignment.tokenBudget,
+        sectionInfo !== null,
       );
 
       // Look up (or create) the per-run fallback context. The runId comes
@@ -281,11 +350,18 @@ export class BuilderWorker extends AbstractWorker {
         );
       }
 
-      // Process model response — handles diff, fenced content, or raw content
-      const { updatedContent, diff } = this.processModelResponse(response.text, relativePath, originalContent);
+      // Process model response — handles diff, fenced content, or raw content.
+      // ALWAYS pass fullContent (not promptContent) — the diff applies to
+      // the full file on disk, not to the section we showed the model.
+      const { updatedContent, diff } = this.processModelResponse(
+        response.text,
+        relativePath,
+        fullContent,
+        sectionInfo !== null,
+      );
       this.enforceForbiddenChanges(contract, updatedContent);
 
-      if (updatedContent === originalContent) {
+      if (updatedContent === fullContent) {
         throw new Error("Model returned no effective file changes");
       }
 
@@ -303,12 +379,16 @@ export class BuilderWorker extends AbstractWorker {
         path: relativePath,
         operation: "modify",
         diff,
-        originalContent,
+        // originalContent is the FULL file before the diff was applied,
+        // not the section. Downstream consumers (Critic, integrator,
+        // gitCommit) need the full original to compute coherent diffs.
+        originalContent: fullContent,
         content: updatedContent,
       }];
 
       const decisions: BuildDecision[] = [{
-        description: `Applied contract-scoped update to ${relativePath}`,
+        description: `Applied contract-scoped update to ${relativePath}` +
+          (sectionInfo ? ` (section-edit mode, lines ${sectionInfo.startLine}-${sectionInfo.endLine})` : ""),
         rationale: contract.goal,
         alternatives: ["Refuse patch outside scope", "Request narrower contract"],
       }];
@@ -345,6 +425,10 @@ export class BuilderWorker extends AbstractWorker {
           tokensIn: response.tokensIn,
           tokensOut: response.tokensOut,
           fellBack: response.usedProvider !== primaryProvider,
+          sectionMode: sectionInfo !== null,
+          sectionRange: sectionInfo
+            ? { startLine: sectionInfo.startLine, endLine: sectionInfo.endLine, totalLines: sectionInfo.totalLines }
+            : null,
         },
       });
 
@@ -411,15 +495,22 @@ export class BuilderWorker extends AbstractWorker {
    *
    * The fallback can be disabled by passing `fallbackModel: null` in
    * the BuilderWorkerConfig at construction time.
+   *
+   * In section-edit mode, the system prompt is different — it tells the
+   * model to return a unified diff with original line numbers, NOT full
+   * file content. Returning full content in section mode would replace
+   * the entire file with just the section and is unrecoverable.
    */
   private buildInvocationChain(
     primaryProvider: Provider,
     primaryModel: string,
     prompt: string,
     tokenBudget: number,
+    sectionMode: boolean,
   ): InvokeConfig[] {
-    const systemPrompt =
-      "You are the Builder worker in Zendorium. Obey the contract exactly. Return ONLY the full final file content. No markdown fences. No explanations.";
+    const systemPrompt = sectionMode
+      ? "You are the Builder worker in Zendorium. You are editing a SECTION of a large file. Return ONLY a unified diff with ORIGINAL file line numbers (do not restart at 1). No markdown fences. No explanations. No full file content — that would corrupt the file."
+      : "You are the Builder worker in Zendorium. Obey the contract exactly. Return ONLY the full final file content. No markdown fences. No explanations.";
 
     const chain: InvokeConfig[] = [{
       provider: primaryProvider,
@@ -494,38 +585,86 @@ export class BuilderWorker extends AbstractWorker {
    * many context layers survived). The caller is responsible for emitting
    * the truncation warning and the prompt-size log line.
    *
-   * Budget hierarchy:
-   *   1. Fixed sections (instructions + originalContent) — never truncated.
-   *      If these alone exceed PROMPT_CHAR_CAP, the prompt goes over and
-   *      the operator gets a loud warning at the call site.
+   * Two prompt formats:
+   *   - NORMAL MODE (sectionInfo == null): show the full file as
+   *     "Current file:" and instruct the model to return full file content.
+   *   - SECTION-EDIT MODE (sectionInfo != null): show only the windowed
+   *     section with line numbers prefixed, instruct the model to return
+   *     a unified diff with ORIGINAL file line numbers, and provide an
+   *     example diff template using the actual section line range.
+   *
+   * Budget hierarchy is the same in both modes:
+   *   1. Fixed sections (instructions + content/section) — never truncated.
    *   2. Context block — capped at min(remaining_budget, CONTEXT_CHAR_CAP).
    *      Truncated by dropping later layers and later files within a layer
-   *      first. Layer order in the assembled context is the priority order
-   *      from the ContextAssembler (target files → dependencies → patterns
-   *      → tests → similar implementations), so dropping from the tail
-   *      preserves the most relevant material.
+   *      first.
    */
   private buildPrompt(
     contract: TaskContract,
     assignment: WorkerAssignment,
-    originalContent: string,
+    promptContent: string,
     model: string,
+    sectionInfo: SectionExtraction | null,
   ): BuiltPrompt {
-    // Build the fixed (non-context) parts first so we can compute the
-    // remaining budget for the context block.
-    const fixedParts = [
-      `You are the Builder worker on model ${model}.`,
-      "You must obey the contract exactly.",
-      `Target file: ${contract.file}`,
-      `Goal: ${contract.goal}`,
-      `Constraints: ${contract.constraints.join(" | ") || "none"}`,
-      `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
-      `Interface rules: ${contract.interfaceRules.join(" | ")}`,
-      "Return ONLY the full final file content for the target file. No markdown fences. No explanations.",
-      "If the contract cannot be satisfied without leaving scope, return the original file unchanged.",
-      "Current file:",
-      originalContent,
-    ];
+    let fixedParts: string[];
+
+    if (sectionInfo) {
+      // SECTION-EDIT MODE — windowed slice + diff-only output
+      fixedParts = [
+        `You are the Builder worker on model ${model}.`,
+        "You must obey the contract exactly.",
+        `Target file: ${contract.file}`,
+        `Goal: ${contract.goal}`,
+        `Constraints: ${contract.constraints.join(" | ") || "none"}`,
+        `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
+        `Interface rules: ${contract.interfaceRules.join(" | ")}`,
+        "",
+        "SECTION-EDIT MODE — LARGE FILE",
+        `You are editing lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${contract.file}.`,
+        `The full file has ${sectionInfo.totalLines} lines. You are seeing ONLY the relevant section.`,
+        sectionInfo.matchedFunction
+          ? `This section is centered on the function/method: \`${sectionInfo.matchedFunction}\` (lines ${sectionInfo.funcStart}-${sectionInfo.funcEnd}).`
+          : `This section was selected by ${sectionInfo.extractionMethod}.`,
+        "",
+        "OUTPUT FORMAT — CRITICAL:",
+        "You MUST return a UNIFIED DIFF only. Do NOT return full file content.",
+        "Returning the section as full content would replace the entire file with just this section",
+        "and would lose the rest of the file. This is unrecoverable.",
+        "",
+        `The diff hunk header @@ -X,Y +X,Z @@ MUST use ORIGINAL file line numbers.`,
+        `X must be a line number between ${sectionInfo.startLine} and ${sectionInfo.endLine}.`,
+        "Line numbering does NOT restart at 1 for the section — use the actual file line numbers",
+        "shown in the section below (each line is prefixed with its line number).",
+        "",
+        "Example diff format (return EXACTLY this format — no markdown fences, no explanations):",
+        `--- a/${contract.file}`,
+        `+++ b/${contract.file}`,
+        `@@ -${sectionInfo.startLine},3 +${sectionInfo.startLine},4 @@`,
+        ` line at ${sectionInfo.startLine}`,
+        ` line at ${sectionInfo.startLine + 1}`,
+        "+inserted new line",
+        ` line at ${sectionInfo.startLine + 2}`,
+        "",
+        `Section content (lines ${sectionInfo.startLine}-${sectionInfo.endLine}, line numbers prefixed but NOT part of the file):`,
+        this.numberSectionLines(promptContent, sectionInfo.startLine),
+      ];
+    } else {
+      // NORMAL MODE — full file, return full file content
+      fixedParts = [
+        `You are the Builder worker on model ${model}.`,
+        "You must obey the contract exactly.",
+        `Target file: ${contract.file}`,
+        `Goal: ${contract.goal}`,
+        `Constraints: ${contract.constraints.join(" | ") || "none"}`,
+        `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
+        `Interface rules: ${contract.interfaceRules.join(" | ")}`,
+        "Return ONLY the full final file content for the target file. No markdown fences. No explanations.",
+        "If the contract cannot be satisfied without leaving scope, return the original file unchanged.",
+        "Current file:",
+        promptContent,
+      ];
+    }
+
     const fixedJoined = fixedParts.join("\n\n");
     const fixedChars = fixedJoined.length;
 
@@ -554,7 +693,7 @@ export class BuilderWorker extends AbstractWorker {
       // Zero budget — log every file as truncated so the operator can see
       // the prompt was over budget before context even got a chance.
       const reason = contextBudget <= 0
-        ? "fixed sections (instructions + originalContent) consumed entire prompt budget"
+        ? "fixed sections (instructions + content) consumed entire prompt budget"
         : "no context layers requested";
       for (let i = 0; i < layers.length; i++) {
         for (const file of layers[i].files) {
@@ -586,8 +725,23 @@ export class BuilderWorker extends AbstractWorker {
       truncated,
       layersIncluded,
       layersTotal,
-      originalContentChars: originalContent.length,
+      originalContentChars: promptContent.length,
+      sectionMode: sectionInfo !== null,
     };
+  }
+
+  /**
+   * Prefix each line of a section with its file line number, padded to 5 chars.
+   * Used in section-edit mode so the model has explicit line-number guidance
+   * when generating the diff hunk headers.
+   *
+   * Format: `  245: function submit(input) {`
+   */
+  private numberSectionLines(content: string, startLineNum: number): string {
+    return content
+      .split("\n")
+      .map((line, i) => `${(startLineNum + i).toString().padStart(5, " ")}: ${line}`)
+      .join("\n");
   }
 
   /**
@@ -646,9 +800,27 @@ export class BuilderWorker extends AbstractWorker {
 
   /**
    * Process model response. Handles three response formats:
-   * 1. Unified diff (preferred) — apply hunks to original content
+   * 1. Unified diff (preferred) — apply hunks to the FULL file content
    * 2. Full file content in markdown fences — extract and use directly
    * 3. Raw full file content — use directly
+   *
+   * In SECTION-EDIT MODE (sectionMode=true), only path 1 is acceptable:
+   *   - Non-diff responses are HARD REJECTED with an explicit error,
+   *     because using the section content as full file content would
+   *     replace the entire file with just the section.
+   *   - After diff application, TWO safety gates run:
+   *       (a) Length-ratio check: result must be at least 95% of the
+   *           original file length. Catches catastrophic truncations.
+   *       (b) End-of-file structural check: the last non-blank line must
+   *           end with a closing token (`}`, `;`, `)`, `]`, `*/`). Catches
+   *           subtle mid-function truncations that pass the length check.
+   *           This gate exists because coordinator.ts went from 1343 to
+   *           1298 lines (96.6% retained) and committed corrupted; the
+   *           old 50% threshold waved it through.
+   *
+   * fullOriginalContent must ALWAYS be the full file content read from
+   * disk, never the extracted section. The diff is applied to the full
+   * file regardless of whether the prompt showed only a section.
    *
    * CRITICAL: Never write raw diff text as file content. Always verify
    * the result looks like source code, not diff headers.
@@ -656,15 +828,21 @@ export class BuilderWorker extends AbstractWorker {
   private processModelResponse(
     raw: string,
     relativePath: string,
-    originalContent: string,
+    fullOriginalContent: string,
+    sectionMode: boolean,
   ): { updatedContent: string; diff: string } {
     // Strip markdown fences if present
     const stripped = this.stripMarkdownFences(raw);
 
     // Check if the response looks like a unified diff
     if (this.looksLikeDiff(stripped)) {
-      console.log(`[Builder] Response is a unified diff, applying hunks to original content`);
-      const updatedContent = this.diffApplier.applyToString(stripped, originalContent);
+      console.log(
+        `[Builder] Response is a unified diff, applying to ` +
+        `${sectionMode
+          ? `full file (${fullOriginalContent.length} chars, section mode)`
+          : "original content"}`
+      );
+      const updatedContent = this.diffApplier.applyToString(stripped, fullOriginalContent);
 
       // Safety: verify the result is source code, not diff text
       if (DiffApplier.looksLikeRawDiff(updatedContent)) {
@@ -672,8 +850,96 @@ export class BuilderWorker extends AbstractWorker {
         throw new Error("Diff application produced raw diff text instead of patched source code");
       }
 
+      // ─── SECTION-MODE SAFETY GATES ─────────────────────────────────
+      // Two checks. Both must pass. Both abort with explicit errors so
+      // the corrupted file is never written and never committed.
+      //
+      // Gate 1: Length retention. Result must be at least
+      //   SECTION_LENGTH_RETAIN_FLOOR (95%) of the original file length.
+      //   Catches catastrophic truncations.
+      //
+      // Gate 2: End-of-file structural integrity. The last non-blank
+      //   line must end with `}`, `;`, `)`, `]`, or `*/`. Catches subtle
+      //   mid-function truncations that pass the length check.
+      if (sectionMode) {
+        const ratio = updatedContent.length / fullOriginalContent.length;
+        if (ratio < SECTION_LENGTH_RETAIN_FLOOR) {
+          throw new Error(
+            `section-mode diff safety check failed: result is ${updatedContent.length} chars vs ` +
+            `original ${fullOriginalContent.length} chars (${(ratio * 100).toFixed(1)}% retained, ` +
+            `threshold ${(SECTION_LENGTH_RETAIN_FLOOR * 100).toFixed(0)}%). ` +
+            `Diff likely truncated the file. Aborting write.`
+          );
+        }
+
+        // End-of-file structural check. Strip trailing whitespace, find
+        // the last non-blank line, check its terminating character.
+        const trimmedEnd = updatedContent.replace(/\s+$/, "");
+        const lastNewline = trimmedEnd.lastIndexOf("\n");
+        const lastLine = (lastNewline >= 0
+          ? trimmedEnd.slice(lastNewline + 1)
+          : trimmedEnd
+        ).trimEnd();
+        const lastChar = lastLine.slice(-1);
+        const endsCleanly = (
+          lastChar === "}" ||
+          lastChar === ";" ||
+          lastChar === ")" ||
+          lastChar === "]" ||
+          lastLine.endsWith("*/")
+        );
+        if (!endsCleanly) {
+          throw new Error(
+            `section-mode diff safety check failed: result is ${updatedContent.length} chars vs ` +
+            `original ${fullOriginalContent.length} chars (${(ratio * 100).toFixed(1)}% retained), ` +
+            `but file ends mid-statement. Last line: ` +
+            `"${lastLine.slice(0, 100)}${lastLine.length > 100 ? "..." : ""}". ` +
+            `File likely truncated mid-function. Aborting write.`
+          );
+        }
+
+        // Gate 3: brace balance. Mirrors core/diff-applier.ts checkBraceBalance
+        // exactly so the trigger condition tracks. In normal mode the diff
+        // applier only WARNS on imbalance, but in section-edit mode a brace
+        // imbalance is the canonical signal of mid-function truncation, so
+        // we promote it from warning to hard throw. Threshold matches the
+        // diff applier: |opens - closes| > 2 (the tolerance absorbs braces
+        // in string and template literals as small false-positive noise).
+        let braceOpens = 0;
+        let braceCloses = 0;
+        for (let i = 0; i < updatedContent.length; i++) {
+          const ch = updatedContent.charCodeAt(i);
+          if (ch === 123 /* { */) braceOpens++;
+          else if (ch === 125 /* } */) braceCloses++;
+        }
+        if (Math.abs(braceOpens - braceCloses) > 2) {
+          throw new Error(
+            `section-mode diff safety check failed: brace imbalance detected — possible truncation ` +
+            `(${braceOpens} open vs ${braceCloses} close, delta ${braceOpens - braceCloses}, ` +
+            `result is ${updatedContent.length} chars vs original ${fullOriginalContent.length})`
+          );
+        }
+
+        console.log(
+          `[Builder] Section-mode diff applied: ${fullOriginalContent.length} → ${updatedContent.length} chars ` +
+          `(${(ratio * 100).toFixed(1)}% retained, ends with "${lastChar}", braces ${braceOpens}/${braceCloses})`
+        );
+      }
+
       const finalContent = updatedContent.trimEnd() + "\n";
       return { updatedContent: finalContent, diff: stripped };
+    }
+
+    // In section mode, we MUST get a diff. Non-diff responses are
+    // catastrophic because the "full content" the model returned is
+    // actually only the section content — using it as updatedContent
+    // would replace the entire file with the section. Hard reject.
+    if (sectionMode) {
+      throw new Error(
+        `SECTION-MODE: model returned non-diff content. In section-edit mode, ` +
+        `the response MUST be a unified diff so it can be applied to the full file. ` +
+        `Got (first 200 chars): ${stripped.slice(0, 200)}`
+      );
     }
 
     // Fallback: treat as full file content — but verify it's not diff text
@@ -682,7 +948,7 @@ export class BuilderWorker extends AbstractWorker {
       // Try to apply it anyway
       console.warn(`[Builder] Response looks like malformed diff, attempting to apply`);
       try {
-        const updatedContent = this.diffApplier.applyToString(stripped, originalContent);
+        const updatedContent = this.diffApplier.applyToString(stripped, fullOriginalContent);
         if (!DiffApplier.looksLikeRawDiff(updatedContent)) {
           const finalContent = updatedContent.trimEnd() + "\n";
           return { updatedContent: finalContent, diff: stripped };
@@ -695,7 +961,7 @@ export class BuilderWorker extends AbstractWorker {
 
     console.log(`[Builder] Response is full file content, computing diff`);
     const updatedContent = stripped.trimEnd() + "\n";
-    const diff = this.buildUnifiedDiff(relativePath, originalContent, updatedContent);
+    const diff = this.buildUnifiedDiff(relativePath, fullOriginalContent, updatedContent);
     return { updatedContent, diff };
   }
 

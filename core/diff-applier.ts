@@ -8,6 +8,9 @@
  *   - Return rollback snapshot always
  *   - Use git apply if available, fallback to manual patch
  *   - Verify output is real content, not raw diff text
+ *   - Brace-balance sanity check after every patched write — warns
+ *     loudly when opens and closes diverge by more than 2, which is
+ *     a strong signal of mid-function truncation
  */
 
 import { readFile, writeFile, mkdir } from "fs/promises";
@@ -113,6 +116,12 @@ export class DiffApplier {
   /**
    * Apply a diff to a string in memory (no file I/O).
    * Returns the patched content.
+   *
+   * After applying hunks, runs a brace-balance sanity check on the result
+   * and warns loudly if `{` and `}` diverge by more than 2 — that is a
+   * strong signal of mid-function truncation. The warning is informational;
+   * callers (e.g. workers/builder.ts in section-edit mode) are responsible
+   * for the actual abort decision via their own structural checks.
    */
   applyToString(diff: string, originalContent: string): string {
     const hunks = this.parseAllHunks(diff);
@@ -152,7 +161,9 @@ export class DiffApplier {
       }
     }
 
-    return lines.join("\n");
+    const result = lines.join("\n");
+    this.checkBraceBalance(result, `applyToString (${result.length} chars, ${hunks.length} hunks)`);
+    return result;
   }
 
   /**
@@ -346,6 +357,9 @@ export class DiffApplier {
 
   /**
    * Apply hunks to a single file: READ original → apply hunks → WRITE patched content.
+   *
+   * Runs the brace-balance sanity check on the patched content before writing
+   * to disk. The check is informational only — a warning, not an abort.
    */
   private async applyFileChunk(
     chunk: { file: string; hunks: string[] },
@@ -420,7 +434,14 @@ export class DiffApplier {
       throw new Error(`Patch produced raw diff output instead of source code for ${chunk.file}`);
     }
 
-    // Step 4: Write the PATCHED content (not the diff)
+    // Step 4: Brace-balance sanity check on the patched content. Warns
+    // loudly on imbalance but does not abort — abort decisions belong to
+    // the caller (e.g. workers/builder.ts section-mode safety checks).
+    if (content !== original) {
+      this.checkBraceBalance(content, `applyFileChunk: ${chunk.file}`);
+    }
+
+    // Step 5: Write the PATCHED content (not the diff)
     if (content !== original) {
       const dir = dirname(absFile);
       if (!existsSync(dir)) {
@@ -459,6 +480,38 @@ export class DiffApplier {
     }
 
     return { ok: errors.length === 0, errors };
+  }
+
+  /**
+   * Brace-balance sanity check.
+   *
+   * Counts `{` and `}` characters in the patched content. A correctly
+   * balanced TypeScript/JavaScript file has equal counts. A mid-function
+   * truncation typically removes more closes than opens (because the cut
+   * happens before the closing braces), so opens > closes is the canonical
+   * truncation signal.
+   *
+   * Tolerance: 2 chars. Braces inside string literals or template
+   * literals can produce false imbalance; the tolerance absorbs small
+   * differences without losing the signal on real truncations.
+   *
+   * This is an INFORMATIONAL warning. The caller decides whether to abort.
+   * In section-edit mode, the Builder runs its own structural checks
+   * (length ratio + end-of-file marker) and uses those to decide.
+   */
+  private checkBraceBalance(content: string, context: string): void {
+    let opens = 0;
+    let closes = 0;
+    for (let i = 0; i < content.length; i++) {
+      const ch = content.charCodeAt(i);
+      if (ch === 123 /* { */) opens++;
+      else if (ch === 125 /* } */) closes++;
+    }
+    if (Math.abs(opens - closes) > 2) {
+      console.warn(
+        `[diff-applier] brace balance: ${opens} open vs ${closes} close — UNBALANCED, possible truncation (${context})`
+      );
+    }
   }
 
   // ─── Hunk Parsing ─────────────────────────────────────────────
