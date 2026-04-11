@@ -110,7 +110,8 @@ import {
   type VerificationReceipt,
 } from "./verification-pipeline.js";
 import { loadMemory, recordTask } from "./project-memory.js";
-import { gateContext } from "./context-gate.js";
+import { gateContext, type GatedContext } from "./context-gate.js";
+import { normalizePrompt } from "./prompt-normalizer.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -247,6 +248,7 @@ export class Coordinator {
     const memory = await loadMemory(effectiveProjectRoot);
     const gatedContext = gateContext(memory, input);
     console.log("[coordinator] gated context:", JSON.stringify(gatedContext));
+    const normalizedInput = await normalizePrompt(input, gatedContext, effectiveProjectRoot);
 
     // Construct per-submit ContextAssembler and IntegrationJudge so they
     // honor the effective projectRoot. These can't be class fields because
@@ -261,9 +263,9 @@ export class Coordinator {
 
     // Phase 1: Charter
     console.log(`[coordinator] PHASE 1: Charter — analyzing request`);
-    this.emit({ type: "run_started", payload: { input: submission.input } });
+    this.emit({ type: "run_started", payload: { input: normalizedInput } });
 
-    const analysis = this.charterGen.analyzeRequest(submission.input);
+    const analysis = this.charterGen.analyzeRequest(normalizedInput);
     const charter = this.charterGen.generateCharter(analysis);
     const constraints = [
       ...this.charterGen.generateDefaultConstraints(analysis),
@@ -277,7 +279,7 @@ export class Coordinator {
     console.log(`[coordinator] PHASE 2: Intent — creating and validating`);
     const intent = createIntent({
       runId: randomUUID(),
-      userRequest: submission.input,
+      userRequest: normalizedInput,
       charter,
       constraints,
       exclusions: submission.exclusions,
@@ -304,6 +306,7 @@ export class Coordinator {
       workerResults: [],
       cancelled: false,
       projectRoot: effectiveProjectRoot,
+      gatedContext,
       contextAssembler,
       judge,
     };
@@ -411,7 +414,7 @@ export class Coordinator {
         if (commitSha) {
           console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
           await recordTask(active.projectRoot, {
-            prompt: submission.input,
+            prompt: normalizedInput,
             verdict,
             commitSha,
             cost: totalCost,
@@ -961,6 +964,7 @@ export class Coordinator {
       changes: [...active.changes],
       workerResults: [...active.workerResults],
       projectRoot: active.projectRoot,
+      recentContext: node.workerType === "scout" ? active.gatedContext : undefined,
     };
 
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
@@ -1396,6 +1400,8 @@ interface ActiveRun {
    *     in submit() with this projectRoot
    */
   projectRoot: string;
+  /** Gated project memory relevant to the current prompt, for Scout context. */
+  gatedContext: GatedContext;
   /**
    * Per-submit ContextAssembler constructed in submit() with the per-task
    * projectRoot. Used by dispatchNode to assemble context for each worker.

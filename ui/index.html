@@ -196,7 +196,7 @@
     }
 
     .glyph-value.cost {
-      font-size: clamp(56px, 9vw, 112px);
+      font-size: clamp(28px, 4vw, 48px);
       color: var(--teal);
       text-shadow:
         0 0 18px rgba(77, 245, 200, 0.26),
@@ -574,12 +574,29 @@
       text-align: left;
       color: inherit;
       transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+      display: grid;
+      gap: 8px;
     }
 
     .history-card.active {
       border-color: rgba(77, 245, 200, 0.35);
       box-shadow: 0 0 20px rgba(77, 245, 200, 0.08);
       transform: translateY(-1px);
+    }
+
+    .history-prompt {
+      font-family: var(--font-ui);
+      font-size: 13px;
+      color: var(--ink);
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
+    .history-sha {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
     }
 
     .stream-box {
@@ -810,7 +827,12 @@
     const WS_URL = __zd.ws;
     const ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator'];
     const CONFIG_ROLE_ORDER = ['scout', 'builder', 'critic', 'verifier', 'integrator', 'escalation', 'coordinator'];
-    const STORAGE_KEYS = { repoPath: 'zendorium.repoPath', modelConfig: 'zendorium.modelConfig' };
+    const STORAGE_KEYS = {
+      repoPath: 'zendorium.repoPath',
+      modelConfig: 'zendorium.modelConfig',
+      runHistory: 'zendorium.runHistory',
+    };
+    const HISTORY_MAX = 20;
     const ROLE_COLORS = {
       scout: '#4df5c8',
       builder: '#fb923c',
@@ -882,6 +904,8 @@
         prompt: '',
         repoPath: '.',
         status: 'idle',
+        verdict: '',
+        commitSha: '',
         startedAt: null,
         completedAt: null,
         totalCostUsd: 0,
@@ -902,6 +926,61 @@
         state.runs.unshift(run);
       }
       return run;
+    }
+
+    // ─── History persistence ─────────────────────────────────────
+    // state.runs lives in memory only — page reloads wipe it. We persist a
+    // slim form (no graph/stream/receipts payloads) to localStorage on every
+    // render so the Run History panel survives refreshes. Heavy fields stay
+    // in memory for the active session and get reconstructed-as-empty on
+    // restore (the user can click into a restored run; they won't see
+    // worker/graph data because that was per-session, but they will see
+    // prompt + verdict + cost + commit SHA, which is what matters for history).
+
+    function persistRuns() {
+      try {
+        const slim = state.runs.slice(0, HISTORY_MAX).map((run) => ({
+          id: run.id,
+          prompt: run.prompt,
+          repoPath: run.repoPath,
+          status: run.status,
+          verdict: run.verdict,
+          commitSha: run.commitSha,
+          startedAt: run.startedAt,
+          completedAt: run.completedAt,
+          totalCostUsd: run.totalCostUsd,
+          receiptCount: run.receiptCount,
+        }));
+        window.localStorage.setItem(STORAGE_KEYS.runHistory, JSON.stringify(slim));
+      } catch {
+        // Quota exceeded, private mode, etc — ignore.
+      }
+    }
+
+    function restoreRuns() {
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEYS.runHistory);
+        if (!raw) return;
+        const slim = JSON.parse(raw);
+        if (!Array.isArray(slim)) return;
+        for (const entry of slim) {
+          if (!entry || typeof entry !== 'object') continue;
+          const run = createEmptyRun();
+          run.id = String(entry.id || `restored-${Math.random().toString(36).slice(2, 8)}`);
+          run.prompt = String(entry.prompt || '');
+          run.repoPath = String(entry.repoPath || '.');
+          run.status = String(entry.status || 'idle');
+          run.verdict = String(entry.verdict || '');
+          run.commitSha = String(entry.commitSha || '');
+          run.startedAt = entry.startedAt || null;
+          run.completedAt = entry.completedAt || null;
+          run.totalCostUsd = Number(entry.totalCostUsd || 0);
+          run.receiptCount = Number(entry.receiptCount || 0);
+          state.runs.push(run);
+        }
+      } catch {
+        // Corrupt JSON, ignore — we'll start fresh.
+      }
     }
 
     function setSocketStatus(label, ok = false) {
@@ -1072,6 +1151,10 @@
       if (payload.startedAt || payload.started_at) run.startedAt = payload.startedAt || payload.started_at;
       if (payload.completedAt || payload.completed_at) run.completedAt = payload.completedAt || payload.completed_at;
       if (payload.totalCostUsd != null || payload.total_cost_usd != null) run.totalCostUsd = Number(payload.totalCostUsd ?? payload.total_cost_usd ?? run.totalCostUsd);
+      if (payload.verdict) run.verdict = String(payload.verdict);
+      if (payload.commitSha || payload.commit_sha) run.commitSha = String(payload.commitSha || payload.commit_sha);
+      // commit_created event from the coordinator carries { runId, sha }.
+      if (type === 'commit_created' && payload.sha) run.commitSha = String(payload.sha);
 
       if (Array.isArray(payload.receipts)) {
         run.receipts = payload.receipts.map((receipt) => normalizeReceipt(receipt));
@@ -1123,6 +1206,10 @@
         run.receipts = run.receipts.slice(0, 40);
         run.receiptCount = run.receipts.length;
         run.totalCostUsd = cost;
+        // Mirror the receipt-level commit/verdict onto the run itself so the
+        // history card can show them after the run finishes.
+        if (commitSha) run.commitSha = commitSha;
+        if (r.verdict) run.verdict = String(r.verdict);
       } else if (type.includes('receipt')) {
         // Fallback for older/other receipt event shapes.
         const receipt = normalizeReceipt(payload.receipt || payload);
@@ -1137,6 +1224,7 @@
       if (type === 'run_started' || type === 'start' || type === 'run') run.status = 'running';
       else if (type.includes('complete') || type === 'done') {
         run.status = payload.verdict || payload.status || 'complete';
+        if (payload.verdict) run.verdict = String(payload.verdict);
         run.completedAt = payload.completedAt || payload.completed_at || new Date().toISOString();
       } else if (type.includes('partial')) run.status = 'partial';
       else if (type.includes('error') || type.includes('failed')) run.status = 'failed';
@@ -1386,6 +1474,10 @@
 
       const progress = document.getElementById('run-progress');
       if (progress) progress.classList.toggle('active', active);
+
+      // Persist the run list (slim form) to localStorage so the history
+      // panel survives page reloads. Cheap enough to call on every render.
+      persistRuns();
     }
 
     function renderHeader() {
@@ -1508,14 +1600,25 @@
       }
       list.innerHTML = state.runs.slice(0, 14).map((run) => {
         const status = normalizeRunStatus(run.status);
+        const verdict = run.verdict || status;
+        const sha = run.commitSha ? String(run.commitSha).slice(0, 10) : '';
+        const promptText = run.prompt && run.prompt.trim().length > 0
+          ? run.prompt.trim()
+          : '(no prompt)';
+        const promptShort = promptText.length > 90
+          ? `${promptText.slice(0, 87)}…`
+          : promptText;
         return `
           <button class="history-card ${run.id === state.currentRunId ? 'active' : ''}" onclick="selectRun('${esc(run.id)}')">
             <div class="history-row">
-              <span class="mini-chip">${esc(status)}</span>
+              <span class="mini-chip">${esc(verdict)}</span>
               <span class="tiny">$${Number(run.totalCostUsd || 0).toFixed(4)}</span>
             </div>
-            <div class="receipt-model" style="margin-top:10px;">${esc(run.id || 'pending')}</div>
-            <div class="tiny" style="margin-top:8px;">${esc(compactTask(run.prompt || 'waiting'))}</div>
+            <div class="history-prompt">${esc(promptShort)}</div>
+            <div class="history-row">
+              <span class="history-sha">${sha ? `commit ${esc(sha)}` : 'no commit'}</span>
+              <span class="tiny">${esc(run.id || '')}</span>
+            </div>
           </button>
         `;
       }).join('');
@@ -1670,6 +1773,7 @@
     document.getElementById('repo-input').addEventListener('blur', persistRepoPath);
 
     loadRepoPath();
+    restoreRuns();
     renderSettings();
     render();
     connect();

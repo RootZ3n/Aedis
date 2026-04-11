@@ -18,6 +18,7 @@
 
 import type { IntentObject } from "../core/intent.js";
 import type { AssembledContext } from "../core/context-assembler.js";
+import type { GatedContext } from "../core/context-gate.js";
 import type { CostEntry, Issue, RunTask, RunState } from "../core/runstate.js";
 
 // ─── Worker Types ────────────────────────────────────────────────────
@@ -118,6 +119,8 @@ export interface WorkerAssignment {
    *     this field; workers fall back to their constructor-time projectRoot.
    */
   readonly projectRoot?: string;
+  /** Prompt-gated recent project memory, attached for Scout context. */
+  readonly recentContext?: GatedContext;
 }
 
 export interface WorkerResult {
