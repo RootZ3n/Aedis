@@ -114,8 +114,10 @@ import { loadMemory, recordTask } from "./project-memory.js";
 import {
   gateContext,
   gateContextForWave,
+  mergeGatedContext,
   type GatedContext,
 } from "./context-gate.js";
+import { getAedisMemoryAdapter, toGatedContext } from "./aedis-memory.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
 import { createChangeSet, type ChangeSet } from "./change-set.js";
@@ -213,6 +215,7 @@ export interface RunReceipt {
   readonly totalCost: CostEntry;
   readonly commitSha: string | null;
   readonly durationMs: number;
+  readonly memorySuggestions?: readonly string[];
 }
 
 // ─── Coordinator ─────────────────────────────────────────────────────
@@ -261,6 +264,7 @@ export class Coordinator {
     let commitSha: string | null = null;
     let verificationReceipt: VerificationReceipt | null = null;
     let judgmentReport: JudgmentReport | null = null;
+    let repairResult: RepairResult | null = null;
     const input = submission.input;
 
     console.log(`[coordinator] ═══ submit() entry — input="${submission.input.slice(0, 80)}${submission.input.length > 80 ? "…" : ""}"`);
@@ -275,7 +279,7 @@ export class Coordinator {
       (submission.projectRoot ? " (overridden via submission)" : " (Coordinator default)")
     );
     const projectMemory = await loadMemory(effectiveProjectRoot);
-    const gatedContext = gateContext(projectMemory, input);
+    let gatedContext = gateContext(projectMemory, input);
     console.log("[coordinator] gated context:", JSON.stringify(gatedContext));
     const normalizedInput = await normalizePrompt(input, gatedContext, effectiveProjectRoot);
 
@@ -358,6 +362,28 @@ export class Coordinator {
       console.log(`[coordinator] multi-file plan: ${plan.waves.length} wave(s).`);
     }
 
+    try {
+      const memoryAdapter = await getAedisMemoryAdapter();
+      if (memoryAdapter) {
+        const memoryContext = await memoryAdapter.buildExecutionContext({
+          projectRoot: effectiveProjectRoot,
+          prompt: normalizedInput,
+          projectMemory,
+          scopeClassification,
+          targetFiles: charterTargets,
+        });
+        gatedContext = mergeGatedContext(gatedContext, toGatedContext(memoryContext, projectMemory.language));
+        console.log("[coordinator] memory-backed gate:", JSON.stringify({
+          relevantFiles: memoryContext.relevantFiles,
+          clusterFiles: memoryContext.clusterFiles,
+          landmines: memoryContext.landmines,
+          strictVerification: memoryContext.strictVerification,
+        }));
+      }
+    } catch (err) {
+      console.warn(`[coordinator] memory-backed gate unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Phase 3: RunState
     console.log(`[coordinator] PHASE 3: RunState — creating`);
     const run = createRunState(intent.id);
@@ -373,6 +399,7 @@ export class Coordinator {
       gatedContext,
       projectMemory,
       normalizedInput,
+      memorySuggestions: [],
       contextAssembler,
       judge,
       scopeClassification: scopeClassification ?? null,
@@ -502,7 +529,6 @@ export class Coordinator {
       // Phase 9b: change-set gate (invariants + repair-pass) — only
       // meaningful for multi-file runs. Output is fed into the
       // MergeGate alongside judgment and verification.
-      let repairResult: RepairResult | null = null;
       let changeSetGateInput:
         | Parameters<typeof decideMerge>[0]["changeSetGate"]
         | undefined;
@@ -604,14 +630,6 @@ export class Coordinator {
         commitSha = await this.gitCommit(active);
         if (commitSha) {
           console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
-          await recordTask(active.projectRoot, {
-            prompt: normalizedInput,
-            verdict,
-            commitSha,
-            cost: totalCost,
-            timestamp: new Date().toISOString(),
-            filesTouched: active.changes.map(c => c.path),
-          });
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
         } else {
           console.warn(`[coordinator] PHASE 10 — gitCommit returned null — see prior errors or recordDecision entries`);
@@ -662,12 +680,25 @@ export class Coordinator {
         Date.now() - startTime,
         mergeDecision,
       );
+      active.memorySuggestions = await this.persistMemoryArtifacts(
+        active,
+        input,
+        normalizedInput,
+        receipt,
+        verificationReceipt,
+        mergeDecision,
+        repairResult,
+        commitSha,
+      );
+      const finalReceipt: RunReceipt = active.memorySuggestions.length > 0
+        ? { ...receipt, memorySuggestions: [...active.memorySuggestions] }
+        : receipt;
 
       console.log(`[coordinator] ═══ submit() exit — verdict=${verdict} duration=${Date.now() - startTime}ms`);
       this.emit({ type: "run_complete", payload: { runId: run.id, verdict } });
-      this.emit({ type: "receipt_generated", payload: { receiptId: receipt.id } });
+      this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id } });
 
-      return receipt;
+      return finalReceipt;
     } catch (err) {
       const errMessage = err instanceof Error ? err.message : String(err);
       const errStack = err instanceof Error ? err.stack : undefined;
@@ -686,8 +717,21 @@ export class Coordinator {
 
       failRun(run, errMessage);
       const receipt = this.buildReceipt(active, verificationReceipt, judgmentReport, null, Date.now() - startTime);
+      active.memorySuggestions = await this.persistMemoryArtifacts(
+        active,
+        input,
+        normalizedInput,
+        receipt,
+        verificationReceipt,
+        null,
+        repairResult,
+        null,
+      );
+      const finalReceipt: RunReceipt = active.memorySuggestions.length > 0
+        ? { ...receipt, memorySuggestions: [...active.memorySuggestions] }
+        : receipt;
       console.log(`[coordinator] ═══ submit() exit (failed) — verdict=${receipt.verdict} duration=${Date.now() - startTime}ms`);
-      return receipt;
+      return finalReceipt;
     } finally {
       this.activeRuns.delete(run.id);
     }
@@ -805,14 +849,19 @@ export class Coordinator {
       allowsIntentRevision: true,
     });
 
-    if (analysis.riskSignals.length > 0) {
-      console.log(`[coordinator] buildTaskGraph: adding escalation boundaries for ${builderNodes.length} builder(s) due to risk signals: ${analysis.riskSignals.join(", ")}`);
+    const memoryLandmines = active.gatedContext.landmines ?? [];
+    const escalationReasons = [
+      ...analysis.riskSignals,
+      ...memoryLandmines.map((item) => `memory:${item}`),
+    ];
+    if (escalationReasons.length > 0) {
+      console.log(`[coordinator] buildTaskGraph: adding escalation boundaries for ${builderNodes.length} builder(s) due to risk signals: ${escalationReasons.join(", ")}`);
       for (const builder of builderNodes) {
         addEscalationBoundary(
           graph,
           builder.id,
           "standard",
-          `Risk signals: ${analysis.riskSignals.join(", ")}`,
+          `Risk signals: ${escalationReasons.join(", ")}`,
           "coordinator"
         );
       }
@@ -1500,8 +1549,16 @@ export class Coordinator {
       wave,
       targetFiles: node.targetFiles,
     });
+    const merged = mergeGatedContext(gated, {
+      ...(active.gatedContext.clusterFiles ? { clusterFiles: active.gatedContext.clusterFiles } : {}),
+      ...(active.gatedContext.landmines ? { landmines: active.gatedContext.landmines } : {}),
+      ...(active.gatedContext.safeApproaches ? { safeApproaches: active.gatedContext.safeApproaches } : {}),
+      ...(active.gatedContext.memoryNotes ? { memoryNotes: active.gatedContext.memoryNotes } : {}),
+      ...(active.gatedContext.suggestedNextSteps ? { suggestedNextSteps: active.gatedContext.suggestedNextSteps } : {}),
+      ...(active.gatedContext.strictVerification !== undefined ? { strictVerification: active.gatedContext.strictVerification } : {}),
+    });
 
-    const log = gated.inclusionLog ?? [];
+    const log = merged.inclusionLog ?? [];
     if (log.length > 0) {
       console.log(
         `[coordinator] wave-gate (wave ${wave.id} ${wave.name}, node ${node.id.slice(0, 6)}): ${log.length} item(s) injected`,
@@ -1515,7 +1572,7 @@ export class Coordinator {
       );
     }
 
-    return gated;
+    return merged;
   }
 
   // ─── Per-wave Verification (P2) ────────────────────────────────────
@@ -1897,6 +1954,58 @@ export class Coordinator {
     };
   }
 
+  private async persistMemoryArtifacts(
+    active: ActiveRun,
+    rawInput: string,
+    normalizedInput: string,
+    receipt: RunReceipt,
+    verificationReceipt: VerificationReceipt | null,
+    mergeDecision: MergeDecision | null,
+    repairResult: RepairResult | null,
+    commitSha: string | null,
+  ): Promise<string[]> {
+    const filesTouched = uniqueStrings([
+      ...active.changes.map((change) => change.path),
+      ...active.run.filesTouched.map((touch) => touch.filePath),
+    ]);
+    await recordTask(active.projectRoot, {
+      prompt: rawInput,
+      normalizedPrompt: normalizedInput,
+      verdict: receipt.verdict,
+      commitSha,
+      cost: receipt.totalCost.estimatedCostUsd,
+      timestamp: receipt.timestamp,
+      filesTouched,
+      scopeType: active.scopeClassification?.type,
+      complexityTier: active.scopeClassification ? String(active.scopeClassification.blastRadius) : undefined,
+      resultSummary: receipt.summary.phase,
+      verificationVerdict: verificationReceipt?.verdict,
+      failureSummary: mergeDecision?.primaryBlockReason || active.run.failureReason || undefined,
+      successPattern: receipt.verdict === "success" ? "Scoped fix passed commit and verification gates." : undefined,
+      affectedSystems: uniqueStrings(filesTouched.map((file) => file.split("/")[0] ?? "").filter(Boolean)),
+      changeTypes: uniqueStrings(active.changes.map((change) => change.operation)),
+    });
+
+    const memoryAdapter = await getAedisMemoryAdapter();
+    if (!memoryAdapter) return [];
+    const result = await memoryAdapter.persistRunMemory({
+      projectRoot: active.projectRoot,
+      rawInput,
+      normalizedPrompt: normalizedInput,
+      scopeClassification: active.scopeClassification,
+      projectMemory: active.projectMemory,
+      run: active.run,
+      receipt,
+      changes: active.changes,
+      workerResults: active.workerResults,
+      verificationReceipt,
+      mergeDecision,
+      repairResult,
+      commitSha,
+    });
+    return result.suggestions;
+  }
+
   private determineVerdict(
     active: ActiveRun,
     verificationReceipt: VerificationReceipt | null,
@@ -1966,6 +2075,7 @@ interface ActiveRun {
   projectMemory: Awaited<ReturnType<typeof loadMemory>>;
   /** Normalized prompt from PHASE 1. Used for wave-aware gating. */
   normalizedInput: string;
+  memorySuggestions: string[];
   /**
    * Per-submit ContextAssembler constructed in submit() with the per-task
    * projectRoot. Used by dispatchNode to assemble context for each worker.
@@ -2014,4 +2124,8 @@ export class CoordinatorError extends Error {
     super(message);
     this.name = "CoordinatorError";
   }
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }

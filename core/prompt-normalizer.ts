@@ -41,6 +41,10 @@ async function rewriteWithLocalModel(
   const recentFiles = context.relevantFiles.length > 0
     ? context.relevantFiles
     : context.recentTaskSummaries;
+  const memoryHints = [
+    ...(context.landmines ?? []).slice(0, 2),
+    ...(context.safeApproaches ?? []).slice(0, 2),
+  ];
 
   const instruction = [
     "Rewrite the following user request into one explicit engineering prompt.",
@@ -50,6 +54,7 @@ async function rewriteWithLocalModel(
     "",
     `Language: ${context.language}`,
     `Recent context: ${recentFiles.join(" | ") || "none"}`,
+    `Memory hints: ${memoryHints.join(" | ") || "none"}`,
     `Raw prompt: ${raw}`,
   ].join("\n");
 

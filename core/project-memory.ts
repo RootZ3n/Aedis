@@ -23,6 +23,15 @@ export interface TaskSummary {
   readonly commitSha: string | null;
   readonly cost: number;
   readonly timestamp: string;
+  readonly normalizedPrompt?: string;
+  readonly scopeType?: string;
+  readonly complexityTier?: string;
+  readonly resultSummary?: string;
+  readonly verificationVerdict?: string;
+  readonly failureSummary?: string;
+  readonly successPattern?: string;
+  readonly affectedSystems?: readonly string[];
+  readonly changeTypes?: readonly string[];
   /**
    * Optional list of files touched by this task. When provided, recordTask
    * folds them into the memory's `recentFiles` list (deduped, capped).

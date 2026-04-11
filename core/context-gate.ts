@@ -7,6 +7,12 @@ export interface GatedContext {
   relevantFiles: string[];
   recentTaskSummaries: string[];
   language: string;
+  clusterFiles?: string[];
+  landmines?: string[];
+  safeApproaches?: string[];
+  memoryNotes?: string[];
+  suggestedNextSteps?: string[];
+  strictVerification?: boolean;
   /**
    * Shared invariants the current wave must respect. Populated only
    * when gating is wave-aware (see gateContextForWave). Empty on
@@ -64,7 +70,7 @@ export function gateContext(memory: ProjectMemory, prompt: string): GatedContext
   const recentTasks = memory.recentTasks ?? [];
   const recentTaskSummaries = recentTasks
     .slice(0, MAX_RECENT_TASKS)
-    .map(task => task.prompt.slice(0, 120));
+    .map(task => (task.resultSummary ?? task.prompt).slice(0, 120));
 
   return {
     relevantFiles,
@@ -162,6 +168,24 @@ export function gateContextForWave(inputs: WaveContextInputs): GatedContext {
   };
 }
 
+export function mergeGatedContext(base: GatedContext, overlay?: Partial<GatedContext>): GatedContext {
+  if (!overlay) return base;
+  return {
+    relevantFiles: uniqueStrings([...base.relevantFiles, ...(overlay.relevantFiles ?? [])]),
+    recentTaskSummaries: uniqueStrings([...base.recentTaskSummaries, ...(overlay.recentTaskSummaries ?? [])]).slice(0, MAX_RECENT_TASKS + 3),
+    language: overlay.language ?? base.language,
+    ...(mergeOptionalArrays(base.clusterFiles, overlay.clusterFiles, "clusterFiles")),
+    ...(mergeOptionalArrays(base.landmines, overlay.landmines, "landmines")),
+    ...(mergeOptionalArrays(base.safeApproaches, overlay.safeApproaches, "safeApproaches")),
+    ...(mergeOptionalArrays(base.memoryNotes, overlay.memoryNotes, "memoryNotes")),
+    ...(mergeOptionalArrays(base.suggestedNextSteps, overlay.suggestedNextSteps, "suggestedNextSteps")),
+    ...(mergeOptionalArrays(base.waveInvariants, overlay.waveInvariants, "waveInvariants")),
+    ...(mergeOptionalArrays(base.waveSiblings, overlay.waveSiblings, "waveSiblings")),
+    ...(mergeOptionalArrays(base.inclusionLog, overlay.inclusionLog, "inclusionLog")),
+    ...(overlay.strictVerification !== undefined ? { strictVerification: overlay.strictVerification } : base.strictVerification !== undefined ? { strictVerification: base.strictVerification } : {}),
+  };
+}
+
 function extractPromptWords(prompt: string): string[] {
   return Array.from(
     new Set(
@@ -172,4 +196,20 @@ function extractPromptWords(prompt: string): string[] {
         .filter(word => word.length >= 4)
     )
   );
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return Array.from(new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0)));
+}
+
+function mergeOptionalArrays<T>(
+  base: readonly T[] | undefined,
+  overlay: readonly T[] | undefined,
+  key: "clusterFiles" | "landmines" | "safeApproaches" | "memoryNotes" | "suggestedNextSteps" | "waveInvariants" | "waveSiblings" | "inclusionLog",
+): Partial<GatedContext> {
+  const values = [...(base ?? []), ...(overlay ?? [])];
+  if (values.length === 0) return {};
+  return {
+    [key]: Array.from(new Set(values)),
+  } as Partial<GatedContext>;
 }

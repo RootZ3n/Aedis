@@ -173,9 +173,13 @@ export class ScoutWorker extends AbstractWorker {
       const recentFiles = (assignment.recentContext?.relevantFiles ?? []).filter(
         (path) => !path.startsWith(".aedis/") && !path.endsWith(".json")
       );
+      const clusterFiles = (assignment.recentContext?.clusterFiles ?? []).filter(
+        (path) => !path.startsWith(".aedis/") && !path.endsWith(".json")
+      );
       console.log(`[scout] recentContext: ${recentFiles.length} relevant files`);
       const targetFiles = Array.from(new Set([
         ...recentFiles,
+        ...clusterFiles,
         ...baseTargetFiles,
       ]));
 
@@ -599,6 +603,13 @@ export class ScoutWorker extends AbstractWorker {
       factors.push("Task spans multiple files");
       mitigations.push("Scout similar files first and split work if needed");
     }
+    if ((assignment.recentContext?.landmines?.length ?? 0) > 0) {
+      factors.push(...assignment.recentContext!.landmines!);
+      mitigations.push("Raise verification strictness and avoid sweeping refactors in fragile areas");
+    }
+    if (assignment.recentContext?.strictVerification) {
+      mitigations.push("Require focused verification on touched files and nearby cluster peers");
+    }
 
     const level = factors.length >= 4 ? "critical" : factors.length >= 3 ? "high" : factors.length >= 2 ? "medium" : "low";
     return { level, factors, mitigations };
@@ -617,6 +628,8 @@ export class ScoutWorker extends AbstractWorker {
       `Start with ${keyFiles}.`,
       exported.length > 0 ? `Watch exports ${exported.join(", ")}.` : null,
       complex.length > 0 ? `High-complexity files: ${complex.join(", ")}.` : null,
+      (assignment.recentContext?.safeApproaches?.length ?? 0) > 0 ? `Reuse prior successful pattern: ${assignment.recentContext!.safeApproaches![0]}.` : null,
+      (assignment.recentContext?.landmines?.length ?? 0) > 0 ? `Avoid known landmine: ${assignment.recentContext!.landmines![0]}.` : null,
       risk.level !== "low" ? `Risk is ${risk.level}; keep edits narrow.` : "Risk is low; follow existing patterns.",
     ].filter(Boolean);
     return parts.join(" ");
