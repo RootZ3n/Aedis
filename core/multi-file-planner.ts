@@ -1,3 +1,5 @@
+import type { ChangeSet } from "./change-set.js";
+
 export interface PlanWave {
   id: number;
   name: string;
@@ -19,11 +21,11 @@ export interface Plan {
   dependencyEdges: PlanEdge[];
 }
 
-function normalizeChangeSet(changeSet: readonly string[]): string[] {
+function normalizeChangeSet(changeSet: ChangeSet): string[] {
   return Array.from(
     new Set(
-      changeSet
-        .map((file) => file.trim())
+      changeSet.filesInScope
+        .map((file) => file.path.trim())
         .filter((file) => file.length > 0),
     ),
   );
@@ -81,7 +83,7 @@ function buildCheckpoint(waveId: number, prompt: string, files: readonly string[
   }
 }
 
-export function planChangeSet(changeSet: readonly string[], prompt: string): Plan {
+export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
   const files = normalizeChangeSet(changeSet);
   const buckets = new Map<number, string[]>([
     [1, []],

@@ -115,6 +115,9 @@ import { gateContext, type GatedContext } from "./context-gate.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
 import { createChangeSet, type ChangeSet } from "./change-set.js";
+import { extractInvariants } from "./invariant-extractor.js";
+import { planChangeSet, type Plan } from "./multi-file-planner.js";
+import { runRepairPass } from "./repair-pass.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -317,7 +320,20 @@ export class Coordinator {
     // wants the immutable intent + the same deduped charter target list we
     // used for the scope classifier above, so file inclusion / dependency
     // relationships / coherence verdict line up with what was just classified.
-    const changeSet = createChangeSet(intent, charterTargets);
+    const baseChangeSet = createChangeSet(intent, charterTargets);
+    const invariants = await extractInvariants(charterTargets, effectiveProjectRoot);
+    const changeSet: ChangeSet = Object.freeze({
+      ...baseChangeSet,
+      invariants: Object.freeze(invariants),
+    });
+    console.log(`[coordinator] invariants: ${invariants.length} cross-file alignment constraints found.`);
+    const plan =
+      scopeClassification.type === "multi-file" || scopeClassification.type === "architectural"
+        ? planChangeSet(changeSet, normalizedInput)
+        : undefined;
+    if (plan) {
+      console.log(`[coordinator] multi-file plan: ${plan.waves.length} wave(s).`);
+    }
 
     // Phase 3: RunState
     console.log(`[coordinator] PHASE 3: RunState — creating`);
@@ -336,6 +352,7 @@ export class Coordinator {
       judge,
       scopeClassification: scopeClassification ?? null,
       changeSet,
+      plan,
     };
     this.activeRuns.set(run.id, active);
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
@@ -428,6 +445,36 @@ export class Coordinator {
 
       const verdict = this.determineVerdict(active, verificationReceipt, judgmentReport);
       const totalCost = active.run.totalCost?.estimatedCostUsd ?? 0;
+      let repairResult: Awaited<ReturnType<typeof runRepairPass>> | null = null;
+
+      if (active.changeSet.filesInScope.length > 1) {
+        const plan = active.plan ?? planChangeSet(active.changeSet, normalizedInput);
+        const invariants = await extractInvariants(
+          active.changeSet.filesInScope.map((entry) => entry.path),
+          active.projectRoot,
+        );
+        repairResult = await runRepairPass(active.changeSet, active.projectRoot);
+
+        const allWavesComplete = isGraphComplete(active.graph) && !hasFailedNodes(active.graph);
+        const invariantsSatisfied =
+          active.changeSet.coherenceVerdict.coherent &&
+          (invariants.length > 0 || plan.waves.every((wave) => wave.files.length <= 1));
+        const repairPassClean = repairResult.issues.length === 0;
+
+        if (!allWavesComplete || !invariantsSatisfied || !repairPassClean) {
+          const reasons: string[] = [];
+          if (!allWavesComplete) {
+            reasons.push("all waves complete check failed");
+          }
+          if (!invariantsSatisfied) {
+            reasons.push("invariants satisfied check failed");
+          }
+          if (!repairPassClean) {
+            reasons.push(`repair pass found ${repairResult.issues.length} issue(s)`);
+          }
+          console.warn(`[coordinator] WARN: change-set merge gate — ${reasons.join("; ")}`);
+        }
+      }
 
       // Phase 10: Commit
       const changeCount = Math.max(active.changes.length, active.run.filesTouched.length);
@@ -457,6 +504,13 @@ export class Coordinator {
         console.log(`[coordinator] PHASE 10 SKIPPED — no changes to commit (active.changes=0, filesTouched=0)`);
       } else {
         console.log(`[coordinator] PHASE 10 SKIPPED — autoCommit=${this.config.autoCommit} cancelled=${active.cancelled} changeCount=${changeCount}`);
+      }
+
+      if (active.changeSet.filesInScope.length > 1) {
+        repairResult = repairResult ?? await runRepairPass(active.changeSet, active.projectRoot);
+        console.log(
+          `[coordinator] repair-pass: ${repairResult.repairsAttempted} attempted, ${repairResult.repairsApplied} applied, ${repairResult.issues.length} issues`
+        );
       }
 
       if (process.env.AEDIS_VISION === "true") {
@@ -1483,8 +1537,9 @@ interface ActiveRun {
    * planners need to reason about the change as a unit. Set in submit()
    * after PHASE 2 (intent locked) and attached during ActiveRun
    * construction.
-   */
+  */
   changeSet: ChangeSet;
+  plan?: Plan;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────

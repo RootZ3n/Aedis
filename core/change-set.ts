@@ -1,4 +1,5 @@
 import type { IntentObject } from "./intent.js";
+import type { Invariant } from "./invariant-extractor.js";
 
 export type FileStatus =
   | "planned"
@@ -23,6 +24,7 @@ export interface ChangeSet {
   readonly intent: IntentObject;
   readonly filesInScope: readonly FileInclusion[];
   readonly dependencyRelationships: Readonly<Record<string, readonly string[]>>;
+  readonly invariants: readonly Invariant[];
   readonly sharedInvariants: readonly string[];
   readonly acceptanceCriteria: readonly string[];
   readonly coherenceVerdict: CoherenceVerdict;
@@ -146,6 +148,7 @@ export function createChangeSet(intent: IntentObject, files: readonly string[]):
     intent,
     filesInScope: Object.freeze(filesInScope.map((entry) => Object.freeze(entry))),
     dependencyRelationships,
+    invariants: Object.freeze([]),
     sharedInvariants,
     acceptanceCriteria,
     coherenceVerdict: Object.freeze(coherenceVerdict),

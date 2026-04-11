@@ -8,6 +8,8 @@
  *   - Contract adherence: do implementations match their interfaces?
  *   - Assumption collision: did two workers make contradictory assumptions?
  *   - Intent alignment: do the changes fulfill the Charter's deliverables?
+ *   - Cross-file coherence: orphaned refs, partial migrations, and an
+ *     overall import/export alignment score across the actual diffs.
  *
  * The Judge runs at VerificationCheckpoints and before final apply.
  * It produces a JudgmentReport with pass/fail verdicts per check and
@@ -59,7 +61,8 @@ export type JudgmentCategory =
   | "assumption-collision"
   | "intent-alignment"
   | "scope-boundary"
-  | "rollback-safety";
+  | "rollback-safety"
+  | "cross-file-coherence";
 
 export interface JudgmentIssue {
   readonly category: JudgmentCategory;
@@ -67,6 +70,36 @@ export interface JudgmentIssue {
   readonly message: string;
   readonly files: readonly string[];
   readonly suggestedFix?: string;
+}
+
+// ─── Cross-file structural findings ──────────────────────────────────
+
+/**
+ * A symbol that was removed from one file but is still referenced
+ * (by name) in at least one other file in the same change set.
+ */
+export interface OrphanedReference {
+  /** Identifier name (function, class, type, etc.) */
+  readonly name: string;
+  /** File the export was removed from */
+  readonly removedFrom: string;
+  /** Other files in the change set that still mention `name` */
+  readonly stillReferencedIn: readonly string[];
+}
+
+/**
+ * Evidence of a half-finished rename: a removed export and an added
+ * export co-exist in the same file (rename heuristic), but the OLD
+ * name still appears in another changed file — meaning some callers
+ * are on the new API and some are on the old.
+ */
+export interface PartialMigration {
+  readonly oldName: string;
+  readonly newName: string;
+  /** File where the rename was introduced */
+  readonly introducedIn: string;
+  /** Files that still reference the old name */
+  readonly oldNameStillIn: readonly string[];
 }
 
 // ─── Configuration ───────────────────────────────────────────────────
@@ -109,6 +142,15 @@ const DEFAULT_CONFIG: IntegrationJudgeConfig = {
   projectRoot: process.cwd(),
 };
 
+// Regex used by every export-aware method below. Captures `function`,
+// `const`, `class`, `interface`, `type`, and `enum` exports — matches
+// the convention already used by checkTypeAlignment.
+const EXPORT_DECL_REGEX = /export\s+(?:async\s+)?(?:function|const|class|interface|type|enum)\s+(\w+)/g;
+const REMOVED_EXPORT_REGEX = /^-\s*export\s+(?:async\s+)?(?:function|const|class|interface|type|enum)\s+(\w+)/gm;
+const ADDED_EXPORT_REGEX = /^\+\s*export\s+(?:async\s+)?(?:function|const|class|interface|type|enum)\s+(\w+)/gm;
+const NAMED_EXPORT_REGEX = /export\s*\{\s*([^}]+)\}/g;
+const NAMED_IMPORT_REGEX = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]/g;
+
 // ─── Integration Judge ───────────────────────────────────────────────
 
 export class IntegrationJudge {
@@ -137,6 +179,7 @@ export class IntegrationJudge {
     checks.push(this.checkIntentAlignment(intent, changes));
     checks.push(this.checkScopeBoundary(intent, runState, changes));
     checks.push(this.checkRollbackSafety(changes));
+    checks.push(this.checkCrossFileCoherence(changes));
 
     const coherenceScore = this.computeCoherenceScore(checks);
     const blockers = this.extractBlockers(checks);
@@ -516,6 +559,332 @@ export class IntegrationJudge {
     };
   }
 
+  /**
+   * Cross-file coherence: rolls up the three structural checks
+   * (orphaned references, partial migrations, import/export alignment
+   * score) into a single JudgmentCheck slot.
+   *
+   * The score is the alignment ratio from scoreCrossFileCoherence().
+   * The check is `passed` only when there are zero orphaned references,
+   * zero partial migrations, AND the score is >= 0.8. Anything below
+   * that is treated as a blocker — these are the hard-to-spot bugs
+   * that pass tests but break consumers downstream, so we'd rather
+   * stop the build than ship them.
+   */
+  private checkCrossFileCoherence(changes: readonly FileChange[]): JudgmentCheck {
+    const orphans = this.detectOrphanedReferences(changes);
+    const migrations = this.detectPartialMigration(changes);
+    const score = this.scoreCrossFileCoherence(changes);
+
+    const issues: string[] = [];
+    const affectedFiles: string[] = [];
+
+    for (const orphan of orphans) {
+      issues.push(
+        `Orphaned reference "${orphan.name}" — removed from ${orphan.removedFrom} but still referenced in ${orphan.stillReferencedIn.join(", ")}`
+      );
+      affectedFiles.push(orphan.removedFrom, ...orphan.stillReferencedIn);
+    }
+
+    for (const migration of migrations) {
+      issues.push(
+        `Partial migration "${migration.oldName}" → "${migration.newName}" introduced in ${migration.introducedIn}, but ${migration.oldNameStillIn.join(", ")} still use the old name`
+      );
+      affectedFiles.push(migration.introducedIn, ...migration.oldNameStillIn);
+    }
+
+    const passed = orphans.length === 0 && migrations.length === 0 && score >= 0.8;
+
+    const summary = `import/export alignment ${(score * 100).toFixed(0)}%`;
+    const details = passed
+      ? `${summary} — no orphaned references, no partial migrations`
+      : `${summary}; ${issues.join("; ")}`;
+
+    return {
+      name: "Cross-File Coherence",
+      category: "cross-file-coherence",
+      passed,
+      score,
+      details,
+      affectedFiles: [...new Set(affectedFiles)],
+    };
+  }
+
+  // ─── Cross-file structural methods ───────────────────────────────
+
+  /**
+   * Find references to deleted or renamed exports that other changed
+   * files did NOT update.
+   *
+   * Strategy:
+   *   1. Walk every non-delete change and pull `removed` / `added`
+   *      export names from its diff (lines starting with -/+).
+   *   2. For each removed export, check whether the same file added
+   *      it back (rename within a single file is fine).
+   *   3. For removed exports that weren't re-added in the same file,
+   *      scan every OTHER changed file's content for the identifier
+   *      as a whole word. Each other file that still mentions the
+   *      name is a stale reference.
+   *   4. Also handles deleted files: when a whole file is removed,
+   *      every export it ever declared is treated as removed and the
+   *      same scan applies.
+   *
+   * Returns one OrphanedReference per (name, removedFrom) pair that
+   * has at least one stale referencing file. Empty array means every
+   * removed export was either re-added in place or genuinely unused
+   * elsewhere in the changeset.
+   */
+  private detectOrphanedReferences(
+    changes: readonly FileChange[]
+  ): OrphanedReference[] {
+    const orphans: OrphanedReference[] = [];
+
+    // Build map: file path → { removed: [], added: [] }
+    const exportChanges = new Map<string, { removed: string[]; added: string[] }>();
+
+    for (const change of changes) {
+      const removed: string[] = [];
+      const added: string[] = [];
+
+      if (change.operation === "delete") {
+        // Whole-file delete — treat every export the file used to declare
+        // (per its originalContent if available) as removed.
+        const original = change.originalContent ?? "";
+        for (const m of original.matchAll(EXPORT_DECL_REGEX)) {
+          removed.push(m[1]);
+        }
+        for (const m of original.matchAll(NAMED_EXPORT_REGEX)) {
+          for (const name of m[1].split(",")) {
+            const cleaned = name.trim().split(/\s+as\s+/)[0].trim();
+            if (cleaned) removed.push(cleaned);
+          }
+        }
+      } else {
+        const diff = change.diff ?? "";
+        for (const m of diff.matchAll(REMOVED_EXPORT_REGEX)) removed.push(m[1]);
+        for (const m of diff.matchAll(ADDED_EXPORT_REGEX)) added.push(m[1]);
+      }
+
+      if (removed.length > 0 || added.length > 0) {
+        exportChanges.set(change.path, { removed, added });
+      }
+    }
+
+    // For each removed export, find files that still reference the name.
+    for (const [sourceFile, { removed, added }] of exportChanges) {
+      const reAddedHere = new Set(added);
+
+      for (const name of removed) {
+        // Re-added in the same file → not orphaned (rename within file is fine).
+        if (reAddedHere.has(name)) continue;
+
+        const wholeWord = new RegExp(`\\b${escapeRegExp(name)}\\b`);
+        const stillIn: string[] = [];
+
+        for (const other of changes) {
+          if (other.path === sourceFile) continue;
+          if (other.operation === "delete") continue;
+          // Prefer post-change content; fall back to diff if content is absent.
+          const haystack = other.content ?? other.diff ?? "";
+          if (wholeWord.test(haystack)) {
+            stillIn.push(other.path);
+          }
+        }
+
+        if (stillIn.length > 0) {
+          orphans.push({
+            name,
+            removedFrom: sourceFile,
+            stillReferencedIn: stillIn,
+          });
+        }
+      }
+    }
+
+    return orphans;
+  }
+
+  /**
+   * Detect mixed old/new API usage across files — the half-finished
+   * rename pattern where one file has been migrated and others have
+   * not.
+   *
+   * Strategy:
+   *   1. For each non-delete change, pull both removed exports and
+   *      added exports from its diff. If both lists are non-empty,
+   *      treat the file as having performed at least one rename.
+   *   2. Pair removed[i] with added[i] (best-effort positional pairing
+   *      — fragile but cheap; covers the common case where a single
+   *      rename appears as one removed line and one added line).
+   *   3. For each (oldName, newName) pair where the names differ,
+   *      scan every OTHER changed file for whole-word matches of
+   *      `oldName`. Each match is a file that's still on the old API.
+   *   4. Returns one PartialMigration per (oldName, newName) pair
+   *      with at least one straggler.
+   *
+   * NOTE: this is a heuristic. It will miss renames that don't manifest
+   * as paired export-line changes (e.g. a function renamed via inline
+   * edit) and it will produce false positives if the same diff legitimately
+   * removes one export and adds an unrelated one. The signal is still
+   * useful — false positives surface as warnings, not blockers.
+   */
+  private detectPartialMigration(
+    changes: readonly FileChange[]
+  ): PartialMigration[] {
+    const migrations: PartialMigration[] = [];
+
+    for (const change of changes) {
+      if (change.operation === "delete") continue;
+      const diff = change.diff ?? "";
+      if (!diff) continue;
+
+      const removed = [...diff.matchAll(REMOVED_EXPORT_REGEX)].map((m) => m[1]);
+      const added = [...diff.matchAll(ADDED_EXPORT_REGEX)].map((m) => m[1]);
+
+      if (removed.length === 0 || added.length === 0) continue;
+
+      // Positional pairing — covers single-rename diffs cleanly and
+      // degrades gracefully on multi-rename diffs (might mis-pair but
+      // still detects that something migrated).
+      const pairCount = Math.min(removed.length, added.length);
+      for (let i = 0; i < pairCount; i++) {
+        const oldName = removed[i];
+        const newName = added[i];
+        if (oldName === newName) continue;
+
+        const wholeWord = new RegExp(`\\b${escapeRegExp(oldName)}\\b`);
+        const stillIn: string[] = [];
+
+        for (const other of changes) {
+          if (other.path === change.path) continue;
+          if (other.operation === "delete") continue;
+          const haystack = other.content ?? other.diff ?? "";
+          if (wholeWord.test(haystack)) {
+            stillIn.push(other.path);
+          }
+        }
+
+        if (stillIn.length > 0) {
+          migrations.push({
+            oldName,
+            newName,
+            introducedIn: change.path,
+            oldNameStillIn: stillIn,
+          });
+        }
+      }
+    }
+
+    return migrations;
+  }
+
+  /**
+   * Returns a 0..1 cross-file coherence score based on how many
+   * cross-file imports actually resolve to exports that exist after
+   * the changes are applied.
+   *
+   * Definition of "cross-file":
+   *   We only count imports whose target file is ALSO in the change
+   *   set — imports of node_modules / standard library / unchanged
+   *   files are out of scope (we have no visibility into them).
+   *
+   * Algorithm:
+   *   1. Build exportsByFile: for each non-delete change, parse the
+   *      post-change content for `export <kind> <name>` and
+   *      `export { ... }` clauses.
+   *   2. Build the set of deleted file paths.
+   *   3. For every changed (non-delete) file, parse named imports
+   *      (`import { a, b } from "./path"`) and resolve each to a
+   *      changed file via resolveImportPath().
+   *   4. For each name in each cross-file import:
+   *        - if the target was deleted → import counts as unresolved
+   *        - else if the target's post-change exports include the
+   *          name → resolved
+   *        - else → unresolved
+   *   5. Score = resolved / total. If there are zero cross-file imports
+   *      (e.g. a single-file change), return 1.0 — there's nothing to
+   *      misalign.
+   *
+   * The score is consumed by checkCrossFileCoherence() and used as the
+   * JudgmentCheck score for the cross-file-coherence category, which
+   * feeds into the overall weighted coherence score in the report.
+   */
+  private scoreCrossFileCoherence(changes: readonly FileChange[]): number {
+    if (changes.length === 0) return 1;
+
+    // 1. Build post-change exports per file.
+    const exportsByFile = new Map<string, Set<string>>();
+    for (const change of changes) {
+      if (change.operation === "delete") continue;
+      const content = change.content ?? "";
+      const exported = new Set<string>();
+
+      for (const m of content.matchAll(EXPORT_DECL_REGEX)) {
+        exported.add(m[1]);
+      }
+      for (const m of content.matchAll(NAMED_EXPORT_REGEX)) {
+        for (const name of m[1].split(",")) {
+          const cleaned = name.trim().split(/\s+as\s+/)[0].trim();
+          if (cleaned) exported.add(cleaned);
+        }
+      }
+
+      exportsByFile.set(change.path, exported);
+    }
+
+    // 2. Set of deleted file paths.
+    const deletedFiles = new Set(
+      changes.filter((c) => c.operation === "delete").map((c) => c.path)
+    );
+
+    // 3. Walk every changed file's named imports and score them.
+    let totalImports = 0;
+    let resolvedImports = 0;
+
+    for (const change of changes) {
+      if (change.operation === "delete") continue;
+      const content = change.content ?? "";
+
+      for (const m of content.matchAll(NAMED_IMPORT_REGEX)) {
+        const importedNames = m[1]
+          .split(",")
+          .map((n) => n.trim().split(/\s+as\s+/)[0].trim())
+          .filter(Boolean);
+        const importPath = m[2];
+
+        // Resolve the import path against the importer's directory and
+        // try to find a matching change. Cross-file coherence is only
+        // defined when the target is in our change set.
+        const resolved = this.resolveImportPath(change.path, importPath);
+        const candidates = [resolved, `${resolved}.ts`, `${resolved}.js`, `${resolved}/index.ts`, `${resolved}/index.js`];
+        const targetPath = candidates.find((c) =>
+          changes.some((other) => other.path === c)
+        );
+
+        if (!targetPath) continue; // External import — out of scope.
+
+        if (deletedFiles.has(targetPath)) {
+          // Importing from a deleted file — every imported name is unresolved.
+          totalImports += importedNames.length;
+          continue;
+        }
+
+        const targetExports = exportsByFile.get(targetPath) ?? new Set<string>();
+        for (const name of importedNames) {
+          totalImports++;
+          if (targetExports.has(name)) {
+            resolvedImports++;
+          }
+        }
+      }
+    }
+
+    // No cross-file imports → nothing to misalign → perfect coherence.
+    if (totalImports === 0) return 1;
+
+    return resolvedImports / totalImports;
+  }
+
   // ─── Scoring & Reporting ─────────────────────────────────────────
 
   private computeCoherenceScore(checks: readonly JudgmentCheck[]): number {
@@ -530,6 +899,7 @@ export class IntegrationJudge {
       "intent-alignment": 1.3,
       "scope-boundary": 0.8,
       "rollback-safety": 1.0,
+      "cross-file-coherence": 1.4,
     };
 
     let weightedSum = 0;
@@ -617,4 +987,15 @@ export class IntegrationJudge {
       return regex.test(filePath);
     });
   }
+}
+
+// ─── Module-level helpers ────────────────────────────────────────────
+
+/**
+ * Escape a string for safe insertion into a RegExp source. Used by the
+ * cross-file structural methods so an identifier containing regex
+ * metacharacters (e.g. `$state`) doesn't blow up the whole-word match.
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
