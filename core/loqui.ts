@@ -57,7 +57,6 @@ function buildPrompt(
   lastTasks: readonly TaskSummary[],
 ): string {
   const lines: string[] = [];
-  lines.push("You are Loqui, the conversational reasoning interface for Aedis.");
   lines.push("Answer the user's question about this repo using only the context below. Be concise and concrete. If the context is insufficient, say so.");
   lines.push("");
   lines.push(`Repo language: ${gated.language || "unknown"}`);
@@ -102,7 +101,12 @@ async function callOllama(prompt: string): Promise<string> {
     const res = await fetch(OLLAMA_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: MODEL, prompt, stream: false }),
+      body: JSON.stringify({
+        model: MODEL,
+        prompt,
+        stream: false,
+        system: "You are Loqui, the conversational reasoning interface for Aedis.",
+      }),
       signal: controller.signal,
     });
 

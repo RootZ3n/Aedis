@@ -11,6 +11,7 @@
  *   - openai: https://api.openai.com/v1/chat/completions + OPENAI_API_KEY
  *   - minimax: MiniMax chat completions + MINIMAX_API_KEY
  *   - zai: OpenAI-compatible, ZAI_BASE_URL + ZAI_API_KEY
+ *   - portum: OpenAI-compatible, http://localhost:18797/v1/chat/completions, no API key
  *   - local: mock response, zero cost
  *
  * Fallback chain:
@@ -35,6 +36,7 @@ export type Provider =
   | "openai"
   | "minimax"
   | "zai"
+  | "portum"
   | "local";
 
 export interface InvokeConfig {
@@ -202,6 +204,13 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
           model, prompt, systemPrompt, maxTokens,
         );
         break;
+      case "portum":
+        result = await invokeOpenAICompatible(
+          "http://localhost:18797/v1",
+          undefined,
+          model, prompt, systemPrompt, maxTokens,
+        );
+        break;
       default:
         throw new InvokerError(`Unknown provider "${provider}"`, "config");
     }
@@ -351,11 +360,11 @@ async function invokeOllama(
   return { text, tokensIn, tokensOut, costUsd: estimateCost(model, tokensIn, tokensOut) };
 }
 
-// ─── OpenAI-Compatible (ModelStudio, OpenRouter, OpenAI, MiniMax, ZAI) ─
+// ─── OpenAI-Compatible (ModelStudio, OpenRouter, OpenAI, MiniMax, ZAI, Portum) ─
 
 async function invokeOpenAICompatible(
   baseUrl: string,
-  apiKey: string,
+  apiKey: string | undefined,
   model: string,
   prompt: string,
   systemPrompt?: string,
@@ -365,12 +374,17 @@ async function invokeOpenAICompatible(
   if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
   messages.push({ role: "user", content: prompt });
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
   const res = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify({
       model,
       messages,

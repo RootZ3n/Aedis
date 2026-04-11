@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Aedis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
       color-scheme: dark;
@@ -20,11 +23,13 @@
       --amber: #f59e0b;
       --red: #ff5d6c;
       --good: #4df5c8;
+      --gray: rgba(255, 255, 255, 0.55);
       --panel: rgba(8, 12, 24, 0.72);
       --panel-strong: rgba(11, 16, 32, 0.92);
       --shadow: 0 20px 80px rgba(0, 0, 0, 0.55);
       --font-ui: "Trebuchet MS", "Segoe UI", sans-serif;
       --font-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+      --font-lumen: "DM Mono", "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
     }
 
     * { box-sizing: border-box; }
@@ -115,6 +120,11 @@
       40%           { opacity: 1;    transform: translateY(-2px); }
     }
 
+    @keyframes lumenLineEnter {
+      from { opacity: 0; transform: translateY(2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     .app {
       position: relative;
       min-height: 100vh;
@@ -151,7 +161,7 @@
     .graph-panel,
     .receipts-panel,
     .history-panel,
-    .stream-panel,
+    .lumen-panel,
     .settings-panel,
     .loqui-panel {
       padding: 18px;
@@ -362,17 +372,12 @@
       animation: progressSweep 1.6s ease-in-out infinite;
     }
 
+    /* Two-column row holding Task Graph (left) and Lumen log (right). */
     .dashboard {
       display: grid;
       grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
       gap: 18px;
       align-items: start;
-    }
-
-    .main-column,
-    .side-column {
-      display: grid;
-      gap: 18px;
     }
 
     .band {
@@ -429,9 +434,6 @@
         0 0 30px color-mix(in srgb, var(--accent) 50%, transparent),
         0 0 64px color-mix(in srgb, var(--accent) 38%, transparent),
         0 0 100px color-mix(in srgb, var(--accent) 24%, transparent);
-      /* pulseGlow runs forever; workerActivate runs once when the card
-         transitions from idle to active, flashing an outline ring in the
-         worker's accent color so the eye snaps to it. */
       animation:
         pulseGlow 1s ease-in-out infinite,
         workerActivate 0.9s ease-out 1;
@@ -540,8 +542,7 @@
 
     .receipt-card,
     .history-card,
-    .settings-item,
-    .stream-box {
+    .settings-item {
       border-radius: 18px;
       border: 1px solid rgba(255,255,255,0.08);
       background: var(--panel);
@@ -581,6 +582,17 @@
       color: var(--ink);
     }
 
+    /* Run History is now a full-width panel — give it a multi-column grid
+       so the cards spread out instead of stacking in a single tall stripe. */
+    .history-panel {
+      display: grid;
+      gap: 12px;
+    }
+
+    .history-list {
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+
     .history-card {
       cursor: pointer;
       text-align: left;
@@ -611,20 +623,89 @@
       letter-spacing: 0.06em;
     }
 
-    .stream-box {
-      min-height: 260px;
-      max-height: 360px;
-      overflow: auto;
+    /* ─── Lumen live log ────────────────────────────────────────── */
+    .lumen-panel {
+      display: grid;
+      gap: 12px;
     }
 
-    pre {
-      margin: 0;
-      white-space: pre-wrap;
+    .lumen-box {
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at 12% 8%, rgba(77, 245, 200, 0.04), transparent 38%),
+        radial-gradient(circle at 88% 92%, rgba(251, 146, 60, 0.04), transparent 38%),
+        rgba(8, 12, 24, 0.78);
+      padding: 14px 16px;
+      min-height: 280px;
+      max-height: 460px;
+      overflow-y: auto;
+      display: grid;
+      gap: 4px;
+      align-content: start;
+      font-family: var(--font-lumen);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .lumen-line {
+      display: grid;
+      grid-template-columns: 1.4em minmax(0, 1fr);
+      column-gap: 10px;
+      align-items: baseline;
+      padding: 2px 0;
       word-break: break-word;
+      animation: lumenLineEnter 220ms ease-out;
+    }
+
+    .lumen-line .icon {
+      font-size: 14px;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .lumen-line .text {
+      min-width: 0;
+    }
+
+    .lumen-line.gray         { color: var(--gray); }
+    .lumen-line.green        { color: #6ee7a8; }
+    .lumen-line.blue         { color: var(--blue); }
+    .lumen-line.orange       { color: var(--orange); }
+    .lumen-line.purple       { color: var(--violet); }
+    .lumen-line.teal         { color: var(--teal); }
+    .lumen-line.pink         { color: var(--pink); }
+    .lumen-line.red          { color: var(--red); }
+    .lumen-line.bright-teal  {
+      color: var(--teal);
+      text-shadow: 0 0 14px rgba(77, 245, 200, 0.55);
+    }
+
+    .lumen-line.big {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 12px 0 8px;
+      margin-top: 8px;
+      border-top: 1px dashed rgba(255, 255, 255, 0.10);
+      text-shadow: 0 0 22px currentColor;
+    }
+
+    .lumen-line.big.complete  { color: var(--good); }
+    .lumen-line.big.failed    { color: var(--red); }
+    .lumen-line.big.partial   { color: var(--orange); }
+    .lumen-line.big.cancelled { color: var(--gray); }
+
+    .lumen-empty {
       color: var(--muted);
       font-family: var(--font-mono);
-      font-size: 15px;
-      line-height: 1.5;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-align: center;
+      padding: 26px 14px;
+      border: 1px dashed rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
     }
 
     .settings-item {
@@ -826,6 +907,8 @@
       }
       .glyph-card { min-height: 86px; }
       .loqui-msg { max-width: 92%; }
+      .lumen-box { font-size: 13px; }
+      .lumen-line.big { font-size: 18px; }
     }
   </style>
 </head>
@@ -881,15 +964,11 @@
 
       <div id="run-progress" class="run-progress" aria-hidden="true"></div>
 
-      <section class="panel band">
-        <div class="label">Workers</div>
-        <div id="worker-grid" class="worker-grid"></div>
-      </section>
-
+      <!-- 2. Loqui chat panel -->
       <section class="panel loqui-panel">
         <div class="loqui-row">
           <div class="label">Loqui — Ask the repo</div>
-          <span class="tiny">qwen3.5:9b · local</span>
+          <span class="tiny">qwen3.6-plus · local</span>
         </div>
         <div id="loqui-log" class="loqui-log"></div>
         <form id="loqui-form" class="loqui-form">
@@ -904,42 +983,51 @@
         </form>
       </section>
 
+      <!-- 3. Workers grid -->
+      <section class="panel band">
+        <div class="label">Workers</div>
+        <div id="worker-grid" class="worker-grid"></div>
+      </section>
+
+      <!-- 4. Task Graph (left) + Lumen live log (right) -->
       <div class="dashboard">
-        <section class="main-column">
-          <section class="panel graph-panel">
-            <div class="label">Task Graph</div>
-            <div class="graph-shell">
-              <svg id="task-graph" viewBox="0 0 960 360" preserveAspectRatio="xMidYMid meet"></svg>
-            </div>
-          </section>
-
-          <section class="panel receipts-panel">
-            <div class="label">Receipt Feed</div>
-            <div id="receipt-list" class="receipts-list"></div>
-          </section>
-
-          <section class="panel settings-panel">
-            <div class="settings-row">
-              <div class="label">Worker Models</div>
-              <button id="config-save" class="button" type="button">Save</button>
-            </div>
-            <div id="settings-grid" class="settings-grid"></div>
-            <div id="config-status" class="settings-note">Loading model config...</div>
-          </section>
+        <section class="panel graph-panel">
+          <div class="label">Task Graph</div>
+          <div class="graph-shell">
+            <svg id="task-graph" viewBox="0 0 960 360" preserveAspectRatio="xMidYMid meet"></svg>
+          </div>
         </section>
 
-        <aside class="side-column">
-          <section class="panel history-panel">
-            <div class="label">Run History</div>
-            <div id="history-list" class="history-list"></div>
-          </section>
-
-          <section class="panel stream-panel">
-            <div class="label">Raw Stream</div>
-            <div class="stream-box"><pre id="stream-log">Waiting for runtime events...</pre></div>
-          </section>
-        </aside>
+        <section class="panel lumen-panel">
+          <div class="loqui-row">
+            <div class="label">Lumen — Live Log</div>
+            <span class="tiny">human-readable events</span>
+          </div>
+          <div id="lumen-log" class="lumen-box"></div>
+        </section>
       </div>
+
+      <!-- 5. Run History (full width) -->
+      <section class="panel history-panel">
+        <div class="label">Run History</div>
+        <div id="history-list" class="history-list"></div>
+      </section>
+
+      <!-- 6. Receipt Feed (full width) -->
+      <section class="panel receipts-panel">
+        <div class="label">Receipt Feed</div>
+        <div id="receipt-list" class="receipts-list"></div>
+      </section>
+
+      <!-- 7. Worker Models (full width) -->
+      <section class="panel settings-panel">
+        <div class="settings-row">
+          <div class="label">Worker Models</div>
+          <button id="config-save" class="button" type="button">Save</button>
+        </div>
+        <div id="settings-grid" class="settings-grid"></div>
+        <div id="config-status" class="settings-note">Loading model config...</div>
+      </section>
     </div>
   </div>
 
@@ -972,6 +1060,7 @@
       runHistory: 'zendorium.runHistory',
     };
     const HISTORY_MAX = 20;
+    const LUMEN_MAX = 200;
     const ROLE_COLORS = {
       scout: '#4df5c8',
       builder: '#fb923c',
@@ -980,6 +1069,14 @@
       integrator: '#f472b6',
       escalation: '#ff5d6c',
       coordinator: '#4df5c8'
+    };
+    /** Maps a worker role to a Lumen line color class. */
+    const WORKER_LUMEN_COLOR = {
+      scout: 'blue',
+      builder: 'orange',
+      critic: 'purple',
+      verifier: 'teal',
+      integrator: 'pink',
     };
     const MODEL_OPTIONS = {
       scout: [{ model: 'local', provider: 'local', label: 'local' }],
@@ -1053,7 +1150,7 @@
         graph: { nodes: [], edges: [] },
         workers,
         receipts: [],
-        stream: []
+        lumen: []
       };
     }
 
@@ -1069,14 +1166,6 @@
     }
 
     // ─── History persistence ─────────────────────────────────────
-    // state.runs lives in memory only — page reloads wipe it. We persist a
-    // slim form (no graph/stream/receipts payloads) to localStorage on every
-    // render so the Run History panel survives refreshes. Heavy fields stay
-    // in memory for the active session and get reconstructed-as-empty on
-    // restore (the user can click into a restored run; they won't see
-    // worker/graph data because that was per-session, but they will see
-    // prompt + verdict + cost + commit SHA, which is what matters for history).
-
     function persistRuns() {
       try {
         const slim = state.runs.slice(0, HISTORY_MAX).map((run) => ({
@@ -1152,7 +1241,6 @@
         state.connected = true;
         setSocketStatus('LIVE', true);
         try { ws.send(JSON.stringify({ type: 'hello', client: 'zendorium-ui' })); } catch {}
-        // Resubscribe to in-flight task so the server can target us specifically
         if (state.currentRunId) {
           try { ws.send(JSON.stringify({ type: 'subscribe', taskId: state.currentRunId })); } catch {}
         }
@@ -1187,10 +1275,6 @@
       const repoPath = state.repoPath || '.';
       console.log('submitPrompt fired', prompt, repoPath);
 
-      // Optimistic local run — gives immediate UI feedback while POST is in flight.
-      // The id is replaced with the server-issued task_id once the POST resolves,
-      // so subsequent WebSocket events (which carry taskId in their payload) line
-      // up with the same run object.
       const tempId = `pending-${Date.now().toString(36)}`;
       const run = createEmptyRun();
       run.id = tempId;
@@ -1198,7 +1282,7 @@
       run.repoPath = repoPath;
       run.status = 'queued';
       run.startedAt = new Date().toISOString();
-      run.stream.push(JSON.stringify({ type: 'submitting', prompt, repoPath }, null, 2));
+      pushLumen(run, { color: 'gray', icon: '✉', text: `Submitting task: ${truncate(prompt, 60)}` });
       state.active = run;
       state.currentRunId = tempId;
       state.runs.unshift(run);
@@ -1222,25 +1306,13 @@
         const taskId = data.task_id || data.taskId || tempId;
 
         if (taskId !== tempId) {
-          // Promote the optimistic run to the server-issued id so future WS
-          // events keyed on taskId reuse this run object instead of spawning a
-          // sibling.
           run.id = taskId;
           state.history = dedupeHistory([taskId, ...state.history.filter((entry) => entry !== tempId)]);
           state.currentRunId = taskId;
         }
 
-        run.stream.push(JSON.stringify({
-          type: 'submitted',
-          task_id: taskId,
-          status: data.status || 'queued',
-          repo_path: data.repo_path ?? repoPath,
-        }, null, 2));
-        if (run.stream.length > 30) run.stream.shift();
+        pushLumen(run, { color: 'gray', icon: '✓', text: `Task accepted (${taskId})` });
 
-        // Tell the WS server we want events for this task. The current
-        // websocket implementation broadcasts everything anyway, but a
-        // typed subscribe message future-proofs against per-client filtering.
         if (state.socket && state.socket.readyState === WebSocket.OPEN) {
           try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
         }
@@ -1248,11 +1320,11 @@
         console.error('submit error', err);
         run.status = 'failed';
         run.completedAt = new Date().toISOString();
-        run.stream.push(JSON.stringify({
-          type: 'submit_error',
-          error: err && err.message ? err.message : String(err),
-        }, null, 2));
-        if (run.stream.length > 30) run.stream.shift();
+        pushLumen(run, {
+          color: 'red',
+          icon: '❌',
+          text: `Submit failed — ${truncate(err && err.message ? err.message : String(err), 80)}`,
+        });
       } finally {
         state.submitting = false;
         render();
@@ -1289,8 +1361,6 @@
           throw new Error(body.message || body.error || `HTTP ${res.status}`);
         }
         const data = await res.json().catch(() => ({}));
-        // Server may shape the response a few different ways; accept the
-        // common ones so this UI doesn't break if the route gets refactored.
         const answer = String(
           data.answer ?? data.response ?? data.text ?? data.message ?? ''
         ).trim() || '(no answer returned)';
@@ -1325,6 +1395,177 @@
       return payload.taskId || payload.task_id || payload.runId || payload.run_id || payload.id || state.currentRunId || null;
     }
 
+    // ─── Lumen translation ───────────────────────────────────────
+    function pushLumen(run, entry) {
+      if (!run || !entry) return;
+      run.lumen.push({
+        color: entry.color || 'gray',
+        icon: entry.icon || '·',
+        text: entry.text || '',
+        big: !!entry.big,
+        verdictClass: entry.verdictClass || '',
+        at: new Date().toISOString(),
+      });
+      if (run.lumen.length > LUMEN_MAX) run.lumen.shift();
+    }
+
+    function truncate(value, max) {
+      const text = String(value ?? '');
+      if (text.length <= max) return text;
+      return `${text.slice(0, max - 1)}…`;
+    }
+
+    function capitalize(value) {
+      const text = String(value || '');
+      if (!text) return '';
+      return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+
+    function formatConfidence(raw) {
+      if (raw == null) return '?';
+      const num = Number(raw);
+      if (Number.isFinite(num)) {
+        if (num <= 1) return `${(num * 100).toFixed(0)}%`;
+        return `${num.toFixed(0)}%`;
+      }
+      return String(raw);
+    }
+
+    function translateToLumen(run, payload, type) {
+      switch (type) {
+        case 'charter_generated': {
+          const objective =
+            payload.objective ||
+            (payload.charter && payload.charter.objective) ||
+            payload.summary ||
+            '';
+          pushLumen(run, {
+            color: 'gray',
+            icon: '📋',
+            text: `Charter: ${truncate(objective, 60)}`,
+          });
+          return;
+        }
+
+        case 'intent_locked':
+        case 'intent_generated': {
+          pushLumen(run, { color: 'gray', icon: '🔒', text: 'Intent locked' });
+          return;
+        }
+
+        case 'coherence_check_passed':
+        case 'coherence_passed': {
+          pushLumen(run, { color: 'green', icon: '✅', text: 'Coherence passed' });
+          return;
+        }
+
+        case 'task_started':
+        case 'worker_started': {
+          const wt = String(
+            payload.workerType ||
+            payload.worker_type ||
+            (payload.task && (payload.task.workerType || payload.task.worker_type)) ||
+            ''
+          ).toLowerCase();
+          if (!wt) return;
+          const color = WORKER_LUMEN_COLOR[wt] || 'gray';
+          pushLumen(run, {
+            color,
+            icon: '⚡',
+            text: `${capitalize(wt)} started`,
+          });
+          return;
+        }
+
+        case 'scout_complete': {
+          const conf = formatConfidence(
+            payload.confidence ?? (payload.result && payload.result.confidence)
+          );
+          pushLumen(run, {
+            color: 'blue',
+            icon: '🔍',
+            text: `Scout complete — confidence ${conf}`,
+          });
+          return;
+        }
+
+        case 'builder_complete': {
+          const conf = formatConfidence(
+            payload.confidence ?? (payload.result && payload.result.confidence)
+          );
+          pushLumen(run, {
+            color: 'orange',
+            icon: '🔨',
+            text: `Builder complete — confidence ${conf}`,
+          });
+          return;
+        }
+
+        case 'task_failed':
+        case 'worker_failed': {
+          const wt = String(
+            payload.workerType ||
+            payload.worker_type ||
+            (payload.task && (payload.task.workerType || payload.task.worker_type)) ||
+            'task'
+          );
+          const err = String(
+            payload.error ||
+            payload.message ||
+            (payload.result && payload.result.error) ||
+            'unknown error'
+          );
+          pushLumen(run, {
+            color: 'red',
+            icon: '❌',
+            text: `${capitalize(wt)} failed — ${truncate(err, 80)}`,
+          });
+          return;
+        }
+
+        case 'commit_created': {
+          const sha = String(
+            payload.sha || payload.commitSha || payload.commit_sha || ''
+          ).slice(0, 8);
+          pushLumen(run, {
+            color: 'bright-teal',
+            icon: '✅',
+            text: `Committed ${sha || '(unknown sha)'}`,
+          });
+          return;
+        }
+
+        case 'run_complete':
+        case 'done': {
+          const verdictRaw = String(
+            payload.verdict || payload.status || 'complete'
+          ).toLowerCase();
+          const verdictClass =
+            verdictRaw.includes('fail') || verdictRaw.includes('error') ? 'failed'
+            : verdictRaw.includes('partial') ? 'partial'
+            : verdictRaw.includes('cancel') || verdictRaw.includes('abort') ? 'cancelled'
+            : 'complete';
+          const icon =
+            verdictClass === 'failed' ? '❌'
+            : verdictClass === 'partial' ? '◐'
+            : verdictClass === 'cancelled' ? '⊘'
+            : '◆';
+          pushLumen(run, {
+            color: '',
+            icon,
+            text: verdictRaw.toUpperCase(),
+            big: true,
+            verdictClass,
+          });
+          return;
+        }
+
+        default:
+          // Silent — never render raw JSON.
+          return;
+      }
+    }
+
     function ingestEvent(payload) {
       const type = normalizeType(payload);
       const runId = guessRunId(payload);
@@ -1337,8 +1578,7 @@
         state.history = dedupeHistory([runId, ...state.history]);
       }
 
-      run.stream.push(JSON.stringify(payload, null, 2));
-      if (run.stream.length > 30) run.stream.shift();
+      translateToLumen(run, payload, type);
 
       if (payload.prompt || payload.request || payload.input) run.prompt = payload.prompt || payload.request || payload.input;
       if (payload.repoPath || payload.repo_path) run.repoPath = payload.repoPath || payload.repo_path;
@@ -1347,7 +1587,6 @@
       if (payload.totalCostUsd != null || payload.total_cost_usd != null) run.totalCostUsd = Number(payload.totalCostUsd ?? payload.total_cost_usd ?? run.totalCostUsd);
       if (payload.verdict) run.verdict = String(payload.verdict);
       if (payload.commitSha || payload.commit_sha) run.commitSha = String(payload.commitSha || payload.commit_sha);
-      // commit_created event from the coordinator carries { runId, sha }.
       if (type === 'commit_created' && payload.sha) run.commitSha = String(payload.sha);
 
       if (Array.isArray(payload.receipts)) {
@@ -1363,11 +1602,6 @@
       if (Array.isArray(payload.workers)) applyWorkers(run, payload.workers);
       if (payload.worker || payload.workerStatus || payload.worker_status) applyWorkers(run, [payload.worker || payload.workerStatus || payload.worker_status]);
 
-      // Dedicated handler for receipt_generated — extract the nested fields
-      // the coordinator emits (totalCost.estimatedCostUsd, summary.filesModified,
-      // commitSha) and surface them in the receipt card. Set rather than
-      // accumulate run.totalCostUsd because run_complete fires first with the
-      // same total and accumulating would double-count.
       if (type === 'receipt_generated' && payload.receipt) {
         const r = payload.receipt;
         const tc = r.totalCost || {};
@@ -1400,12 +1634,9 @@
         run.receipts = run.receipts.slice(0, 40);
         run.receiptCount = run.receipts.length;
         run.totalCostUsd = cost;
-        // Mirror the receipt-level commit/verdict onto the run itself so the
-        // history card can show them after the run finishes.
         if (commitSha) run.commitSha = commitSha;
         if (r.verdict) run.verdict = String(r.verdict);
       } else if (type.includes('receipt')) {
-        // Fallback for older/other receipt event shapes.
         const receipt = normalizeReceipt(payload.receipt || payload);
         appendReceipt(run, receipt);
       }
@@ -1643,8 +1874,6 @@
     }
 
     function isRunActive() {
-      // True whenever the user should see "something is happening" feedback:
-      // either we're mid-POST or the active run is queued/running on the server.
       const status = normalizeRunStatus(state.active.status);
       return state.submitting || status === 'queued' || status === 'running';
     }
@@ -1653,14 +1882,13 @@
       renderHeader();
       renderWorkers();
       renderReceipts();
-      renderStream();
+      renderLumen();
       renderHistory();
       renderGraph();
       renderLoqui();
 
       const active = isRunActive();
       const button = document.getElementById('submit-button');
-      // Disable while a run is in flight so the user can't double-fire.
       button.disabled = active;
       button.classList.toggle('running', active);
       button.textContent = state.submitting
@@ -1670,8 +1898,6 @@
       const progress = document.getElementById('run-progress');
       if (progress) progress.classList.toggle('active', active);
 
-      // Persist the run list (slim form) to localStorage so the history
-      // panel survives page reloads. Cheap enough to call on every render.
       persistRuns();
     }
 
@@ -1783,8 +2009,30 @@
       }).join('');
     }
 
-    function renderStream() {
-      document.getElementById('stream-log').textContent = (state.active.stream || []).slice(-18).join('\n\n');
+    function renderLumen() {
+      const log = document.getElementById('lumen-log');
+      if (!log) return;
+
+      const lumen = state.active.lumen || [];
+      if (lumen.length === 0) {
+        log.innerHTML = '<div class="lumen-empty">Waiting for runtime events…</div>';
+        return;
+      }
+
+      log.innerHTML = lumen.map((entry) => {
+        const classes = ['lumen-line'];
+        if (entry.color) classes.push(entry.color);
+        if (entry.big) classes.push('big');
+        if (entry.verdictClass) classes.push(entry.verdictClass);
+        return `
+          <div class="${classes.join(' ')}">
+            <span class="icon">${esc(entry.icon)}</span>
+            <span class="text">${esc(entry.text)}</span>
+          </div>
+        `;
+      }).join('');
+
+      log.scrollTop = log.scrollHeight;
     }
 
     function renderHistory() {
@@ -1846,7 +2094,6 @@
       }
 
       log.innerHTML = parts.join('');
-      // Auto-scroll to bottom so the newest message / spinner is always visible.
       log.scrollTop = log.scrollHeight;
 
       const button = document.getElementById('loqui-send');
