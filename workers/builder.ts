@@ -132,7 +132,23 @@ const CONTEXT_OVERHEAD_CHARS = 64;
 // catches the SUBTLE truncations that pass the length check — like the
 // 1343 to 1298 case which retained 96.6%. A file truncated mid-function
 // will end with a partial statement, never with a clean closing token.
+//
+// Gate 3 (brace balance) compares the result's imbalance to the ORIGINAL
+// file's imbalance. We can't use absolute imbalance because some files
+// legitimately have unbalanced braces from string literals or template
+// literals (workers/scout.ts has 175 open vs 169 close = delta 6 from
+// braces inside its regex strings). The previous absolute-threshold
+// check false-positived on every correct diff to such files. Delta-based
+// preserves the corruption signal (a truncating diff increases the delta
+// sharply because closing braces drop out without their matching opens)
+// without false-positiving on inherent string-literal noise.
+//
+//   SECTION_BRACE_DELTA_TOLERANCE — how much MORE imbalanced the result
+//     can be relative to the original before we throw. 2 = "the diff
+//     can shift the brace count by at most 2 in either direction", which
+//     covers normal edits that add or remove a small block.
 const SECTION_LENGTH_RETAIN_FLOOR = 0.95;
+const SECTION_BRACE_DELTA_TOLERANCE = 2;
 
 // ─── Internal types for prompt assembly ──────────────────────────────
 
@@ -818,9 +834,12 @@ export class BuilderWorker extends AbstractWorker {
   //           because coordinator.ts went from 1343 to 1298 lines
   //           (96.6% retained) and committed corrupted; the old 50%
   //           threshold waved it through.
-  //       (c) Brace balance: |opens - closes| must be <= 2. Mirrors
-  //           DiffApplier.checkBraceBalance and catches the brace-imbalance
-  //           shape of mid-function truncation.
+  //       (c) Brace balance, DELTA-VS-ORIGINAL: the result's brace
+  //           imbalance can exceed the ORIGINAL's by at most
+  //           SECTION_BRACE_DELTA_TOLERANCE (2). Catches the brace-imbalance
+  //           shape of mid-function truncation without false-positiving
+  //           on files that legitimately have unbalanced braces in string
+  //           literals or template literals.
   //
   // fullOriginalContent must ALWAYS be the full file content read from
   // disk, never the extracted section. The diff is applied to the full
@@ -873,10 +892,16 @@ export class BuilderWorker extends AbstractWorker {
       //   or block comment terminator. Catches subtle mid-function
       //   truncations that pass the length check.
       //
-      // Gate 3: Brace balance. |opens - closes| must be <= 2. Mirrors
-      //   DiffApplier.checkBraceBalance threshold exactly. Promoted from
-      //   warning to hard throw in section mode because brace imbalance
-      //   is the canonical signal of mid-function truncation.
+      // Gate 3: Brace balance, DELTA-VS-ORIGINAL. The result's imbalance
+      //   may exceed the ORIGINAL's imbalance by at most
+      //   SECTION_BRACE_DELTA_TOLERANCE (2). The previous absolute-threshold
+      //   version false-positived on workers/scout.ts (175 open vs 169
+      //   close = delta 6 from braces inside its regex strings); any
+      //   correct diff to it would also have delta 6 and trip the gate.
+      //   Comparing to the original's imbalance preserves the corruption
+      //   signal — a truncating diff drops closing braces sharply,
+      //   pushing the delta WORSE — without false-positiving on inherent
+      //   string-literal noise.
       if (sectionMode) {
         const ratio = updatedContent.length / fullOriginalContent.length;
         if (ratio < SECTION_LENGTH_RETAIN_FLOOR) {
@@ -914,31 +939,46 @@ export class BuilderWorker extends AbstractWorker {
           );
         }
 
-        // Gate 3: brace balance. Mirrors core/diff-applier.ts checkBraceBalance
-        // exactly so the trigger condition tracks. In normal mode the diff
-        // applier only WARNS on imbalance, but in section-edit mode a brace
-        // imbalance is the canonical signal of mid-function truncation, so
-        // we promote it from warning to hard throw. Threshold matches the
-        // diff applier: |opens - closes| > 2 (the tolerance absorbs braces
-        // in string and template literals as small false-positive noise).
-        let braceOpens = 0;
-        let braceCloses = 0;
+        // Gate 3: brace balance, DELTA-VS-ORIGINAL.
+        // Count braces in BOTH the original file and the result, then
+        // compare imbalances. We allow the result to be at most
+        // SECTION_BRACE_DELTA_TOLERANCE (2) more imbalanced than the
+        // original. Files with legitimate inherent imbalance from string
+        // literals (e.g. workers/scout.ts at delta 6) pass cleanly because
+        // a correct diff preserves their delta; a truncating diff makes
+        // it WORSE.
+        let originalOpens = 0;
+        let originalCloses = 0;
+        for (let i = 0; i < fullOriginalContent.length; i++) {
+          const ch = fullOriginalContent.charCodeAt(i);
+          if (ch === 123 /* { */) originalOpens++;
+          else if (ch === 125 /* } */) originalCloses++;
+        }
+        let resultOpens = 0;
+        let resultCloses = 0;
         for (let i = 0; i < updatedContent.length; i++) {
           const ch = updatedContent.charCodeAt(i);
-          if (ch === 123 /* { */) braceOpens++;
-          else if (ch === 125 /* } */) braceCloses++;
+          if (ch === 123 /* { */) resultOpens++;
+          else if (ch === 125 /* } */) resultCloses++;
         }
-        if (Math.abs(braceOpens - braceCloses) > 2) {
+        const originalDelta = Math.abs(originalOpens - originalCloses);
+        const resultDelta = Math.abs(resultOpens - resultCloses);
+        const deltaIncrease = resultDelta - originalDelta;
+        if (deltaIncrease > SECTION_BRACE_DELTA_TOLERANCE) {
           throw new Error(
-            `section-mode diff safety check failed: brace imbalance detected — possible truncation ` +
-            `(${braceOpens} open vs ${braceCloses} close, delta ${braceOpens - braceCloses}, ` +
+            `section-mode diff safety check failed: brace imbalance worsened — possible truncation ` +
+            `(original ${originalOpens} open / ${originalCloses} close, delta=${originalDelta}; ` +
+            `result ${resultOpens} open / ${resultCloses} close, delta=${resultDelta}; ` +
+            `delta increased by ${deltaIncrease}, threshold ${SECTION_BRACE_DELTA_TOLERANCE}; ` +
             `result is ${updatedContent.length} chars vs original ${fullOriginalContent.length})`
           );
         }
 
         console.log(
           `[Builder] Section-mode diff applied: ${fullOriginalContent.length} → ${updatedContent.length} chars ` +
-          `(${(ratio * 100).toFixed(1)}% retained, ends with "${lastChar}", braces ${braceOpens}/${braceCloses})`
+          `(${(ratio * 100).toFixed(1)}% retained, ends with "${lastChar}", ` +
+          `braces ${resultOpens}/${resultCloses} delta=${resultDelta} ` +
+          `vs original delta=${originalDelta})`
         );
       }
 
