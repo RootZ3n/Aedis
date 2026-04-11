@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Zendorium</title>
+  <title>Aedis</title>
   <style>
     :root {
       color-scheme: dark;
@@ -617,8 +617,8 @@
     <div class="shell">
       <section class="hero">
         <section class="panel hero-main">
-          <div class="eyebrow">Zendorium live</div>
-          <h1 class="headline">Bioluminescent Build Control</h1>
+          <div class="eyebrow">Aedis</div>
+          <h1 class="headline">Aedis</h1>
           <div class="subgrid">
             <article class="glyph-card">
               <div class="label">Live Cost</div>
@@ -787,7 +787,8 @@
       history: [],
       active: createEmptyRun(),
       modelConfig: { ...DEFAULT_MODEL_CONFIG },
-      repoPath: '.'
+      repoPath: '.',
+      submitting: false
     };
 
     function createEmptyRun() {
@@ -850,7 +851,11 @@
       ws.addEventListener('open', () => {
         state.connected = true;
         setSocketStatus('LIVE', true);
-        ws.send(JSON.stringify({ type: 'hello', client: 'zendorium-ui' }));
+        try { ws.send(JSON.stringify({ type: 'hello', client: 'zendorium-ui' })); } catch {}
+        // Resubscribe to in-flight task so the server can target us specifically
+        if (state.currentRunId) {
+          try { ws.send(JSON.stringify({ type: 'subscribe', taskId: state.currentRunId })); } catch {}
+        }
         render();
       });
       ws.addEventListener('message', (event) => {
@@ -871,35 +876,87 @@
       ws.addEventListener('error', () => setSocketStatus('SOCKET ERR'));
     }
 
-    function submitPrompt(event) {
+    async function submitPrompt(event) {
       event.preventDefault();
+      if (state.submitting) return;
       persistRepoPath();
       const input = document.getElementById('prompt-input');
       const prompt = input.value.trim();
-      if (!prompt || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
-      const syntheticId = `run-${Date.now().toString(36)}`;
+      if (!prompt) return;
+
+      const repoPath = state.repoPath || '.';
+      console.log('submitPrompt fired', prompt, repoPath);
+
+      // Optimistic local run — gives immediate UI feedback while POST is in flight.
+      // The id is replaced with the server-issued task_id once the POST resolves,
+      // so subsequent WebSocket events (which carry taskId in their payload) line
+      // up with the same run object.
+      const tempId = `pending-${Date.now().toString(36)}`;
       const run = createEmptyRun();
-      run.id = syntheticId;
+      run.id = tempId;
       run.prompt = prompt;
-      run.repoPath = state.repoPath;
+      run.repoPath = repoPath;
       run.status = 'queued';
       run.startedAt = new Date().toISOString();
+      run.stream.push(JSON.stringify({ type: 'submitting', prompt, repoPath }, null, 2));
       state.active = run;
-      state.currentRunId = syntheticId;
+      state.currentRunId = tempId;
       state.runs.unshift(run);
-      state.history = dedupeHistory([syntheticId, ...state.history]);
-      state.socket.send(JSON.stringify({
-        type: 'run',
-        prompt,
-        input: prompt,
-        request: prompt,
-        runId: syntheticId,
-        repoPath: state.repoPath,
-        repo_path: state.repoPath,
-        client: 'zendorium-ui'
-      }));
+      state.history = dedupeHistory([tempId, ...state.history]);
+
+      state.submitting = true;
       input.value = '';
       render();
+
+      try {
+        const res = await fetch(`${API_BASE}/tasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, repoPath }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.message || body.error || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const taskId = data.task_id || data.taskId || tempId;
+
+        if (taskId !== tempId) {
+          // Promote the optimistic run to the server-issued id so future WS
+          // events keyed on taskId reuse this run object instead of spawning a
+          // sibling.
+          run.id = taskId;
+          state.history = dedupeHistory([taskId, ...state.history.filter((entry) => entry !== tempId)]);
+          state.currentRunId = taskId;
+        }
+
+        run.stream.push(JSON.stringify({
+          type: 'submitted',
+          task_id: taskId,
+          status: data.status || 'queued',
+          repo_path: data.repo_path ?? repoPath,
+        }, null, 2));
+        if (run.stream.length > 30) run.stream.shift();
+
+        // Tell the WS server we want events for this task. The current
+        // websocket implementation broadcasts everything anyway, but a
+        // typed subscribe message future-proofs against per-client filtering.
+        if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+          try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
+        }
+      } catch (err) {
+        console.error('submit error', err);
+        run.status = 'failed';
+        run.completedAt = new Date().toISOString();
+        run.stream.push(JSON.stringify({
+          type: 'submit_error',
+          error: err && err.message ? err.message : String(err),
+        }, null, 2));
+        if (run.stream.length > 30) run.stream.shift();
+      } finally {
+        state.submitting = false;
+        render();
+      }
     }
 
     function dedupeHistory(items) {
@@ -911,7 +968,7 @@
     }
 
     function guessRunId(payload) {
-      return payload.runId || payload.run_id || payload.id || state.currentRunId || null;
+      return payload.taskId || payload.task_id || payload.runId || payload.run_id || payload.id || state.currentRunId || null;
     }
 
     function ingestEvent(payload) {
@@ -960,7 +1017,7 @@
 
       if (type === 'run_started' || type === 'start' || type === 'run') run.status = 'running';
       else if (type.includes('complete') || type === 'done') {
-        run.status = payload.status || 'complete';
+        run.status = payload.verdict || payload.status || 'complete';
         run.completedAt = payload.completedAt || payload.completed_at || new Date().toISOString();
       } else if (type.includes('partial')) run.status = 'partial';
       else if (type.includes('error') || type.includes('failed')) run.status = 'failed';
@@ -1189,7 +1246,9 @@
       renderStream();
       renderHistory();
       renderGraph();
-      document.getElementById('submit-button').disabled = !state.connected;
+      const button = document.getElementById('submit-button');
+      button.disabled = state.submitting;
+      button.textContent = state.submitting ? 'Sending…' : 'Run';
     }
 
     function renderHeader() {

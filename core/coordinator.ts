@@ -332,6 +332,7 @@ export class Coordinator {
       console.log(`[coordinator] PHASE 6: ExecuteGraph — entering with ${active.graph.nodes.length} node(s)`);
       await this.executeGraph(active);
       console.log(`[coordinator] PHASE 6 done — graph state: ${JSON.stringify(getGraphSummary(active.graph))}`);
+      console.log(`[coordinator] PHASE 6 trace — builder nodes processed: ${active.graph.nodes.filter(n => n.workerType === 'builder').length}`);
 
       // Phase 8: Post-Build IntegrationJudge
       if (!active.cancelled && !hasFailedNodes(active.graph)) {
