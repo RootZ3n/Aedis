@@ -620,7 +620,8 @@ export interface SectionExtraction {
   readonly extractionMethod:
     | "function-keyword-match"
     | "longest-function-fallback"
-    | "middle-of-file-fallback";
+    | "middle-of-file-fallback"
+    | "top-of-file-keyword";
   /** Keywords that were extracted from the task description. */
   readonly keywordsUsed: readonly string[];
 }
@@ -634,6 +635,18 @@ interface FunctionLocation {
 export const SECTION_LARGE_FILE_THRESHOLD = 16_000;
 export const SECTION_MAX_LINES = 150;
 export const SECTION_PADDING_LINES = 100;
+
+// Top-of-file pre-check. When the task description matches one of these
+// phrases, the section is forced to lines 1..TOP_OF_FILE_LINE_COUNT and
+// function matching is skipped entirely. JSDoc-at-top tasks, file header
+// banners, and import-block edits all live above the first function in
+// the file, so picking a mid-file function for them produces a section
+// that (a) misses the actual edit target and (b) trips the brace-balance
+// safety gate in workers/builder.ts because applying the diff outside
+// any function will leave the file with mismatched braces relative to
+// the section the model was looking at.
+export const TOP_OF_FILE_LINE_COUNT = 50;
+const TOP_OF_FILE_PATTERN = /\b(?:top of (?:the )?file|(?:at|to) the top|file header|beginning of (?:the )?file)\b/i;
 
 const SECTION_STOP_WORDS = new Set([
   "the", "a", "an", "to", "in", "on", "at", "of", "for", "with", "and", "or",
@@ -666,6 +679,12 @@ const FN_REGEX_WORDS_TO_SKIP = new Set([
  * has more than SECTION_MAX_LINES lines.
  *
  * Algorithm:
+ *   0. PRE-CHECK: if the task description matches TOP_OF_FILE_PATTERN
+ *      ("top of file", "at the top", "file header", "beginning of file",
+ *      etc.), return lines 1..TOP_OF_FILE_LINE_COUNT immediately. JSDoc
+ *      and file-banner tasks are NEVER inside a function, and picking a
+ *      mid-file function for them trips the brace-balance safety gate
+ *      in workers/builder.ts.
  *   1. Find all function/method declarations via regex + brace matching.
  *   2. Score each function by keyword match against the task description.
  *      - Exact name match: +100 per matching keyword
@@ -693,6 +712,32 @@ export function extractRelevantSection(
     // Already small enough to send whole even if char count is large
     // (e.g. one massive line). Let the Builder handle it.
     return null;
+  }
+
+  // ─── STEP 0: TOP-OF-FILE PRE-CHECK ─────────────────────────────────
+  // Tasks that target the file header (JSDoc at top of file, banner
+  // comments, import block edits) are NEVER inside a function. The
+  // function-matching logic below would pick a mid-file function and
+  // the brace-balance check in workers/builder.ts would then reject the
+  // resulting diff because editing a section in the middle of the file
+  // leaves the brace count mismatched relative to what the model saw.
+  // Bypass function matching entirely for these tasks and return the
+  // first TOP_OF_FILE_LINE_COUNT lines directly.
+  if (TOP_OF_FILE_PATTERN.test(taskDescription)) {
+    const endLineZeroIdx = Math.min(TOP_OF_FILE_LINE_COUNT - 1, totalLines - 1);
+    const sectionLines = lines.slice(0, endLineZeroIdx + 1);
+    const endLineOneIdx = endLineZeroIdx + 1;
+    return {
+      section: sectionLines.join("\n"),
+      startLine: 1,
+      endLine: endLineOneIdx,
+      totalLines,
+      matchedFunction: "file-header",
+      funcStart: 1,
+      funcEnd: endLineOneIdx,
+      extractionMethod: "top-of-file-keyword",
+      keywordsUsed: extractTaskKeywords(taskDescription),
+    };
   }
 
   const keywords = extractTaskKeywords(taskDescription);
