@@ -1,3 +1,4 @@
+// Builder worker module
 import { readFile, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
@@ -271,7 +272,17 @@ export class BuilderWorker extends AbstractWorker {
       let sectionInfo: SectionExtraction | null = null;
 
       if (fullContent.length > LARGE_FILE_CHAR_THRESHOLD) {
-        sectionInfo = extractRelevantSection(targetPath, fullContent, contract.goal);
+        // contract.goal is a charter-generated summary that often loses key
+        // phrases from the original user prompt — particularly the
+        // "top of file" / "at the top" / "file header" / "beginning of file"
+        // triggers that the top-of-file pre-check in extractRelevantSection
+        // looks for. Concatenate intent.userRequest (the original verbatim
+        // prompt) with contract.goal so the trigger phrase is matched no
+        // matter which source contains it. The regex doesn't care about
+        // extra text. userRequest is a required string on IntentObject
+        // (intent.ts:26) so no null check is needed.
+        const taskDesc = `${assignment.intent.userRequest} ${contract.goal}`;
+        sectionInfo = extractRelevantSection(targetPath, fullContent, taskDesc);
         if (sectionInfo) {
           promptContent = sectionInfo.section;
           console.log(
