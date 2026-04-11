@@ -11,7 +11,7 @@
  * yet" rather than an error so the rest of the pipeline can keep running.
  */
 
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 // ─── Public types ────────────────────────────────────────────────────
@@ -192,4 +192,15 @@ export async function recordTask(
 
   await saveMemory(projectRoot, next);
   return next;
+}
+
+/**
+ * Delete the project memory file if it exists. Does not throw if the file
+ * is already missing. Useful for resetting project state completely.
+ */
+export async function deleteMemory(projectRoot: string): Promise<void> {
+  const path = memoryPath(projectRoot);
+  if (await fileExists(path)) {
+    await unlink(path);
+  }
 }
