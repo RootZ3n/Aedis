@@ -6,6 +6,8 @@ export interface GatedContext {
   language: string;
 }
 
+const MAX_RELEVANT_FILES = 10;
+
 export function gateContext(memory: ProjectMemory, prompt: string): GatedContext {
   const words = Array.from(
     new Set(
@@ -17,12 +19,16 @@ export function gateContext(memory: ProjectMemory, prompt: string): GatedContext
     )
   );
 
+  const recentFiles = memory.recentFiles ?? [];
   const relevantFiles = words.length === 0
     ? []
-    : memory.recentFiles.filter(path => {
-        const normalizedPath = path.toLowerCase();
-        return words.some(word => normalizedPath.includes(word));
-      });
+    : recentFiles
+        .filter(path => {
+          const normalizedPath = path.toLowerCase();
+          return words.some(word => normalizedPath.includes(word));
+        })
+        .sort()
+        .slice(0, MAX_RELEVANT_FILES);
 
   const recentTaskSummaries = memory.recentTasks
     .slice(0, 3)
