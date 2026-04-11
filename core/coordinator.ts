@@ -109,6 +109,7 @@ import {
   VerificationPipeline,
   type VerificationReceipt,
 } from "./verification-pipeline.js";
+import { recordTask } from "./project-memory.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -389,6 +390,9 @@ export class Coordinator {
         console.log(`[coordinator] PHASE 9 SKIPPED — judgmentReport=${judgmentReport ? `passed=${judgmentReport.passed}` : "null"} cancelled=${active.cancelled}`);
       }
 
+      const verdict = this.determineVerdict(active, verificationReceipt, judgmentReport);
+      const totalCost = active.run.totalCost?.estimatedCostUsd ?? 0;
+
       // Phase 10: Commit
       const changeCount = Math.max(active.changes.length, active.run.filesTouched.length);
       const canCommit =
@@ -401,6 +405,13 @@ export class Coordinator {
         commitSha = await this.gitCommit(active);
         if (commitSha) {
           console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
+          await recordTask(active.projectRoot, {
+            prompt: submission.input,
+            verdict,
+            commitSha,
+            cost: totalCost,
+            timestamp: new Date().toISOString(),
+          });
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
         } else {
           console.warn(`[coordinator] PHASE 10 — gitCommit returned null — see prior errors or recordDecision entries`);
@@ -412,7 +423,6 @@ export class Coordinator {
       }
 
       // Finalize
-      const verdict = this.determineVerdict(active, verificationReceipt, judgmentReport);
       console.log(`[coordinator] FINALIZE — verdict=${verdict} (cancelled=${active.cancelled} phase=${run.phase} hasFailedNodes=${hasFailedNodes(active.graph)} workerResults=${active.workerResults.length})`);
 
       if (verdict === "success" || verdict === "partial") {
