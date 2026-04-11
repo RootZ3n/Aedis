@@ -38,6 +38,12 @@ export class IntegratorWorker extends AbstractWorker {
   constructor(config: IntegratorWorkerConfig = {}) {
     super();
     this.eventBus = config.eventBus ?? null;
+    // NOTE: this.runState is almost always null in production. Workers are
+    // constructed once at boot via WorkerRegistry, BEFORE any run exists,
+    // so config.runState is null at construction time. The per-run RunState
+    // must flow through the WorkerAssignment instead — see resolveRunState
+    // below. The constructor field is preserved for tests and stand-alone
+    // harnesses that bypass the registry.
     this.runState = config.runState ?? null;
     this.judge = new IntegrationJudge();
   }
@@ -53,11 +59,23 @@ export class IntegratorWorker extends AbstractWorker {
       if (!runState) {
         throw new Error("Integrator requires RunState for coherence tracking");
       }
-      const approvedBuilderResults = assignment.upstreamResults.filter(
-        (result) => result.workerType === "builder" && result.success,
-      );
+
+      // Resolve approved (successful) Builder results from the run.
+      // The Integrator's direct upstream in the task graph is Verifier
+      // (scout→builder→critic→verifier→integrator), so the original
+      // assignment.upstreamResults walk for `workerType === "builder"`
+      // returned empty in production. The Coordinator attaches the full
+      // active.workerResults array via structural typing in dispatchNode,
+      // and resolveBuilderResults reads from there. See the helper below.
+      const approvedBuilderResults = this.resolveBuilderResults(assignment);
       if (approvedBuilderResults.length === 0) {
-        throw new Error("Integrator requires approved BuilderResults");
+        throw new Error(
+          "Integrator requires approved BuilderResults but found none — neither " +
+          "Coordinator-attached assignment.workerResults nor any direct " +
+          "upstreamResults of kind 'builder' with success=true. Check that " +
+          "Coordinator.dispatchNode attaches active.workerResults to the " +
+          "assignment, or that at least one Builder ran successfully in this run."
+        );
       }
 
       const changes = approvedBuilderResults.flatMap((result) =>
@@ -198,5 +216,44 @@ export class IntegratorWorker extends AbstractWorker {
     const attached = (assignment as unknown as { runState?: RunState }).runState;
     if (attached) return attached;
     return this.runState;
+  }
+
+  /**
+   * Resolve the approved (successful) Builder results for this run.
+   *
+   * Lookup order:
+   *   1. assignment.workerResults — attached by Coordinator.dispatchNode
+   *      via structural typing. This is the canonical source for production
+   *      runs because the Integrator's direct upstream in the task graph
+   *      is Verifier (scout→builder→critic→verifier→integrator), so the
+   *      assignment.upstreamResults walk below cannot find Builder results
+   *      — they live on `active.workerResults` on the Coordinator's
+   *      ActiveRun, populated as each worker completes execution.
+   *   2. assignment.upstreamResults walk — the original behavior. Works
+   *      only when the task graph wires Builder DIRECTLY to Integrator
+   *      (not the case in the standard pipeline, but preserved for tests
+   *      and alternate graph topologies).
+   *
+   * In both cases the result is filtered for `workerType === "builder"`
+   * AND `success === true` — the Integrator must only operate on
+   * approved Builder runs, never on failed ones.
+   *
+   * Returns an empty array if neither source has any approved Builder
+   * results. The caller is responsible for the throw — that way the
+   * error message can name BOTH failure paths so the operator knows
+   * where to look.
+   *
+   * Uses structural typing (the cast through `unknown`) so we don't need
+   * to add a `workerResults` field to WorkerAssignment in workers/base.ts.
+   * The Coordinator attaches the field via the same cast pattern.
+   */
+  private resolveBuilderResults(assignment: WorkerAssignment): WorkerResult[] {
+    const attached = (assignment as unknown as { workerResults?: WorkerResult[] }).workerResults;
+    const source = attached && attached.length > 0
+      ? attached
+      : assignment.upstreamResults;
+    return source.filter(
+      (result) => result.workerType === "builder" && result.success,
+    );
   }
 }

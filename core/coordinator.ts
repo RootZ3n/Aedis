@@ -944,6 +944,20 @@ export class Coordinator {
     // reads it via the same structural cast pattern.
     (assignment as unknown as { changes?: FileChange[] }).changes = [...active.changes];
 
+    // Also attach the full set of completed worker results so downstream
+    // workers can find upstream worker results that are NOT in their direct
+    // upstream edges. IntegratorWorker is the canonical case: its only
+    // direct upstream in the task graph is Verifier (scout→builder→critic→
+    // verifier→integrator), but it needs to find the successful Builder
+    // results to verify approval and extract their changes. The original
+    // upstreamResults filter `workerType === "builder" && success` returns
+    // an empty array because no Builder is in the direct upstream set.
+    // active.workerResults contains every WorkerResult produced so far in
+    // this run, in dispatch order. Shallow-copy so workers can't mutate
+    // the Coordinator's running tally. IntegratorWorker.resolveBuilderResults
+    // reads via the same structural cast pattern.
+    (assignment as unknown as { workerResults?: WorkerResult[] }).workerResults = [...active.workerResults];
+
     // Find and execute worker
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
     if (!worker) {

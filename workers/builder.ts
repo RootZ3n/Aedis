@@ -332,7 +332,7 @@ export class BuilderWorker extends AbstractWorker {
           : "")
       );
 
-      // Build fallback chain: primary first, Anthropic Sonnet second.
+      // Build fallback chain: primary first, configured fallback second.
       // If the primary IS already anthropic, don't append a duplicate fallback.
       const chain = this.buildInvocationChain(
         primaryProvider as Provider,
