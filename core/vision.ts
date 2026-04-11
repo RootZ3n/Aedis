@@ -26,35 +26,47 @@ export async function captureAndAnalyze(url: string, question: string): Promise<
 }
 
 async function analyzeScreenshot(base64Png: string, question: string): Promise<string> {
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OLLAMA_VISION_MODEL,
-      stream: false,
-      messages: [
-        {
-          role: "user",
-          content: question,
-          images: [base64Png],
-        },
-      ],
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60_000);
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Ollama vision request failed: ${response.status} ${response.statusText}${body ? `\n${body}` : ""}`);
+  try {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OLLAMA_VISION_MODEL,
+        stream: false,
+        messages: [
+          {
+            role: "system",
+            content: "You are a precise visual analysis assistant. Answer the user's question based on the provided screenshot. Be concise and factual.",
+          },
+          {
+            role: "user",
+            content: question,
+            images: [base64Png],
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Ollama vision request failed: ${response.status} ${response.statusText}${body ? `\n${body}` : ""}`);
+    }
+
+    const data = (await response.json()) as OllamaChatResponse;
+    const content = data.message?.content?.trim();
+
+    if (!content) {
+      throw new Error(`Ollama vision request returned no content for model ${OLLAMA_VISION_MODEL}.`);
+    }
+
+    return content;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const data = (await response.json()) as OllamaChatResponse;
-  const content = data.message?.content?.trim();
-
-  if (!content) {
-    throw new Error(`Ollama vision request returned no content for model ${OLLAMA_VISION_MODEL}.`);
-  }
-
-  return content;
 }
