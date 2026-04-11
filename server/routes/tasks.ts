@@ -10,6 +10,7 @@
 import { randomUUID } from "crypto";
 import { existsSync } from "fs";
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
+import { askLoqui } from "../../core/loqui.js";
 import type { ServerContext } from "../index.js";
 
 // ─── Request/Response Schemas ────────────────────────────────────────
@@ -26,6 +27,11 @@ interface SubmitBody {
 
 interface TaskParams {
   id: string;
+}
+
+interface LoquiBody {
+  question: string;
+  repoPath: string;
 }
 
 // ─── In-memory run tracker (bridges POST → Coordinator → WS) ────────
@@ -51,6 +57,36 @@ export function getTrackedRun(taskId: string): TrackedRun | undefined {
 
 export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   const ctx = (): ServerContext => fastify.ctx;
+
+  fastify.post<{ Body: LoquiBody }>(
+    "/loqui",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["question", "repoPath"],
+          properties: {
+            question: { type: "string", minLength: 1 },
+            repoPath: { type: "string", minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Body: LoquiBody }>, reply: FastifyReply) => {
+      const { question, repoPath } = request.body;
+
+      if (!existsSync(repoPath)) {
+        reply.code(400).send({
+          error: "Bad request",
+          message: `repoPath does not exist on this host: ${repoPath}`,
+        });
+        return;
+      }
+
+      const answer = await askLoqui(question, repoPath);
+      reply.send({ answer });
+    }
+  );
 
   /**
    * POST /tasks — Submit a new build task.
