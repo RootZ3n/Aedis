@@ -1422,13 +1422,13 @@
     }
 
     function formatConfidence(raw) {
+      // Confidence comes off the wire as a 0..1 float (e.g. 0.85). Always
+      // multiply by 100 and round to a whole percent — no conditional
+      // branching, no edge cases at exactly 1.0.
       if (raw == null) return '?';
       const num = Number(raw);
-      if (Number.isFinite(num)) {
-        if (num <= 1) return `${(num * 100).toFixed(0)}%`;
-        return `${num.toFixed(0)}%`;
-      }
-      return String(raw);
+      if (!Number.isFinite(num)) return String(raw);
+      return `${Math.round(num * 100)}%`;
     }
 
     function translateToLumen(run, payload, type) {
@@ -1497,6 +1497,32 @@
             color: 'orange',
             icon: '🔨',
             text: `Builder complete — confidence ${conf}`,
+          });
+          return;
+        }
+
+        case 'critic_review':
+        case 'critic_complete': {
+          const conf = formatConfidence(
+            payload.confidence ?? (payload.result && payload.result.confidence)
+          );
+          pushLumen(run, {
+            color: 'purple',
+            icon: '🔬',
+            text: `Critic review — confidence ${conf}`,
+          });
+          return;
+        }
+
+        case 'verifier_check':
+        case 'verifier_complete': {
+          const conf = formatConfidence(
+            payload.confidence ?? (payload.result && payload.result.confidence)
+          );
+          pushLumen(run, {
+            color: 'teal',
+            icon: '🛡',
+            text: `Verifier check — confidence ${conf}`,
           });
           return;
         }
