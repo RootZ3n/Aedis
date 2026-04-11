@@ -109,7 +109,8 @@ import {
   VerificationPipeline,
   type VerificationReceipt,
 } from "./verification-pipeline.js";
-import { recordTask } from "./project-memory.js";
+import { loadMemory, recordTask } from "./project-memory.js";
+import { gateContext } from "./context-gate.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -230,6 +231,7 @@ export class Coordinator {
     let commitSha: string | null = null;
     let verificationReceipt: VerificationReceipt | null = null;
     let judgmentReport: JudgmentReport | null = null;
+    const input = submission.input;
 
     console.log(`[coordinator] ═══ submit() entry — input="${submission.input.slice(0, 80)}${submission.input.length > 80 ? "…" : ""}"`);
 
@@ -242,6 +244,9 @@ export class Coordinator {
       `[coordinator] effective projectRoot for this submission: ${effectiveProjectRoot}` +
       (submission.projectRoot ? " (overridden via submission)" : " (Coordinator default)")
     );
+    const memory = await loadMemory(effectiveProjectRoot);
+    const gatedContext = gateContext(memory, input);
+    console.log("[coordinator] gated context:", JSON.stringify(gatedContext));
 
     // Construct per-submit ContextAssembler and IntegrationJudge so they
     // honor the effective projectRoot. These can't be class fields because
@@ -411,6 +416,7 @@ export class Coordinator {
             commitSha,
             cost: totalCost,
             timestamp: new Date().toISOString(),
+            filesTouched: active.changes.map(c => c.path),
           });
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
         } else {

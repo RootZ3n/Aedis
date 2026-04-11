@@ -60,6 +60,13 @@ async function fileExists(path: string): Promise<boolean> {
 async function detectLanguage(projectRoot: string): Promise<string> {
   const root = resolve(projectRoot);
   if (await fileExists(join(root, "tsconfig.json"))) return "typescript";
+  if (await fileExists(join(root, "Cargo.toml"))) return "rust";
+  if (await fileExists(join(root, "go.mod"))) return "go";
+  if (
+    await fileExists(join(root, "requirements.txt")) ||
+    await fileExists(join(root, "pyproject.toml"))
+  ) return "python";
+  if (await fileExists(join(root, "pom.xml"))) return "java";
   if (await fileExists(join(root, "package.json"))) return "javascript";
   return "unknown";
 }
