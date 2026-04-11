@@ -14,6 +14,8 @@
  * an overall coherence score. Failed judgments block the pipeline.
  */
 
+import { relative, resolve } from "node:path";
+
 import type { IntentObject, Deliverable } from "./intent.js";
 import type { RunState, AcceptedAssumption } from "./runstate.js";
 import type { FileChange, BuilderOutput, WorkerResult } from "../workers/base.js";
@@ -80,6 +82,22 @@ export interface IntegrationJudgeConfig {
   strictScope: boolean;
   /** File patterns to ignore in coherence checks */
   ignorePatterns: string[];
+  /**
+   * Project root used to normalize paths in checkIntentAlignment.
+   *
+   * Without this, deliverable paths from the Charter (which may be
+   * absolute, relative, or bare basenames depending on what the user
+   * typed) and change paths from the Builder (always relative to
+   * projectRoot via BuilderWorker.toRelative) compare via exact string
+   * match and never align. Path normalization resolves both sides
+   * against projectRoot first.
+   *
+   * Defaults to process.cwd() — correct in production where the API
+   * server runs from the project root. Set explicitly via the
+   * Coordinator (see core/coordinator.ts constructor) for cases where
+   * cwd diverges from the actual project root.
+   */
+  projectRoot: string;
 }
 
 const DEFAULT_CONFIG: IntegrationJudgeConfig = {
@@ -88,6 +106,7 @@ const DEFAULT_CONFIG: IntegrationJudgeConfig = {
   strictAssumptions: true,
   strictScope: true,
   ignorePatterns: ["*.test.ts", "*.spec.ts", "*.md"],
+  projectRoot: process.cwd(),
 };
 
 // ─── Integration Judge ───────────────────────────────────────────────
@@ -358,12 +377,45 @@ export class IntegrationJudge {
     changes: readonly FileChange[]
   ): JudgmentCheck {
     const issues: string[] = [];
-    const changedPaths = new Set(changes.map((c) => c.path));
+
+    // Path normalization for both sides of the comparison.
+    //
+    // Deliverable paths come from the Charter and may appear as
+    // absolute ("/abs/projectRoot/core/intent.ts"), relative
+    // ("core/intent.ts"), or bare basenames ("intent.ts") depending on
+    // what the user typed. Change paths come from the Builder and are
+    // always relative to projectRoot via BuilderWorker.toRelative,
+    // forward-slashed.
+    //
+    // Without normalization, the Set-based exact-string match below
+    // never aligns and every deliverable looks "missing" while every
+    // change looks "extra" — causing the Integration Judge to fail
+    // even on successful builds.
+    //
+    // The formula:
+    //   relative(projectRoot, resolve(projectRoot, p))
+    // resolves p to absolute (resolve treats absolute paths as
+    // idempotent, relative paths as projectRoot-rooted), then expresses
+    // the result back as a path relative to projectRoot. The trailing
+    // .replace(/\\/g, "/") forces forward slashes to match the format
+    // BuilderWorker.toRelative emits.
+    //
+    // CAVEAT: this does NOT handle bare-basename deliverables that live
+    // in subdirectories. "intent.ts" normalizes to "intent.ts" (placed
+    // at projectRoot, not in core/), so it still won't match the
+    // Builder's "core/intent.ts". If you see "Missing deliverables"
+    // failures with basename-only deliverable paths, the fix is to
+    // make the CharterGenerator emit full relative paths, not to
+    // extend this normalization further.
+    const normalize = (p: string): string =>
+      relative(this.config.projectRoot, resolve(this.config.projectRoot, p)).replace(/\\/g, "/");
+
+    const changedPaths = new Set(changes.map((c) => normalize(c.path)));
 
     // Check each deliverable has at least one corresponding change
     const missingDeliverables: Deliverable[] = [];
     for (const deliverable of intent.charter.deliverables) {
-      const hasChange = deliverable.targetFiles.some((f) => changedPaths.has(f));
+      const hasChange = deliverable.targetFiles.some((f) => changedPaths.has(normalize(f)));
       if (!hasChange && deliverable.targetFiles.length > 0) {
         missingDeliverables.push(deliverable);
       }
@@ -375,12 +427,14 @@ export class IntegrationJudge {
       );
     }
 
-    // Check for files changed that aren't in any deliverable
+    // Check for files changed that aren't in any deliverable.
+    // Deliverable paths normalized via the same `normalize` helper so
+    // the Set lookup matches Builder-emitted change paths consistently.
     const deliverableFiles = new Set(
-      intent.charter.deliverables.flatMap((d) => d.targetFiles)
+      intent.charter.deliverables.flatMap((d) => d.targetFiles).map(normalize)
     );
     const extraFiles = changes
-      .filter((c) => !deliverableFiles.has(c.path))
+      .filter((c) => !deliverableFiles.has(normalize(c.path)))
       .filter((c) => !this.isIgnored(c.path))
       .map((c) => c.path);
 

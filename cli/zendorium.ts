@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { existsSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+
 import { TerminalStream, streamSocket } from "./stream.js";
 
 // Override either via env to point at a remote Zendorium (e.g. tailscale-served).
@@ -10,26 +13,79 @@ const WS_URL = process.env["ZENDORIUM_WS_URL"] ?? API_BASE.replace(/^http(s?):/,
 
 type Command = "run" | "status" | "runs" | "workers" | "health";
 
-function parseArgs(argv: string[]): { command: Command; args: string[] } {
-  if (!argv.length) return { command: "health", args: [] };
+interface ParsedArgs {
+  command: Command;
+  args: string[];
+  repo: string | undefined;
+  watch: boolean;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  if (!argv.length) return { command: "health", args: [], repo: undefined, watch: false };
+
+  // Detect command first (or fall through to "run").
   const known = new Set<Command>(["run", "status", "runs", "workers", "health"]);
   const first = argv[0] as Command;
-  if (known.has(first)) return { command: first, args: argv.slice(1) };
-  return { command: "run", args: argv };
+  let command: Command;
+  let rest: string[];
+  if (known.has(first)) {
+    command = first;
+    rest = argv.slice(1);
+  } else {
+    command = "run";
+    rest = argv;
+  }
+
+  // Extract --repo / --watch flags out of `rest`. Anything not a flag is positional.
+  // Supports both `--repo <path>` and `--repo=<path>` styles. --watch is boolean.
+  // Both flags are silently ignored when used with non-run commands — they have
+  // no meaning for status/runs/workers/health.
+  let repo: string | undefined;
+  let watch = false;
+  const positional: string[] = [];
+
+  for (let i = 0; i < rest.length; i++) {
+    const tok = rest[i];
+    if (tok === "--watch") {
+      watch = true;
+      continue;
+    }
+    if (tok === "--repo") {
+      const next = rest[i + 1];
+      if (next === undefined || next.startsWith("--")) {
+        process.stderr.write("--repo requires a path argument\n");
+        process.exit(2);
+      }
+      repo = next;
+      i++; // consume the value token
+      continue;
+    }
+    if (tok.startsWith("--repo=")) {
+      repo = tok.slice("--repo=".length);
+      continue;
+    }
+    positional.push(tok);
+  }
+
+  return { command, args: positional, repo, watch };
 }
 
 function usage(): string {
   return [
     "zendorium \"fix the auth bug in login.ts\"",
-    "zendorium run \"add dark mode to settings\"",
+    "zendorium run \"add dark mode to settings\" [--repo <path>] [--watch]",
     "zendorium status <run_id>",
     "zendorium runs",
     "zendorium workers",
     "zendorium health",
+    "",
+    "Run options:",
+    "  --repo <path>   Build against a specific repo (default: cwd)",
+    "  --watch         Tail systemd journal for zendorium during the run",
   ].join("\n");
 }
 
-// ─���─ HTTP helpers ────────────────────────────────────────────────────
+// ─── HTTP helpers ────────────────────────────────────────────────────
 
 async function fetchJson(path: string, init?: RequestInit): Promise<any> {
   const url = `${API_BASE}${path}`;
@@ -120,10 +176,79 @@ function extractCostUsd(payload: any): number {
   return 0;
 }
 
+// ─── Journal Tail (--watch) ──────────────────────────────────────────
+
+// Lines containing any of these substrings are dropped from the tail
+// output. Matches the user's intended `grep -v` filter exactly.
+const JOURNAL_FILTER = /req-|favicon|websocket|level/;
+
+/**
+ * Spawn `journalctl -u zendorium -f --since now` and stream its stdout
+ * to the CLI's stdout, line-by-line, dropping lines that match the
+ * JOURNAL_FILTER regex (req-/favicon/websocket/level noise).
+ *
+ * Returns the spawned ChildProcess so the caller can kill it when the
+ * run completes. Returns null if spawn fails (e.g., journalctl not on
+ * PATH, non-systemd host) — the run should continue without the tail
+ * in that case rather than crash.
+ */
+function startJournalTail(): ChildProcess | null {
+  let child: ChildProcess;
+  try {
+    child = spawn("journalctl", ["-u", "zendorium", "-f", "--since", "now"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    process.stderr.write(
+      `[watch] failed to spawn journalctl: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return null;
+  }
+
+  // Buffer stdout chunks and split on newlines so we can apply the
+  // filter line-by-line. Without buffering, a single chunk could split
+  // a line in two and the filter would miss matches that span the boundary.
+  let stdoutBuf = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    stdoutBuf += chunk.toString("utf8");
+    let nl: number;
+    while ((nl = stdoutBuf.indexOf("\n")) >= 0) {
+      const line = stdoutBuf.slice(0, nl);
+      stdoutBuf = stdoutBuf.slice(nl + 1);
+      if (line.length === 0) continue;
+      if (JOURNAL_FILTER.test(line)) continue;
+      process.stdout.write(`[journal] ${line}\n`);
+    }
+  });
+
+  // stderr from journalctl is usually startup errors (permission denied,
+  // unit not found). Surface it once so the operator knows the tail isn't
+  // working, then let the run proceed without the tail.
+  child.stderr?.on("data", (chunk: Buffer) => {
+    const text = chunk.toString("utf8").trim();
+    if (text) process.stderr.write(`[watch] journalctl stderr: ${text}\n`);
+  });
+
+  child.on("error", (err) => {
+    process.stderr.write(`[watch] journalctl unavailable: ${err.message}\n`);
+  });
+
+  child.on("exit", (code, signal) => {
+    // SIGTERM is our own clean shutdown — don't report it as an error.
+    if (signal === "SIGTERM" || signal === "SIGKILL") return;
+    if (code !== null && code !== 0) {
+      process.stderr.write(`[watch] journalctl exited with code=${code}\n`);
+    }
+  });
+
+  return child;
+}
+
 // ─── Main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { command, args } = parseArgs(process.argv.slice(2));
+  const parsed = parseArgs(process.argv.slice(2));
+  const { command, args } = parsed;
 
   // ── Query commands (HTTP) ──────────────────────────────────────
 
@@ -179,7 +304,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // ── Run command (POST task → WebSocket stream) ���────────────────
+  // ── Run command (POST task → WebSocket stream) ─────────────────
 
   const prompt = args.join(" ").trim();
   if (!prompt) {
@@ -188,78 +313,119 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Step 1: POST to /tasks to submit the build
-  let taskId: string;
-  try {
-    process.stderr.write(`Submitting: ${prompt}\n`);
-    const data = await fetchJson("/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt,
-        repoPath: process.cwd(),
-      }),
-    });
-    taskId = data.task_id;
-    process.stderr.write(`Task ${taskId} accepted. Connecting to live stream...\n`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`zendorium: failed to submit task: ${msg}\n`);
-    process.stderr.write(`  Is the Zendorium server running at ${API_BASE}?\n`);
-    process.exitCode = 1;
-    return;
+  // Resolve --repo (or default to cwd) and validate it exists before
+  // we touch the network. Failing here saves a wasted POST and gives
+  // the user a clearer error than the server's "path not found".
+  let repoPath: string;
+  if (parsed.repo) {
+    if (!existsSync(parsed.repo)) {
+      process.stderr.write(`zendorium: --repo path does not exist: ${parsed.repo}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    repoPath = parsed.repo;
+  } else {
+    repoPath = process.cwd();
   }
 
-  // Step 2: Connect WebSocket and subscribe to this task's events
-  const stream = new TerminalStream();
-
-  try {
-    const socket = new WebSocket(WS_URL);
-
-    await streamSocket(socket, stream, {
-      // On open, send subscribe message so server filters events for this run
-      request: {
-        type: "subscribe",
-        taskId,
-        client: "zendorium-cli",
-      },
-      // Close when run completes or fails
-      closeOnComplete: true,
-    });
-  } catch (error) {
-    const msg = error instanceof Error
-      ? error.message
-      : typeof error === "object" && error !== null && "message" in error
-        ? String((error as any).message)
-        : String(error);
-    process.stderr.write(`zendorium: stream error: ${msg}\n`);
-    process.exitCode = 1;
+  // Start the journal tail BEFORE the POST so the operator can see the
+  // server-side log lines as the request lands. The tail uses --since now
+  // to skip historical entries, so we'll only see entries from this point
+  // forward. Stays alive until the finally block at the bottom of this
+  // function kills it (handles both success and exception paths).
+  let journalTail: ChildProcess | null = null;
+  if (parsed.watch) {
+    process.stderr.write(`[watch] tailing systemd journal for zendorium (filter: req-/favicon/websocket/level)\n`);
+    journalTail = startJournalTail();
   }
 
-  // Step 3: Print final receipt
   try {
-    const [statusResult, receiptResult] = await Promise.allSettled([
-      fetchJson(`/tasks/${encodeURIComponent(taskId)}`),
-      fetchJson(`/tasks/${encodeURIComponent(taskId)}/receipts`),
-    ]);
+    // Step 1: POST to /tasks to submit the build
+    let taskId: string;
+    try {
+      process.stderr.write(`Repo: ${repoPath}\n`);
+      process.stderr.write(`Submitting: ${prompt}\n`);
+      const data = await fetchJson("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          repoPath,
+        }),
+      });
+      taskId = data.task_id;
+      process.stderr.write(`Task ${taskId} accepted. Connecting to live stream...\n`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`zendorium: failed to submit task: ${msg}\n`);
+      process.stderr.write(`  Is the Zendorium server running at ${API_BASE}?\n`);
+      process.exitCode = 1;
+      return;
+    }
 
-    const statusData = statusResult.status === "fulfilled" ? statusResult.value : null;
-    const receiptData = receiptResult.status === "fulfilled" ? receiptResult.value : null;
-    const finalCostUsd = extractCostUsd(receiptData) || extractCostUsd(statusData);
+    // Step 2: Connect WebSocket and subscribe to this task's events
+    const stream = new TerminalStream();
 
-    if (statusData && (statusData.status === "complete" || statusData.status === "failed" || statusData.status === "partial" || statusData.status === "cancelled")) {
-      const display = statusData.status === "partial" ? "complete (partial)" : statusData.status;
-      process.stderr.write(`
+    try {
+      const socket = new WebSocket(WS_URL);
+
+      await streamSocket(socket, stream, {
+        // On open, send subscribe message so server filters events for this run
+        request: {
+          type: "subscribe",
+          taskId,
+          client: "zendorium-cli",
+        },
+        // Close when run completes or fails
+        closeOnComplete: true,
+      });
+    } catch (error) {
+      const msg = error instanceof Error
+        ? error.message
+        : typeof error === "object" && error !== null && "message" in error
+          ? String((error as any).message)
+          : String(error);
+      process.stderr.write(`zendorium: stream error: ${msg}\n`);
+      process.exitCode = 1;
+    }
+
+    // Step 3: Print final receipt
+    try {
+      const [statusResult, receiptResult] = await Promise.allSettled([
+        fetchJson(`/tasks/${encodeURIComponent(taskId)}`),
+        fetchJson(`/tasks/${encodeURIComponent(taskId)}/receipts`),
+      ]);
+
+      const statusData = statusResult.status === "fulfilled" ? statusResult.value : null;
+      const receiptData = receiptResult.status === "fulfilled" ? receiptResult.value : null;
+      const finalCostUsd = extractCostUsd(receiptData) || extractCostUsd(statusData);
+
+      if (statusData && (statusData.status === "complete" || statusData.status === "failed" || statusData.status === "partial" || statusData.status === "cancelled")) {
+        const display = statusData.status === "partial" ? "complete (partial)" : statusData.status;
+        process.stderr.write(`
 Task ${taskId}: ${display}
 `);
-      process.stderr.write(`Cost: $${finalCostUsd.toFixed(4)}\n`);
-      if (statusData.error) {
-        process.stderr.write(`Error: ${statusData.error}
+        process.stderr.write(`Cost: $${finalCostUsd.toFixed(4)}\n`);
+        if (statusData.error) {
+          process.stderr.write(`Error: ${statusData.error}
 `);
+        }
+      }
+    } catch {
+      // Non-fatal — final summary already printed by stream
+    }
+  } finally {
+    // Always kill the journal tail when the run finishes, regardless of
+    // success or failure. SIGTERM gives journalctl a chance to flush any
+    // buffered output cleanly. The exit handler in startJournalTail
+    // recognizes SIGTERM as our own clean shutdown and stays quiet.
+    if (journalTail) {
+      try {
+        journalTail.kill("SIGTERM");
+      } catch {
+        // Already exited or unkillable — nothing to do.
       }
     }
-  } catch {
-    // Non-fatal — final summary already printed by stream
   }
 }
 

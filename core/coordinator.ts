@@ -184,7 +184,12 @@ export class Coordinator {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.charterGen = new CharterGenerator(this.config.charterConfig);
     this.contextAssembler = new ContextAssembler({ projectRoot: this.config.projectRoot });
-    this.judge = new IntegrationJudge();
+    // Pass projectRoot to the IntegrationJudge so its checkIntentAlignment
+    // path-normalization helper resolves deliverable and change paths
+    // against the same root the Builder uses (BuilderWorker.toRelative).
+    // Without this, the judge falls back to its process.cwd() default,
+    // which is correct only when cwd === projectRoot.
+    this.judge = new IntegrationJudge({ projectRoot: this.config.projectRoot });
     this.verifier = new VerificationPipeline();
     this.trustRouter = new TrustRouter(trustProfile);
     this.workerRegistry = workerRegistry;
