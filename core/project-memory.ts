@@ -4,6 +4,7 @@
  * Stored at {projectRoot}/.aedis/memory.json. Tracks:
  *   - last 20 file paths touched (deduped, most-recent-first)
  *   - last 10 task summaries (prompt, verdict, commitSha, cost, timestamp)
+ *   - up to 20 file clusters that tend to change together
  *   - repo language inferred from tsconfig.json / package.json presence
  *
  * The store is intentionally tiny and self-contained: no schemas, no DB,
@@ -29,11 +30,18 @@ export interface TaskSummary {
   readonly filesTouched?: readonly string[];
 }
 
+export interface FileCluster {
+  readonly files: string[];
+  readonly changedTogether: number;
+  readonly lastSeen: string;
+}
+
 export interface ProjectMemory {
   readonly projectRoot: string;
   readonly language: string;
   readonly recentFiles: readonly string[];
   readonly recentTasks: readonly TaskSummary[];
+  readonly fileClusters: readonly FileCluster[];
   readonly updatedAt: string;
   readonly schemaVersion: number;
 }
@@ -44,6 +52,7 @@ const MEMORY_DIR = ".aedis";
 const MEMORY_FILE = "memory.json";
 const MAX_FILES = 20;
 const MAX_TASKS = 10;
+const MAX_CLUSTERS = 20;
 
 function memoryPath(projectRoot: string): string {
   return join(resolve(projectRoot), MEMORY_DIR, MEMORY_FILE);
@@ -78,6 +87,7 @@ function emptyMemory(projectRoot: string, language: string): ProjectMemory {
     language,
     recentFiles: [],
     recentTasks: [],
+    fileClusters: [],
     updatedAt: new Date().toISOString(),
     schemaVersion: 1,
   };
@@ -93,6 +103,67 @@ function isTaskSummary(value: unknown): value is TaskSummary {
     typeof v.cost === "number" &&
     (v.commitSha === null || typeof v.commitSha === "string")
   );
+}
+
+function isFileCluster(value: unknown): value is FileCluster {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    Array.isArray(v.files) &&
+    v.files.every((entry) => typeof entry === "string") &&
+    typeof v.changedTogether === "number" &&
+    typeof v.lastSeen === "string"
+  );
+}
+
+function normalizeTouchedFiles(files: readonly string[]): string[] {
+  return Array.from(
+    new Set(
+      files.filter((file): file is string => typeof file === "string" && file.length > 0),
+    ),
+  );
+}
+
+function updateFileClusters(
+  clusters: readonly FileCluster[],
+  touchedFiles: readonly string[],
+  timestamp: string,
+): FileCluster[] {
+  if (touchedFiles.length <= 1) {
+    return [...clusters].slice(0, MAX_CLUSTERS);
+  }
+
+  const normalizedTouched = normalizeTouchedFiles(touchedFiles).sort();
+  const existingIndex = clusters.findIndex((cluster) =>
+    cluster.files.some((file) => normalizedTouched.includes(file)),
+  );
+
+  const nextClusters = [...clusters];
+
+  if (existingIndex >= 0) {
+    const existing = nextClusters[existingIndex];
+    const mergedFiles = Array.from(new Set([...existing.files, ...normalizedTouched])).sort();
+    nextClusters[existingIndex] = {
+      files: mergedFiles,
+      changedTogether: existing.changedTogether + 1,
+      lastSeen: timestamp,
+    };
+  } else {
+    nextClusters.unshift({
+      files: normalizedTouched,
+      changedTogether: 1,
+      lastSeen: timestamp,
+    });
+  }
+
+  return nextClusters
+    .sort((a, b) => {
+      if (b.changedTogether !== a.changedTogether) {
+        return b.changedTogether - a.changedTogether;
+      }
+      return b.lastSeen.localeCompare(a.lastSeen);
+    })
+    .slice(0, MAX_CLUSTERS);
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -129,6 +200,16 @@ export async function loadMemory(projectRoot: string): Promise<ProjectMemory> {
             .filter(isTaskSummary)
             .slice(0, MAX_TASKS)
         : [],
+      fileClusters: Array.isArray(parsed.fileClusters)
+        ? parsed.fileClusters
+            .filter(isFileCluster)
+            .map((cluster) => ({
+              files: normalizeTouchedFiles(cluster.files).slice(0, MAX_FILES),
+              changedTogether: cluster.changedTogether,
+              lastSeen: cluster.lastSeen,
+            }))
+            .slice(0, MAX_CLUSTERS)
+        : [],
       updatedAt: typeof parsed.updatedAt === "string"
         ? parsed.updatedAt
         : new Date().toISOString(),
@@ -157,6 +238,7 @@ export async function saveMemory(
     language: memory.language,
     recentFiles: memory.recentFiles.slice(0, MAX_FILES),
     recentTasks: memory.recentTasks.slice(0, MAX_TASKS),
+    fileClusters: memory.fileClusters.slice(0, MAX_CLUSTERS),
     updatedAt: new Date().toISOString(),
     schemaVersion: memory.schemaVersion,
   };
@@ -167,8 +249,9 @@ export async function saveMemory(
 /**
  * Record a finished task into the project memory and persist. The new
  * task is prepended to `recentTasks`; any `filesTouched` are merged into
- * `recentFiles` (most-recent-first, deduped, capped at 20). Returns the
- * updated memory snapshot.
+ * `recentFiles` (most-recent-first, deduped, capped at 20). Multi-file
+ * tasks also update `fileClusters` so memory learns which files tend to
+ * move together. Returns the updated memory snapshot.
  */
 export async function recordTask(
   projectRoot: string,
@@ -177,7 +260,7 @@ export async function recordTask(
   const memory = await loadMemory(projectRoot);
 
   const touched = Array.isArray(taskSummary.filesTouched)
-    ? taskSummary.filesTouched.filter((f): f is string => typeof f === "string" && f.length > 0)
+    ? normalizeTouchedFiles(taskSummary.filesTouched)
     : [];
 
   // Most-recent-first dedupe: new files come first, then any existing
@@ -192,12 +275,14 @@ export async function recordTask(
   }
 
   const recentTasks = [taskSummary, ...memory.recentTasks].slice(0, MAX_TASKS);
+  const fileClusters = updateFileClusters(memory.fileClusters, touched, taskSummary.timestamp);
 
   const next: ProjectMemory = {
     projectRoot: memory.projectRoot,
     language: memory.language,
     recentFiles,
     recentTasks,
+    fileClusters,
     updatedAt: new Date().toISOString(),
     schemaVersion: memory.schemaVersion,
   };
@@ -218,6 +303,7 @@ export async function clearMemory(projectRoot: string): Promise<ProjectMemory> {
     language: memory.language,
     recentFiles: [],
     recentTasks: [],
+    fileClusters: [],
     updatedAt: new Date().toISOString(),
     schemaVersion: memory.schemaVersion,
   };
