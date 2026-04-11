@@ -202,6 +202,24 @@ export async function recordTask(
 }
 
 /**
+ * Reset the project memory to an empty state while preserving the detected
+ * language and project root. Useful for starting a fresh session without
+ * deleting the memory file itself.
+ */
+export async function clearMemory(projectRoot: string): Promise<ProjectMemory> {
+  const memory = await loadMemory(projectRoot);
+  const next: ProjectMemory = {
+    projectRoot: memory.projectRoot,
+    language: memory.language,
+    recentFiles: [],
+    recentTasks: [],
+    updatedAt: new Date().toISOString(),
+  };
+  await saveMemory(projectRoot, next);
+  return next;
+}
+
+/**
  * Delete the project memory file if it exists. Does not throw if the file
  * is already missing. Useful for resetting project state completely.
  */

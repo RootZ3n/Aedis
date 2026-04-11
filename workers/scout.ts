@@ -159,9 +159,15 @@ export class ScoutWorker extends AbstractWorker {
     const projectRoot = assignment.projectRoot ?? this.projectRoot;
 
     try {
-      const targetFiles = assignment.task.targetFiles.length > 0
+      const baseTargetFiles = assignment.task.targetFiles.length > 0
         ? assignment.task.targetFiles
         : this.extractContextFiles(assignment);
+      const recentFiles = assignment.recentContext?.relevantFiles ?? [];
+      console.log(`[scout] recentContext: ${recentFiles.length} relevant files`);
+      const targetFiles = Array.from(new Set([
+        ...recentFiles,
+        ...baseTargetFiles,
+      ]));
 
       const reads: ScoutFileRead[] = [];
       const summaries: FileSymbolSummary[] = [];
