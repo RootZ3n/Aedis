@@ -911,7 +911,7 @@ export class Coordinator {
       graph.edges.some((e) => e.to === node.id && e.from === graph.nodes.find((n) => n.runTaskId === r.taskId)?.id)
     );
 
-    const assignment: WorkerAssignment = this.trustRouter.buildAssignment(
+    const baseAssignment = this.trustRouter.buildAssignment(
       routingDecision,
       runTask,
       intent,
@@ -919,44 +919,39 @@ export class Coordinator {
       upstreamResults
     );
 
-    // Attach the active run's RunState to the assignment so workers that
-    // need it as a hard input (specifically VerifierWorker, which calls
-    // pipeline.verify(intent, runState, ...) and records coherence checks
-    // and decisions against it) can read it. Workers are constructed once
-    // at boot via WorkerRegistry, so the constructor-time config.runState
-    // is ALWAYS null in production — the per-run state must flow through
-    // the assignment. Uses structural typing (cast through unknown) to
-    // avoid touching the WorkerAssignment type definition in
-    // workers/base.ts; VerifierWorker.resolveRunState reads it via the
-    // same cast pattern.
-    (assignment as unknown as { runState?: RunState }).runState = run;
-
-    // Also attach the run's accumulated file changes (the running tally
-    // populated by collectChanges() after each Builder.execute() succeeds).
-    // VerifierWorker needs the full FileChange[] (path + operation + diff
-    // + content) to verify against, but its only direct upstream in the
-    // task graph is Critic, not Builder — so its assignment.upstreamResults
-    // contains the Critic's result, not the Builder's. The Builder's
-    // changes are not reachable through the upstreamResults walk and
-    // runState.filesTouched only has paths, not content. active.changes
-    // is the canonical source. Shallow-copy the array so workers can't
-    // mutate the Coordinator's running tally. VerifierWorker.resolveChanges
-    // reads it via the same structural cast pattern.
-    (assignment as unknown as { changes?: FileChange[] }).changes = [...active.changes];
-
-    // Also attach the full set of completed worker results so downstream
-    // workers can find upstream worker results that are NOT in their direct
-    // upstream edges. IntegratorWorker is the canonical case: its only
-    // direct upstream in the task graph is Verifier (scout→builder→critic→
-    // verifier→integrator), but it needs to find the successful Builder
-    // results to verify approval and extract their changes. The original
-    // upstreamResults filter `workerType === "builder" && success` returns
-    // an empty array because no Builder is in the direct upstream set.
-    // active.workerResults contains every WorkerResult produced so far in
-    // this run, in dispatch order. Shallow-copy so workers can't mutate
-    // the Coordinator's running tally. IntegratorWorker.resolveBuilderResults
-    // reads via the same structural cast pattern.
-    (assignment as unknown as { workerResults?: WorkerResult[] }).workerResults = [...active.workerResults];
+    // Decorate the base assignment with per-run state. These three fields
+    // (runState, changes, workerResults) are declared as optional on
+    // WorkerAssignment in workers/base.ts and are populated here for every
+    // dispatch so workers can read them via direct field access — no cast
+    // pattern required.
+    //
+    //   runState        — passed to VerifierWorker and IntegratorWorker
+    //                     for pipeline.verify() and recordCoherenceCheck;
+    //                     workers cannot get RunState through their
+    //                     constructor because they are constructed at
+    //                     boot via WorkerRegistry, before any run exists.
+    //   changes         — the running tally of Builder outputs from
+    //                     collectChanges() after each Builder.execute()
+    //                     succeeds; the Verifier reads this because its
+    //                     direct upstream in the task graph is Critic,
+    //                     not Builder, and the upstreamResults walk for
+    //                     `output.kind === "builder"` returns empty.
+    //   workerResults   — every WorkerResult produced so far in this run,
+    //                     in dispatch order; the Integrator reads this to
+    //                     find the successful Builder results because its
+    //                     direct upstream is Verifier, not Builder.
+    //
+    // Both arrays are shallow-copied at attach time so workers cannot
+    // mutate the Coordinator's running tallies. The new fields are
+    // declared `readonly` on the interface, so we build the assignment
+    // via spread (rather than mutating after construction) to respect
+    // the readonly contract for the existing fields too.
+    const assignment: WorkerAssignment = {
+      ...baseAssignment,
+      runState: run,
+      changes: [...active.changes],
+      workerResults: [...active.workerResults],
+    };
 
     // Find and execute worker
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);

@@ -41,9 +41,11 @@ export class IntegratorWorker extends AbstractWorker {
     // NOTE: this.runState is almost always null in production. Workers are
     // constructed once at boot via WorkerRegistry, BEFORE any run exists,
     // so config.runState is null at construction time. The per-run RunState
-    // must flow through the WorkerAssignment instead — see resolveRunState
-    // below. The constructor field is preserved for tests and stand-alone
-    // harnesses that bypass the registry.
+    // must flow through the WorkerAssignment instead — see the inline
+    // resolution in execute() which reads assignment.runState first and
+    // falls back to this constructor field. The constructor field is
+    // preserved for tests and stand-alone harnesses that bypass the
+    // registry and pass a RunState explicitly.
     this.runState = config.runState ?? null;
     this.judge = new IntegrationJudge();
   }
@@ -55,26 +57,41 @@ export class IntegratorWorker extends AbstractWorker {
   async execute(assignment: WorkerAssignment): Promise<IntegratorResult> {
     const startedAt = Date.now();
     try {
-      const runState = this.resolveRunState(assignment);
+      // Resolve the active RunState. Coordinator.dispatchNode populates
+      // assignment.runState (now a typed optional field on WorkerAssignment)
+      // for every production dispatch. Falls back to this.runState which
+      // is the constructor-time field used by tests and stand-alone
+      // harnesses that bypass the registry.
+      const runState = assignment.runState ?? this.runState;
       if (!runState) {
         throw new Error("Integrator requires RunState for coherence tracking");
       }
 
       // Resolve approved (successful) Builder results from the run.
-      // The Integrator's direct upstream in the task graph is Verifier
-      // (scout→builder→critic→verifier→integrator), so the original
-      // assignment.upstreamResults walk for `workerType === "builder"`
-      // returned empty in production. The Coordinator attaches the full
-      // active.workerResults array via structural typing in dispatchNode,
-      // and resolveBuilderResults reads from there. See the helper below.
-      const approvedBuilderResults = this.resolveBuilderResults(assignment);
+      // Coordinator.dispatchNode populates assignment.workerResults (a
+      // snapshot of active.workerResults) for every production dispatch
+      // — that's the canonical source because the Integrator's direct
+      // upstream in the task graph is Verifier (scout→builder→critic→
+      // verifier→integrator), so the upstreamResults walk for
+      // `workerType === "builder"` returns empty in production. The
+      // upstreamResults walk is preserved as a fallback for tests and
+      // alternate graph topologies that wire Builder directly to Integrator.
+      // Both code paths filter for `workerType === "builder"` AND
+      // `success === true` — the Integrator must only operate on approved
+      // Builder runs, never on failed ones.
+      const builderResultsSource = (assignment.workerResults && assignment.workerResults.length > 0)
+        ? assignment.workerResults
+        : assignment.upstreamResults;
+      const approvedBuilderResults = builderResultsSource.filter(
+        (result) => result.workerType === "builder" && result.success,
+      );
       if (approvedBuilderResults.length === 0) {
         throw new Error(
           "Integrator requires approved BuilderResults but found none — neither " +
           "Coordinator-attached assignment.workerResults nor any direct " +
           "upstreamResults of kind 'builder' with success=true. Check that " +
-          "Coordinator.dispatchNode attaches active.workerResults to the " +
-          "assignment, or that at least one Builder ran successfully in this run."
+          "Coordinator.dispatchNode populates assignment.workerResults, " +
+          "or that at least one Builder ran successfully in this run."
         );
       }
 
@@ -193,67 +210,5 @@ export class IntegratorWorker extends AbstractWorker {
       ...report.blockers.map((issue) => ({ severity: "critical" as const, message: issue.message, file: issue.files[0] })),
       ...report.warnings.map((issue) => ({ severity: "warning" as const, message: issue.message, file: issue.files[0] })),
     ];
-  }
-
-  /**
-   * Resolve the RunState for this execution.
-   *
-   * Lookup order:
-   *   1. assignment.runState — attached by Coordinator.dispatchNode right
-   *      after building the assignment via trustRouter.buildAssignment.
-   *      This is the per-run canonical source for production runs.
-   *   2. this.runState — the constructor-time fallback. Almost always null
-   *      in production because workers are constructed at boot before any
-   *      run exists. Used by tests and stand-alone harnesses that pass a
-   *      RunState explicitly to the constructor.
-   *
-   * Uses structural typing (the cast through `unknown`) so we don't need
-   * to add a `runState` field to WorkerAssignment in workers/base.ts.
-   * The Coordinator attaches the field via the same cast pattern, and
-   * TypeScript's structural typing covers the read on this side.
-   */
-  private resolveRunState(assignment: WorkerAssignment): RunState | null {
-    const attached = (assignment as unknown as { runState?: RunState }).runState;
-    if (attached) return attached;
-    return this.runState;
-  }
-
-  /**
-   * Resolve the approved (successful) Builder results for this run.
-   *
-   * Lookup order:
-   *   1. assignment.workerResults — attached by Coordinator.dispatchNode
-   *      via structural typing. This is the canonical source for production
-   *      runs because the Integrator's direct upstream in the task graph
-   *      is Verifier (scout→builder→critic→verifier→integrator), so the
-   *      assignment.upstreamResults walk below cannot find Builder results
-   *      — they live on `active.workerResults` on the Coordinator's
-   *      ActiveRun, populated as each worker completes execution.
-   *   2. assignment.upstreamResults walk — the original behavior. Works
-   *      only when the task graph wires Builder DIRECTLY to Integrator
-   *      (not the case in the standard pipeline, but preserved for tests
-   *      and alternate graph topologies).
-   *
-   * In both cases the result is filtered for `workerType === "builder"`
-   * AND `success === true` — the Integrator must only operate on
-   * approved Builder runs, never on failed ones.
-   *
-   * Returns an empty array if neither source has any approved Builder
-   * results. The caller is responsible for the throw — that way the
-   * error message can name BOTH failure paths so the operator knows
-   * where to look.
-   *
-   * Uses structural typing (the cast through `unknown`) so we don't need
-   * to add a `workerResults` field to WorkerAssignment in workers/base.ts.
-   * The Coordinator attaches the field via the same cast pattern.
-   */
-  private resolveBuilderResults(assignment: WorkerAssignment): WorkerResult[] {
-    const attached = (assignment as unknown as { workerResults?: WorkerResult[] }).workerResults;
-    const source = attached && attached.length > 0
-      ? attached
-      : assignment.upstreamResults;
-    return source.filter(
-      (result) => result.workerType === "builder" && result.success,
-    );
   }
 }

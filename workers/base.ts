@@ -18,7 +18,7 @@
 
 import type { IntentObject } from "../core/intent.js";
 import type { AssembledContext } from "../core/context-assembler.js";
-import type { CostEntry, Issue, RunTask } from "../core/runstate.js";
+import type { CostEntry, Issue, RunTask, RunState } from "../core/runstate.js";
 
 // ─── Worker Types ────────────────────────────────────────────────────
 
@@ -41,6 +41,62 @@ export interface WorkerAssignment {
   readonly tier: WorkerTier;
   /** Maximum tokens this worker may consume */
   readonly tokenBudget: number;
+
+  /**
+   * Active RunState for the current Coordinator run, attached by
+   * Coordinator.dispatchNode after building the base assignment.
+   *
+   * Optional because:
+   *   - Workers are constructed once at boot via WorkerRegistry, BEFORE
+   *     any run exists, so they cannot get RunState through their
+   *     constructor in production.
+   *   - The Coordinator populates this field on every dispatch in
+   *     production, so workers that need RunState (Verifier, Integrator)
+   *     can read it directly.
+   *   - Tests and stand-alone harnesses that bypass the registry may
+   *     omit this field and pass RunState through the worker constructor
+   *     instead. Workers fall back to their constructor-time runState
+   *     when this field is undefined.
+   */
+  readonly runState?: RunState;
+
+  /**
+   * Snapshot of the run's accumulated file changes, attached by
+   * Coordinator.dispatchNode. This is `active.changes` on the
+   * Coordinator's ActiveRun — the running tally populated by
+   * collectChanges() after each Builder.execute() succeeds.
+   *
+   * Optional because:
+   *   - The Verifier needs the full FileChange[] (path + operation +
+   *     diff + content) to verify against, but its only direct upstream
+   *     in the task graph is Critic, not Builder, so its
+   *     upstreamResults walk for `output.kind === "builder"` returns
+   *     empty in production. The Coordinator populates this field so
+   *     the Verifier can read it directly.
+   *   - Shallow-copied at attach time so workers cannot mutate the
+   *     Coordinator's running tally. The array contents themselves are
+   *     readonly (deeply immutable from the consumer's perspective).
+   */
+  readonly changes?: readonly FileChange[];
+
+  /**
+   * Snapshot of all worker results produced so far in the current run,
+   * in dispatch order. Attached by Coordinator.dispatchNode.
+   *
+   * Optional because:
+   *   - The Integrator needs the successful Builder results (with
+   *     .success and .output.changes) to verify approval and extract
+   *     the merged changeset, but its only direct upstream in the task
+   *     graph is Verifier (scout→builder→critic→verifier→integrator),
+   *     so its upstreamResults walk for `workerType === "builder"`
+   *     returns empty in production. The Coordinator populates this
+   *     field so the Integrator can find the Builder results directly.
+   *   - Future workers that need broader visibility into the run get
+   *     the same access path through this field.
+   *   - Shallow-copied at attach time so workers cannot mutate the
+   *     Coordinator's running tally.
+   */
+  readonly workerResults?: readonly WorkerResult[];
 }
 
 export interface WorkerResult {

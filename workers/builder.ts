@@ -353,6 +353,7 @@ export class BuilderWorker extends AbstractWorker {
 
       // Real model call via fallback-aware invoker
       const response = await invokeModelWithFallback(chain, runCtx);
+      console.log(`[builder] model response received from ${response.usedProvider}/${response.usedModel}`);
 
       if (response.usedProvider !== primaryProvider) {
         console.warn(
@@ -378,7 +379,7 @@ export class BuilderWorker extends AbstractWorker {
       this.enforceForbiddenChanges(contract, updatedContent);
 
       if (updatedContent === fullContent) {
-        throw new Error("Model returned no effective file changes");
+        throw new Error(`Model returned no effective file changes for ${relativePath}`);
       }
 
       // Final safety gate: never write raw diff text to a source file
