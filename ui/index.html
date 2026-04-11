@@ -336,6 +336,16 @@
       animation: buttonRunPulse 1.4s ease-in-out infinite;
     }
 
+    /* Build-mode tinting for the Loqui send button — orange instead of teal,
+       so the user sees at a glance that the next click will run a real build
+       rather than a Q&A. */
+    .button.build {
+      background: linear-gradient(180deg, rgba(251, 146, 60, 0.22), rgba(251, 146, 60, 0.10));
+      color: var(--orange);
+      border-color: rgba(251, 146, 60, 0.40);
+      box-shadow: 0 0 24px rgba(251, 146, 60, 0.12);
+    }
+
     /* Thin animated bar that lives between the hero and the worker band */
     .run-progress {
       position: relative;
@@ -582,8 +592,7 @@
       color: var(--ink);
     }
 
-    /* Run History is now a full-width panel — give it a multi-column grid
-       so the cards spread out instead of stacking in a single tall stripe. */
+    /* Run History is a full-width panel with a responsive multi-column grid. */
     .history-panel {
       display: grid;
       gap: 12px;
@@ -831,6 +840,28 @@
       box-shadow: 0 0 18px rgba(255, 93, 108, 0.12);
     }
 
+    /* Build-mode user bubble — orange tinting plus a small tag prefix
+       (rendered in JS) so the chat history shows which message went to
+       /tasks vs /tasks/loqui at a glance. */
+    .loqui-msg.user.build {
+      border-color: rgba(251, 146, 60, 0.55);
+      box-shadow: 0 0 22px rgba(251, 146, 60, 0.18);
+    }
+
+    .loqui-msg .mode-tag {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      margin-right: 8px;
+      border-radius: 999px;
+      border: 1px solid currentColor;
+      vertical-align: middle;
+      opacity: 0.85;
+    }
+
     .loqui-thinking {
       justify-self: start;
       display: inline-flex;
@@ -846,6 +877,12 @@
       letter-spacing: 0.16em;
       text-transform: uppercase;
       animation: loquiThink 1.4s ease-in-out infinite;
+    }
+
+    .loqui-thinking.build {
+      border-color: rgba(251, 146, 60, 0.32);
+      background: rgba(251, 146, 60, 0.05);
+      color: var(--orange);
     }
 
     .loqui-thinking .loqui-dots {
@@ -875,10 +912,53 @@
       border-radius: 14px;
     }
 
+    /* Loqui form: input takes the flex slot, then the mode toggle, then
+       the send button. The toggle is a tight segmented control so the
+       whole row stays on one line on desktop. */
     .loqui-form {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       gap: 12px;
+      align-items: stretch;
+    }
+
+    .loqui-mode-toggle {
+      display: inline-flex;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      background: rgba(12, 18, 32, 0.92);
+      min-height: 54px;
+    }
+
+    .loqui-mode-toggle button {
+      border: none;
+      background: transparent;
+      color: var(--gray);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding: 0 16px;
+      cursor: pointer;
+      transition: background 200ms ease, color 200ms ease;
+      min-width: 64px;
+    }
+
+    .loqui-mode-toggle button:hover {
+      color: var(--ink);
+    }
+
+    .loqui-mode-toggle button.active.ask {
+      background: rgba(77, 245, 200, 0.16);
+      color: var(--teal);
+      box-shadow: inset 0 0 16px rgba(77, 245, 200, 0.18);
+    }
+
+    .loqui-mode-toggle button.active.build {
+      background: rgba(251, 146, 60, 0.18);
+      color: var(--orange);
+      box-shadow: inset 0 0 16px rgba(251, 146, 60, 0.22);
     }
 
     @media (max-width: 1240px) {
@@ -909,6 +989,8 @@
       .loqui-msg { max-width: 92%; }
       .lumen-box { font-size: 13px; }
       .lumen-line.big { font-size: 18px; }
+      .loqui-mode-toggle { width: 100%; }
+      .loqui-mode-toggle button { flex: 1; }
     }
   </style>
 </head>
@@ -967,8 +1049,8 @@
       <!-- 2. Loqui chat panel -->
       <section class="panel loqui-panel">
         <div class="loqui-row">
-          <div class="label">Loqui — Ask the repo</div>
-          <span class="tiny">qwen3.6-plus · local</span>
+          <div class="label">Loqui — Ask or Build</div>
+          <span class="tiny" id="loqui-mode-tag">ask · qwen3.6-plus</span>
         </div>
         <div id="loqui-log" class="loqui-log"></div>
         <form id="loqui-form" class="loqui-form">
@@ -979,6 +1061,10 @@
             placeholder="Ask Aedis anything about this repo..."
             autocomplete="off"
           />
+          <div class="loqui-mode-toggle" role="group" aria-label="Loqui mode">
+            <button type="button" id="loqui-mode-ask" class="ask active">Ask</button>
+            <button type="button" id="loqui-mode-build" class="build">Build</button>
+          </div>
           <button id="loqui-send" class="button" type="submit">Send</button>
         </form>
       </section>
@@ -1058,6 +1144,7 @@
       repoPath: 'zendorium.repoPath',
       modelConfig: 'zendorium.modelConfig',
       runHistory: 'zendorium.runHistory',
+      loquiMode: 'zendorium.loquiMode',
     };
     const HISTORY_MAX = 20;
     const LUMEN_MAX = 200;
@@ -1070,7 +1157,6 @@
       escalation: '#ff5d6c',
       coordinator: '#4df5c8'
     };
-    /** Maps a worker role to a Lumen line color class. */
     const WORKER_LUMEN_COLOR = {
       scout: 'blue',
       builder: 'orange',
@@ -1084,28 +1170,33 @@
         { model: 'qwen3.6-plus', provider: 'modelstudio', label: 'qwen3.6-plus' },
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
         { model: 'minimax-coding', provider: 'minimax', label: 'minimax-coding' },
-        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' }
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
+        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       critic: [
         { model: 'qwen3.5:9b', provider: 'ollama', label: 'qwen3.5:9b' },
         { model: 'qwen3.5:4b', provider: 'ollama', label: 'qwen3.5:4b' },
-        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' }
+        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       verifier: [{ model: 'local', provider: 'local', label: 'local' }],
       integrator: [
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
-        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' }
+        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
+        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       escalation: [
         { model: 'claude-opus-4-6', provider: 'anthropic', label: 'claude-opus-4-6' },
         { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
-        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' }
+        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
+        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       coordinator: [
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
-        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' }
+        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
+        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ]
     };
     const DEFAULT_MODEL_CONFIG = {
@@ -1128,7 +1219,7 @@
       modelConfig: { ...DEFAULT_MODEL_CONFIG },
       repoPath: '.',
       submitting: false,
-      loqui: { messages: [], thinking: false }
+      loqui: { messages: [], thinking: false, mode: 'ask' }
     };
 
     function createEmptyRun() {
@@ -1331,19 +1422,82 @@
       }
     }
 
-    // ─── Loqui chat ──────────────────────────────────────────────
+    // ─── Loqui mode + chat ───────────────────────────────────────
+    //
+    // Loqui has two modes that share the same input field:
+    //   ask   → POST /tasks/loqui, render answer as a chat bubble
+    //   build → POST /tasks (the same endpoint the hero RUN button hits),
+    //           create a real run object, render a confirmation bubble,
+    //           and let the rest of the UI (workers, lumen, history)
+    //           pick up the run from the WebSocket like any other build.
+    //
+    // The repo field is shared with the hero — both flows read state.repoPath
+    // (which the hero's repo-input keeps in sync via persistRepoPath).
+
+    function setLoquiMode(mode) {
+      const next = mode === 'build' ? 'build' : 'ask';
+      state.loqui.mode = next;
+      try {
+        window.localStorage.setItem(STORAGE_KEYS.loquiMode, next);
+      } catch {
+        // Private mode / quota — non-fatal, just won't survive reload.
+      }
+
+      const askBtn = document.getElementById('loqui-mode-ask');
+      const buildBtn = document.getElementById('loqui-mode-build');
+      if (askBtn) askBtn.classList.toggle('active', next === 'ask');
+      if (buildBtn) buildBtn.classList.toggle('active', next === 'build');
+
+      const input = document.getElementById('loqui-input');
+      if (input) {
+        input.placeholder = next === 'build'
+          ? 'Describe what to build...'
+          : 'Ask Aedis anything about this repo...';
+      }
+
+      const send = document.getElementById('loqui-send');
+      if (send) {
+        send.classList.toggle('build', next === 'build');
+        send.textContent = next === 'build' ? 'Build' : 'Ask';
+      }
+
+      const tag = document.getElementById('loqui-mode-tag');
+      if (tag) {
+        tag.textContent = next === 'build'
+          ? 'build · /tasks'
+          : 'ask · qwen3.6-plus';
+      }
+    }
+
+    function restoreLoquiMode() {
+      try {
+        const saved = window.localStorage.getItem(STORAGE_KEYS.loquiMode);
+        if (saved === 'build' || saved === 'ask') {
+          setLoquiMode(saved);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      setLoquiMode('ask');
+    }
+
     async function submitLoqui(event) {
       event.preventDefault();
       if (state.loqui.thinking) return;
       const input = document.getElementById('loqui-input');
-      const question = input.value.trim();
-      if (!question) return;
+      const text = input.value.trim();
+      if (!text) return;
 
+      // Snapshot the mode at submit time so a mid-flight toggle can't
+      // race the response. Subsequent UI updates use this same value.
+      const mode = state.loqui.mode;
       const repoPath = state.repoPath || '.';
 
       state.loqui.messages.push({
         role: 'user',
-        text: question,
+        text,
+        mode,
         at: new Date().toISOString(),
       });
       state.loqui.thinking = true;
@@ -1351,36 +1505,110 @@
       renderLoqui();
 
       try {
-        const res = await fetch(`${API_BASE}/tasks/loqui`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, repoPath }),
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.message || body.error || `HTTP ${res.status}`);
+        if (mode === 'build') {
+          await runBuildFromLoqui(text, repoPath);
+        } else {
+          await runAskFromLoqui(text, repoPath);
         }
-        const data = await res.json().catch(() => ({}));
-        const answer = String(
-          data.answer ?? data.response ?? data.text ?? data.message ?? ''
-        ).trim() || '(no answer returned)';
-        state.loqui.messages.push({
-          role: 'assistant',
-          text: answer,
-          at: new Date().toISOString(),
-        });
       } catch (err) {
-        console.error('loqui error', err);
+        console.error('loqui submit error', err);
         state.loqui.messages.push({
           role: 'assistant',
-          text: `Loqui error: ${err && err.message ? err.message : String(err)}`,
+          text: `${mode === 'build' ? 'Build' : 'Loqui'} error: ${err && err.message ? err.message : String(err)}`,
+          mode,
           at: new Date().toISOString(),
           error: true,
         });
       } finally {
         state.loqui.thinking = false;
-        renderLoqui();
+        // Full render so the worker grid / history / lumen panels pick up
+        // any new run created by build mode, plus refreshes the chat log.
+        render();
       }
+    }
+
+    async function runAskFromLoqui(question, repoPath) {
+      const res = await fetch(`${API_BASE}/tasks/loqui`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, repoPath }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || body.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json().catch(() => ({}));
+      const answer = String(
+        data.answer ?? data.response ?? data.text ?? data.message ?? ''
+      ).trim() || '(no answer returned)';
+      state.loqui.messages.push({
+        role: 'assistant',
+        text: answer,
+        mode: 'ask',
+        at: new Date().toISOString(),
+      });
+    }
+
+    async function runBuildFromLoqui(prompt, repoPath) {
+      // Mirror the optimistic-run pattern from submitPrompt: create a local
+      // run object so the worker grid / lumen / history panels show
+      // something immediately, then promote its id to the server's task_id
+      // once the POST resolves.
+      const tempId = `pending-${Date.now().toString(36)}`;
+      const run = createEmptyRun();
+      run.id = tempId;
+      run.prompt = prompt;
+      run.repoPath = repoPath;
+      run.status = 'queued';
+      run.startedAt = new Date().toISOString();
+      pushLumen(run, { color: 'gray', icon: '✉', text: `Submitting (loqui): ${truncate(prompt, 60)}` });
+      state.active = run;
+      state.currentRunId = tempId;
+      state.runs.unshift(run);
+      state.history = dedupeHistory([tempId, ...state.history]);
+
+      const res = await fetch(`${API_BASE}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, repoPath }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        // Mark the local run failed before bubbling so the hero shows
+        // FAILED instead of staying QUEUED forever.
+        run.status = 'failed';
+        run.completedAt = new Date().toISOString();
+        pushLumen(run, {
+          color: 'red',
+          icon: '❌',
+          text: `Build submit failed — HTTP ${res.status}`,
+        });
+        throw new Error(body.message || body.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const taskId = data.task_id || data.taskId || tempId;
+
+      if (taskId !== tempId) {
+        run.id = taskId;
+        state.history = dedupeHistory([taskId, ...state.history.filter((entry) => entry !== tempId)]);
+        state.currentRunId = taskId;
+      }
+      pushLumen(run, { color: 'gray', icon: '✓', text: `Task accepted (${taskId})` });
+
+      // Subscribe over WS so live events route to this task.
+      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+        try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
+      }
+
+      // Confirmation bubble in the chat. Tells the user the build is
+      // queued and where to watch progress — keeps the chat coherent
+      // even though the heavy lifting happens in the worker grid.
+      state.loqui.messages.push({
+        role: 'assistant',
+        text: `Build queued — task ${taskId}. Watch the worker grid and Lumen log for progress.`,
+        mode: 'build',
+        at: new Date().toISOString(),
+      });
     }
 
     function dedupeHistory(items) {
@@ -1877,6 +2105,11 @@
     }
 
     function findProvider(role, model) {
+      // Returns the FIRST option whose model name matches. Now that
+      // qwen3.6-plus appears twice (modelstudio + portum), this is only
+      // safe as a fallback when the caller has no provider hint at all —
+      // readSetting() uses the option index instead, and mergeModelConfig
+      // prefers an explicit input.provider before falling back here.
       const option = (MODEL_OPTIONS[role] || []).find((entry) => entry.model === model);
       return option ? option.provider : null;
     }
@@ -1884,8 +2117,22 @@
     function readSetting(role) {
       if (role === 'scout' || role === 'verifier') return MODEL_OPTIONS[role][0];
       const select = document.getElementById(`model-${role}`);
-      const model = select ? select.value : state.modelConfig[role].model;
-      return { model, provider: findProvider(role, model) || state.modelConfig[role].provider };
+      const opts = MODEL_OPTIONS[role] || [];
+      // The <option> values are now indices into MODEL_OPTIONS[role] so
+      // duplicate model names (qwen3.6-plus on modelstudio AND portum) can
+      // be distinguished. Falls back to the current state if the select
+      // element isn't mounted yet.
+      if (select) {
+        const idx = Number(select.value);
+        if (Number.isInteger(idx) && idx >= 0 && idx < opts.length) {
+          return { model: opts[idx].model, provider: opts[idx].provider };
+        }
+      }
+      const current = state.modelConfig[role];
+      return {
+        model: current.model,
+        provider: current.provider,
+      };
     }
 
     function setConfigStatus(message, isError) {
@@ -2101,19 +2348,26 @@
       const parts = [];
 
       if (messages.length === 0 && !state.loqui.thinking) {
-        parts.push('<div class="loqui-empty">Ask Loqui about this repo. It reads project memory and gated context, never the whole tree.</div>');
+        parts.push('<div class="loqui-empty">Ask Loqui about this repo, or switch to Build mode to queue a real task. Both share the repo path from the hero.</div>');
       } else {
         for (const msg of messages) {
-          const cls = msg.role === 'user' ? 'user' : 'assistant';
+          const isUser = msg.role === 'user';
+          const cls = isUser ? 'user' : 'assistant';
+          const modeCls = msg.mode === 'build' && isUser ? ' build' : '';
           const errCls = msg.error ? ' error' : '';
-          parts.push(`<div class="loqui-msg ${cls}${errCls}">${esc(msg.text)}</div>`);
+          const tag = msg.mode === 'build'
+            ? '<span class="mode-tag">Build</span>'
+            : (isUser ? '<span class="mode-tag">Ask</span>' : '');
+          parts.push(`<div class="loqui-msg ${cls}${modeCls}${errCls}">${tag}${esc(msg.text)}</div>`);
         }
       }
 
       if (state.loqui.thinking) {
+        const thinkingClass = state.loqui.mode === 'build' ? 'loqui-thinking build' : 'loqui-thinking';
+        const verb = state.loqui.mode === 'build' ? 'Building' : 'Thinking';
         parts.push(
-          '<div class="loqui-thinking">' +
-            'Thinking' +
+          `<div class="${thinkingClass}">` +
+            esc(verb) +
             '<span class="loqui-dots"><span></span><span></span><span></span></span>' +
           '</div>'
         );
@@ -2125,7 +2379,11 @@
       const button = document.getElementById('loqui-send');
       if (button) {
         button.disabled = state.loqui.thinking;
-        button.textContent = state.loqui.thinking ? 'Wait…' : 'Send';
+        if (state.loqui.thinking) {
+          button.textContent = 'Wait…';
+        } else {
+          button.textContent = state.loqui.mode === 'build' ? 'Build' : 'Ask';
+        }
       }
     }
 
@@ -2231,12 +2489,16 @@
         const color = ROLE_COLORS[role] || 'var(--ink)';
         const options = MODEL_OPTIONS[role] || [];
         const fixed = role === 'scout' || role === 'verifier';
+        // <option value> is the index into MODEL_OPTIONS[role] so duplicate
+        // model names (qwen3.6-plus appears on both modelstudio and portum)
+        // are distinguishable. The "selected" check matches BOTH model and
+        // provider so the right entry is highlighted on render.
         return `
           <div class="settings-item">
             <div class="role-name" style="color:${color}">${esc(role)}</div>
             ${fixed
               ? `<div class="fixed-model">${esc(current.model)}</div>`
-              : `<select id="model-${role}" class="config-select">${options.map((entry) => `<option value="${esc(entry.model)}" ${entry.model === current.model ? 'selected' : ''}>${esc(entry.label)}</option>`).join('')}</select>`}
+              : `<select id="model-${role}" class="config-select">${options.map((entry, i) => `<option value="${i}" ${entry.model === current.model && entry.provider === current.provider ? 'selected' : ''}>${esc(entry.label)}</option>`).join('')}</select>`}
             <div class="tiny">${esc(current.provider)}</div>
           </div>
         `;
@@ -2274,12 +2536,15 @@
     window.selectRun = selectRun;
     document.getElementById('prompt-form').addEventListener('submit', submitPrompt);
     document.getElementById('loqui-form').addEventListener('submit', submitLoqui);
+    document.getElementById('loqui-mode-ask').addEventListener('click', () => setLoquiMode('ask'));
+    document.getElementById('loqui-mode-build').addEventListener('click', () => setLoquiMode('build'));
     document.getElementById('config-save').addEventListener('click', saveModelConfig);
     document.getElementById('repo-input').addEventListener('change', persistRepoPath);
     document.getElementById('repo-input').addEventListener('blur', persistRepoPath);
 
     loadRepoPath();
     restoreRuns();
+    restoreLoquiMode();
     renderSettings();
     render();
     connect();

@@ -1,5 +1,5 @@
 /**
- * Coordinator — Master orchestrator for Zendorium build runs.
+ * Coordinator — Master orchestrator for Aedis build runs.
  *
  * The Coordinator owns the full lifecycle of a build:
  *   1. Receive task (from Simple Mode or API)
@@ -113,6 +113,8 @@ import {
 import { loadMemory, recordTask } from "./project-memory.js";
 import { gateContext, type GatedContext } from "./context-gate.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
+import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
+import { createChangeSet, type ChangeSet } from "./change-set.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -276,6 +278,22 @@ export class Coordinator {
 
     this.emit({ type: "charter_generated", payload: { charter, analysis } });
 
+    // Classify scope from the charter's target files (deduped union of
+    // every deliverable's targetFiles). Surfaces oversized requests early
+    // so we can warn the operator before spending tokens on planning.
+    const charterTargets = Array.from(
+      new Set(
+        charter.deliverables.flatMap((d) => [...d.targetFiles]),
+      ),
+    );
+    const scopeClassification = classifyScope(normalizedInput, charterTargets);
+    console.log(
+      `[coordinator] scope: ${scopeClassification.type} blastRadius=${scopeClassification.blastRadius} decompose=${scopeClassification.recommendDecompose}`
+    );
+    if (scopeClassification.recommendDecompose) {
+      console.warn("[coordinator] WARN: large scope detected — consider decomposing this task.");
+    }
+
     // Phase 2: Intent
     console.log(`[coordinator] PHASE 2: Intent — creating and validating`);
     const intent = createIntent({
@@ -295,6 +313,12 @@ export class Coordinator {
 
     this.emit({ type: "intent_locked", payload: { intentId: intent.id, version: intent.version } });
 
+    // Build the ChangeSet now that the IntentObject is locked. createChangeSet
+    // wants the immutable intent + the same deduped charter target list we
+    // used for the scope classifier above, so file inclusion / dependency
+    // relationships / coherence verdict line up with what was just classified.
+    const changeSet = createChangeSet(intent, charterTargets);
+
     // Phase 3: RunState
     console.log(`[coordinator] PHASE 3: RunState — creating`);
     const run = createRunState(intent.id);
@@ -310,9 +334,12 @@ export class Coordinator {
       gatedContext,
       contextAssembler,
       judge,
+      scopeClassification: scopeClassification ?? null,
+      changeSet,
     };
     this.activeRuns.set(run.id, active);
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
+    console.log(`[coordinator] changeSet created: ${charterTargets.length} file(s), scope=${active.scopeClassification?.type ?? "unknown"}`);
 
     try {
       // Phase 4: Build TaskGraph
@@ -1441,6 +1468,23 @@ interface ActiveRun {
    * the projectRoot affects checkIntentAlignment path normalization.
    */
   judge: IntegrationJudge;
+  /**
+   * Scope classification produced after PHASE 1 (charter). Captures
+   * type / blastRadius / decompose recommendation so downstream phases
+   * (and post-run analysis) can react to oversized requests without
+   * re-running the classifier. Set in submit() between charter generation
+   * and intent locking.
+   */
+  scopeClassification?: ScopeClassification | null;
+  /**
+   * ChangeSet built from the locked intent and the charter's target files.
+   * Carries filesInScope, dependency relationships, shared invariants,
+   * acceptance criteria, and a coherence verdict — everything downstream
+   * planners need to reason about the change as a unit. Set in submit()
+   * after PHASE 2 (intent locked) and attached during ActiveRun
+   * construction.
+   */
+  changeSet: ChangeSet;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────

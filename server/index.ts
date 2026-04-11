@@ -203,7 +203,7 @@ export async function createServer(
         socket.send(JSON.stringify({
           type: "connected",
           timestamp: new Date().toISOString(),
-          message: "Zendorium WebSocket connected",
+          message: "Aedis WebSocket connected",
           clients: eventBus.clientCount(),
         }));
       } catch {
