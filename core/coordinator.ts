@@ -931,6 +931,19 @@ export class Coordinator {
     // same cast pattern.
     (assignment as unknown as { runState?: RunState }).runState = run;
 
+    // Also attach the run's accumulated file changes (the running tally
+    // populated by collectChanges() after each Builder.execute() succeeds).
+    // VerifierWorker needs the full FileChange[] (path + operation + diff
+    // + content) to verify against, but its only direct upstream in the
+    // task graph is Critic, not Builder — so its assignment.upstreamResults
+    // contains the Critic's result, not the Builder's. The Builder's
+    // changes are not reachable through the upstreamResults walk and
+    // runState.filesTouched only has paths, not content. active.changes
+    // is the canonical source. Shallow-copy the array so workers can't
+    // mutate the Coordinator's running tally. VerifierWorker.resolveChanges
+    // reads it via the same structural cast pattern.
+    (assignment as unknown as { changes?: FileChange[] }).changes = [...active.changes];
+
     // Find and execute worker
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
     if (!worker) {

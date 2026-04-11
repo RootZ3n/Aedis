@@ -75,7 +75,26 @@ export class VerifierWorker extends AbstractWorker {
       if (!runState) {
         throw new Error("Verifier requires RunState to record receipts and checks");
       }
-      const changes = this.collectChanges(assignment);
+
+      // Resolve the file changes for this verification run. The Verifier
+      // needs the full FileChange[] (path + operation + diff + content) to
+      // verify against. The Verifier's direct upstream in the task graph
+      // is Critic, NOT Builder, so the original upstreamResults walk
+      // (which filters for output.kind === "builder") finds nothing in
+      // production. The Coordinator attaches active.changes — its running
+      // tally of Builder outputs — to the assignment via structural typing,
+      // and that is the canonical source. See resolveChanges for details.
+      const changes = this.resolveChanges(assignment);
+      if (changes.length === 0) {
+        throw new Error(
+          "Verifier requires builder changes but found none — neither " +
+          "Coordinator-attached assignment.changes (active.changes) nor any " +
+          "upstreamResults of kind 'builder'. Check that " +
+          "Coordinator.dispatchNode attaches active.changes to the assignment, " +
+          "or that the task graph wires Builder output directly to Verifier."
+        );
+      }
+
       const receipt = await this.pipeline.verify(
         assignment.intent,
         runState,
@@ -191,14 +210,39 @@ export class VerifierWorker extends AbstractWorker {
     return this.runState;
   }
 
-  private collectChanges(assignment: WorkerAssignment): FileChange[] {
-    const changes = assignment.upstreamResults.flatMap((result) =>
+  /**
+   * Resolve the file changes that this Verifier should verify against.
+   *
+   * Lookup order:
+   *   1. assignment.changes — attached by Coordinator.dispatchNode right
+   *      after building the assignment. This is the canonical source for
+   *      production runs because the Verifier's direct upstream in the
+   *      task graph is Critic (not Builder), so the upstreamResults walk
+   *      below cannot find Builder's changes — they live on `active.changes`
+   *      on the Coordinator's ActiveRun, populated by collectChanges()
+   *      after each Builder.execute() succeeds.
+   *   2. assignment.upstreamResults walk — the original behavior. Works
+   *      only when the task graph wires Builder DIRECTLY to Verifier
+   *      (not the case in the standard pipeline scout→builder→critic→
+   *      verifier→integrator, but preserved for tests, alternate graph
+   *      topologies, or future graph rewrites that re-wire Builder→Verifier).
+   *
+   * Returns an empty array if neither source has any changes. The caller
+   * is responsible for the throw — that way the error message can name
+   * BOTH failure paths so the operator knows where to look.
+   *
+   * Uses structural typing (the cast through `unknown`) so we don't need
+   * to add a `changes` field to WorkerAssignment in workers/base.ts.
+   * The Coordinator attaches the field via the same cast pattern.
+   */
+  private resolveChanges(assignment: WorkerAssignment): FileChange[] {
+    const attached = (assignment as unknown as { changes?: FileChange[] }).changes;
+    if (attached && attached.length > 0) {
+      return [...attached];
+    }
+    return assignment.upstreamResults.flatMap((result) =>
       result.output.kind === "builder" ? [...result.output.changes] : [],
     );
-    if (changes.length === 0) {
-      throw new Error("Verifier requires upstream builder changes");
-    }
-    return changes;
   }
 
   private toIssues(receipt: VerificationReceipt): Issue[] {
