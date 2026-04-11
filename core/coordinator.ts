@@ -54,6 +54,7 @@ import {
   type Deliverable,
 } from "./intent.js";
 import { getCallLog } from "./model-invoker.js";
+import { captureAndAnalyze } from "./vision.js";
 import {
   CharterGenerator,
   type RequestAnalysis,
@@ -429,6 +430,23 @@ export class Coordinator {
         console.log(`[coordinator] PHASE 10 SKIPPED — no changes to commit (active.changes=0, filesTouched=0)`);
       } else {
         console.log(`[coordinator] PHASE 10 SKIPPED — autoCommit=${this.config.autoCommit} cancelled=${active.cancelled} changeCount=${changeCount}`);
+      }
+
+      if (process.env.AEDIS_VISION === "true") {
+        try {
+          const visionResult = await captureAndAnalyze(
+            "http://localhost:18796",
+            "describe the current run status and any visible errors",
+          );
+          console.log(
+            `[coordinator] vision check: ${visionResult.slice(0, 200)}`
+          );
+        } catch (err) {
+          const visionMessage = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[coordinator] vision check failed: ${visionMessage.slice(0, 200)}`
+          );
+        }
       }
 
       // Finalize
