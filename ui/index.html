@@ -515,7 +515,7 @@
       word-break: break-word;
       color: var(--muted);
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: 15px;
       line-height: 1.5;
     }
 
@@ -1005,7 +1005,45 @@
       if (Array.isArray(payload.workers)) applyWorkers(run, payload.workers);
       if (payload.worker || payload.workerStatus || payload.worker_status) applyWorkers(run, [payload.worker || payload.workerStatus || payload.worker_status]);
 
-      if (type.includes('receipt')) {
+      // Dedicated handler for receipt_generated — extract the nested fields
+      // the coordinator emits (totalCost.estimatedCostUsd, summary.filesModified,
+      // commitSha) and surface them in the receipt card. Set rather than
+      // accumulate run.totalCostUsd because run_complete fires first with the
+      // same total and accumulating would double-count.
+      if (type === 'receipt_generated' && payload.receipt) {
+        const r = payload.receipt;
+        const tc = r.totalCost || {};
+        const summary = r.summary || {};
+        const cost = Number(tc.estimatedCostUsd ?? tc.estimated_cost_usd ?? 0);
+        const filesModifiedRaw = summary.filesModified ?? summary.files_modified;
+        const filesModified = Array.isArray(filesModifiedRaw)
+          ? filesModifiedRaw.length
+          : Number(filesModifiedRaw || 0);
+        const commitSha = r.commitSha || r.commit_sha || '';
+        const receipt = {
+          id: String(
+            r.id ||
+            r.receiptId ||
+            payload.receiptId ||
+            `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          ),
+          worker: String(r.verdict || 'run'),
+          model: String(commitSha ? String(commitSha).slice(0, 10) : (r.verdict || 'complete')),
+          inputTokens: Number(tc.inputTokens ?? tc.input_tokens ?? 0),
+          outputTokens: Number(tc.outputTokens ?? tc.output_tokens ?? 0),
+          totalTokens: Number(tc.totalTokens ?? tc.total_tokens ?? 0),
+          durationMs: Number(r.durationMs ?? r.duration_ms ?? 0),
+          at: r.at || new Date().toISOString(),
+          costUsd: cost,
+          filesModified,
+          commitSha,
+        };
+        run.receipts.unshift(receipt);
+        run.receipts = run.receipts.slice(0, 40);
+        run.receiptCount = run.receipts.length;
+        run.totalCostUsd = cost;
+      } else if (type.includes('receipt')) {
+        // Fallback for older/other receipt event shapes.
         const receipt = normalizeReceipt(payload.receipt || payload);
         appendReceipt(run, receipt);
       }
@@ -1135,7 +1173,9 @@
         totalTokens,
         durationMs,
         at: input.at || input.timestamp || new Date().toISOString(),
-        costUsd
+        costUsd,
+        filesModified: 0,
+        commitSha: '',
       };
     }
 
@@ -1327,32 +1367,36 @@
         container.innerHTML = '<div class="empty">No receipts yet</div>';
         return;
       }
-      container.innerHTML = receipts.map((receipt) => `
-        <article class="receipt-card">
-          <div class="receipt-row">
-            <div class="receipt-model">${esc(String(receipt.worker || 'system').toUpperCase())}</div>
-            <div class="mini-chip">${esc(receipt.model)}</div>
-          </div>
-          <div class="receipt-metrics">
-            <div class="receipt-metric">
-              <div class="label">Tokens</div>
-              <div class="receipt-number">${formatInt(receipt.totalTokens)}</div>
+      container.innerHTML = receipts.map((receipt) => {
+        const sha = receipt.commitSha ? String(receipt.commitSha).slice(0, 10) : '';
+        const chipText = sha || receipt.model || 'unknown';
+        return `
+          <article class="receipt-card">
+            <div class="receipt-row">
+              <div class="receipt-model">${esc(String(receipt.worker || 'system').toUpperCase())}</div>
+              <div class="mini-chip">${esc(chipText)}</div>
             </div>
-            <div class="receipt-metric">
-              <div class="label">In</div>
-              <div class="receipt-number">${formatInt(receipt.inputTokens)}</div>
+            <div class="receipt-metrics">
+              <div class="receipt-metric">
+                <div class="label">Cost</div>
+                <div class="receipt-number">$${Number(receipt.costUsd || 0).toFixed(4)}</div>
+              </div>
+              <div class="receipt-metric">
+                <div class="label">Files</div>
+                <div class="receipt-number">${formatInt(receipt.filesModified || 0)}</div>
+              </div>
+              <div class="receipt-metric">
+                <div class="label">Tokens</div>
+                <div class="receipt-number">${formatInt(receipt.totalTokens)}</div>
+              </div>
+              <div class="receipt-metric">
+                <div class="label">Time</div>
+                <div class="receipt-number">${formatDuration(receipt.durationMs)}</div>
+              </div>
             </div>
-            <div class="receipt-metric">
-              <div class="label">Cost</div>
-              <div class="receipt-number">$${Number(receipt.costUsd || 0).toFixed(4)}</div>
-            </div>
-            <div class="receipt-metric">
-              <div class="label">Time</div>
-              <div class="receipt-number">${formatDuration(receipt.durationMs)}</div>
-            </div>
-          </div>
-        </article>
-      `).join('');
+          </article>
+        `;
+      }).join('');
     }
 
     function renderStream() {

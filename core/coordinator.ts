@@ -1202,7 +1202,7 @@ export class Coordinator {
         return null;
       }
 
-      const message = `zendorium: ${active.intent.charter.objective}\n\nRun: ${active.run.id}\nIntent: ${active.intent.id} v${active.intent.version}`;
+      const message = `aedis: ${active.intent.charter.objective}\n\nRun: ${active.run.id}\nIntent: ${active.intent.id} v${active.intent.version}`;
 
       // All git commands run with cwd=active.projectRoot so they target
       // the per-task effective root rather than the API server's cwd.
