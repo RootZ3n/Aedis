@@ -128,10 +128,10 @@ const CONTEXT_OVERHEAD_CHARS = 64;
 //     a single Builder edit is almost certainly a misapplied diff.
 //
 // The end-of-file structural check (last non-blank line must end with
-// `}`, `;`, `)`, `]`, or `*/`) catches the SUBTLE truncations that pass
-// the length check — like the 1343→1298 case which retained 96.6%. A
-// file truncated mid-function will end with a partial statement, never
-// with a clean closing token.
+// a closing brace, semicolon, paren, bracket, or block comment terminator)
+// catches the SUBTLE truncations that pass the length check — like the
+// 1343 to 1298 case which retained 96.6%. A file truncated mid-function
+// will end with a partial statement, never with a clean closing token.
 const SECTION_LENGTH_RETAIN_FLOOR = 0.95;
 
 // ─── Internal types for prompt assembly ──────────────────────────────
@@ -735,7 +735,7 @@ export class BuilderWorker extends AbstractWorker {
    * Used in section-edit mode so the model has explicit line-number guidance
    * when generating the diff hunk headers.
    *
-   * Format: `  245: function submit(input) {`
+   * Format: "  245: function submit(input) {"
    */
   private numberSectionLines(content: string, startLineNum: number): string {
     return content
@@ -748,7 +748,7 @@ export class BuilderWorker extends AbstractWorker {
    * Assemble the context block under a hard char budget.
    *
    * Walks layers in priority order. For each file, computes its serialized
-   * cost (`FILE: path\ncontent` plus separator overhead). If adding the
+   * cost ("FILE: path\\ncontent" plus separator overhead). If adding the
    * file would exceed the budget, the file is recorded as truncated and
    * skipped. Files within a layer are walked in order, so earlier files
    * win when budget is tight.
@@ -798,33 +798,43 @@ export class BuilderWorker extends AbstractWorker {
 
   // ─── Response Processing ─────────────────────────────────────────
 
-  /**
-   * Process model response. Handles three response formats:
-   * 1. Unified diff (preferred) — apply hunks to the FULL file content
-   * 2. Full file content in markdown fences — extract and use directly
-   * 3. Raw full file content — use directly
-   *
-   * In SECTION-EDIT MODE (sectionMode=true), only path 1 is acceptable:
-   *   - Non-diff responses are HARD REJECTED with an explicit error,
-   *     because using the section content as full file content would
-   *     replace the entire file with just the section.
-   *   - After diff application, TWO safety gates run:
-   *       (a) Length-ratio check: result must be at least 95% of the
-   *           original file length. Catches catastrophic truncations.
-   *       (b) End-of-file structural check: the last non-blank line must
-   *           end with a closing token (`}`, `;`, `)`, `]`, `*/`). Catches
-   *           subtle mid-function truncations that pass the length check.
-   *           This gate exists because coordinator.ts went from 1343 to
-   *           1298 lines (96.6% retained) and committed corrupted; the
-   *           old 50% threshold waved it through.
-   *
-   * fullOriginalContent must ALWAYS be the full file content read from
-   * disk, never the extracted section. The diff is applied to the full
-   * file regardless of whether the prompt showed only a section.
-   *
-   * CRITICAL: Never write raw diff text as file content. Always verify
-   * the result looks like source code, not diff headers.
-   */
+  //
+  // Process model response. Handles three response formats:
+  //   1. Unified diff (preferred) — apply hunks to the FULL file content
+  //   2. Full file content in markdown fences — extract and use directly
+  //   3. Raw full file content — use directly
+  //
+  // In SECTION-EDIT MODE (sectionMode=true), only path 1 is acceptable:
+  //   - Non-diff responses are HARD REJECTED with an explicit error,
+  //     because using the section content as full file content would
+  //     replace the entire file with just the section.
+  //   - After diff application, three safety gates run:
+  //       (a) Length-ratio check: result must be at least 95% of the
+  //           original file length. Catches catastrophic truncations.
+  //       (b) End-of-file structural check: the last non-blank line must
+  //           end with a closing brace, semicolon, paren, bracket, or
+  //           block comment terminator. Catches subtle mid-function
+  //           truncations that pass the length check. This gate exists
+  //           because coordinator.ts went from 1343 to 1298 lines
+  //           (96.6% retained) and committed corrupted; the old 50%
+  //           threshold waved it through.
+  //       (c) Brace balance: |opens - closes| must be <= 2. Mirrors
+  //           DiffApplier.checkBraceBalance and catches the brace-imbalance
+  //           shape of mid-function truncation.
+  //
+  // fullOriginalContent must ALWAYS be the full file content read from
+  // disk, never the extracted section. The diff is applied to the full
+  // file regardless of whether the prompt showed only a section.
+  //
+  // CRITICAL: Never write raw diff text as file content. Always verify
+  // the result looks like source code, not diff headers.
+  //
+  // Note: this comment is intentionally a line-comment block, not a
+  // JSDoc /** ... */ block, because the description references block
+  // comment terminators and we cannot include that character sequence
+  // inside a JSDoc comment without closing it early. esbuild caught
+  // exactly this hazard at build time once already.
+  //
   private processModelResponse(
     raw: string,
     relativePath: string,
@@ -851,7 +861,7 @@ export class BuilderWorker extends AbstractWorker {
       }
 
       // ─── SECTION-MODE SAFETY GATES ─────────────────────────────────
-      // Two checks. Both must pass. Both abort with explicit errors so
+      // Three checks. All must pass. All abort with explicit errors so
       // the corrupted file is never written and never committed.
       //
       // Gate 1: Length retention. Result must be at least
@@ -859,8 +869,14 @@ export class BuilderWorker extends AbstractWorker {
       //   Catches catastrophic truncations.
       //
       // Gate 2: End-of-file structural integrity. The last non-blank
-      //   line must end with `}`, `;`, `)`, `]`, or `*/`. Catches subtle
-      //   mid-function truncations that pass the length check.
+      //   line must end with a closing brace, semicolon, paren, bracket,
+      //   or block comment terminator. Catches subtle mid-function
+      //   truncations that pass the length check.
+      //
+      // Gate 3: Brace balance. |opens - closes| must be <= 2. Mirrors
+      //   DiffApplier.checkBraceBalance threshold exactly. Promoted from
+      //   warning to hard throw in section mode because brace imbalance
+      //   is the canonical signal of mid-function truncation.
       if (sectionMode) {
         const ratio = updatedContent.length / fullOriginalContent.length;
         if (ratio < SECTION_LENGTH_RETAIN_FLOOR) {
@@ -967,12 +983,12 @@ export class BuilderWorker extends AbstractWorker {
 
   /**
    * Strip markdown code fences from model output.
-   * Handles ```diff, ```typescript, ```, etc.
+   * Handles diff, typescript, and unmarked fenced blocks.
    */
   private stripMarkdownFences(raw: string): string {
     const trimmed = raw.trim();
 
-    // Match opening ``` with optional language tag, then content, then closing ```
+    // Match opening fence with optional language tag, then content, then closing fence
     const fenced = trimmed.match(/^```(?:diff|patch|typescript|ts|javascript|js|text)?\s*\n([\s\S]*?)\n```\s*$/);
     if (fenced) return fenced[1];
 

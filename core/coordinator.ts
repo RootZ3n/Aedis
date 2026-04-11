@@ -537,6 +537,7 @@ export class Coordinator {
 
     markReady(graph, scoutNode.id);
     console.log(`[coordinator] buildTaskGraph: complete — total nodes=${graph.nodes.length} edges=${graph.edges.length} scout marked ready`);
+    // Graph construction finished; execution will begin once scheduler picks up scoutNode
   }
 
   private prepareDeliverablesForGraph(
