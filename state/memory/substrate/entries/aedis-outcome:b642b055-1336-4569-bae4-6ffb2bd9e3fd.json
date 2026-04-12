@@ -1,0 +1,64 @@
+{
+  "id": "aedis-outcome:b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in apps/api/src/lib/personality-loader.ts, add a JSDoc comment above the loadPersonalities function",
+  "summary": "[change-set] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 5deb5e4e-a626-4ad3-9b4a-e95e0368b3f1) reported no touched files\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 0d983fb9-9b24-42b8-9280-8228c81cd34b) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 5deb5e4e-a626-4ad3-9b4a-e95e0368b3f1) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task cdd69707-b493-4fe6-99df-c639174fe74e) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 3a19d0be-6058-4b30-84b2-8791eba13b40) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — skipped\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:wave-2-warnings\",\n        \"message\": \"Wave 2 (consumers) passed with warnings: [wave 2 consumers] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint\",\n        \"files\": []\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 0d983fb9-9b24-42b8-9280-8228c81cd34b) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 5deb5e4e-a626-4ad3-9b4a-e95e0368b3f1) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task cdd69707-b493-4fe6-99df-c639174fe74e) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 3a19d0be-6058-4b30-84b2-8791eba13b40) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — skipped\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:wave-2-warnings\",\n        \"message\": \"Wave 2 (consumers) passed with warnings: [wave 2 consumers] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint\",\n        \"files\": []\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 6 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:apps",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-12T12:45:04.306Z",
+  "updatedAt": "2026-04-12T12:45:04.371Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/lib/personality-loader.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "5336ce7c-39ea-416f-ab18-fa3c231c8166",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "edad7bdc-f8f4-4f77-a23f-d03a9256ce82",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+    "aedis-task:b642b055-1336-4569-bae4-6ffb2bd9e3fd"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:b642b055-1336-4569-bae4-6ffb2bd9e3fd"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:b642b055-1336-4569-bae4-6ffb2bd9e3fd"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

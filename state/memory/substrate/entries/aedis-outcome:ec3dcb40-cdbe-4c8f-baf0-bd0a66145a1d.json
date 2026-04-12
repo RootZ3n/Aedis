@@ -1,0 +1,64 @@
+{
+  "id": "aedis-outcome:ec3dcb40-cdbe-4c8f-baf0-bd0a66145a1d",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in apps/api/src/lib/personality-loader.ts, add a JSDoc comment above the loadPersonalities function",
+  "summary": "Missing required lint verification hook [change-set] FAIL — 4/6 stages passed, confidence 74%, 1 blockers, checks typecheck:pass, tests:fail, missing required checks: lint",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 9fa8fad5-fab6-4da5-af71-13b4b8fb7b03) reported no touched files\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 72f51cb7-d4a2-445e-8f3f-e59f2037785a) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 9fa8fad5-fab6-4da5-af71-13b4b8fb7b03) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task 0bae3ccd-9744-43df-a2fb-0ddf82ceea00) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 9f4fa7df-1748-4515-8a4b-6f5d875fe4c5) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:lint\",\n        \"message\": \"Missing required lint verification hook\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-2\",\n        \"message\": \"Wave 2 (consumers) verification failed: [wave 2 consumers] FAIL — 4/6 stages passed, confidence 74%, 1 blockers, checks typecheck:pass, tests:fail, missing required checks: lint\",\n        \"files\": []\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:lint\",\n        \"message\": \"Missing required lint verification hook\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-2\",\n        \"message\": \"Wave 2 (consumers) verification failed: [wave 2 consumers] FAIL — 4/6 stages passed, confidence 74%, 1 blockers, checks typecheck:pass, tests:fail, missing required checks: lint\",\n        \"files\": []\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 72f51cb7-d4a2-445e-8f3f-e59f2037785a) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 9fa8fad5-fab6-4da5-af71-13b4b8fb7b03) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task 0bae3ccd-9744-43df-a2fb-0ddf82ceea00) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 9f4fa7df-1748-4515-8a4b-6f5d875fe4c5) reported zero cost\"\n      }\n    ],\n    \"primaryBlockReason\": \"Missing required lint verification hook\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 4 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:apps",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-12T12:33:04.098Z",
+  "updatedAt": "2026-04-12T12:33:04.163Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/lib/personality-loader.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "ec3dcb40-cdbe-4c8f-baf0-bd0a66145a1d",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "64ce694c-2365-4fb8-843d-8a92093a10e1",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "aa981ce5-871b-43b3-b383-a0c3c963dfbc",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:ec3dcb40-cdbe-4c8f-baf0-bd0a66145a1d",
+    "aedis-task:ec3dcb40-cdbe-4c8f-baf0-bd0a66145a1d"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:ec3dcb40-cdbe-4c8f-baf0-bd0a66145a1d"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:ec3dcb40-cdbe-4c8f-baf0-bd0a66145a1d"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "primaryBlockReason": "Missing required lint verification hook"
+  }
+}

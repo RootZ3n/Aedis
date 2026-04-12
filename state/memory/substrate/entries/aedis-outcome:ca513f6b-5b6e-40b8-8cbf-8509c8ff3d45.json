@@ -1,0 +1,64 @@
+{
+  "id": "aedis-outcome:ca513f6b-5b6e-40b8-8cbf-8509c8ff3d45",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in apps/api/src/lib/personality-loader.ts, add a JSDoc comment above the loadPersonalities function",
+  "summary": "[change-set] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 050269ce-2f03-4632-8e9b-5842a10e5a8b) reported no touched files\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task bd276c74-c1f7-4aa8-bfe3-92ac8b6f7ad4) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 050269ce-2f03-4632-8e9b-5842a10e5a8b) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task ca6f11d1-04f3-40a2-affe-e88543e018c9) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 0998a6a9-b716-4330-8efb-a51cce7c4aff) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — skipped\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task bd276c74-c1f7-4aa8-bfe3-92ac8b6f7ad4) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 050269ce-2f03-4632-8e9b-5842a10e5a8b) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task ca6f11d1-04f3-40a2-affe-e88543e018c9) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 0998a6a9-b716-4330-8efb-a51cce7c4aff) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — skipped\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 5 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:apps",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-12T12:39:25.329Z",
+  "updatedAt": "2026-04-12T12:39:25.394Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/lib/personality-loader.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "ca513f6b-5b6e-40b8-8cbf-8509c8ff3d45",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "896dfbd8-5fa3-4778-b6bb-38936ab53a1a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "2e740bb2-8a1a-482d-962e-d91617124eb0",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:ca513f6b-5b6e-40b8-8cbf-8509c8ff3d45",
+    "aedis-task:ca513f6b-5b6e-40b8-8cbf-8509c8ff3d45"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:ca513f6b-5b6e-40b8-8cbf-8509c8ff3d45"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:ca513f6b-5b6e-40b8-8cbf-8509c8ff3d45"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

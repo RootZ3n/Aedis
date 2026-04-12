@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:3fa350c2-7478-435e-a328-7a9b13daf67b",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/capability-registry.ts, build capability registry",
+  "summary": "Missing deliverables: Modify core/capability-registry.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/capability-registry.ts\",\n        \"files\": []\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/capability-registry.ts\",\n        \"files\": []\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"Missing deliverables: Modify core/capability-registry.ts\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-12T12:39:04.558Z",
+  "updatedAt": "2026-04-12T12:39:04.561Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-capreg-int-84tZ8A",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "3fa350c2-7478-435e-a328-7a9b13daf67b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "1d903b53-48f8-426a-ad6f-4ef3aa2b87a8",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:3fa350c2-7478-435e-a328-7a9b13daf67b",
+    "aedis-task:3fa350c2-7478-435e-a328-7a9b13daf67b"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:3fa350c2-7478-435e-a328-7a9b13daf67b"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:3fa350c2-7478-435e-a328-7a9b13daf67b"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Missing deliverables: Modify core/capability-registry.ts"
+  }
+}

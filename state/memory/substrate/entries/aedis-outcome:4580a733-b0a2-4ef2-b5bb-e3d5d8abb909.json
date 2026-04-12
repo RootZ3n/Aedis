@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:4580a733-b0a2-4ef2-b5bb-e3d5d8abb909",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/capability-registry.ts, build capability registry",
+  "summary": "\"core/capability-registry.ts\" modified without original content or diff — cannot rollback",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/capability-registry.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-2\",\n        \"message\": \"Wave 2 (consumers) verification failed: [wave 2 consumers] FAIL — 2/6 stages passed, confidence 52%, 4 blockers, missing required checks: lint, typecheck, tests\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/capability-registry.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-2\",\n        \"message\": \"Wave 2 (consumers) verification failed: [wave 2 consumers] FAIL — 2/6 stages passed, confidence 52%, 4 blockers, missing required checks: lint, typecheck, tests\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"\\\"core/capability-registry.ts\\\" modified without original content or diff — cannot rollback\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-12T12:18:15.514Z",
+  "updatedAt": "2026-04-12T12:18:15.516Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-capreg-int-BycLFg",
+  "filePaths": [
+    "core/capability-registry.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "4580a733-b0a2-4ef2-b5bb-e3d5d8abb909",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "433f2335-3e87-462b-ad84-c5a36e849b53",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:4580a733-b0a2-4ef2-b5bb-e3d5d8abb909",
+    "aedis-task:4580a733-b0a2-4ef2-b5bb-e3d5d8abb909"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:4580a733-b0a2-4ef2-b5bb-e3d5d8abb909"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:4580a733-b0a2-4ef2-b5bb-e3d5d8abb909"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "\"core/capability-registry.ts\" modified without original content or diff — cannot rollback"
+  }
+}

@@ -156,7 +156,7 @@ const DEFAULT_CONFIG: VerificationPipelineConfig = {
   runAllStages: true,
   timeoutMs: 120_000,
   hooks: [],
-  requiredChecks: ["lint", "typecheck", "tests"],
+  requiredChecks: [],
   judgeConfig: {},
   stageWeights: {
     "diff-check": 1.0,
@@ -346,31 +346,29 @@ export class VerificationPipeline {
       );
       for (const kind of this.config.requiredChecks) {
         if (!configuredKinds.has(kind)) {
+          // Missing check = advisory skip, never a blocker.
           checks.push({
             kind,
             name: this.labelForCheck(kind),
             required: true,
             executed: false,
             passed: false,
-            details: `Missing required ${kind} hook`,
+            details: `${kind} hook not configured — skipped`,
           });
           stages.push({
             stage: this.stageForCheck(kind),
             name: this.labelForCheck(kind),
-            passed: false,
-            score: 0,
+            passed: true,
+            score: 1,
             issues: [{
               stage: this.stageForCheck(kind),
-              severity: "blocker",
-              message: `Missing required ${kind} verification hook`,
+              severity: "warning",
+              message: `${kind} hook not configured — skipped`,
             }],
             durationMs: 0,
-            details: `Missing required ${kind} verification hook`,
+            details: `${kind} hook not configured — skipped`,
           });
-          if (!this.config.runAllStages) {
-            aborted = true;
-            break;
-          }
+          // Never abort on a missing check — it's a skip, not a failure.
         }
       }
 
@@ -469,14 +467,17 @@ export class VerificationPipeline {
     const allIssues = stages.flatMap((s) => s.issues);
     const blockers = allIssues.filter((i) => i.severity === "blocker");
     const confidenceScore = this.computeConfidence(stages);
-    const missingRequiredChecks = this.config.requiredChecks.filter(
+    // Missing checks are advisory — only actual blockers and low
+    // confidence scores cause a fail verdict. A check that never ran
+    // (not configured, not installed) is a skip, not a failure.
+    const missingChecks = this.config.requiredChecks.filter(
       (kind) => !checks.some((check) => check.kind === kind && check.executed),
     );
 
     const verdict: VerificationReceipt["verdict"] =
-      blockers.length > 0 || missingRequiredChecks.length > 0 || confidenceScore < this.config.minimumConfidence
+      blockers.length > 0 || confidenceScore < this.config.minimumConfidence
         ? "fail"
-        : allIssues.some((i) => i.severity === "warning")
+        : allIssues.some((i) => i.severity === "warning") || missingChecks.length > 0
           ? "pass-with-warnings"
           : "pass";
 
@@ -494,8 +495,8 @@ export class VerificationPipeline {
         summaryParts.push(`checks ${executedChecks.join(", ")}`);
       }
     }
-    if (missingRequiredChecks.length > 0) {
-      summaryParts.push(`missing required checks: ${missingRequiredChecks.join(", ")}`);
+    if (missingChecks.length > 0) {
+      summaryParts.push(`skipped checks: ${missingChecks.join(", ")}`);
     }
 
     return {

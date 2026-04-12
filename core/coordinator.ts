@@ -1873,17 +1873,35 @@ export class Coordinator {
   }
 
   /**
-   * Collect failing wave receipts as synthetic merge findings. These
-   * join the regular findings inside decideMerge so a failing wave
-   * always produces a critical block.
+   * Collect wave verification findings for the merge gate.
+   *   - verdict "fail"              → critical (blocks commit)
+   *   - verdict "pass-with-warnings" → advisory (surfaced but does not block)
+   *   - verdict "pass"              → no finding
    */
   private waveFailureFindings(active: ActiveRun): MergeFinding[] {
     const findings: MergeFinding[] = [];
     for (const receipt of active.waveVerifications) {
-      if (receipt.verdict !== "fail") continue;
+      if (receipt.verdict === "pass") continue;
       const scope = receipt.scope;
       const waveId = scope && scope.kind === "wave" ? scope.waveId : 0;
       const waveName = scope && scope.kind === "wave" ? scope.waveName : "unknown";
+
+      if (receipt.verdict === "pass-with-warnings") {
+        findings.push({
+          source: "verification-pipeline",
+          severity: "advisory",
+          code: `verification:wave-${waveId}-warnings`,
+          message: `Wave ${waveId} (${waveName}) passed with warnings: ${receipt.summary}`,
+          files: Array.from(
+            new Set(
+              receipt.allIssues
+                .map((i) => i.file)
+                .filter((f): f is string => Boolean(f)),
+            ),
+          ),
+        });
+        continue;
+      }
       findings.push({
         source: "verification-pipeline",
         severity: "critical",

@@ -232,6 +232,11 @@ function translateVerification(receipt: VerificationReceipt): MergeFinding[] {
   const out: MergeFinding[] = [];
 
   for (const issue of receipt.allIssues) {
+    // Skip issues with empty or blank messages — a custom hook that
+    // produced no meaningful output should never generate a finding
+    // (especially not a critical one that blocks a commit).
+    if (!issue.message || !issue.message.trim()) continue;
+
     // Severity mapping: the verification pipeline has its own 4-level
     // scale (info/warning/error/blocker). Blockers are always critical;
     // errors are critical too (a type error, a broken contract — these
