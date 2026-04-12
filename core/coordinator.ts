@@ -82,6 +82,12 @@ import {
   type CostEntry,
 } from "./runstate.js";
 import {
+  ReceiptStore,
+  type ReceiptPatch,
+  type ReceiptCheckpoint,
+  type ReceiptWorkerEvent,
+} from "./receipt-store.js";
+import {
   createTaskGraph,
   addNode,
   addEdge,
@@ -108,6 +114,7 @@ import {
 } from "./integration-judge.js";
 import {
   VerificationPipeline,
+  type VerificationPipelineConfig,
   type VerificationReceipt,
 } from "./verification-pipeline.js";
 import { loadMemory, recordTask } from "./project-memory.js";
@@ -125,6 +132,9 @@ import {
   type ExecutionReceipt,
 } from "./execution-gate.js";
 import { generateRunSummary, type RunSummary } from "./run-summary.js";
+import { buildRunSummaryPayload, persistentStatusForReceipt } from "./coordinator-audit.js";
+import { buildDispatchAssignment, workerCompleteEventType } from "./coordinator-dispatch.js";
+import { determineRunVerdict } from "./coordinator-lifecycle.js";
 import { estimateBlastRadius, type BlastRadiusEstimate } from "./blast-radius.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
@@ -165,6 +175,8 @@ export interface CoordinatorConfig {
   workBranch: string;
   /** CharterGenerator config overrides */
   charterConfig?: Partial<CharterGeneratorConfig>;
+  /** Verification configuration, including required external hooks. */
+  verificationConfig?: Partial<VerificationPipelineConfig>;
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -178,6 +190,8 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
 export interface TaskSubmission {
   /** Raw user request (natural language) */
   input: string;
+  /** Durable run ID assigned before execution begins. */
+  runId?: string;
   /** Optional pre-structured charter params (bypasses CharterGenerator) */
   charterOverride?: CreateIntentParams;
   /** Optional constraints to add */
@@ -277,6 +291,7 @@ export class Coordinator {
   private trustRouter: TrustRouter;
   private workerRegistry: WorkerRegistry;
   private eventBus: EventBus | null;
+  private receiptStore: ReceiptStore;
 
   /** Active runs indexed by run ID */
   private activeRuns = new Map<string, ActiveRun>();
@@ -285,7 +300,8 @@ export class Coordinator {
     config: Partial<CoordinatorConfig>,
     trustProfile: TrustProfile,
     workerRegistry: WorkerRegistry,
-    eventBus?: EventBus
+    eventBus?: EventBus,
+    receiptStore?: ReceiptStore,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.charterGen = new CharterGenerator(this.config.charterConfig);
@@ -293,10 +309,11 @@ export class Coordinator {
     // they can pick up per-task projectRoot overrides. The constructor
     // intentionally does not create boot-time defaults — there's no use
     // case for a "default" assembler or judge that uses the wrong root.
-    this.verifier = new VerificationPipeline();
+    this.verifier = new VerificationPipeline(this.config.verificationConfig);
     this.trustRouter = new TrustRouter(trustProfile);
     this.workerRegistry = workerRegistry;
     this.eventBus = eventBus ?? null;
+    this.receiptStore = receiptStore ?? new ReceiptStore(this.config.projectRoot);
   }
 
   // ─── Public API ────────────────────────────────────────────────────
@@ -342,7 +359,7 @@ export class Coordinator {
 
     // Phase 1: Charter
     console.log(`[coordinator] PHASE 1: Charter — analyzing request`);
-    this.emit({ type: "run_started", payload: { input: normalizedInput } });
+    this.emit({ type: "run_started", payload: { runId: submission.runId ?? null, input: normalizedInput } });
 
     const analysis = this.charterGen.analyzeRequest(normalizedInput);
     const charter = this.charterGen.generateCharter(analysis);
@@ -474,7 +491,7 @@ export class Coordinator {
 
     // Phase 3: RunState
     console.log(`[coordinator] PHASE 3: RunState — creating`);
-    const run = createRunState(intent.id);
+    const run = createRunState(intent.id, submission.runId);
 
     const active: ActiveRun = {
       intent,
@@ -500,6 +517,14 @@ export class Coordinator {
     this.activeRuns.set(run.id, active);
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
     console.log(`[coordinator] changeSet created: ${charterTargets.length} file(s), scope=${active.scopeClassification?.type ?? "unknown"}`);
+    await this.receiptStore.beginRun({
+      runId: run.id,
+      intentId: intent.id,
+      prompt: input,
+      taskSummary: input,
+      startedAt: run.startedAt,
+      phase: run.phase,
+    });
 
     try {
       // Phase 4: Build TaskGraph
@@ -517,6 +542,14 @@ export class Coordinator {
       this.emit({
         type: "task_graph_built",
         payload: { runId: run.id, summary: summaryAfterBuild },
+      });
+      await this.persistReceiptCheckpoint(active, {
+        at: new Date().toISOString(),
+        type: "planner_finished",
+        status: "RUNNING",
+        phase: run.phase,
+        summary: `Planner built ${active.graph.nodes.length} task node(s)`,
+        details: { graphSummary: summaryAfterBuild },
       });
 
       // Phase 5: Pre-Build Coherence
@@ -612,6 +645,19 @@ export class Coordinator {
               active.workerResults,
             );
         console.log(`[coordinator] PHASE 9 done — verdict=${verificationReceipt.verdict} summary=${verificationReceipt.summary}`);
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "verification_result",
+          status: "RUNNING",
+          phase: run.phase,
+          summary: verificationReceipt.summary,
+          details: { verdict: verificationReceipt.verdict },
+        }, {
+          verificationResults: {
+            final: verificationReceipt,
+            waves: [...active.waveVerifications],
+          },
+        });
       } else {
         console.log(`[coordinator] PHASE 9 SKIPPED — judgmentReport=${judgmentReport ? `passed=${judgmentReport.passed}` : "null"} cancelled=${active.cancelled}`);
       }
@@ -687,6 +733,16 @@ export class Coordinator {
         // difference between an advisory gate (commit anyway) and a
         // blocking gate (fail safely).
         await this.rollbackChanges(active, mergeDecision);
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "FAILED",
+          phase: run.phase,
+          summary: mergeDecision.primaryBlockReason,
+          details: { summary: mergeDecision.summary },
+        }, {
+          appendErrors: [mergeDecision.primaryBlockReason],
+        });
       } else {
         this.emit({
           type: "merge_approved",
@@ -814,6 +870,7 @@ export class Coordinator {
       const finalReceipt: RunReceipt = active.memorySuggestions.length > 0
         ? { ...receipt, memorySuggestions: [...active.memorySuggestions] }
         : receipt;
+      await this.persistFinalReceipt(active, finalReceipt);
 
       // Emit execution_verified / execution_failed BEFORE run_complete
       // so the UI can render real state before any "complete" flourish.
@@ -826,7 +883,7 @@ export class Coordinator {
 
       console.log(`[coordinator] ═══ submit() exit — verdict=${verdictAfterGate} duration=${Date.now() - startTime}ms`);
       this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason, classification: finalReceipt.humanSummary?.classification ?? null } });
-      this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id, receipt: finalReceipt } });
+      this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: finalReceipt.id, receipt: finalReceipt } });
 
       return finalReceipt;
     } catch (err) {
@@ -888,12 +945,13 @@ export class Coordinator {
       const finalReceipt: RunReceipt = active.memorySuggestions.length > 0
         ? { ...receipt, memorySuggestions: [...active.memorySuggestions] }
         : receipt;
+      await this.persistFinalReceipt(active, finalReceipt);
 
       this.emitExecutionEvent(run.id, executionDecision);
       this.emitRunSummary(run.id, finalReceipt);
       console.log(`[coordinator] ═══ submit() exit (failed) — verdict=${receipt.verdict} duration=${Date.now() - startTime}ms`);
       this.emit({ type: "run_complete", payload: { runId: run.id, verdict: "failed", executionVerified: false, executionReason: executionDecision.reason, error: errMessage, classification: finalReceipt.humanSummary?.classification ?? null } });
-      this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id, receipt: finalReceipt } });
+      this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: finalReceipt.id, receipt: finalReceipt } });
       return finalReceipt;
     } finally {
       this.activeRuns.delete(run.id);
@@ -908,6 +966,24 @@ export class Coordinator {
     if (!active) return false;
     active.cancelled = true;
     abortRun(active.run, "Cancelled by user");
+    void this.receiptStore.patchRun(runId, {
+      intentId: active.intent.id,
+      prompt: active.rawUserPrompt,
+      taskSummary: active.rawUserPrompt,
+      status: "INTERRUPTED",
+      phase: active.run.phase,
+      completedAt: active.run.completedAt,
+      appendErrors: ["Cancelled by user"],
+      appendCheckpoints: [
+        {
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "INTERRUPTED",
+          phase: active.run.phase,
+          summary: "Run interrupted by user cancellation",
+        },
+      ],
+    });
     return true;
   }
 
@@ -1290,7 +1366,7 @@ export class Coordinator {
           markCompleted(graph, node.id);
           this.collectChanges(active, result);
           this.emit({
-            type: this.workerCompleteEvent(node.workerType as WorkerType),
+            type: workerCompleteEventType(node.workerType as WorkerType),
             payload: { runId: run.id, taskId: node.id, confidence: result.confidence },
           });
         } else {
@@ -1366,6 +1442,17 @@ export class Coordinator {
       type: "task_started",
       payload: { runId: run.id, taskId: node.id, workerType: node.workerType },
     });
+    await this.persistReceiptWorkerEvent(active, {
+      at: new Date().toISOString(),
+      workerType: node.workerType,
+      taskId: runTask.id,
+      status: "started",
+      summary: node.label,
+      confidence: null,
+      costUsd: 0,
+      filesTouched: [...node.targetFiles],
+      issues: [],
+    });
 
     // Use the per-submit ContextAssembler from active so the per-task
     // projectRoot is honored.
@@ -1397,50 +1484,21 @@ export class Coordinator {
       graph.edges.some((e) => e.to === node.id && e.from === graph.nodes.find((n) => n.runTaskId === r.taskId)?.id)
     );
 
-    const baseAssignment = this.trustRouter.buildAssignment(
-      routingDecision,
-      runTask,
+    const recentContext = this.resolveRecentContext(active, node);
+    const assignment: WorkerAssignment = buildDispatchAssignment({
+      decision: routingDecision,
+      task: runTask,
       intent,
       context,
-      upstreamResults
-    );
-
-    // Decorate the base assignment with per-run state. These four fields
-    // (runState, changes, workerResults, projectRoot) are declared as
-    // optional on WorkerAssignment in workers/base.ts and are populated
-    // here for every dispatch so workers can read them via direct field
-    // access — no cast pattern required.
-    //
-    //   runState        — passed to VerifierWorker and IntegratorWorker
-    //   changes         — running tally of Builder outputs
-    //   workerResults   — every WorkerResult so far in dispatch order
-    //   projectRoot     — per-task effective project root for Builder/
-    //                     Scout/Critic/Integrator file ops and config
-    //                     lookup. Without this, workers would always use
-    //                     their constructor-time projectRoot (the API
-    //                     server's cwd) regardless of which repo the
-    //                     task targets.
-    //
-    // The arrays are shallow-copied at attach time so workers cannot
-    // mutate the Coordinator's running tallies. The fields are declared
-    // `readonly` on the interface, so we build the assignment via spread
-    // (rather than mutating after construction) to respect the readonly
-    // contract for the existing fields too.
-    // Pick the gated context the worker will see. Scouts get the base
-    // project-memory gate (broad, pre-wave context). Builders inside a
-    // multi-file plan get a wave-aware gate so they see only the
-    // invariants and siblings for their wave — preserving minimal
-    // context discipline. Everything else gets nothing extra.
-    const recentContext = this.resolveRecentContext(active, node);
-
-    const assignment: WorkerAssignment = {
-      ...baseAssignment,
+      upstreamResults,
       runState: run,
-      changes: [...active.changes],
-      workerResults: [...active.workerResults],
+      changes: active.changes,
+      workerResults: active.workerResults,
       projectRoot: active.projectRoot,
       recentContext,
-    };
+      buildAssignment: (decision, task, intent, context, upstreamResults) =>
+        this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),
+    });
 
     const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
     if (!worker) {
@@ -1503,6 +1561,19 @@ export class Coordinator {
     }
 
     active.workerResults.push(result);
+    await this.persistReceiptWorkerEvent(active, {
+      at: new Date().toISOString(),
+      workerType: node.workerType,
+      taskId: runTask.id,
+      status: result.success ? "completed" : "failed",
+      summary: result.success
+        ? `${node.workerType} completed`
+        : result.issues[0]?.message ?? `${node.workerType} failed`,
+      confidence: result.confidence,
+      costUsd: Number(result.cost?.estimatedCostUsd ?? 0),
+      filesTouched: result.touchedFiles.map((touch) => touch.path),
+      issues: result.issues.map((issue) => issue.message),
+    });
     return { node, result };
   }
 
@@ -2022,6 +2093,110 @@ export class Coordinator {
     }
   }
 
+  private async persistReceiptCheckpoint(
+    active: ActiveRun,
+    checkpoint: ReceiptCheckpoint,
+    extra: ReceiptPatch = {},
+  ): Promise<void> {
+    await this.receiptStore.patchRun(active.run.id, {
+      ...extra,
+      intentId: active.intent.id,
+      prompt: active.rawUserPrompt,
+      taskSummary: active.rawUserPrompt,
+      status: checkpoint.status,
+      phase: checkpoint.phase,
+      totalCost: active.run.totalCost,
+      filesTouched: active.run.filesTouched.map((touch) => ({
+        path: touch.filePath,
+        operation: touch.operation,
+        taskId: touch.taskId,
+        timestamp: touch.timestamp,
+      })),
+      changesSummary: active.changes.map((change) => ({
+        path: change.path,
+        operation: change.operation,
+      })),
+      runSummary: getRunSummary(active.run),
+      graphSummary: getGraphSummary(active.graph),
+      appendCheckpoints: [checkpoint, ...(extra.appendCheckpoints ?? [])],
+    });
+  }
+
+  private async persistReceiptWorkerEvent(
+    active: ActiveRun,
+    event: ReceiptWorkerEvent,
+  ): Promise<void> {
+    await this.persistReceiptCheckpoint(
+      active,
+      {
+        at: event.at,
+        type: "worker_step",
+        status: active.run.phase === "failed" ? "FAILED" : "RUNNING",
+        phase: active.run.phase,
+        summary: event.summary,
+        details: {
+          workerType: event.workerType,
+          taskId: event.taskId,
+          status: event.status,
+        },
+      },
+      {
+        appendWorkerEvents: [event],
+      },
+    );
+  }
+
+  private async persistFinalReceipt(active: ActiveRun, receipt: RunReceipt): Promise<void> {
+    const classification = receipt.humanSummary?.classification ?? null;
+    const status = persistentStatusForReceipt(receipt);
+    await this.receiptStore.patchRun(active.run.id, {
+      intentId: active.intent.id,
+      prompt: active.rawUserPrompt,
+      taskSummary:
+        receipt.humanSummary?.headline ??
+        active.rawUserPrompt,
+      status,
+      phase: active.run.phase,
+      completedAt: active.run.completedAt,
+      finalClassification: classification,
+      totalCost: receipt.totalCost,
+      confidence: {
+        overall: receipt.humanSummary?.confidence.overall ?? null,
+        planning: receipt.humanSummary?.confidence.planning ?? null,
+        execution: receipt.humanSummary?.confidence.execution ?? null,
+        verification: receipt.humanSummary?.confidence.verification ?? null,
+      },
+      filesTouched: active.run.filesTouched.map((touch) => ({
+        path: touch.filePath,
+        operation: touch.operation,
+        taskId: touch.taskId,
+        timestamp: touch.timestamp,
+      })),
+      changesSummary: active.changes.map((change) => ({
+        path: change.path,
+        operation: change.operation,
+      })),
+      verificationResults: {
+        final: receipt.verificationReceipt,
+        waves: [...receipt.waveVerifications],
+      },
+      graphSummary: receipt.graphSummary,
+      runSummary: receipt.summary,
+      humanSummary: receipt.humanSummary,
+      finalReceipt: receipt,
+      appendErrors: active.run.failureReason ? [active.run.failureReason] : [],
+      appendCheckpoints: [
+        {
+          at: receipt.timestamp,
+          type: "run_completed",
+          status,
+          phase: active.run.phase,
+          summary: receipt.humanSummary?.headline ?? receipt.verdict,
+        },
+      ],
+    });
+  }
+
   // ─── Receipt Building ─────────────────────────────────────────────
 
   private buildReceipt(
@@ -2224,26 +2399,11 @@ export class Coordinator {
    * run_complete. Pure serialization — no computation done here.
    */
   private emitRunSummary(runId: string, receipt: RunReceipt): void {
-    const summary = receipt.humanSummary;
-    if (!summary) return;
+    const payload = buildRunSummaryPayload(runId, receipt);
+    if (!payload) return;
     this.emit({
       type: "run_summary",
-      payload: {
-        runId,
-        classification: summary.classification,
-        classificationReason: summary.classificationReason,
-        headline: summary.headline,
-        narrative: summary.narrative,
-        whatWasAttempted: summary.whatWasAttempted,
-        whatChanged: summary.whatChanged,
-        filesTouchedCount: summary.filesTouchedCount,
-        verification: summary.verification,
-        blastRadius: summary.blastRadius,
-        confidence: summary.confidence,
-        cost: summary.cost,
-        failureExplanation: summary.failureExplanation,
-        factors: summary.factors,
-      },
+      payload,
     });
   }
 
@@ -2318,16 +2478,14 @@ export class Coordinator {
     judgmentReport: JudgmentReport | null,
     mergeDecision: MergeDecision | null = null,
   ): RunReceipt["verdict"] {
-    if (active.cancelled) return "aborted";
-    if (active.run.phase === "failed") return "failed";
-    // A blocking MergeGate is the final authority — a blocked commit
-    // is a failed run, regardless of how individual stages scored.
-    if (mergeDecision?.action === "block") return "failed";
-    if (verificationReceipt?.verdict === "fail") return "failed";
-    if (judgmentReport && !judgmentReport.passed) return "failed";
-    if (verificationReceipt?.verdict === "pass-with-warnings") return "partial";
-    if (hasFailedNodes(active.graph)) return "partial";
-    return "success";
+    return determineRunVerdict({
+      cancelled: active.cancelled,
+      runPhase: active.run.phase,
+      mergeAction: mergeDecision?.action ?? null,
+      verificationVerdict: verificationReceipt?.verdict ?? null,
+      judgmentPassed: judgmentReport?.passed ?? null,
+      hasFailedNodes: hasFailedNodes(active.graph),
+    });
   }
 
   // ─── Event Helpers ─────────────────────────────────────────────────
@@ -2336,16 +2494,6 @@ export class Coordinator {
     this.eventBus?.emit(event);
   }
 
-  private workerCompleteEvent(type: WorkerType): AedisEvent["type"] {
-    const map: Record<WorkerType, AedisEvent["type"]> = {
-      scout: "scout_complete",
-      builder: "builder_complete",
-      critic: "critic_review",
-      verifier: "verifier_check",
-      integrator: "task_complete",
-    };
-    return map[type];
-  }
 }
 
 // ─── Internal State ──────────────────────────────────────────────────

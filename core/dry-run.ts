@@ -323,7 +323,7 @@ function buildSteps(input: {
 
   steps.push({
     stage: "verifier",
-    description: "Verifier would run typecheck + lint + tests against the changes",
+    description: "Verifier requires real lint + typecheck + test hooks and fails closed if any required check is missing",
     tools: ["verifier-pipeline", "tsc", "lint", "test-runner"],
     targetFiles: input.charterTargets,
   });

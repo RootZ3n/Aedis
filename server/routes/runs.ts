@@ -16,6 +16,11 @@ import {
   type TrackedRunLike,
 } from "../../core/metrics.js";
 import { getAllTrackedRuns, getTrackedRun } from "./tasks.js";
+import {
+  buildRunDetailResponse,
+  buildRunIntegrationResponse,
+  buildRunListEntry,
+} from "./run-contracts.js";
 
 // ─── Request Schemas ─────────────────────────────────────────────────
 
@@ -32,6 +37,10 @@ interface RunsQuery {
 
 export const runRoutes: FastifyPluginAsync = async (fastify) => {
   const ctx = (): ServerContext => fastify.ctx;
+  const resolveRunId = async (id: string): Promise<string> => {
+    const task = await ctx().receiptStore.getTask(id);
+    return task?.runId ?? id;
+  };
 
   /**
    * GET /runs — List recent runs with summary.
@@ -48,6 +57,29 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
       const limit = Math.min(request.query.limit ?? 20, 100);
       const statusFilter = request.query.status;
 
+      const persisted = await ctx().receiptStore.listRuns(limit, statusFilter);
+      if (persisted.length > 0) {
+        reply.send({
+          runs: persisted.map((run) => ({
+            ...buildRunListEntry({
+              id: run.runId,
+              runId: run.runId,
+              status: run.status,
+              classification: run.finalClassification,
+              prompt: run.prompt,
+              summary: run.summary,
+              costUsd: run.costUsd,
+              confidence: run.confidence ?? 0,
+              timestamp: run.updatedAt,
+              completedAt: run.completedAt,
+            }),
+          })),
+          total: persisted.length,
+          source: "persistent-receipts",
+        });
+        return;
+      }
+
       const tracked = getAllTrackedRuns() as unknown as readonly TrackedRunLike[];
       if (tracked.length > 0) {
         const projected = projectRunList(tracked, limit)
@@ -58,7 +90,18 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
               run.classification === statusFilter,
           );
         reply.send({
-          runs: projected,
+          runs: projected.map((run) => buildRunListEntry({
+            id: run.id,
+            runId: run.runId ?? run.id,
+            status: run.status,
+            classification: run.classification,
+            prompt: run.prompt,
+            summary: run.summary,
+            costUsd: run.costUsd,
+            confidence: run.confidence,
+            timestamp: run.timestamp,
+            completedAt: run.completedAt,
+          })),
           total: projected.length,
           source: "tracked-runs",
         });
@@ -86,16 +129,19 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
           const verdict = (completed?.payload as any)?.verdict ?? "running";
 
           return {
-            run_id: runId,
+            id: runId,
+            runId,
             status: completed ? "complete" : "running",
-            verdict,
-            started_at: started?.timestamp ?? null,
-            completed_at: completed?.timestamp ?? null,
-            event_count: runEvents.length,
-            phases: [...new Set(runEvents.map((e) => e.type))],
+            classification: verdict,
+            prompt: String((started?.payload as any)?.prompt ?? ""),
+            summary: verdict,
+            costUsd: Number((completed?.payload as any)?.totalCostUsd ?? 0),
+            confidence: 0,
+            timestamp: started?.timestamp ?? completed?.timestamp ?? new Date().toISOString(),
+            completedAt: completed?.timestamp ?? null,
           };
         })
-        .filter((r) => !statusFilter || r.status === statusFilter || r.verdict === statusFilter)
+        .filter((r) => !statusFilter || r.status === statusFilter || r.classification === statusFilter)
         .slice(-limit)
         .reverse();
 
@@ -122,6 +168,51 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id",
     async (request: FastifyRequest<{ Params: RunParams }>, reply: FastifyReply) => {
       const { id } = request.params;
+      const runId = await resolveRunId(id);
+
+      const persisted = await ctx().receiptStore.getRun(runId);
+      if (persisted) {
+        const task = await ctx().receiptStore.getTaskByRunId(runId);
+        const humanSummary = persisted.humanSummary as {
+          headline?: unknown;
+          narrative?: unknown;
+          verification?: unknown;
+        } | null;
+        reply.send({
+          ...buildRunDetailResponse({
+            id: persisted.runId,
+            taskId: task?.taskId ?? null,
+            runId: persisted.runId,
+            status: persisted.status,
+            prompt: task?.prompt ?? persisted.prompt,
+            submittedAt: task?.submittedAt ?? persisted.startedAt ?? persisted.createdAt,
+            completedAt: persisted.completedAt,
+            receipt: persisted.finalReceipt,
+            filesChanged: persisted.changesSummary.map((change) => ({
+              path: change.path,
+              operation: change.operation,
+            })),
+            summary: {
+              classification: persisted.finalClassification,
+              headline: typeof humanSummary?.headline === "string" && humanSummary.headline
+                ? humanSummary.headline
+                : persisted.taskSummary,
+              narrative: typeof humanSummary?.narrative === "string" ? humanSummary.narrative : "",
+              verification: typeof humanSummary?.verification === "string" ? humanSummary.verification : "not-run",
+            },
+            confidence: persisted.confidence,
+            errors: persisted.errors.map((message) => ({ source: "persistent-receipt", message })),
+            executionVerified: persisted.finalReceipt?.executionVerified ?? null,
+            executionGateReason: persisted.finalReceipt?.executionGateReason ?? null,
+            blastRadius: persisted.finalReceipt?.blastRadius ?? null,
+            totalCostUsd: persisted.totalCost.estimatedCostUsd,
+            workerEvents: persisted.workerEvents,
+            checkpoints: persisted.checkpoints,
+          }),
+          source: "persistent-receipts",
+        });
+        return;
+      }
 
       // Try tracked registry first — either the task_id or the
       // runId. `getTrackedRun` keys on task_id; a linear scan
@@ -130,52 +221,98 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
       const tracked =
         byTaskId ??
         (getAllTrackedRuns() as unknown as readonly TrackedRunLike[]).find(
-          (r) => r.runId === id,
+          (r) => r.runId === runId,
         );
       if (tracked) {
         const detail = projectRunDetail(tracked as unknown as TrackedRunLike);
         if (detail) {
-          reply.send({ ...detail, source: "tracked-runs" });
+          reply.send({
+            ...buildRunDetailResponse({
+              id: detail.id,
+              taskId: detail.id,
+              runId: detail.runId ?? detail.id,
+              status: detail.status,
+              prompt: detail.prompt,
+              submittedAt: detail.submittedAt,
+              completedAt: detail.completedAt,
+              receipt: detail.receipt,
+              filesChanged: detail.filesChanged,
+              summary: detail.summary,
+              confidence: detail.confidence,
+              errors: detail.errors,
+              executionVerified: detail.executionVerified,
+              executionGateReason: detail.executionGateReason,
+              blastRadius: detail.blastRadius,
+              totalCostUsd: detail.totalCostUsd,
+              workerEvents: [],
+              checkpoints: [],
+            }),
+            source: "tracked-runs",
+          });
           return;
         }
       }
 
       // Check active runs (in-flight coordinator state)
-      const active = ctx().coordinator.getRunStatus(id);
+      const active = ctx().coordinator.getRunStatus(runId);
       if (active) {
+        const task = await ctx().receiptStore.getTaskByRunId(runId);
         reply.send({
-          run_id: id,
-          status: "running",
-          run_state: {
+          ...buildRunDetailResponse({
+            id: runId,
+            taskId: task?.taskId ?? null,
+            runId,
+            status: "running",
+            prompt: task?.prompt ?? "",
+            submittedAt: task?.submittedAt ?? active.run.startedAt,
+            completedAt: active.run.completedAt,
+            receipt: null,
+            filesChanged: [],
+            summary: {
+              classification: null,
+              headline: `Run is ${active.run.phase}`,
+              narrative: "",
+              verification: "not-run",
+            },
+            confidence: { overall: 0, planning: 0, execution: 0, verification: 0 },
+            errors: [],
+            executionVerified: null,
+            executionGateReason: null,
+            blastRadius: null,
+            totalCostUsd: active.run.totalCost.estimatedCostUsd,
+            workerEvents: [],
+            checkpoints: [],
+          }),
+          runState: {
             phase: active.run.phase,
             tasks: active.run.tasks.map((t) => ({
               id: t.id,
-              worker_type: t.workerType,
+              workerType: t.workerType,
               description: t.description,
               status: t.status,
-              target_files: t.targetFiles,
+              targetFiles: t.targetFiles,
             })),
             assumptions: active.run.assumptions,
             decisions: active.run.decisions,
-            total_cost: active.run.totalCost,
+            totalCost: active.run.totalCost,
           },
-          task_graph: {
+          taskGraph: {
             nodes: active.graph.nodes.map((n) => ({
               id: n.id,
               label: n.label,
-              worker_type: n.workerType,
+              workerType: n.workerType,
               status: n.status,
-              assigned_tier: n.assignedTier,
-              target_files: n.targetFiles,
+              assignedTier: n.assignedTier,
+              targetFiles: n.targetFiles,
             })),
             edges: active.graph.edges,
-            merge_groups: active.graph.mergeGroups,
+            mergeGroups: active.graph.mergeGroups,
             checkpoints: active.graph.checkpoints.map((cp) => ({
               id: cp.id,
               label: cp.label,
               status: cp.status,
             })),
-            escalation_boundaries: active.graph.escalationBoundaries,
+            escalationBoundaries: active.graph.escalationBoundaries,
           },
         });
         return;
@@ -183,7 +320,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Fall back to event history
       const events = ctx().eventBus.recentEvents(500);
-      const runEvents = events.filter((e) => (e.payload as any).runId === id);
+      const runEvents = events.filter((e) => (e.payload as any).runId === runId);
 
       if (runEvents.length === 0) {
         reply.code(404).send({
@@ -193,11 +330,34 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
+      const started = runEvents.find((event) => event.type === "run_started");
+      const completed = runEvents.find((event) => event.type === "run_complete");
       reply.send({
-        run_id: id,
-        status: "complete",
-        events: runEvents,
-        event_count: runEvents.length,
+        ...buildRunDetailResponse({
+          id: runId,
+          taskId: String((started?.payload as any)?.taskId ?? ""),
+          runId,
+          status: String((completed?.payload as any)?.verdict ?? "complete"),
+          prompt: String((started?.payload as any)?.prompt ?? ""),
+          submittedAt: started?.timestamp ?? new Date().toISOString(),
+          completedAt: completed?.timestamp ?? null,
+          receipt: null,
+          filesChanged: [],
+          summary: {
+            classification: String((completed?.payload as any)?.classification ?? "") || null,
+            headline: "Run detail reconstructed from event history",
+            narrative: "",
+            verification: "not-run",
+          },
+          confidence: { overall: 0, planning: 0, execution: 0, verification: 0 },
+          errors: [],
+          executionVerified: (completed?.payload as any)?.executionVerified ?? null,
+          executionGateReason: (completed?.payload as any)?.executionReason ?? null,
+          blastRadius: null,
+          totalCostUsd: Number((completed?.payload as any)?.totalCostUsd ?? 0),
+          workerEvents: [],
+          checkpoints: [],
+        }),
         timeline: runEvents.map((e) => ({
           type: e.type,
           timestamp: e.timestamp,
@@ -214,11 +374,34 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id/integration",
     async (request: FastifyRequest<{ Params: RunParams }>, reply: FastifyReply) => {
       const { id } = request.params;
+      const runId = await resolveRunId(id);
+
+      const persisted = await ctx().receiptStore.getRun(runId);
+      if (persisted) {
+        reply.send(buildRunIntegrationResponse({
+          runId,
+          status: persisted.status,
+          integration: {
+            verdict:
+              persisted.finalReceipt?.mergeDecision?.action === "apply"
+                ? "approved"
+                : persisted.finalReceipt?.mergeDecision?.action === "block"
+                  ? "blocked"
+                  : "not-available",
+            summary: persisted.finalReceipt?.mergeDecision?.summary ?? "No integration decision recorded",
+            events: [],
+            lastCheck: persisted.finalReceipt?.mergeDecision ?? null,
+          },
+          checkpoints: persisted.checkpoints,
+          workerEvents: persisted.workerEvents,
+        }));
+        return;
+      }
 
       const events = ctx().eventBus.recentEvents(500);
       const integrationEvents = events.filter(
         (e) =>
-          (e.payload as any).runId === id &&
+          (e.payload as any).runId === runId &&
           (e.type === "integration_check" || e.type === "merge_approved" || e.type === "merge_blocked")
       );
 
@@ -232,14 +415,18 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
 
       const lastCheck = integrationEvents[integrationEvents.length - 1];
 
-      reply.send({
-        run_id: id,
+      reply.send(buildRunIntegrationResponse({
+        runId,
+        status: "complete",
         integration: {
           verdict: lastCheck.type === "merge_approved" ? "approved" : lastCheck.type === "merge_blocked" ? "blocked" : "pending",
+          summary: String((lastCheck.payload as any)?.summary ?? lastCheck.type),
           events: integrationEvents,
-          last_check: lastCheck,
+          lastCheck,
         },
-      });
+        checkpoints: [],
+        workerEvents: [],
+      }));
     }
   );
 
@@ -250,17 +437,32 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id/receipts",
     async (request: FastifyRequest<{ Params: RunParams }>, reply: FastifyReply) => {
       const { id } = request.params;
+      const runId = await resolveRunId(id);
+      const persisted = await ctx().receiptStore.getRun(runId);
+      if (persisted) {
+        reply.send({
+          runId,
+          receipt: persisted.finalReceipt ?? persisted,
+          costTimeline: persisted.workerEvents.map((event) => ({
+            type: event.status,
+            timestamp: event.at,
+            payload: event,
+          })),
+          source: "persistent-receipts",
+        });
+        return;
+      }
 
       const events = ctx().eventBus.recentEvents(500);
       const receiptEvent = events.find(
-        (e) => e.type === "receipt_generated" && (e.payload as any).runId === id
+        (e) => e.type === "run_receipt" && (e.payload as any).runId === runId
       );
 
       // Gather all cost-related events
       const costEvents = events.filter(
         (e) =>
-          (e.payload as any).runId === id &&
-          (e.type === "worker_assigned" || e.type === "task_complete" || e.type === "receipt_generated")
+          (e.payload as any).runId === runId &&
+          (e.type === "worker_assigned" || e.type === "task_complete" || e.type === "run_receipt")
       );
 
       if (costEvents.length === 0) {
@@ -272,13 +474,14 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       reply.send({
-        run_id: id,
+        runId,
         receipt: receiptEvent?.payload ?? null,
-        cost_timeline: costEvents.map((e) => ({
+        costTimeline: costEvents.map((e) => ({
           type: e.type,
           timestamp: e.timestamp,
           payload: e.payload,
         })),
+        source: "event-bus",
       });
     }
   );

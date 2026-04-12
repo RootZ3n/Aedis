@@ -212,7 +212,7 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
 
       // Emit config change event
       ctx().eventBus.emit({
-        type: "receipt_generated",
+        type: "config_event",
         payload: {
           kind: "config_update",
           summary: "Model configuration updated",

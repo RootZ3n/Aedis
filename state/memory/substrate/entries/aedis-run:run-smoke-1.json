@@ -1,0 +1,49 @@
+{
+  "id": "aedis-run:run-smoke-1",
+  "space": "aedis/runs",
+  "kind": "aedis-run",
+  "title": "fix coordinator dispatch",
+  "summary": "failed run · multi-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"receipt\": {\n    \"id\": \"receipt-smoke-1\",\n    \"runId\": \"run-smoke-1\",\n    \"intentId\": \"intent-smoke-1\",\n    \"timestamp\": \"2026-04-12T00:50:20.500Z\",\n    \"verdict\": \"failed\",\n    \"summary\": {\n      \"runId\": \"run-smoke-1\",\n      \"intentId\": \"intent-smoke-1\",\n      \"phase\": \"failed\",\n      \"taskCounts\": {\n        \"total\": 1,\n        \"pending\": 0,\n        \"active\": 0,\n        \"completed\": 0,\n        \"failed\": 1,\n        \"skipped\": 0\n      },\n      \"totalCost\": {\n        \"model\": \"test\",\n        \"inputTokens\": 10,\n        \"outputTokens\": 10,\n        \"estimatedCostUsd\": 0.01\n      },\n      \"filesModified\": 1,\n      \"assumptions\": 0,\n      \"decisions\": 0,\n      \"issues\": {\n        \"info\": 0,\n        \"warning\": 0,\n        \"error\": 1,\n        \"critical\": 0\n      },\n      \"duration\": 100\n    },\n    \"graphSummary\": {\n      \"totalNodes\": 1,\n      \"planned\": 0,\n      \"ready\": 0,\n      \"dispatched\": 0,\n      \"completed\": 0,\n      \"failed\": 1,\n      \"skipped\": 0,\n      \"blocked\": 0,\n      \"edgeCount\": 0,\n      \"mergeGroupCount\": 0,\n      \"checkpointCount\": 0,\n      \"escalationCount\": 0\n    },\n    \"verificationReceipt\": null,\n    \"waveVerifications\": [],\n    \"judgmentReport\": null,\n    \"mergeDecision\": null,\n    \"totalCost\": {\n      \"model\": \"test\",\n      \"inputTokens\": 10,\n      \"outputTokens\": 10,\n      \"estimatedCostUsd\": 0.01\n    },\n    \"commitSha\": null,\n    \"durationMs\": 100\n  },\n  \"run\": {\n    \"id\": \"run-smoke-1\",\n    \"intentId\": \"intent-smoke-1\",\n    \"startedAt\": \"2026-04-12T00:50:20.500Z\",\n    \"phase\": \"complete\",\n    \"tasks\": [],\n    \"assumptions\": [],\n    \"filesTouched\": [\n      {\n        \"filePath\": \"core/coordinator.ts\",\n        \"operation\": \"modify\",\n        \"taskId\": \"task-1\",\n        \"timestamp\": \"2026-04-12T00:50:20.500Z\"\n      }\n    ],\n    \"decisions\": [],\n    \"coherenceChecks\": [],\n    \"totalCost\": {\n      \"model\": \"test\",\n      \"inputTokens\": 10,\n      \"outputTokens\": 10,\n      \"estimatedCostUsd\": 0.01\n    },\n    \"completedAt\": \"2026-04-12T00:50:20.500Z\",\n    \"failureReason\": null\n  },\n  \"verificationReceipt\": {\n    \"id\": \"v-1\",\n    \"runId\": \"run-smoke-1\",\n    \"intentId\": \"intent-smoke-1\",\n    \"timestamp\": \"2026-04-12T00:50:20.500Z\",\n    \"verdict\": \"fail\",\n    \"confidenceScore\": 0.3,\n    \"stages\": [],\n    \"judgmentReport\": null,\n    \"allIssues\": [],\n    \"blockers\": [],\n    \"summary\": \"verification fail\",\n    \"totalDurationMs\": 20\n  },\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [],\n    \"critical\": [],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"Typecheck failed in coordinator\",\n    \"summary\": \"blocked\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "aedis-run",
+    "ext:ts",
+    "module:core",
+    "scope:multi-file",
+    "verdict:failed",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-12T00:50:20.500Z",
+  "updatedAt": "2026-04-12T00:50:20.501Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-smoke-repo",
+  "filePaths": [
+    "core/coordinator.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "run-smoke-1",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "intent-smoke-1",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "v-1",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "commitSha": "",
+    "filesModified": 1,
+    "scopeType": "multi-file",
+    "blastRadius": 7
+  }
+}

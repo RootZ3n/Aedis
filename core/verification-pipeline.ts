@@ -76,6 +76,10 @@ export interface VerificationReceipt {
   readonly allIssues: readonly VerificationIssue[];
   /** Blocking issues only */
   readonly blockers: readonly VerificationIssue[];
+  /** Required verification checks expected for this run. */
+  readonly requiredChecks: readonly VerificationCheckKind[];
+  /** Checks that actually executed or were missing. */
+  readonly checks: readonly VerificationCheckResult[];
   /** Summary for logging/UI */
   readonly summary: string;
   /** Total verification time */
@@ -96,6 +100,17 @@ export interface VerificationReceipt {
 
 // ─── Hook Types ──────────────────────────────────────────────────────
 
+export type VerificationCheckKind = "lint" | "typecheck" | "tests";
+
+export interface VerificationCheckResult {
+  readonly kind: VerificationCheckKind;
+  readonly name: string;
+  readonly required: boolean;
+  readonly executed: boolean;
+  readonly passed: boolean;
+  readonly details: string;
+}
+
 /**
  * A ToolHook runs an external tool (lint, typecheck, test) against
  * the changeset and returns structured results.
@@ -103,6 +118,7 @@ export interface VerificationReceipt {
 export interface ToolHook {
   readonly name: string;
   readonly stage: VerificationStage;
+  readonly kind?: VerificationCheckKind;
   /** Execute the hook. Receives changed file paths. */
   execute(changedFiles: string[]): Promise<ToolHookResult>;
 }
@@ -127,6 +143,8 @@ export interface VerificationPipelineConfig {
   timeoutMs: number;
   /** Registered tool hooks (lint, typecheck, etc.) */
   hooks: ToolHook[];
+  /** Checks that must exist and execute before verification can pass. */
+  requiredChecks: VerificationCheckKind[];
   /** IntegrationJudge configuration */
   judgeConfig: Partial<IntegrationJudgeConfig>;
   /** Stage weights for confidence scoring */
@@ -138,6 +156,7 @@ const DEFAULT_CONFIG: VerificationPipelineConfig = {
   runAllStages: true,
   timeoutMs: 120_000,
   hooks: [],
+  requiredChecks: ["lint", "typecheck", "tests"],
   judgeConfig: {},
   stageWeights: {
     "diff-check": 1.0,
@@ -235,6 +254,8 @@ export class VerificationPipeline {
         judgmentReport: null,
         allIssues: [],
         blockers: [],
+        requiredChecks: [...this.config.requiredChecks],
+        checks: [],
         summary: `[wave ${wave.id} ${wave.name}] PASS — no changes to verify`,
         totalDurationMs: 0,
         scope: {
@@ -270,6 +291,7 @@ export class VerificationPipeline {
   ): Promise<VerificationReceipt> {
     const startTime = Date.now();
     const stages: StageResult[] = [];
+    const checks: VerificationCheckResult[] = [];
     let aborted = false;
 
     // Stage 1: Diff check
@@ -317,8 +339,53 @@ export class VerificationPipeline {
     // Stage 4+: Tool hooks (lint, typecheck, custom)
     if (!aborted) {
       const changedFiles = changes.map((c) => c.path);
+      const configuredKinds = new Set(
+        this.config.hooks
+          .map((hook) => hook.kind)
+          .filter((kind): kind is VerificationCheckKind => Boolean(kind)),
+      );
+      for (const kind of this.config.requiredChecks) {
+        if (!configuredKinds.has(kind)) {
+          checks.push({
+            kind,
+            name: this.labelForCheck(kind),
+            required: true,
+            executed: false,
+            passed: false,
+            details: `Missing required ${kind} hook`,
+          });
+          stages.push({
+            stage: this.stageForCheck(kind),
+            name: this.labelForCheck(kind),
+            passed: false,
+            score: 0,
+            issues: [{
+              stage: this.stageForCheck(kind),
+              severity: "blocker",
+              message: `Missing required ${kind} verification hook`,
+            }],
+            durationMs: 0,
+            details: `Missing required ${kind} verification hook`,
+          });
+          if (!this.config.runAllStages) {
+            aborted = true;
+            break;
+          }
+        }
+      }
+
       for (const hook of this.config.hooks) {
         if (Date.now() - startTime > this.config.timeoutMs) {
+          if (hook.kind) {
+            checks.push({
+              kind: hook.kind,
+              name: hook.name,
+              required: this.config.requiredChecks.includes(hook.kind),
+              executed: true,
+              passed: false,
+              details: `Verification timed out after ${this.config.timeoutMs}ms`,
+            });
+          }
           stages.push({
             stage: hook.stage,
             name: hook.name,
@@ -337,6 +404,18 @@ export class VerificationPipeline {
 
         try {
           const hookResult = await hook.execute(changedFiles);
+          if (hook.kind) {
+            checks.push({
+              kind: hook.kind,
+              name: hook.name,
+              required: this.config.requiredChecks.includes(hook.kind),
+              executed: true,
+              passed: hookResult.passed,
+              details: hookResult.passed
+                ? `${hook.name} passed`
+                : `${hook.name} failed (exit ${hookResult.exitCode})`,
+            });
+          }
           stages.push({
             stage: hook.stage,
             name: hook.name,
@@ -354,6 +433,16 @@ export class VerificationPipeline {
             break;
           }
         } catch (err) {
+          if (hook.kind) {
+            checks.push({
+              kind: hook.kind,
+              name: hook.name,
+              required: this.config.requiredChecks.includes(hook.kind),
+              executed: true,
+              passed: false,
+              details: `${hook.name} threw an exception`,
+            });
+          }
           stages.push({
             stage: hook.stage,
             name: hook.name,
@@ -380,15 +469,34 @@ export class VerificationPipeline {
     const allIssues = stages.flatMap((s) => s.issues);
     const blockers = allIssues.filter((i) => i.severity === "blocker");
     const confidenceScore = this.computeConfidence(stages);
+    const missingRequiredChecks = this.config.requiredChecks.filter(
+      (kind) => !checks.some((check) => check.kind === kind && check.executed),
+    );
 
     const verdict: VerificationReceipt["verdict"] =
-      blockers.length > 0 || confidenceScore < this.config.minimumConfidence
+      blockers.length > 0 || missingRequiredChecks.length > 0 || confidenceScore < this.config.minimumConfidence
         ? "fail"
         : allIssues.some((i) => i.severity === "warning")
           ? "pass-with-warnings"
           : "pass";
 
     const passedStages = stages.filter((s) => s.passed).length;
+    const summaryParts = [
+      `${verdict.toUpperCase()} — ${passedStages}/${stages.length} stages passed`,
+      `confidence ${(confidenceScore * 100).toFixed(0)}%`,
+      `${blockers.length} blockers`,
+    ];
+    if (checks.length > 0) {
+      const executedChecks = checks
+        .filter((check) => check.executed)
+        .map((check) => `${check.kind}:${check.passed ? "pass" : "fail"}`);
+      if (executedChecks.length > 0) {
+        summaryParts.push(`checks ${executedChecks.join(", ")}`);
+      }
+    }
+    if (missingRequiredChecks.length > 0) {
+      summaryParts.push(`missing required checks: ${missingRequiredChecks.join(", ")}`);
+    }
 
     return {
       id: randomUUID(),
@@ -401,9 +509,33 @@ export class VerificationPipeline {
       judgmentReport,
       allIssues,
       blockers,
-      summary: `${verdict.toUpperCase()} — ${passedStages}/${stages.length} stages passed, confidence ${(confidenceScore * 100).toFixed(0)}%, ${blockers.length} blockers`,
+      requiredChecks: [...this.config.requiredChecks],
+      checks,
+      summary: summaryParts.join(", "),
       totalDurationMs,
     };
+  }
+
+  private labelForCheck(kind: VerificationCheckKind): string {
+    switch (kind) {
+      case "lint":
+        return "Lint";
+      case "typecheck":
+        return "Typecheck";
+      case "tests":
+        return "Tests";
+    }
+  }
+
+  private stageForCheck(kind: VerificationCheckKind): VerificationStage {
+    switch (kind) {
+      case "lint":
+        return "lint";
+      case "typecheck":
+        return "typecheck";
+      case "tests":
+        return "custom-hook";
+    }
   }
 
   // ─── Stage Implementations ────────────────────────────────────────
@@ -618,6 +750,7 @@ export function createLintHook(config: {
   return {
     name: config.name ?? "Lint",
     stage: "lint",
+    kind: "lint",
     async execute(changedFiles: string[]): Promise<ToolHookResult> {
       const start = Date.now();
       try {
@@ -668,6 +801,7 @@ export function createTypecheckHook(config: {
   return {
     name: "TypeScript Check",
     stage: "typecheck",
+    kind: "typecheck",
     async execute(_changedFiles: string[]): Promise<ToolHookResult> {
       const start = Date.now();
       try {
@@ -728,10 +862,12 @@ export function createCustomHook(config: {
   command: string;
   args?: string[];
   passFiles?: boolean;
+  kind?: VerificationCheckKind;
 }): ToolHook {
   return {
     name: config.name,
     stage: "custom-hook",
+    kind: config.kind,
     async execute(changedFiles: string[]): Promise<ToolHookResult> {
       const start = Date.now();
       try {

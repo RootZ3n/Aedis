@@ -10,7 +10,7 @@
 
 import "dotenv/config";
 
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import Fastify from "fastify";
@@ -21,6 +21,13 @@ import cors from "@fastify/cors";
 import { createTailscaleAuth } from "./middleware/auth.js";
 import { createEventBus, type EventBus } from "./websocket.js";
 import { Coordinator, type CoordinatorConfig } from "../core/coordinator.js";
+import { ReceiptStore } from "../core/receipt-store.js";
+import {
+  createCustomHook,
+  createTypecheckHook,
+  type ToolHook,
+  type VerificationPipelineConfig,
+} from "../core/verification-pipeline.js";
 import { WorkerRegistry } from "../workers/base.js";
 import { ScoutWorker } from "../workers/scout.js";
 import { BuilderWorker } from "../workers/builder.js";
@@ -61,6 +68,7 @@ const DEFAULT_CONFIG: ServerConfig = {
 export interface ServerContext {
   coordinator: Coordinator;
   eventBus: EventBus;
+  receiptStore: ReceiptStore;
   workerRegistry: WorkerRegistry;
   config: ServerConfig;
   startedAt: string;
@@ -78,12 +86,57 @@ function defaultTrustProfile(): TrustProfile {
 /**
  * Build a WorkerRegistry with all 5 worker types registered.
  */
-function buildDefaultRegistry(projectRoot: string): WorkerRegistry {
+function buildVerificationConfig(projectRoot: string): Partial<VerificationPipelineConfig> {
+  const hooks: ToolHook[] = [];
+  let scripts: Record<string, string> = {};
+
+  const packageJsonPath = join(projectRoot, "package.json");
+  if (existsSync(packageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
+        scripts?: Record<string, string>;
+      };
+      scripts = packageJson.scripts ?? {};
+    } catch {
+      scripts = {};
+    }
+  }
+
+  if (typeof scripts.lint === "string" && scripts.lint.trim()) {
+    hooks.push(createCustomHook({
+      name: "Lint",
+      command: "npm",
+      args: ["run", "lint"],
+      kind: "lint",
+    }));
+  }
+
+  const tsconfigPath = join(projectRoot, "tsconfig.json");
+  if (existsSync(tsconfigPath)) {
+    hooks.push(createTypecheckHook({ project: tsconfigPath }));
+  }
+
+  if (typeof scripts.test === "string" && scripts.test.trim()) {
+    hooks.push(createCustomHook({
+      name: "Tests",
+      command: "npm",
+      args: ["run", "test"],
+      kind: "tests",
+    }));
+  }
+
+  return {
+    hooks,
+    requiredChecks: ["lint", "typecheck", "tests"],
+  };
+}
+
+function buildDefaultRegistry(projectRoot: string, verificationConfig: Partial<VerificationPipelineConfig>): WorkerRegistry {
   const registry = new WorkerRegistry();
   registry.register(new ScoutWorker({ projectRoot }));
   registry.register(new BuilderWorker({ projectRoot }));
   registry.register(new CriticWorker({ projectRoot }));
-  registry.register(new VerifierWorker());
+  registry.register(new VerifierWorker({ hooks: verificationConfig.hooks ?? [] }));
   registry.register(new IntegratorWorker());
   console.log("[server] WorkerRegistry: 5 workers registered — scout, builder, critic, verifier, integrator");
   return registry;
@@ -93,7 +146,19 @@ function buildDefaultRegistry(projectRoot: string): WorkerRegistry {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const UI_ROOT = join(__dirname, "..", "ui");
+
+function resolveUiRoot(): string {
+  const siblingUi = join(__dirname, "..", "ui");
+  if (existsSync(siblingUi)) return siblingUi;
+
+  // Built output lives in dist/server, while source ui/ stays at repo-root/ui.
+  const repoUi = join(__dirname, "..", "..", "ui");
+  if (existsSync(repoUi)) return repoUi;
+
+  return siblingUi;
+}
+
+const UI_ROOT = resolveUiRoot();
 
 // ─── Boot ────────────────────────────────────────────────────────────
 
@@ -103,24 +168,32 @@ export async function createServer(
   workerRegistry?: WorkerRegistry
 ): Promise<ReturnType<typeof Fastify>> {
   const cfg: ServerConfig = { ...DEFAULT_CONFIG, ...config };
-  const registry = workerRegistry ?? buildDefaultRegistry(cfg.projectRoot);
+  const verificationConfig = buildVerificationConfig(cfg.projectRoot);
+  const registry = workerRegistry ?? buildDefaultRegistry(cfg.projectRoot, verificationConfig);
   const profile = trustProfile ?? defaultTrustProfile();
 
   const eventBus = createEventBus();
+  const receiptStore = new ReceiptStore(cfg.projectRoot);
+  await receiptStore.markIncompleteRunsCrashed(
+    `Server restarted on ${new Date().toISOString()} before the run reached a terminal state`,
+  );
 
   const coordinator = new Coordinator(
     {
       projectRoot: cfg.projectRoot,
+      verificationConfig,
       ...cfg.coordinatorConfig,
     },
     profile,
     registry,
-    eventBus
+    eventBus,
+    receiptStore,
   );
 
   const ctx: ServerContext = {
     coordinator,
     eventBus,
+    receiptStore,
     workerRegistry: registry,
     config: cfg,
     startedAt: new Date().toISOString(),

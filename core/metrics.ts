@@ -33,6 +33,7 @@ export interface TrackedRunLike {
   readonly completedAt: string | null;
   readonly receipt: RunReceipt | null | unknown;
   readonly error: string | null;
+  readonly stateCategory?: "in-flight" | "completed" | "failed" | "crashed";
 }
 
 export interface MetricsSnapshot {
@@ -42,6 +43,8 @@ export interface MetricsSnapshot {
   readonly partialRuns: number;
   readonly noOpRuns: number;
   readonly inFlightRuns: number;
+  readonly completedRuns: number;
+  readonly crashedRuns: number;
   readonly successRate: number;
   readonly totalCostUsd: number;
   readonly avgCostPerRunUsd: number;
@@ -71,6 +74,7 @@ export interface RunListItem {
   readonly runId: string | null;
   readonly status: TrackedRunLike["status"];
   readonly classification: string | null;
+  readonly prompt: string;
   readonly summary: string;
   readonly costUsd: number;
   readonly filesTouched: number;
@@ -133,6 +137,8 @@ export function computeMetrics(
   let partialRuns = 0;
   let noOpRuns = 0;
   let inFlightRuns = 0;
+  let completedRuns = 0;
+  let crashedRuns = 0;
   let totalCostUsd = 0;
   let totalFilesTouched = 0;
   let totalConfidence = 0;
@@ -143,11 +149,26 @@ export function computeMetrics(
   for (const run of runs) {
     const receipt = receiptOf(run);
     if (!receipt) {
-      inFlightRuns += 1;
+      switch (run.stateCategory ?? (run.status === "queued" || run.status === "running" ? "in-flight" : "failed")) {
+        case "in-flight":
+          inFlightRuns += 1;
+          break;
+        case "crashed":
+          crashedRuns += 1;
+          break;
+        case "completed":
+          completedRuns += 1;
+          break;
+        case "failed":
+        default:
+          failedRuns += 1;
+          break;
+      }
       continue;
     }
 
     const classification = classificationOf(receipt);
+    completedRuns += 1;
     switch (classification) {
       case "VERIFIED_SUCCESS":
         successfulRuns += 1;
@@ -199,6 +220,8 @@ export function computeMetrics(
     partialRuns,
     noOpRuns,
     inFlightRuns,
+    completedRuns,
+    crashedRuns,
     successRate: round4(successRate),
     totalCostUsd: round6(totalCostUsd),
     avgCostPerRunUsd: round6(avgCostPerRunUsd),
@@ -303,6 +326,8 @@ function emptySnapshot(now: string): MetricsSnapshot {
     partialRuns: 0,
     noOpRuns: 0,
     inFlightRuns: 0,
+    completedRuns: 0,
+    crashedRuns: 0,
     successRate: 0,
     totalCostUsd: 0,
     avgCostPerRunUsd: 0,
@@ -321,6 +346,7 @@ function toRunListItem(run: TrackedRunLike): RunListItem {
     runId: run.runId,
     status: run.status,
     classification: classificationOf(receipt),
+    prompt: run.prompt,
     summary: humanSummary?.headline ?? receipt?.summary?.phase ?? run.prompt.slice(0, 140),
     costUsd: Number(receipt?.totalCost?.estimatedCostUsd ?? 0),
     filesTouched: Number(humanSummary?.filesTouchedCount ?? 0),

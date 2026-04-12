@@ -1440,6 +1440,7 @@
       runs: [],
       history: [],
       active: createEmptyRun(),
+      historyError: '',
       modelConfig: { ...DEFAULT_MODEL_CONFIG },
       repoPath: '.',
       submitting: false,
@@ -1470,6 +1471,7 @@
       }
       return {
         id: null,
+        taskId: null,
         prompt: '',
         repoPath: '.',
         status: 'idle',
@@ -1488,6 +1490,7 @@
         // yet, which the UI treats as "unknown" rather than success.
         executionVerified: null,
         executionReason: '',
+        loadError: '',
         // Human-Readable Execution + Trust Layer v1 — populated by
         // blast_radius_estimated (before the run starts) and
         // run_summary (at the end). Both are null until the
@@ -1555,6 +1558,90 @@
       }
     }
 
+    async function loadPersistedRuns() {
+      try {
+        const res = await fetch(`${API_BASE}/runs?limit=20`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        state.historyError = '';
+        if (!Array.isArray(data.runs)) return;
+        for (const entry of data.runs) {
+          const id = String(entry.runId || entry.id || '');
+          if (!id) continue;
+          const run = ensureRun(id);
+          run.id = id;
+          run.status = String(entry.status || run.status || 'idle');
+          run.verdict = String(entry.classification || entry.status || run.verdict || '');
+          run.prompt = String(entry.prompt || entry.summary || run.prompt || '');
+          run.totalCostUsd = Number(entry.costUsd || run.totalCostUsd || 0);
+          run.completedAt = entry.completedAt || run.completedAt || null;
+          run.startedAt = entry.timestamp || run.startedAt || null;
+          run.loadError = '';
+        }
+        if (!state.currentRunId && state.runs.length > 0) {
+          state.currentRunId = state.runs[0].id;
+          state.active = state.runs[0];
+        }
+        render();
+      } catch (err) {
+        state.historyError = `Failed to load run history: ${err && err.message ? err.message : String(err)}`;
+        render();
+      }
+    }
+
+    async function loadRunDetail(runId) {
+      try {
+        const res = await fetch(`${API_BASE}/runs/${encodeURIComponent(runId)}`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        const run = ensureRun(runId);
+        run.id = String(data.runId || data.id || runId);
+        run.taskId = String(data.taskId || data.task_id || run.taskId || '');
+        run.prompt = String(data.prompt || run.prompt || '');
+        run.status = String(data.status || run.status || 'idle');
+        run.totalCostUsd = Number(data.totalCostUsd || run.totalCostUsd || 0);
+        run.startedAt = data.submittedAt || run.startedAt || null;
+        run.completedAt = data.completedAt || run.completedAt || null;
+        run.loadError = '';
+        run.receipts = [];
+        run.receiptCount = 0;
+        run.lumen = [];
+        if (data.receipt) {
+          ingestEvent({ type: 'run_receipt', runId, receipt: data.receipt });
+        }
+        if (Array.isArray(data.workerEvents)) {
+          for (const event of data.workerEvents) {
+            pushLumen(run, {
+              color: event.status === 'failed' ? 'orange' : event.status === 'completed' ? 'green' : 'gray',
+              icon: event.status === 'failed' ? '!' : event.status === 'completed' ? '•' : '…',
+              text: `${event.workerType}: ${event.summary}`,
+            });
+          }
+        }
+        if (data.summary && data.summary.headline) {
+          run.runSummary = {
+            classification: data.summary.classification || run.verdict || '',
+            headline: data.summary.headline,
+            narrative: data.summary.narrative || '',
+            verification: data.summary.verification || 'not-run',
+            blastRadius: data.blastRadius || null,
+            confidence: data.confidence || { overall: 0, planning: 0, execution: 0, verification: 0 },
+            cost: { displayUsd: `$${Number(data.totalCostUsd || 0).toFixed(2)}` },
+            whatChanged: Array.isArray(data.filesChanged) ? data.filesChanged : [],
+            filesTouchedCount: Array.isArray(data.filesChanged) ? data.filesChanged.length : 0,
+            failureExplanation: Array.isArray(data.errors) && data.errors[0]
+              ? { stage: data.errors[0].source || 'persistent-receipt', rootCause: data.errors[0].message || '', suggestedFix: data.errors[0].suggestedFix || '' }
+              : null,
+          };
+        }
+        render();
+      } catch (err) {
+        const run = ensureRun(runId);
+        run.loadError = `API error retrieving run details: ${err && err.message ? err.message : String(err)}`;
+        render();
+      }
+    }
+
     function setSocketStatus(label, ok = false) {
       document.getElementById('socket-status').textContent = label;
       const pill = document.getElementById('socket-pill');
@@ -1585,7 +1672,7 @@
         setSocketStatus('LIVE', true);
         try { ws.send(JSON.stringify({ type: 'hello', client: 'aedis-ui' })); } catch {}
         if (state.currentRunId) {
-          try { ws.send(JSON.stringify({ type: 'subscribe', taskId: state.currentRunId })); } catch {}
+          try { ws.send(JSON.stringify({ type: 'subscribe', runId: state.currentRunId })); } catch {}
         }
         render();
       });
@@ -1623,7 +1710,7 @@
       run.id = tempId;
       run.prompt = prompt;
       run.repoPath = repoPath;
-      run.status = 'queued';
+      run.status = 'running';
       run.startedAt = new Date().toISOString();
       pushLumen(run, { color: 'gray', icon: '✉', text: `Submitting task: ${truncate(prompt, 60)}` });
       state.active = run;
@@ -1646,18 +1733,21 @@
           throw new Error(body.message || body.error || `HTTP ${res.status}`);
         }
         const data = await res.json();
-        const taskId = data.task_id || data.taskId || tempId;
+        const taskId = data.task_id || data.taskId || '';
+        const runId = data.run_id || data.runId || taskId || tempId;
 
-        if (taskId !== tempId) {
-          run.id = taskId;
-          state.history = dedupeHistory([taskId, ...state.history.filter((entry) => entry !== tempId)]);
-          state.currentRunId = taskId;
+        run.taskId = taskId || null;
+        run.status = String(data.status || run.status || 'running');
+        if (runId !== tempId) {
+          run.id = runId;
+          state.history = dedupeHistory([runId, ...state.history.filter((entry) => entry !== tempId)]);
+          state.currentRunId = runId;
         }
 
-        pushLumen(run, { color: 'gray', icon: '✓', text: `Task accepted (${taskId})` });
+        pushLumen(run, { color: 'gray', icon: '✓', text: `Task accepted (${taskId || runId})` });
 
         if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-          try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
+          try { state.socket.send(JSON.stringify({ type: 'subscribe', runId })); } catch {}
         }
       } catch (err) {
         console.error('submit error', err);
@@ -1791,11 +1881,12 @@
       state.loqui.lastIntent = label;
 
       if (route === 'build' || route === 'resume') {
-        const taskId = data.task_id || data.taskId;
-        if (!taskId) {
+        const taskId = data.task_id || data.taskId || '';
+        const runId = data.run_id || data.runId || taskId;
+        if (!runId) {
           state.loqui.messages.push({
             role: 'assistant',
-            text: `Loqui tried to ${route} but no task_id came back.`,
+            text: `Loqui tried to ${route} but no run_id came back.`,
             label: 'Error',
             at: new Date().toISOString(),
             error: true,
@@ -1808,10 +1899,11 @@
         // worker grid / lumen / history panels show something
         // immediately, then subscribes to WS updates for live state.
         const run = createEmptyRun();
-        run.id = taskId;
+        run.id = runId;
+        run.taskId = taskId || null;
         run.prompt = data.prompt || originalText;
         run.repoPath = data.repo_path || repoPath;
-        run.status = 'queued';
+        run.status = String(data.status || 'running');
         run.startedAt = new Date().toISOString();
         pushLumen(run, {
           color: 'gray',
@@ -1819,22 +1911,22 @@
           text: `${route === 'resume' ? 'Resuming' : 'Submitting'} (loqui): ${truncate(run.prompt, 60)}`,
         });
         state.active = run;
-        state.currentRunId = taskId;
+        state.currentRunId = runId;
         state.runs.unshift(run);
-        state.history = dedupeHistory([taskId, ...state.history]);
+        state.history = dedupeHistory([runId, ...state.history]);
 
         if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-          try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
+          try { state.socket.send(JSON.stringify({ type: 'subscribe', runId })); } catch {}
         }
 
-        state.loqui.pendingBuilds.set(taskId, {
+        state.loqui.pendingBuilds.set(runId, {
           prompt: run.prompt,
           submittedAt: new Date().toISOString(),
         });
 
         state.loqui.messages.push({
           role: 'assistant',
-          text: `${route === 'resume' ? 'Resume queued' : 'Build queued'} — task ${taskId}. Watch the worker grid and Lumen log for progress.`,
+          text: `${route === 'resume' ? 'Resume queued' : 'Build queued'} — run ${runId}. Watch the worker grid and Lumen log for progress.`,
           label,
           at: new Date().toISOString(),
         });
@@ -2053,7 +2145,7 @@
     }
 
     function guessRunId(payload) {
-      return payload.taskId || payload.task_id || payload.runId || payload.run_id || payload.id || state.currentRunId || null;
+      return payload.runId || payload.run_id || payload.taskId || payload.task_id || payload.id || state.currentRunId || null;
     }
 
     // ─── Lumen translation ───────────────────────────────────────
@@ -2455,7 +2547,7 @@
       if (Array.isArray(payload.workers)) applyWorkers(run, payload.workers);
       if (payload.worker || payload.workerStatus || payload.worker_status) applyWorkers(run, [payload.worker || payload.workerStatus || payload.worker_status]);
 
-      if (type === 'receipt_generated' && payload.receipt) {
+      if (type === 'run_receipt' && payload.receipt) {
         const r = payload.receipt;
         const tc = r.totalCost || {};
         const summary = r.summary || {};
@@ -2489,9 +2581,6 @@
         run.totalCostUsd = cost;
         if (commitSha) run.commitSha = commitSha;
         if (r.verdict) run.verdict = String(r.verdict);
-      } else if (type.includes('receipt')) {
-        const receipt = normalizeReceipt(payload.receipt || payload);
-        appendReceipt(run, receipt);
       }
 
       if (type === 'worker_complete' && payload.payload && payload.payload.cost) {
@@ -2876,7 +2965,9 @@
       const receipts = state.active.receipts || [];
       const container = document.getElementById('receipt-list');
       if (!receipts.length) {
-        container.innerHTML = '<div class="empty">No receipts yet</div>';
+        container.innerHTML = state.active.loadError
+          ? `<div class="empty">${esc(state.active.loadError)}. No data due to error.</div>`
+          : '<div class="empty">No receipts yet</div>';
         return;
       }
       container.innerHTML = receipts.map((receipt) => {
@@ -2962,6 +3053,9 @@
       const verificationLabel = summary.verification || 'not-run';
       const blastLabel = (summary.blastRadius && summary.blastRadius.level) || (blast && blast.level) || 'unknown';
       const filesLabel = Number(summary.filesTouchedCount || 0);
+      const checksLabel = Array.isArray(summary.verificationChecks) && summary.verificationChecks.length
+        ? summary.verificationChecks.map((check) => `${check.kind}:${check.executed ? (check.passed ? 'pass' : 'fail') : 'missing'}`).join(' · ')
+        : 'no checks recorded';
       const changesPreview = (summary.whatChanged || []).slice(0, 5)
         .map((c) => `${esc(c.operation)}:${esc(c.path)}`)
         .join(' · ') || '(no file changes)';
@@ -3003,6 +3097,9 @@
         <div class="trust-summary-narrative" style="font-size:12px;color:var(--gray)">
           Changes: ${changesPreview}
         </div>
+        <div class="trust-summary-narrative" style="font-size:12px;color:var(--gray)">
+          Checks: ${esc(checksLabel)}
+        </div>
         ${failureBlock}
       `;
     }
@@ -3013,7 +3110,9 @@
 
       const lumen = state.active.lumen || [];
       if (lumen.length === 0) {
-        log.innerHTML = '<div class="lumen-empty">Waiting for runtime events…</div>';
+        log.innerHTML = state.active.loadError
+          ? `<div class="lumen-empty">${esc(state.active.loadError)}. No data due to error.</div>`
+          : '<div class="lumen-empty">Waiting for runtime events…</div>';
         return;
       }
 
@@ -3036,7 +3135,9 @@
     function renderHistory() {
       const list = document.getElementById('history-list');
       if (!state.runs.length) {
-        list.innerHTML = '<div class="empty">Runs show up here</div>';
+        list.innerHTML = state.historyError
+          ? `<div class="empty">${esc(state.historyError)}</div>`
+          : '<div class="empty">Runs show up here</div>';
         return;
       }
       list.innerHTML = state.runs.slice(0, 14).map((run) => {
@@ -3257,6 +3358,7 @@
       state.currentRunId = runId;
       state.active = run;
       render();
+      void loadRunDetail(runId);
     }
 
     function esc(value) {
@@ -3280,6 +3382,7 @@
     renderSettings();
     render();
     connect();
+    void loadPersistedRuns();
     loadModelConfig();
   </script>
 </body>

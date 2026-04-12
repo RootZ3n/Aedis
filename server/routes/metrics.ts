@@ -25,8 +25,52 @@ export const metricsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get(
     "/",
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const runs = getAllTrackedRuns() as unknown as readonly TrackedRunLike[];
-      const snapshot = computeMetrics(runs);
+      const tracked = getAllTrackedRuns() as unknown as readonly TrackedRunLike[];
+      const persistedIndex = await fastify.ctx.receiptStore.listRuns(1000);
+      const persistedRuns = await Promise.all(
+        persistedIndex.map(async (entry): Promise<TrackedRunLike | null> => {
+          const persisted = await fastify.ctx.receiptStore.getRun(entry.runId);
+          if (!persisted) return null;
+          const task = await fastify.ctx.receiptStore.getTaskByRunId(entry.runId);
+          return {
+            taskId: task?.taskId ?? persisted.runId,
+            runId: persisted.runId,
+            status:
+              persisted.status === "RUNNING"
+                ? "running"
+                : persisted.status === "COMPLETE"
+                  ? "complete"
+                  : persisted.status === "ABORTED" || persisted.status === "INTERRUPTED"
+                    ? "cancelled"
+                    : "failed",
+            prompt: task?.prompt ?? persisted.prompt,
+            submittedAt: task?.submittedAt ?? persisted.startedAt ?? persisted.createdAt,
+            completedAt: persisted.completedAt,
+            receipt: persisted.finalReceipt,
+            error: persisted.errors[0] ?? task?.error ?? null,
+            stateCategory:
+              persisted.status === "RUNNING"
+                ? "in-flight"
+                : persisted.status === "CRASHED"
+                  ? "crashed"
+                  : persisted.status === "COMPLETE"
+                    ? "completed"
+                    : "failed",
+          };
+        }),
+      );
+
+      const byRunId = new Map<string, TrackedRunLike>();
+      for (const run of persistedRuns) {
+        if (!run?.runId) continue;
+        byRunId.set(run.runId, run);
+      }
+      for (const run of tracked) {
+        if (!run.runId) continue;
+        byRunId.set(run.runId, run);
+      }
+
+      const snapshot = computeMetrics([...byRunId.values()]);
       reply.send(snapshot);
     }
   );

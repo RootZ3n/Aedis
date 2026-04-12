@@ -5,15 +5,14 @@
   "main": "dist/server/index.js",
   "type": "module",
   "bin": {
-    "aedis": "./cli/zendorium.ts",
-    "zendorium": "./cli/zendorium.ts"
+    "aedis": "./cli/aedis.ts"
   },
   "scripts": {
     "start": "npx tsx server/index.ts",
     "build": "tsc",
     "dev": "npx tsx watch server/index.ts",
-    "cli": "tsx cli/zendorium.ts",
-    "test": "tsx --test core/**/*.test.ts"
+    "cli": "tsx cli/aedis.ts",
+    "test": "tsx --test core/**/*.test.ts server/**/*.test.ts"
   },
   "keywords": [
     "ai",

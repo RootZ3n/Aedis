@@ -8,15 +8,11 @@ import { TerminalStream, streamSocket } from "./stream.js";
 // Override either via env to point at a remote Aedis (e.g. tailscale-served).
 // WS_URL defaults to API_BASE with the scheme swapped + /ws appended.
 //   AEDIS_API_BASE=https://mushin.tail8bb475.ts.net/aedis aedis health
-// ZENDORIUM_API_BASE / ZENDORIUM_WS_URL are still read as legacy fallbacks
-// so existing shell profiles keep working after the rename.
 const API_BASE =
   process.env["AEDIS_API_BASE"] ??
-  process.env["ZENDORIUM_API_BASE"] ??
   "http://localhost:18796";
 const WS_URL =
   process.env["AEDIS_WS_URL"] ??
-  process.env["ZENDORIUM_WS_URL"] ??
   API_BASE.replace(/^http(s?):/, "ws$1:") + "/ws";
 
 type Command = "run" | "status" | "runs" | "workers" | "health";

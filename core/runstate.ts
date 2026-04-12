@@ -115,9 +115,9 @@ export interface RunState {
 
 // ─── Factory ─────────────────────────────────────────────────────────
 
-export function createRunState(intentId: string): RunState {
+export function createRunState(intentId: string, runId?: string): RunState {
   return {
-    id: randomUUID(),
+    id: runId ?? randomUUID(),
     intentId,
     startedAt: new Date().toISOString(),
     phase: "charter",

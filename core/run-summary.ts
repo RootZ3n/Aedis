@@ -70,6 +70,13 @@ export interface RunSummary {
   readonly whatChanged: readonly FileChangeSummary[];
   readonly filesTouchedCount: number;
   readonly verification: "pass" | "fail" | "pass-with-warnings" | "not-run";
+  readonly verificationChecks: readonly {
+    kind: string;
+    name: string;
+    executed: boolean;
+    passed: boolean;
+    required: boolean;
+  }[];
   readonly blastRadius: BlastRadiusEstimate;
   readonly confidence: ConfidenceBreakdown;
   readonly cost: RunCostSummary;
@@ -148,6 +155,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     whatChanged,
     confidence,
     verification,
+    verificationChecks: receipt.verificationReceipt?.checks ?? [],
     blastRadius,
     cost,
     failureExplanation,
@@ -164,6 +172,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     whatChanged,
     filesTouchedCount: whatChanged.length,
     verification,
+    verificationChecks: receipt.verificationReceipt?.checks ?? [],
     blastRadius,
     confidence,
     cost,
@@ -202,6 +211,11 @@ function buildNarrative(input: {
   whatChanged: readonly FileChangeSummary[];
   confidence: ConfidenceBreakdown;
   verification: "pass" | "fail" | "pass-with-warnings" | "not-run";
+  verificationChecks: readonly {
+    kind: string;
+    executed: boolean;
+    passed: boolean;
+  }[];
   blastRadius: BlastRadiusEstimate;
   cost: RunCostSummary;
   failureExplanation: FailureExplanation | null;
@@ -212,6 +226,7 @@ function buildNarrative(input: {
     whatChanged,
     confidence,
     verification,
+    verificationChecks,
     blastRadius,
     cost,
     failureExplanation,
@@ -238,6 +253,9 @@ function buildNarrative(input: {
       } else if (verification === "pass-with-warnings") {
         lines.push("Verification passed with advisory warnings.");
       }
+      if (verificationChecks.length > 0) {
+        lines.push(`Checks run: ${verificationChecks.map((check) => `${check.kind}=${check.executed ? (check.passed ? "pass" : "fail") : "missing"}`).join(", ")}.`);
+      }
       lines.push(`Blast radius was ${blastRadius.level} (${blastRadius.rationale}).`);
       lines.push(`Cost: ${cost.displayUsd} across ${cost.inputTokens + cost.outputTokens} tokens.`);
       lines.push(`Confidence: ${percent}%.`);
@@ -251,6 +269,9 @@ function buildNarrative(input: {
         lines.push(`Most likely cause: ${failureExplanation.rootCause}`);
         lines.push(`Suggested next step: ${failureExplanation.suggestedFix}`);
       }
+      if (verificationChecks.length > 0) {
+        lines.push(`Checks run: ${verificationChecks.map((check) => `${check.kind}=${check.executed ? (check.passed ? "pass" : "fail") : "missing"}`).join(", ")}.`);
+      }
       lines.push(`Blast radius was ${blastRadius.level}. Cost: ${cost.displayUsd}. Confidence: ${percent}%.`);
       break;
     }
@@ -262,6 +283,9 @@ function buildNarrative(input: {
         lines.push(`Most likely cause: ${failureExplanation.rootCause}`);
         lines.push(`Suggested next step: ${failureExplanation.suggestedFix}`);
       }
+      if (verificationChecks.length > 0) {
+        lines.push(`Checks run: ${verificationChecks.map((check) => `${check.kind}=${check.executed ? (check.passed ? "pass" : "fail") : "missing"}`).join(", ")}.`);
+      }
       lines.push(`Blast radius was projected as ${blastRadius.level}. Cost: ${cost.displayUsd}. Confidence: ${percent}%.`);
       break;
     }
@@ -271,6 +295,9 @@ function buildNarrative(input: {
       if (failureExplanation) {
         lines.push(`Root cause (${failureExplanation.stage} stage): ${failureExplanation.rootCause}`);
         lines.push(`Suggested next step: ${failureExplanation.suggestedFix}`);
+      }
+      if (verificationChecks.length > 0) {
+        lines.push(`Checks run: ${verificationChecks.map((check) => `${check.kind}=${check.executed ? (check.passed ? "pass" : "fail") : "missing"}`).join(", ")}.`);
       }
       lines.push(`Projected blast radius was ${blastRadius.level}. Cost: ${cost.displayUsd}. Confidence: ${percent}%.`);
       break;

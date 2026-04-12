@@ -1,0 +1,63 @@
+{
+  "id": "aedis-outcome:run-smoke-2",
+  "space": "aedis/success",
+  "kind": "aedis-success",
+  "title": "Successful run for in core/coordinator.ts, scoped dispatch fix",
+  "summary": "Successful approach stayed inside the requested scope. Related cluster files: core/context-gate.ts.",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [],\n    \"critical\": [],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"apply\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "module:core",
+    "success-pattern",
+    "verification:pass"
+  ],
+  "createdAt": "2026-04-12T00:50:20.503Z",
+  "updatedAt": "2026-04-12T00:50:20.504Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-smoke-repo",
+  "filePaths": [
+    "core/coordinator.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "run-smoke-2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "intent-smoke-2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "abc123",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "v-2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:run-smoke-2",
+    "aedis-task:run-smoke-2"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:run-smoke-2"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:run-smoke-2"
+    }
+  ],
+  "confidence": 0.85,
+  "metadata": {
+    "verdict": "success",
+    "verificationVerdict": "pass",
+    "primaryBlockReason": ""
+  }
+}

@@ -54,7 +54,7 @@ interface LoquiUnifiedBody {
 
 interface TrackedRun {
   taskId: string;
-  runId: string | null;
+  runId: string;
   status: "queued" | "running" | "complete" | "failed" | "cancelled";
   prompt: string;
   submittedAt: string;
@@ -92,36 +92,47 @@ export type { TrackedRun };
  * Coordinator and registers the tracked run state. Used by both the
  * legacy POST /tasks handler and the new unified POST /tasks/loqui
  * path so we get exactly one code path for "start a build." The
- * response shape (task_id + prompt + repo_path) is the same for
+ * response shape (task_id + run_id + prompt + repo_path) is the same for
  * both, which keeps the UI's optimistic-run bookkeeping identical
  * whether the request came from the hero form or Loqui.
  */
-function submitBuildTask(
+async function submitBuildTask(
   ctx: ServerContext,
   prompt: string,
   repoPath: string | undefined,
   exclusions: string[] | undefined,
-): { taskId: string; prompt: string; repoPath: string | null } {
+): Promise<{ taskId: string; runId: string; prompt: string; repoPath: string | null }> {
   const taskId = `task_${randomUUID().slice(0, 8)}`;
+  const runId = randomUUID();
+  const submittedAt = new Date().toISOString();
   const tracked: TrackedRun = {
     taskId,
-    runId: null,
+    runId,
     status: "queued",
     prompt,
-    submittedAt: new Date().toISOString(),
+    submittedAt,
     completedAt: null,
     receipt: null,
     error: null,
   };
   trackedRuns.set(taskId, tracked);
+  await ctx.receiptStore.registerTask({
+    taskId,
+    runId,
+    prompt: tracked.prompt,
+    submittedAt,
+  });
+  tracked.status = "running";
+  void ctx.receiptStore.updateTask(taskId, { status: "running" });
 
   ctx.eventBus.emit({
     type: "run_started",
-    payload: { taskId, prompt: tracked.prompt, status: "queued", repoPath: repoPath ?? null },
+    payload: { taskId, runId, prompt: tracked.prompt, status: "running", repoPath: repoPath ?? null },
   });
 
   console.log(`[tasks] calling coordinator.submit for taskId=${taskId} (projectRoot=${repoPath ?? "(default)"})...`);
   ctx.coordinator.submit({
+    runId,
     input: tracked.prompt,
     exclusions,
     ...(repoPath ? { projectRoot: repoPath } : {}),
@@ -131,6 +142,12 @@ function submitBuildTask(
     tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
     tracked.completedAt = new Date().toISOString();
     tracked.receipt = receipt;
+    void ctx.receiptStore.updateTask(taskId, {
+      runId: receipt.runId,
+      status: tracked.status,
+      completedAt: tracked.completedAt,
+      error: null,
+    });
 
     ctx.eventBus.emit({
       type: "run_complete",
@@ -146,7 +163,7 @@ function submitBuildTask(
     });
 
     ctx.eventBus.emit({
-      type: "receipt_generated",
+      type: "run_receipt",
       payload: { taskId, runId: receipt.runId, receiptId: receipt.id, receipt },
     });
   }).catch((err) => {
@@ -161,11 +178,17 @@ function submitBuildTask(
     tracked.status = "failed";
     tracked.completedAt = new Date().toISOString();
     tracked.error = err instanceof Error ? err.message : String(err);
+    void ctx.receiptStore.updateTask(taskId, {
+      status: "failed",
+      completedAt: tracked.completedAt,
+      error: tracked.error,
+    });
 
     ctx.eventBus.emit({
       type: "run_complete",
       payload: {
         taskId,
+        runId,
         verdict: "failed",
         error: tracked.error,
         executionVerified: false,
@@ -173,7 +196,7 @@ function submitBuildTask(
     });
   });
 
-  return { taskId, prompt, repoPath: repoPath ?? null };
+  return { taskId, runId, prompt, repoPath: repoPath ?? null };
 }
 
 /**
@@ -197,10 +220,102 @@ function findLatestTrackedRun(): TrackedRun | null {
   return latest;
 }
 
+async function findLatestKnownRun(ctx: ServerContext): Promise<{
+  taskId: string | null;
+  runId: string;
+  prompt: string;
+  status: string;
+} | null> {
+  const tracked = findLatestTrackedRun();
+  if (tracked) {
+    return {
+      taskId: tracked.taskId,
+      runId: tracked.runId,
+      prompt: tracked.prompt,
+      status: tracked.status,
+    };
+  }
+
+  const recent = await ctx.receiptStore.listRuns(10);
+  for (const entry of recent) {
+    const receipt = await ctx.receiptStore.getRun(entry.runId);
+    if (!receipt) continue;
+    const task = await ctx.receiptStore.getTaskByRunId(entry.runId);
+    return {
+      taskId: task?.taskId ?? null,
+      runId: entry.runId,
+      prompt: task?.prompt ?? receipt.prompt,
+      status: receipt.status,
+    };
+  }
+
+  return null;
+}
+
+async function findKnownRunById(
+  ctx: ServerContext,
+  id: string | null | undefined,
+): Promise<{
+  taskId: string | null;
+  runId: string;
+  prompt: string;
+  status: string;
+} | null> {
+  if (!id) return null;
+  const task = await ctx.receiptStore.getTask(id);
+  if (task) {
+    const receipt = await ctx.receiptStore.getRun(task.runId);
+    return {
+      taskId: task.taskId,
+      runId: task.runId,
+      prompt: task.prompt || receipt?.prompt || "",
+      status: receipt?.status ?? task.status,
+    };
+  }
+  const byRun = await ctx.receiptStore.getTaskByRunId(id);
+  if (byRun) {
+    const receipt = await ctx.receiptStore.getRun(byRun.runId);
+    return {
+      taskId: byRun.taskId,
+      runId: byRun.runId,
+      prompt: byRun.prompt || receipt?.prompt || "",
+      status: receipt?.status ?? byRun.status,
+    };
+  }
+  const receipt = await ctx.receiptStore.getRun(id);
+  if (receipt) {
+    return {
+      taskId: null,
+      runId: receipt.runId,
+      prompt: receipt.prompt,
+      status: receipt.status,
+    };
+  }
+  return null;
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────
 
 export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   const ctx = (): ServerContext => fastify.ctx;
+
+  function toTaskStatus(
+    status: "RUNNING" | "COMPLETE" | "FAILED" | "ABORTED" | "CRASHED" | "INTERRUPTED",
+  ): TrackedRun["status"] {
+    switch (status) {
+      case "RUNNING":
+        return "running";
+      case "COMPLETE":
+        return "complete";
+      case "ABORTED":
+      case "INTERRUPTED":
+        return "cancelled";
+      case "CRASHED":
+      case "FAILED":
+      default:
+        return "failed";
+    }
+  }
 
   fastify.post<{ Body: LoquiBody }>(
     "/loqui",
@@ -245,7 +360,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
    *     route: "build" | "answer" | "clarify",
    *     intent, label, reason, confidence, signals,
    *     ...plus a route-specific payload:
-   *       build   → { task_id, prompt, repo_path }
+   *       build   → { task_id, run_id, prompt, repo_path }
    *       answer  → { answer }
    *       clarify → { clarification }
    *   }
@@ -312,13 +427,14 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
 
       switch (decision.action) {
         case "build": {
-          const result = submitBuildTask(ctx(), decision.effectivePrompt, repoPath, undefined);
+          const result = await submitBuildTask(ctx(), decision.effectivePrompt, repoPath, undefined);
           reply.code(202).send({
             ...envelope,
             task_id: result.taskId,
+            run_id: result.runId,
             prompt: result.prompt,
             repo_path: result.repoPath,
-            status: "queued",
+            status: "running",
             message: "Build task submitted. Watch the worker grid and Lumen log for progress.",
           });
           return;
@@ -332,21 +448,25 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           // fall back to treating the input as a bare build rather
           // than failing — the user's intent to "continue" is clear
           // even if we don't have the history to reference.
-          const prior = findLatestTrackedRun();
+          const requestedPriorId = routerContext.activeRunId ?? routerContext.lastRunId ?? null;
+          const prior =
+            await findKnownRunById(ctx(), requestedPriorId) ??
+            await findLatestKnownRun(ctx());
           const stitched = prior
-            ? `Continue the prior build (${prior.taskId}): "${prior.prompt}". Follow-up instruction: ${decision.originalInput}`
+            ? `Continue the prior build (${prior.runId}): "${prior.prompt}". Follow-up instruction: ${decision.originalInput}`
             : decision.originalInput;
-          const result = submitBuildTask(ctx(), stitched, repoPath, undefined);
+          const result = await submitBuildTask(ctx(), stitched, repoPath, undefined);
           reply.code(202).send({
             ...envelope,
             task_id: result.taskId,
+            run_id: result.runId,
             prompt: result.prompt,
             repo_path: result.repoPath,
-            resumed_from: prior?.taskId ?? null,
-            status: "queued",
+            resumed_from: prior?.runId ?? null,
+            status: "running",
             message: prior
-              ? `Resuming from ${prior.taskId}. New build task submitted.`
-              : "No prior run found in this session — submitted as a fresh build.",
+              ? `Resuming from ${prior.runId}. New build task submitted.`
+              : "No prior run found in persisted history — submitted as a fresh build.",
           });
           return;
         }
@@ -419,7 +539,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /tasks — Submit a new build task.
    *
    * Calls coordinator.submit() and tracks the run.
-   * Returns immediately with task_id. The run executes async.
+   * Returns immediately with task_id + run_id. The run executes async.
    * Client should subscribe on WebSocket with { type: "subscribe", runId }.
    *
    * The optional `repoPath` field in the body lets the caller target a
@@ -475,11 +595,12 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
-      const result = submitBuildTask(ctx(), prompt.trim(), repoPath, request.body.exclusions);
+      const result = await submitBuildTask(ctx(), prompt.trim(), repoPath, request.body.exclusions);
 
       reply.code(202).send({
         task_id: result.taskId,
-        status: "queued",
+        run_id: result.runId,
+        status: "running",
         prompt: result.prompt,
         repo_path: result.repoPath,
         message: "Task submitted. Connect to /ws and subscribe to receive live updates.",
@@ -497,8 +618,9 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       const tracked = trackedRuns.get(id);
 
       if (tracked) {
-        // Check if coordinator has an active run we can query
-        const activeRun = tracked.runId ? ctx().coordinator.getRunStatus(tracked.runId) : null;
+        const activeRun = ctx().coordinator.getRunStatus(tracked.runId);
+        const completedTasks = activeRun ? activeRun.run.tasks.filter((task) => task.status === "completed").length : 0;
+        const failedTasks = activeRun ? activeRun.run.tasks.filter((task) => task.status === "failed").length : 0;
 
         reply.send({
           task_id: tracked.taskId,
@@ -508,10 +630,45 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           submitted_at: tracked.submittedAt,
           completed_at: tracked.completedAt,
           error: tracked.error,
-          active_run: activeRun ? {
+          active_run: Boolean(activeRun),
+          progress: activeRun ? {
             phase: activeRun.run.phase,
-            task_count: activeRun.run.tasks.length,
+            completed_tasks: completedTasks,
+            failed_tasks: failedTasks,
+            total_tasks: activeRun.run.tasks.length,
             total_cost: activeRun.run.totalCost,
+          } : null,
+        });
+        return;
+      }
+
+      const persistedTask = await ctx().receiptStore.getTask(id) ?? await ctx().receiptStore.getTaskByRunId(id);
+      if (persistedTask) {
+        const persistedRun = await ctx().receiptStore.getRun(persistedTask.runId);
+        const activeRun = ctx().coordinator.getRunStatus(persistedTask.runId);
+        const completedTasks = activeRun ? activeRun.run.tasks.filter((task) => task.status === "completed").length : 0;
+        const failedTasks = activeRun ? activeRun.run.tasks.filter((task) => task.status === "failed").length : 0;
+        reply.send({
+          task_id: persistedTask.taskId,
+          run_id: persistedTask.runId,
+          status: persistedRun ? toTaskStatus(persistedRun.status) : persistedTask.status,
+          prompt: persistedTask.prompt,
+          submitted_at: persistedTask.submittedAt,
+          completed_at: persistedRun?.completedAt ?? persistedTask.completedAt,
+          error: persistedRun?.errors[0] ?? persistedTask.error,
+          active_run: Boolean(activeRun),
+          progress: activeRun ? {
+            phase: activeRun.run.phase,
+            completed_tasks: completedTasks,
+            failed_tasks: failedTasks,
+            total_tasks: activeRun.run.tasks.length,
+            total_cost: activeRun.run.totalCost,
+          } : persistedRun ? {
+            phase: persistedRun.phase,
+            completed_tasks: persistedRun.workerEvents.filter((event) => event.status === "completed").length,
+            failed_tasks: persistedRun.workerEvents.filter((event) => event.status === "failed").length,
+            total_tasks: persistedRun.workerEvents.length,
+            total_cost: persistedRun.totalCost,
           } : null,
         });
         return;
@@ -532,12 +689,16 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const lastEvent = taskEvents[taskEvents.length - 1];
-      const isComplete = lastEvent.type === "run_complete" || lastEvent.type === "receipt_generated";
+      const isComplete = lastEvent.type === "run_complete" || lastEvent.type === "run_receipt";
+      const runId = (lastEvent.payload as any).runId ?? id;
 
       reply.send({
         task_id: id,
+        run_id: runId,
         status: isComplete ? "complete" : "running",
         phase: lastEvent.type,
+        active_run: !isComplete,
+        progress: null,
         last_event: lastEvent,
         event_count: taskEvents.length,
         events: taskEvents,
@@ -556,7 +717,14 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       // Check tracked runs first
       const tracked = trackedRuns.get(id);
       if (tracked?.receipt) {
-        reply.send({ task_id: id, receipt: tracked.receipt });
+        reply.send({ task_id: id, run_id: tracked.runId, receipt: tracked.receipt });
+        return;
+      }
+
+      const task = await ctx().receiptStore.getTask(id) ?? await ctx().receiptStore.getTaskByRunId(id);
+      const persisted = await ctx().receiptStore.getRun(task?.runId ?? id);
+      if (persisted) {
+        reply.send({ task_id: task?.taskId ?? id, run_id: persisted.runId, receipt: persisted.finalReceipt ?? persisted });
         return;
       }
 
@@ -564,7 +732,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       const recentEvents = ctx().eventBus.recentEvents(200);
       const receiptEvent = recentEvents.find(
         (e) =>
-          e.type === "receipt_generated" &&
+          e.type === "run_receipt" &&
           ((e.payload as any).taskId === id || (e.payload as any).runId === id)
       );
 
@@ -597,7 +765,26 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         if (cancelled) {
           tracked.status = "cancelled";
           tracked.completedAt = new Date().toISOString();
+          void ctx().receiptStore.updateTask(id, {
+            status: "cancelled",
+            completedAt: tracked.completedAt,
+            error: "Cancelled by user",
+          });
           reply.send({ task_id: id, status: "cancelled", message: "Run cancellation requested" });
+          return;
+        }
+      }
+
+      const persistedTask = await ctx().receiptStore.getTask(id) ?? await ctx().receiptStore.getTaskByRunId(id);
+      if (persistedTask) {
+        const cancelled = ctx().coordinator.cancel(persistedTask.runId);
+        if (cancelled) {
+          void ctx().receiptStore.updateTask(id, {
+            status: "cancelled",
+            completedAt: new Date().toISOString(),
+            error: "Cancelled by user",
+          });
+          reply.send({ task_id: id, run_id: persistedTask.runId, status: "cancelled", message: "Run cancellation requested" });
           return;
         }
       }

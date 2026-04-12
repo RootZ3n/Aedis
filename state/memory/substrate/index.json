@@ -1,0 +1,953 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-12T03:02:50.481Z",
+  "ids": [
+    "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+    "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+    "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+    "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+    "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts",
+    "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136",
+    "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef",
+    "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8",
+    "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452",
+    "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650",
+    "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+    "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821",
+    "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4",
+    "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9",
+    "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80",
+    "aedis-outcome:run-smoke-2",
+    "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+    "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c",
+    "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+    "aedis-run:61a617cc-9127-46ab-ba0e-652412843265",
+    "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+    "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88",
+    "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e",
+    "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+    "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+    "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+    "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+    "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3",
+    "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6",
+    "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063",
+    "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd",
+    "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500",
+    "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994",
+    "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3",
+    "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a",
+    "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+    "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+    "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21",
+    "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671",
+    "aedis-task:run-smoke-1"
+  ],
+  "bySpace": {
+    "aedis/project/tmp-aedis-smoke-repo": [
+      "aedis-task:run-smoke-1"
+    ],
+    "aedis/success": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-rmuhxf": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-uysiuq": [
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994"
+    ],
+    "aedis/failures": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452",
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9",
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8",
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650",
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80",
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821",
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4",
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef",
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-55cfbf": [
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-yznr1h": [
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb"
+    ],
+    "aedis/runs": [
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265",
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-7ijhcv": [
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21"
+    ],
+    "aedis/files": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-czmpps": [
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-yay8py": [
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-3hzjfu": [
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-tcbjez": [
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-2fypaa": [
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-aj7hkk": [
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "aedis/project/tmp-aedis-capreg-int-yhof2z": [
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ]
+  },
+  "byKind": {
+    "aedis-task": [
+      "aedis-task:run-smoke-1",
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994",
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a",
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671",
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3",
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "aedis-success": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "aedis-suggestions": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3",
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd",
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6",
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "aedis-failure": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452",
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9",
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8",
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650",
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80",
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821",
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4",
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef",
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "aedis-run": [
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265",
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c"
+    ],
+    "aedis-file-touch": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ]
+  },
+  "byRepo": {
+    "/tmp/aedis-smoke-repo": [
+      "aedis-task:run-smoke-1",
+      "aedis-outcome:run-smoke-2"
+    ],
+    "/tmp/aedis-capreg-int-RmUhxF": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3"
+    ],
+    "/tmp/aedis-capreg-int-uySIuq": [
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994"
+    ],
+    "/tmp/aedis-capreg-int-ZHNYPr": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452"
+    ],
+    "/tmp/aedis-capreg-int-YZ57dk": [
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9"
+    ],
+    "/tmp/aedis-capreg-int-55CfBF": [
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a"
+    ],
+    "/tmp/aedis-capreg-int-EpR7e9": [
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8"
+    ],
+    "/tmp/aedis-capreg-int-Kstj1L": [
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650"
+    ],
+    "/tmp/aedis-capreg-int-YznR1H": [
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb"
+    ],
+    "/tmp/aedis-capreg-int-OpwULY": [
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80"
+    ],
+    "/tmp/aedis-capreg-int-Q8Tr3s": [
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a"
+    ],
+    "/tmp/aedis-capreg-int-7iJhCv": [
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21"
+    ],
+    "/tmp/aedis-capreg-int-8FYfMg": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts"
+    ],
+    "/tmp/aedis-capreg-int-CzmPPS": [
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd"
+    ],
+    "/tmp/aedis-capreg-int-yxhqgp": [
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602"
+    ],
+    "/tmp/aedis-capreg-int-cO4vFW": [
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821"
+    ],
+    "/tmp/aedis-capreg-int-XR9o6V": [
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f"
+    ],
+    "/tmp/aedis-capreg-int-yAY8PY": [
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6"
+    ],
+    "/tmp/aedis-capreg-int-RA2FDR": [
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62"
+    ],
+    "/tmp/aedis-capreg-int-fHdhet": [
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4"
+    ],
+    "/tmp/aedis-capreg-int-yjtxoz": [
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57"
+    ],
+    "/tmp/aedis-capreg-int-IvBIht": [
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265"
+    ],
+    "/tmp/aedis-capreg-int-3HzJfu": [
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281"
+    ],
+    "/tmp/aedis-capreg-int-tCBJEZ": [
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671"
+    ],
+    "/tmp/aedis-capreg-int-dYN3b0": [
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts"
+    ],
+    "/tmp/aedis-capreg-int-ZBJ5bj": [
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88"
+    ],
+    "/tmp/aedis-capreg-int-AakmQQ": [
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee"
+    ],
+    "/tmp/aedis-capreg-int-RBSSgo": [
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef"
+    ],
+    "/tmp/aedis-capreg-int-tadoYK": [
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts"
+    ],
+    "/tmp/aedis-capreg-int-jfH20p": [
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "/tmp/aedis-capreg-int-vdlumz": [
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts"
+    ],
+    "/tmp/aedis-capreg-int-2FyPAa": [
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3"
+    ],
+    "/tmp/aedis-capreg-int-y6ZgpQ": [
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819"
+    ],
+    "/tmp/aedis-capreg-int-Aj7hKk": [
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "/tmp/aedis-capreg-int-FFKBmT": [
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8"
+    ],
+    "/tmp/aedis-capreg-int-Ue2Ek4": [
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e"
+    ],
+    "/tmp/aedis-capreg-int-0Yt7no": [
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c"
+    ],
+    "/tmp/aedis-capreg-int-yhof2Z": [
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "/tmp/aedis-capreg-int-4eH1xT": [
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ]
+  },
+  "byTag": {
+    "aedis-task": [
+      "aedis-task:run-smoke-1",
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994",
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a",
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671",
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3",
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "change:modify": [
+      "aedis-task:run-smoke-1",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281"
+    ],
+    "ext:ts": [
+      "aedis-task:run-smoke-1",
+      "aedis-outcome:run-smoke-2",
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c",
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ],
+    "module:core": [
+      "aedis-task:run-smoke-1",
+      "aedis-outcome:run-smoke-2",
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c",
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ],
+    "scope:multi-file": [
+      "aedis-task:run-smoke-1",
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a",
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671",
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c",
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "verdict:failed": [
+      "aedis-task:run-smoke-1",
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3",
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994",
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a",
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21",
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671",
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c",
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500",
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ],
+    "success-pattern": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "verification:pass": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "suggestions": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3",
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd",
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6",
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "scope:single-file": [
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994"
+    ],
+    "failure-pattern": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452",
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9",
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8",
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650",
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80",
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821",
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4",
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef",
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "verification:not-run": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452",
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9",
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8",
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650",
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80",
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265",
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef",
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c"
+    ],
+    "aedis-run": [
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265",
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c"
+    ],
+    "file-touch": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ]
+  },
+  "byFile": {
+    "core/coordinator.ts": [
+      "aedis-task:run-smoke-1",
+      "aedis-outcome:run-smoke-2"
+    ],
+    "core/capability-registry.ts": [
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb",
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a",
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts",
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602",
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f",
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62",
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57",
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281",
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts",
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee",
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts",
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts",
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819",
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8",
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c",
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ]
+  },
+  "byEvidence": {
+    "run:run-smoke-1": [
+      "aedis-task:run-smoke-1"
+    ],
+    "intent:intent-smoke-1": [
+      "aedis-task:run-smoke-1"
+    ],
+    "verification:v-1": [
+      "aedis-task:run-smoke-1"
+    ],
+    "run:run-smoke-2": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "intent:intent-smoke-2": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "commit:abc123": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "verification:v-2": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "run:3ef009c1-cb55-47d1-862b-744891aa6cd3": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3"
+    ],
+    "intent:24f10279-d6e9-4bf7-b4bb-2349c2cd7a4f": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3"
+    ],
+    "run:123a8fda-0ce1-4e6c-9e62-7893a5c60994": [
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994"
+    ],
+    "intent:7827a1be-45ae-4c11-8405-ebd60ef98db5": [
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994"
+    ],
+    "run:60f88be9-fd6b-4868-a2b6-0485f7aca452": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452"
+    ],
+    "intent:7c56085a-78da-4023-9706-9c588df83c5e": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452"
+    ],
+    "run:ee1b2580-fcea-4344-a12c-2c6de703c9e9": [
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9"
+    ],
+    "intent:6cd90f78-8550-42c3-8c26-e024b3f8fa4f": [
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9"
+    ],
+    "run:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a": [
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a"
+    ],
+    "intent:4569a78a-eb5a-481c-a4cf-55a5a568fca6": [
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a"
+    ],
+    "run:5f33740b-a9e5-413f-9ee8-0030396295f8": [
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8"
+    ],
+    "intent:686e4b41-589f-4b8c-80e6-d6e7fb1c23d7": [
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8"
+    ],
+    "run:78265afa-a77d-4351-a427-aacac673b650": [
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650"
+    ],
+    "intent:bc7ffa49-2a82-4c01-8187-d14588235d84": [
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650"
+    ],
+    "run:687b87ab-1bdc-4d8f-b3e6-e91645c474bb": [
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb"
+    ],
+    "intent:fa1198ab-f1b3-4cf5-b5dd-0cd3c1dbabed": [
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb"
+    ],
+    "run:f0a927ce-a8e8-4884-afbf-d8cc104d6c80": [
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80"
+    ],
+    "intent:905f41b9-5166-4a7f-b02a-54822e027480": [
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80"
+    ],
+    "run:4543d2d7-d629-463d-9ff4-08ff224bab9a": [
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a"
+    ],
+    "intent:674a28e8-161e-494e-9ba7-ddb48db67773": [
+      "aedis-run:4543d2d7-d629-463d-9ff4-08ff224bab9a"
+    ],
+    "run:d7d176fa-9c0b-400d-9f1d-2e095a32fd21": [
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21"
+    ],
+    "intent:f4304b2d-355d-4805-89cc-588c4cfb0dc2": [
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21"
+    ],
+    "run:096e7d71-e628-4caa-8aa6-86299ea1399e": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts"
+    ],
+    "intent:469f12e9-c8a2-4b65-b02f-431475b823e4": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts"
+    ],
+    "run:f308f0de-9915-48ae-ba26-e2581e571cdd": [
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd"
+    ],
+    "intent:4abeb4b7-bed1-4609-b9f3-5aa85d87c606": [
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd"
+    ],
+    "run:97b1afdb-174b-4bfa-8b91-17f013178602": [
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602"
+    ],
+    "intent:a0dcbd7b-20b0-4b86-9d9f-c8040b5f5194": [
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602"
+    ],
+    "run:a9b9c17e-15f3-4e44-829f-541ae86b5821": [
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821"
+    ],
+    "intent:8d1dacdf-b89a-4605-b281-d2eae7ed085e": [
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821"
+    ],
+    "run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f": [
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f"
+    ],
+    "intent:356c7c10-8555-42da-a7e3-5a13a4b1be9f": [
+      "aedis-run:e6ab1df8-962c-4491-ba60-8ccfd5768a9f"
+    ],
+    "run:856db47c-ce1a-4dd2-b30f-96c4a37746b6": [
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6"
+    ],
+    "intent:d8a8d330-e82c-4aa4-a03c-069e8aba33e8": [
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6"
+    ],
+    "run:c6d54653-50fd-49a3-a8fa-f70f549d2e62": [
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62"
+    ],
+    "intent:632d1a94-dfb4-4275-98a8-70142ed7a1e3": [
+      "aedis-run:c6d54653-50fd-49a3-a8fa-f70f549d2e62"
+    ],
+    "run:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4": [
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4"
+    ],
+    "intent:f67a8409-634f-424c-b6bb-196c3432c8c8": [
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4"
+    ],
+    "run:23458548-d257-4354-bd10-b537c8e01d57": [
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57"
+    ],
+    "intent:98569f75-1269-44df-93c4-49629d85f97b": [
+      "aedis-run:23458548-d257-4354-bd10-b537c8e01d57"
+    ],
+    "run:61a617cc-9127-46ab-ba0e-652412843265": [
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265"
+    ],
+    "intent:03cdb693-b40f-4fa2-9f84-61cb3fa87288": [
+      "aedis-run:61a617cc-9127-46ab-ba0e-652412843265"
+    ],
+    "run:99f8bdcd-d420-4afe-8177-0eb5381eb281": [
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281"
+    ],
+    "intent:4aa952f5-4acc-4ba4-b423-e4a771b3db89": [
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281"
+    ],
+    "run:df40bcab-3598-43a2-ad80-c81004b1e671": [
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671"
+    ],
+    "intent:3c6cc7fb-12b4-4b1d-9a14-02e385169f9f": [
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671"
+    ],
+    "run:01cb7e2e-48a4-4b80-a757-57d5c797aa76": [
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts"
+    ],
+    "intent:8f38ee5f-5e74-4c36-82f8-aad4b0a251ce": [
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts"
+    ],
+    "run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88": [
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88"
+    ],
+    "intent:4626ca4c-59fe-4413-84e0-ca95890d1354": [
+      "aedis-run:6b8190be-9c10-4d4d-84b7-d9f0ddd46f88"
+    ],
+    "run:a1a6261d-6f93-4e21-86fa-ca7303787dee": [
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee"
+    ],
+    "intent:707df34a-95aa-4a87-9dcb-96dd2a500e6c": [
+      "aedis-run:a1a6261d-6f93-4e21-86fa-ca7303787dee"
+    ],
+    "run:4cfc2573-773c-482a-8444-d0bf0aa3cfef": [
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef"
+    ],
+    "intent:71d4d2f4-8829-42aa-ad4e-2d2afdfbe704": [
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef"
+    ],
+    "run:86d8c152-eb23-45c2-a8cc-c9e317ce3361": [
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts"
+    ],
+    "intent:4d9ee8a0-e1cc-4000-94bf-9c39a5f9f541": [
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts"
+    ],
+    "run:0dd7f54f-9c05-4243-8d75-50f6d3637136": [
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "intent:ae5da113-1a80-41b1-8715-a523ec124602": [
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "run:76b27983-6c59-438e-9186-f0c73ba8d153": [
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts"
+    ],
+    "intent:3fd32877-7e32-45a4-adc4-77e0dd187fca": [
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts"
+    ],
+    "run:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3": [
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3"
+    ],
+    "intent:920fa991-4aaa-4b1c-ab98-569ba50ba91b": [
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3"
+    ],
+    "run:b57a470c-76e0-4b83-b507-194cebfa4819": [
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819"
+    ],
+    "intent:16d7ef17-7f94-4cee-942b-15abf5da65c5": [
+      "aedis-run:b57a470c-76e0-4b83-b507-194cebfa4819"
+    ],
+    "run:cfc1ecee-d9ad-44f7-93e5-30bc155d7063": [
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "intent:a4241473-7dd4-4d3c-bb32-e53f98fc941b": [
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8": [
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8"
+    ],
+    "intent:7c3e2edc-ccd0-438a-a53c-22be5999adbb": [
+      "aedis-run:62afb3fd-61c3-4cf0-97e8-00ba6ee69cf8"
+    ],
+    "run:99a4d341-cd6e-4f5e-9233-b100900cc40e": [
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e"
+    ],
+    "intent:b526ecdc-f6b9-498b-80dc-3e80d0fc7e77": [
+      "aedis-run:99a4d341-cd6e-4f5e-9233-b100900cc40e"
+    ],
+    "run:435f2eaf-3145-494f-9b14-fefa10f61f4c": [
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c"
+    ],
+    "intent:fc732856-7adc-43e3-8fac-d39294c24ff8": [
+      "aedis-run:435f2eaf-3145-494f-9b14-fefa10f61f4c"
+    ],
+    "run:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500": [
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "intent:e6f406da-50ca-4cd0-9269-ecd97151a0d0": [
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "run:df9ffb0c-721f-4c7a-a13d-d45ada599fdd": [
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ],
+    "intent:f28dec83-1499-48e4-b92f-5f9f4d77b0da": [
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ]
+  },
+  "byRelation": {
+    "aedis-outcome:run-smoke-1": [
+      "aedis-task:run-smoke-1"
+    ],
+    "aedis-run:run-smoke-1": [
+      "aedis-task:run-smoke-1"
+    ],
+    "aedis-run:run-smoke-2": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "aedis-task:run-smoke-2": [
+      "aedis-outcome:run-smoke-2"
+    ],
+    "aedis-outcome:3ef009c1-cb55-47d1-862b-744891aa6cd3": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3"
+    ],
+    "aedis-run:3ef009c1-cb55-47d1-862b-744891aa6cd3": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3"
+    ],
+    "aedis-task:3ef009c1-cb55-47d1-862b-744891aa6cd3": [
+      "aedis-suggestions:3ef009c1-cb55-47d1-862b-744891aa6cd3"
+    ],
+    "aedis-outcome:123a8fda-0ce1-4e6c-9e62-7893a5c60994": [
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994"
+    ],
+    "aedis-run:123a8fda-0ce1-4e6c-9e62-7893a5c60994": [
+      "aedis-task:123a8fda-0ce1-4e6c-9e62-7893a5c60994"
+    ],
+    "aedis-run:60f88be9-fd6b-4868-a2b6-0485f7aca452": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452"
+    ],
+    "aedis-task:60f88be9-fd6b-4868-a2b6-0485f7aca452": [
+      "aedis-outcome:60f88be9-fd6b-4868-a2b6-0485f7aca452"
+    ],
+    "aedis-run:ee1b2580-fcea-4344-a12c-2c6de703c9e9": [
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9"
+    ],
+    "aedis-task:ee1b2580-fcea-4344-a12c-2c6de703c9e9": [
+      "aedis-outcome:ee1b2580-fcea-4344-a12c-2c6de703c9e9"
+    ],
+    "aedis-outcome:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a": [
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a"
+    ],
+    "aedis-run:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a": [
+      "aedis-task:5fc438ce-aa03-4f67-a9c4-21d7fdbb4b1a"
+    ],
+    "aedis-run:5f33740b-a9e5-413f-9ee8-0030396295f8": [
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8"
+    ],
+    "aedis-task:5f33740b-a9e5-413f-9ee8-0030396295f8": [
+      "aedis-outcome:5f33740b-a9e5-413f-9ee8-0030396295f8"
+    ],
+    "aedis-run:78265afa-a77d-4351-a427-aacac673b650": [
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650"
+    ],
+    "aedis-task:78265afa-a77d-4351-a427-aacac673b650": [
+      "aedis-outcome:78265afa-a77d-4351-a427-aacac673b650"
+    ],
+    "aedis-outcome:687b87ab-1bdc-4d8f-b3e6-e91645c474bb": [
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb"
+    ],
+    "aedis-run:687b87ab-1bdc-4d8f-b3e6-e91645c474bb": [
+      "aedis-task:687b87ab-1bdc-4d8f-b3e6-e91645c474bb"
+    ],
+    "aedis-run:f0a927ce-a8e8-4884-afbf-d8cc104d6c80": [
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80"
+    ],
+    "aedis-task:f0a927ce-a8e8-4884-afbf-d8cc104d6c80": [
+      "aedis-outcome:f0a927ce-a8e8-4884-afbf-d8cc104d6c80"
+    ],
+    "aedis-outcome:d7d176fa-9c0b-400d-9f1d-2e095a32fd21": [
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21"
+    ],
+    "aedis-run:d7d176fa-9c0b-400d-9f1d-2e095a32fd21": [
+      "aedis-task:d7d176fa-9c0b-400d-9f1d-2e095a32fd21"
+    ],
+    "aedis-outcome:096e7d71-e628-4caa-8aa6-86299ea1399e": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts"
+    ],
+    "aedis-run:096e7d71-e628-4caa-8aa6-86299ea1399e": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts"
+    ],
+    "aedis-task:096e7d71-e628-4caa-8aa6-86299ea1399e": [
+      "aedis-file:096e7d71-e628-4caa-8aa6-86299ea1399e:core-capability-registry.ts"
+    ],
+    "aedis-outcome:f308f0de-9915-48ae-ba26-e2581e571cdd": [
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd"
+    ],
+    "aedis-run:f308f0de-9915-48ae-ba26-e2581e571cdd": [
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd"
+    ],
+    "aedis-task:f308f0de-9915-48ae-ba26-e2581e571cdd": [
+      "aedis-suggestions:f308f0de-9915-48ae-ba26-e2581e571cdd"
+    ],
+    "aedis-run:97b1afdb-174b-4bfa-8b91-17f013178602": [
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602"
+    ],
+    "aedis-task:97b1afdb-174b-4bfa-8b91-17f013178602": [
+      "aedis-outcome:97b1afdb-174b-4bfa-8b91-17f013178602"
+    ],
+    "aedis-run:a9b9c17e-15f3-4e44-829f-541ae86b5821": [
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821"
+    ],
+    "aedis-task:a9b9c17e-15f3-4e44-829f-541ae86b5821": [
+      "aedis-outcome:a9b9c17e-15f3-4e44-829f-541ae86b5821"
+    ],
+    "aedis-outcome:856db47c-ce1a-4dd2-b30f-96c4a37746b6": [
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6"
+    ],
+    "aedis-run:856db47c-ce1a-4dd2-b30f-96c4a37746b6": [
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6"
+    ],
+    "aedis-task:856db47c-ce1a-4dd2-b30f-96c4a37746b6": [
+      "aedis-suggestions:856db47c-ce1a-4dd2-b30f-96c4a37746b6"
+    ],
+    "aedis-run:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4": [
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4"
+    ],
+    "aedis-task:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4": [
+      "aedis-outcome:c675b1d7-33be-49d0-a2e7-c22c71c4b5e4"
+    ],
+    "aedis-outcome:99f8bdcd-d420-4afe-8177-0eb5381eb281": [
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281"
+    ],
+    "aedis-run:99f8bdcd-d420-4afe-8177-0eb5381eb281": [
+      "aedis-task:99f8bdcd-d420-4afe-8177-0eb5381eb281"
+    ],
+    "aedis-outcome:df40bcab-3598-43a2-ad80-c81004b1e671": [
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671"
+    ],
+    "aedis-run:df40bcab-3598-43a2-ad80-c81004b1e671": [
+      "aedis-task:df40bcab-3598-43a2-ad80-c81004b1e671"
+    ],
+    "aedis-outcome:01cb7e2e-48a4-4b80-a757-57d5c797aa76": [
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts"
+    ],
+    "aedis-run:01cb7e2e-48a4-4b80-a757-57d5c797aa76": [
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts"
+    ],
+    "aedis-task:01cb7e2e-48a4-4b80-a757-57d5c797aa76": [
+      "aedis-file:01cb7e2e-48a4-4b80-a757-57d5c797aa76:core-capability-registry.ts"
+    ],
+    "aedis-run:4cfc2573-773c-482a-8444-d0bf0aa3cfef": [
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef"
+    ],
+    "aedis-task:4cfc2573-773c-482a-8444-d0bf0aa3cfef": [
+      "aedis-outcome:4cfc2573-773c-482a-8444-d0bf0aa3cfef"
+    ],
+    "aedis-outcome:86d8c152-eb23-45c2-a8cc-c9e317ce3361": [
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts"
+    ],
+    "aedis-run:86d8c152-eb23-45c2-a8cc-c9e317ce3361": [
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts"
+    ],
+    "aedis-task:86d8c152-eb23-45c2-a8cc-c9e317ce3361": [
+      "aedis-file:86d8c152-eb23-45c2-a8cc-c9e317ce3361:core-capability-registry.ts"
+    ],
+    "aedis-run:0dd7f54f-9c05-4243-8d75-50f6d3637136": [
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "aedis-task:0dd7f54f-9c05-4243-8d75-50f6d3637136": [
+      "aedis-outcome:0dd7f54f-9c05-4243-8d75-50f6d3637136"
+    ],
+    "aedis-outcome:76b27983-6c59-438e-9186-f0c73ba8d153": [
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts"
+    ],
+    "aedis-run:76b27983-6c59-438e-9186-f0c73ba8d153": [
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts"
+    ],
+    "aedis-task:76b27983-6c59-438e-9186-f0c73ba8d153": [
+      "aedis-file:76b27983-6c59-438e-9186-f0c73ba8d153:core-capability-registry.ts"
+    ],
+    "aedis-outcome:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3": [
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3"
+    ],
+    "aedis-run:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3": [
+      "aedis-task:432269ba-a5d3-41e9-aaa2-9f26c0ecf2d3"
+    ],
+    "aedis-outcome:cfc1ecee-d9ad-44f7-93e5-30bc155d7063": [
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "aedis-run:cfc1ecee-d9ad-44f7-93e5-30bc155d7063": [
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "aedis-task:cfc1ecee-d9ad-44f7-93e5-30bc155d7063": [
+      "aedis-suggestions:cfc1ecee-d9ad-44f7-93e5-30bc155d7063"
+    ],
+    "aedis-outcome:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500": [
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "aedis-run:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500": [
+      "aedis-task:0fd74dcb-78fa-4b5f-ab16-b13fd0ecf500"
+    ],
+    "aedis-outcome:df9ffb0c-721f-4c7a-a13d-d45ada599fdd": [
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ],
+    "aedis-run:df9ffb0c-721f-4c7a-a13d-d45ada599fdd": [
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ],
+    "aedis-task:df9ffb0c-721f-4c7a-a13d-d45ada599fdd": [
+      "aedis-file:df9ffb0c-721f-4c7a-a13d-d45ada599fdd:core-capability-registry.ts"
+    ]
+  }
+}

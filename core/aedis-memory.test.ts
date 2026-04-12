@@ -336,6 +336,8 @@ function sampleVerification(verdict: VerificationReceipt["verdict"]): Verificati
     judgmentReport: null,
     allIssues: [],
     blockers: [],
+    requiredChecks: ["lint", "typecheck", "tests"],
+    checks: [],
     summary: `verification ${verdict}`,
     totalDurationMs: 100,
   };

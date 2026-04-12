@@ -1,0 +1,66 @@
+{
+  "id": "aedis-task:run-smoke-2",
+  "space": "aedis/project/tmp-aedis-smoke-repo",
+  "kind": "aedis-task",
+  "title": "in core/coordinator.ts, scoped dispatch fix",
+  "summary": "single-file · success run · single-file scope · 1 file(s) touched · verification pass",
+  "raw": "{\n  \"rawInput\": \"fix coordinator dispatch\",\n  \"normalizedPrompt\": \"in core/coordinator.ts, scoped dispatch fix\",\n  \"workerResults\": []\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:core",
+    "scope:single-file",
+    "verdict:success"
+  ],
+  "createdAt": "2026-04-12T00:50:20.503Z",
+  "updatedAt": "2026-04-12T00:50:20.504Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-smoke-repo",
+  "filePaths": [
+    "core/coordinator.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "run-smoke-2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "intent-smoke-2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "abc123",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "v-2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:run-smoke-2",
+    "aedis-run:run-smoke-2"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:run-smoke-2"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:run-smoke-2"
+    }
+  ],
+  "confidence": 0.85,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "pass",
+    "filesTouched": 1
+  }
+}

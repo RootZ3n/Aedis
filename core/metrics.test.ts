@@ -97,6 +97,24 @@ test("computeMetrics: no-op and partial are NOT counted as successful", () => {
   assert.equal(m.successRate, 0);
 });
 
+test("computeMetrics: crashed persisted runs are not counted as in-flight", () => {
+  const runs: TrackedRunLike[] = [
+    trackedRun({
+      taskId: "task_crash",
+      prompt: "crash mid-run",
+      status: "failed",
+      receipt: null,
+      error: "server restarted",
+      stateCategory: "crashed",
+    }),
+  ];
+  const m = computeMetrics(runs);
+  assert.equal(m.totalRuns, 1);
+  assert.equal(m.crashedRuns, 1);
+  assert.equal(m.inFlightRuns, 0);
+  assert.equal(m.failedRuns, 0);
+});
+
 test("computeMetrics: lastRunSummary reflects the newest run", () => {
   const runs: TrackedRunLike[] = [
     trackedRun({
@@ -217,6 +235,7 @@ function trackedRun(opts: {
   runId?: string | null;
   receipt: RunReceipt | null;
   error?: string | null;
+  stateCategory?: TrackedRunLike["stateCategory"];
 }): TrackedRunLike {
   return {
     taskId: opts.taskId,
@@ -227,6 +246,7 @@ function trackedRun(opts: {
     completedAt: opts.completedAt ?? (opts.receipt ? "2026-04-11T17:10:00.000Z" : null),
     receipt: opts.receipt,
     error: opts.error ?? null,
+    stateCategory: opts.stateCategory,
   };
 }
 
@@ -329,6 +349,8 @@ function baseReceipt(opts: BaseReceiptOpts): RunReceipt {
         judgmentReport: null,
         allIssues: [],
         blockers: [],
+        requiredChecks: ["lint", "typecheck", "tests"],
+        checks: [],
         summary: `verification ${opts.verification.verdict}`,
         totalDurationMs: 10,
       }

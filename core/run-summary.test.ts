@@ -423,6 +423,8 @@ function receipt(o: ReceiptOverrides): RunReceipt {
         judgmentReport: null,
         allIssues: [],
         blockers: [],
+        requiredChecks: ["lint", "typecheck", "tests"],
+        checks: [],
         summary: `verification ${o.verification.verdict}`,
         totalDurationMs: 10,
       }
