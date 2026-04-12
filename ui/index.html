@@ -692,6 +692,122 @@
       letter-spacing: 0.06em;
     }
 
+    /* ─── Trust Summary panel ───────────────────────────────────── */
+    /* Human-Readable Execution + Trust Layer v1. Rendered from the
+       run_summary event. Stays hidden until the coordinator emits
+       a summary so the layout doesn't shift on idle. */
+    .trust-summary-panel {
+      display: grid;
+      gap: 10px;
+    }
+
+    .trust-summary-body {
+      display: grid;
+      gap: 10px;
+      font-family: var(--font-lumen);
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--ink);
+    }
+
+    .trust-summary-narrative {
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(8, 12, 24, 0.72);
+    }
+
+    .trust-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+    }
+
+    .trust-summary-metric {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(12, 18, 32, 0.72);
+    }
+
+    .trust-summary-metric .label {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+    }
+
+    .trust-summary-metric .value {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      margin-top: 4px;
+    }
+
+    .trust-summary-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .trust-summary-chip.verified_success {
+      color: var(--teal);
+      border-color: rgba(77, 245, 200, 0.38);
+      background: rgba(77, 245, 200, 0.08);
+    }
+
+    .trust-summary-chip.partial_success {
+      color: #fbbf24;
+      border-color: rgba(251, 191, 36, 0.38);
+      background: rgba(251, 191, 36, 0.08);
+    }
+
+    .trust-summary-chip.no_op {
+      color: #a78bfa;
+      border-color: rgba(167, 139, 250, 0.38);
+      background: rgba(167, 139, 250, 0.08);
+    }
+
+    .trust-summary-chip.failed {
+      color: #f87171;
+      border-color: rgba(248, 113, 113, 0.38);
+      background: rgba(248, 113, 113, 0.08);
+    }
+
+    .trust-summary-meter {
+      display: block;
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .trust-summary-meter > div {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, #4df5c8, #60a5fa);
+      transition: width 250ms ease;
+    }
+
+    .trust-summary-failure {
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px dashed rgba(248, 113, 113, 0.38);
+      background: rgba(248, 113, 113, 0.05);
+      color: #fca5a5;
+      font-size: 13px;
+    }
+
+    .trust-summary-failure strong {
+      color: #f87171;
+    }
+
     /* ─── Lumen live log ────────────────────────────────────────── */
     .lumen-panel {
       display: grid;
@@ -1167,6 +1283,18 @@
         </section>
       </div>
 
+      <!-- 4b. Trust Summary (full width) — renders the human-
+           readable run summary from the run_summary event. Stays
+           hidden until the coordinator emits a summary so the hero
+           layout doesn't shift on idle. -->
+      <section class="panel trust-summary-panel" id="trust-summary-panel" style="display:none;">
+        <div class="loqui-row">
+          <div class="label">Trust Summary</div>
+          <span id="trust-summary-chip" class="tiny">—</span>
+        </div>
+        <div id="trust-summary-body" class="trust-summary-body"></div>
+      </section>
+
       <!-- 5. Run History (full width) -->
       <section class="panel history-panel">
         <div class="label">Run History</div>
@@ -1360,6 +1488,12 @@
         // yet, which the UI treats as "unknown" rather than success.
         executionVerified: null,
         executionReason: '',
+        // Human-Readable Execution + Trust Layer v1 — populated by
+        // blast_radius_estimated (before the run starts) and
+        // run_summary (at the end). Both are null until the
+        // coordinator emits them.
+        blastRadius: null,
+        runSummary: null,
       };
     }
 
@@ -2016,6 +2150,72 @@
           return;
         }
 
+        // Human-Readable Execution + Trust Layer v1 — fired right
+        // after scope classification, before any worker runs. Gives
+        // the UI a projected blast radius chip so the user sees the
+        // scale of the change before it ships.
+        case 'blast_radius_estimated': {
+          run.blastRadius = {
+            level: String(payload.level || 'low'),
+            scopeType: String(payload.scopeType || 'unknown'),
+            estimatedFiles: Number(payload.estimatedFiles || 0),
+            rawScore: Number(payload.rawScore || 0),
+            recommendDecompose: !!payload.recommendDecompose,
+            rationale: String(payload.rationale || ''),
+          };
+          pushLumen(run, {
+            color: run.blastRadius.level === 'high' ? 'red'
+                 : run.blastRadius.level === 'medium' ? 'orange'
+                 : 'teal',
+            icon: '⊙',
+            text: `Blast radius: ${run.blastRadius.level} — ${run.blastRadius.rationale}`,
+          });
+          return;
+        }
+
+        // Fired at the very end of the run with a composed,
+        // plain-English story of what happened. This is the event
+        // Lumen binds to for the "summary card" — classification
+        // chip, narrative paragraph, confidence meter, and (on
+        // failure) the root cause + suggested fix.
+        case 'run_summary': {
+          run.runSummary = {
+            classification: String(payload.classification || ''),
+            classificationReason: String(payload.classificationReason || ''),
+            headline: String(payload.headline || ''),
+            narrative: String(payload.narrative || ''),
+            whatWasAttempted: String(payload.whatWasAttempted || ''),
+            whatChanged: Array.isArray(payload.whatChanged) ? payload.whatChanged : [],
+            filesTouchedCount: Number(payload.filesTouchedCount || 0),
+            verification: String(payload.verification || 'not-run'),
+            confidence: payload.confidence || { overall: 0, planning: 0, execution: 0, verification: 0, basis: [] },
+            cost: payload.cost || { displayUsd: '$0.00', inputTokens: 0, outputTokens: 0 },
+            blastRadius: payload.blastRadius || run.blastRadius,
+            failureExplanation: payload.failureExplanation || null,
+            factors: Array.isArray(payload.factors) ? payload.factors : [],
+          };
+          // Push the narrative as a big Lumen entry so the live
+          // log reflects the same story the summary card shows.
+          const classChar =
+            run.runSummary.classification === 'VERIFIED_SUCCESS' ? 'complete'
+            : run.runSummary.classification === 'PARTIAL_SUCCESS' ? 'partial'
+            : run.runSummary.classification === 'NO_OP' ? 'failed'
+            : 'failed';
+          const classIcon =
+            run.runSummary.classification === 'VERIFIED_SUCCESS' ? '✓'
+            : run.runSummary.classification === 'PARTIAL_SUCCESS' ? '◐'
+            : run.runSummary.classification === 'NO_OP' ? '∅'
+            : '⛔';
+          pushLumen(run, {
+            color: '',
+            icon: classIcon,
+            text: run.runSummary.headline,
+            big: true,
+            verdictClass: classChar,
+          });
+          return;
+        }
+
         // Execution Truth Enforcement v1 — fired by the coordinator
         // execution gate. These events are the single source of
         // truth for whether a run actually produced real work. They
@@ -2501,6 +2701,7 @@
     function render() {
       renderHeader();
       renderWorkers();
+      renderTrustSummary();
       renderReceipts();
       renderLumen();
       renderHistory();
@@ -2628,6 +2829,102 @@
           </article>
         `;
       }).join('');
+    }
+
+    /**
+     * Render the Trust Summary panel. Hidden when there is no
+     * summary yet (pre-run, idle state). Grounded entirely in
+     * state.active.runSummary + state.active.blastRadius — every
+     * field comes from the coordinator's run_summary event.
+     */
+    function renderTrustSummary() {
+      const panel = document.getElementById('trust-summary-panel');
+      if (!panel) return;
+      const run = state.active;
+      const summary = run && run.runSummary;
+      const blast = (summary && summary.blastRadius) || (run && run.blastRadius) || null;
+
+      if (!summary && !blast) {
+        panel.style.display = 'none';
+        return;
+      }
+
+      panel.style.display = '';
+      const chipEl = document.getElementById('trust-summary-chip');
+      const body = document.getElementById('trust-summary-body');
+
+      // Pre-summary: we have a blast radius but no summary yet.
+      // Show the projected risk chip + rationale so the user sees
+      // the expected scale before execution finishes.
+      if (!summary && blast) {
+        if (chipEl) {
+          chipEl.textContent = `projected · ${blast.level}`;
+          chipEl.className = 'tiny';
+        }
+        body.innerHTML = `
+          <div class="trust-summary-narrative">
+            Projected blast radius: <strong>${esc(blast.level)}</strong>.
+            ${esc(blast.rationale || '')}
+          </div>
+        `;
+        return;
+      }
+
+      // Post-summary: full render.
+      const cls = String(summary.classification || 'unknown').toLowerCase();
+      if (chipEl) {
+        chipEl.textContent = summary.classification || '—';
+        chipEl.className = `trust-summary-chip ${esc(cls)}`;
+      }
+
+      const confidencePct = Math.round((summary.confidence?.overall || 0) * 100);
+      const costLabel = (summary.cost && summary.cost.displayUsd) || '$0.00';
+      const verificationLabel = summary.verification || 'not-run';
+      const blastLabel = (summary.blastRadius && summary.blastRadius.level) || (blast && blast.level) || 'unknown';
+      const filesLabel = Number(summary.filesTouchedCount || 0);
+      const changesPreview = (summary.whatChanged || []).slice(0, 5)
+        .map((c) => `${esc(c.operation)}:${esc(c.path)}`)
+        .join(' · ') || '(no file changes)';
+
+      const failureBlock = summary.failureExplanation
+        ? `
+          <div class="trust-summary-failure">
+            <div><strong>Root cause</strong> (${esc(summary.failureExplanation.stage)}): ${esc(summary.failureExplanation.rootCause)}</div>
+            <div style="margin-top:6px"><strong>Suggested fix:</strong> ${esc(summary.failureExplanation.suggestedFix)}</div>
+          </div>
+        `
+        : '';
+
+      body.innerHTML = `
+        <div class="trust-summary-narrative">${esc(summary.narrative || summary.headline || '')}</div>
+        <div class="trust-summary-grid">
+          <div class="trust-summary-metric">
+            <div class="label">Files touched</div>
+            <div class="value">${filesLabel}</div>
+          </div>
+          <div class="trust-summary-metric">
+            <div class="label">Verification</div>
+            <div class="value">${esc(verificationLabel)}</div>
+          </div>
+          <div class="trust-summary-metric">
+            <div class="label">Blast radius</div>
+            <div class="value">${esc(blastLabel)}</div>
+          </div>
+          <div class="trust-summary-metric">
+            <div class="label">Cost</div>
+            <div class="value">${esc(costLabel)}</div>
+          </div>
+          <div class="trust-summary-metric">
+            <div class="label">Confidence</div>
+            <div class="value">${confidencePct}%</div>
+            <span class="trust-summary-meter"><div style="width:${confidencePct}%"></div></span>
+          </div>
+        </div>
+        <div class="trust-summary-narrative" style="font-size:12px;color:var(--gray)">
+          Changes: ${changesPreview}
+        </div>
+        ${failureBlock}
+      `;
     }
 
     function renderLumen() {

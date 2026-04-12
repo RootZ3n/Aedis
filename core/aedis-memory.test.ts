@@ -319,6 +319,8 @@ function sampleReceipt(verdict: RunReceipt["verdict"]): RunReceipt {
     executionGateReason: verdict === "success" ? "test fixture: verified" : "test fixture: not verified",
     executionEvidence: [],
     executionReceipts: [],
+    humanSummary: null,
+    blastRadius: null,
   };
 }
 

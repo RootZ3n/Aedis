@@ -48,7 +48,9 @@ export type AedisEventType =
   | "run_complete"
   | "receipt_generated"
   | "execution_verified"
-  | "execution_failed";
+  | "execution_failed"
+  | "blast_radius_estimated"
+  | "run_summary";
 
 /**
  * @deprecated Use AedisEventType. Alias kept for downstream code that

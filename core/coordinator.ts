@@ -124,6 +124,8 @@ import {
   type ExecutionGateDecision,
   type ExecutionReceipt,
 } from "./execution-gate.js";
+import { generateRunSummary, type RunSummary } from "./run-summary.js";
+import { estimateBlastRadius, type BlastRadiusEstimate } from "./blast-radius.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
 import { createChangeSet, type ChangeSet } from "./change-set.js";
@@ -238,6 +240,28 @@ export interface RunReceipt {
   readonly executionGateReason: string;
   readonly executionEvidence: readonly ExecutionEvidence[];
   readonly executionReceipts: readonly ExecutionReceipt[];
+  /**
+   * Human-Readable Execution + Trust Layer v1. A structured,
+   * human-readable summary of the run, composed from the other
+   * receipt fields (classification, blast radius, confidence,
+   * failure explanation, cost). The UI renders this instead of
+   * asking the user to read logs. Always populated on the happy
+   * path; may be null on the legacy catch-path where buildReceipt
+   * is called before the summary wiring landed (defensive only —
+   * in practice the coordinator always provides the summary).
+   *
+   * Named `humanSummary` rather than `summary` because the
+   * RunReceipt already has a `summary` field (the structured
+   * task-count / phase snapshot from getRunSummary in runstate.ts).
+   */
+  readonly humanSummary: RunSummary | null;
+  /**
+   * Planning-time blast radius estimate. Computed after scope
+   * classification, before execution. Surfaced on the RunReceipt
+   * so the UI can show a "projected risk" chip before the run
+   * finishes and compare it to the post-run actuals.
+   */
+  readonly blastRadius: BlastRadiusEstimate | null;
 }
 
 // ─── Coordinator ─────────────────────────────────────────────────────
@@ -346,6 +370,35 @@ export class Coordinator {
       console.warn("[coordinator] WARN: large scope detected — consider decomposing this task.");
     }
 
+    // Human-Readable Execution + Trust Layer v1 — compute a user-
+    // facing blast radius estimate as soon as we have a scope
+    // classification. This is additive: the estimate is emitted as
+    // an event and also attached to the final RunReceipt so the UI
+    // can render a "projected risk" chip before execution and
+    // compare it to the post-run actuals.
+    const blastRadius = estimateBlastRadius({
+      scopeClassification,
+      charterFileCount: charterTargets.length,
+      prompt: normalizedInput,
+    });
+    console.log(
+      `[coordinator] blast radius: level=${blastRadius.level} scope=${blastRadius.scopeType} ` +
+      `estFiles=${blastRadius.estimatedFiles} raw=${blastRadius.rawScore} ` +
+      `(${blastRadius.rationale})`,
+    );
+    this.emit({
+      type: "blast_radius_estimated",
+      payload: {
+        level: blastRadius.level,
+        scopeType: blastRadius.scopeType,
+        estimatedFiles: blastRadius.estimatedFiles,
+        rawScore: blastRadius.rawScore,
+        recommendDecompose: blastRadius.recommendDecompose,
+        rationale: blastRadius.rationale,
+        signals: blastRadius.signals,
+      },
+    });
+
     // Phase 2: Intent
     console.log(`[coordinator] PHASE 2: Intent — creating and validating`);
     const intent = createIntent({
@@ -441,6 +494,8 @@ export class Coordinator {
       changeSet,
       plan,
       waveVerifications: [],
+      rawUserPrompt: input,
+      blastRadius,
     };
     this.activeRuns.set(run.id, active);
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
@@ -764,8 +819,13 @@ export class Coordinator {
       // so the UI can render real state before any "complete" flourish.
       this.emitExecutionEvent(run.id, executionDecision);
 
+      // Emit the human-readable run summary. Always fires, on
+      // every terminal path, so Lumen has a single event to bind
+      // to for "here is the plain-English story of this run."
+      this.emitRunSummary(run.id, finalReceipt);
+
       console.log(`[coordinator] ═══ submit() exit — verdict=${verdictAfterGate} duration=${Date.now() - startTime}ms`);
-      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason } });
+      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason, classification: finalReceipt.humanSummary?.classification ?? null } });
       this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id, receipt: finalReceipt } });
 
       return finalReceipt;
@@ -830,8 +890,9 @@ export class Coordinator {
         : receipt;
 
       this.emitExecutionEvent(run.id, executionDecision);
+      this.emitRunSummary(run.id, finalReceipt);
       console.log(`[coordinator] ═══ submit() exit (failed) — verdict=${receipt.verdict} duration=${Date.now() - startTime}ms`);
-      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: "failed", executionVerified: false, executionReason: executionDecision.reason, error: errMessage } });
+      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: "failed", executionVerified: false, executionReason: executionDecision.reason, error: errMessage, classification: finalReceipt.humanSummary?.classification ?? null } });
       this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id, receipt: finalReceipt } });
       return finalReceipt;
     } finally {
@@ -2050,7 +2111,11 @@ export class Coordinator {
         ? "failed"
         : rawVerdict);
 
-    return {
+    // Build the receipt without humanSummary first, then compose
+    // the summary from the receipt itself (the summary generator
+    // reads receipt fields like executionVerified, executionEvidence,
+    // graphSummary, etc. — keeping receipts the source of truth).
+    const baseReceipt: RunReceipt = {
       id: randomUUID(),
       runId: active.run.id,
       intentId: active.intent.id,
@@ -2071,7 +2136,51 @@ export class Coordinator {
         "Execution gate was not evaluated for this run",
       executionEvidence: executionDecision ? [...executionDecision.evidence] : [],
       executionReceipts: executionDecision ? [...executionDecision.workerReceipts] : [],
+      humanSummary: null,
+      blastRadius: active.blastRadius ?? null,
     };
+
+    // Compose the human-readable summary from the receipt we just
+    // built. Pure function — see core/run-summary.ts.
+    const averageWorkerConfidence = this.averageWorkerConfidence(active.workerResults);
+    const humanSummary = generateRunSummary({
+      receipt: baseReceipt,
+      userPrompt: active.rawUserPrompt || active.normalizedInput,
+      scopeClassification: active.scopeClassification ?? null,
+      changes: active.changes.map((c) => ({ path: c.path, operation: c.operation })),
+      averageWorkerConfidence,
+    });
+    console.log(
+      `[coordinator] run summary: classification=${humanSummary.classification} ` +
+      `confidence=${Math.round(humanSummary.confidence.overall * 100)}% ` +
+      `files=${humanSummary.filesTouchedCount} blast=${humanSummary.blastRadius.level}`,
+    );
+    console.log(`[coordinator] run summary headline: ${humanSummary.headline}`);
+
+    return {
+      ...baseReceipt,
+      humanSummary,
+    };
+  }
+
+  /**
+   * Average worker confidence across all worker results in the
+   * current run. Used as an optional boost/penalty signal in the
+   * confidence scoring breakdown. Returns 0 when there are no
+   * worker results yet (pre-build coherence failure path) so the
+   * scorer can fall back to its gate-only path.
+   */
+  private averageWorkerConfidence(results: readonly WorkerResult[]): number {
+    if (results.length === 0) return 0;
+    let total = 0;
+    let count = 0;
+    for (const r of results) {
+      if (typeof r.confidence === "number") {
+        total += r.confidence;
+        count += 1;
+      }
+    }
+    return count > 0 ? total / count : 0;
   }
 
   /**
@@ -2104,6 +2213,36 @@ export class Coordinator {
         counts: decision.counts,
         evidence: decision.evidence,
         receipts: decision.workerReceipts,
+      },
+    });
+  }
+
+  /**
+   * Emit the human-readable run summary as its own event so Lumen
+   * and other subscribers have a single hook for "here is the
+   * plain-English story of this run." Always fires alongside
+   * run_complete. Pure serialization — no computation done here.
+   */
+  private emitRunSummary(runId: string, receipt: RunReceipt): void {
+    const summary = receipt.humanSummary;
+    if (!summary) return;
+    this.emit({
+      type: "run_summary",
+      payload: {
+        runId,
+        classification: summary.classification,
+        classificationReason: summary.classificationReason,
+        headline: summary.headline,
+        narrative: summary.narrative,
+        whatWasAttempted: summary.whatWasAttempted,
+        whatChanged: summary.whatChanged,
+        filesTouchedCount: summary.filesTouchedCount,
+        verification: summary.verification,
+        blastRadius: summary.blastRadius,
+        confidence: summary.confidence,
+        cost: summary.cost,
+        failureExplanation: summary.failureExplanation,
+        factors: summary.factors,
       },
     });
   }
@@ -2282,6 +2421,18 @@ interface ActiveRun {
    * wave becomes a critical blocking finding attributed to that wave.
    */
   waveVerifications: VerificationReceipt[];
+  /**
+   * Raw user prompt captured at submit() time. The run summary uses
+   * this for the "what was attempted" field so the user sees their
+   * original request back, not the normalized one.
+   */
+  rawUserPrompt: string;
+  /**
+   * Planning-time blast radius estimate computed after scope
+   * classification. Attached to the RunReceipt and included in the
+   * run summary for after-run comparison.
+   */
+  blastRadius: BlastRadiusEstimate | null;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────
