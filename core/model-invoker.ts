@@ -52,6 +52,8 @@ export interface InvokeConfig {
   prompt: string;
   systemPrompt?: string;
   maxTokens?: number;
+  /** Run ID threaded through to the call log for scoped cost aggregation. */
+  runId?: string;
 }
 
 export interface InvokeResult {
@@ -141,6 +143,8 @@ export interface CallLogEntry {
   costUsd: number;
   durationMs: number;
   error?: string;
+  /** Run ID for scoped cost aggregation. */
+  runId?: string;
 }
 
 const callLog: CallLogEntry[] = [];
@@ -242,6 +246,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
       tokensOut: result.tokensOut,
       costUsd: result.costUsd,
       durationMs: Date.now() - startMs,
+      ...(config.runId ? { runId: config.runId } : {}),
     });
 
     return result;
@@ -253,6 +258,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
       tokensIn: 0, tokensOut: 0, costUsd: 0,
       durationMs: Date.now() - startMs,
       error: msg,
+      ...(config.runId ? { runId: config.runId } : {}),
     });
     throw err;
   }

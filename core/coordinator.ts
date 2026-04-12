@@ -778,7 +778,13 @@ export class Coordinator {
           console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
         } else {
-          console.warn(`[coordinator] PHASE 10 — gitCommit returned null — see prior errors or recordDecision entries`);
+          // Merge gate approved but commit failed — this is a critical
+          // failure. The builder's changes are on disk but not committed,
+          // leaving the repo in an inconsistent state. Roll back and
+          // force the verdict to "failed".
+          console.error(`[coordinator] PHASE 10 FAILED — gitCommit returned null. Rolling back builder changes.`);
+          await this.rollbackChanges(active, mergeDecision);
+          failRun(run, "Merge gate approved but git commit failed — changes rolled back");
         }
       } else if (this.config.autoCommit && !active.cancelled) {
         console.log(`[coordinator] PHASE 10 SKIPPED — no changes to commit (active.changes=0, filesTouched=0)`);
@@ -2000,6 +2006,17 @@ export class Coordinator {
         if (change.originalContent !== undefined) {
           await writeFile(absPath, change.originalContent, "utf-8");
           restored++;
+        } else if (change.operation === "delete") {
+          // File was deleted but no originalContent captured. Try to
+          // recover from git so the user doesn't lose the file.
+          try {
+            const { stdout } = await exec("git", ["show", `HEAD:${change.path}`], { cwd: active.projectRoot });
+            await writeFile(absPath, stdout, "utf-8");
+            restored++;
+            console.warn(`[coordinator] rollbackChanges: restored deleted file ${change.path} from git HEAD`);
+          } catch {
+            unrestorable.push(change.path);
+          }
         } else {
           unrestorable.push(change.path);
         }
@@ -2050,6 +2067,20 @@ export class Coordinator {
             console.error(`[Coordinator]   Restored: ${change.path}`);
           }
         }
+        // Unstage the restored files so a later git operation does not
+        // accidentally commit the (now-reverted) content.
+        const restoredPaths = corruptedFiles
+          .filter((p) => active.changes.some((c) => c.path === p && c.originalContent))
+          .map((p) => resolve(active.projectRoot, p));
+        if (restoredPaths.length > 0) {
+          try {
+            await exec("git", ["reset", "HEAD", "--", ...restoredPaths], { cwd: active.projectRoot });
+          } catch (resetErr) {
+            console.warn(
+              `[Coordinator] SAFETY: git reset after restore failed: ${resetErr instanceof Error ? resetErr.message : String(resetErr)}`,
+            );
+          }
+        }
         recordDecision(active.run, {
           description: `Blocked commit: ${corruptedFiles.length} files contained raw diff text instead of patched source`,
           madeBy: "coordinator",
@@ -2066,7 +2097,14 @@ export class Coordinator {
       // the per-task effective root rather than the API server's cwd.
       // This is the difference between committing to the right repo vs.
       // committing to /mnt/ai/Zendorium accidentally.
-      await exec("git", ["add", "-A"], { cwd: active.projectRoot });
+      // Stage only the files Aedis changed — NOT `git add -A` which would
+      // sweep in unrelated uncommitted files from the working tree.
+      const changedPaths = active.changes.map((c) => resolve(active.projectRoot, c.path));
+      if (changedPaths.length === 0) {
+        console.warn(`[coordinator] gitCommit: no changed paths to stage — skipping commit`);
+        return null;
+      }
+      await exec("git", ["add", "--", ...changedPaths], { cwd: active.projectRoot });
       await exec("git", ["commit", "-m", message], { cwd: active.projectRoot });
 
       const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: active.projectRoot });
@@ -2235,6 +2273,7 @@ export class Coordinator {
     }
 
     if (estimatedCostUsd === 0) {
+      const runId = active.run.id;
       const runStartMs = Date.now() - durationMs;
       const log = getCallLog();
       let fallbackCost = 0;
@@ -2243,8 +2282,13 @@ export class Coordinator {
       let fallbackModel = "";
       let entriesUsed = 0;
       for (const entry of log) {
-        const entryMs = new Date(entry.timestamp).getTime();
-        if (entryMs >= runStartMs) {
+        // Prefer runId-scoped filtering to avoid cross-run cost bleed
+        // when multiple runs execute concurrently. Fall back to the
+        // wall-clock window only for legacy entries without a runId.
+        const matchesRun = entry.runId
+          ? entry.runId === runId
+          : new Date(entry.timestamp).getTime() >= runStartMs;
+        if (matchesRun) {
           fallbackCost += entry.costUsd;
           fallbackIn += entry.tokensIn;
           fallbackOut += entry.tokensOut;
@@ -2256,7 +2300,7 @@ export class Coordinator {
         console.log(
           `[coordinator] aggregateCost fallback: WorkerResult.cost was 0, ` +
           `pulled $${fallbackCost.toFixed(6)} from model-invoker call log ` +
-          `(${entriesUsed} entries within ${durationMs}ms run window)`
+          `(${entriesUsed} entries for run ${runId.slice(0, 8)})`
         );
         estimatedCostUsd = fallbackCost;
         inputTokens = fallbackIn;
@@ -2267,7 +2311,7 @@ export class Coordinator {
           `[coordinator] aggregateCost: no cost data anywhere — ` +
           `WorkerResult.cost was 0 for all ${active.workerResults.length} ` +
           `workers, model-invoker call log has ${entriesUsed} entry/entries ` +
-          `in the ${durationMs}ms run window. Receipt will report $0.000000.`
+          `for run ${runId.slice(0, 8)}. Receipt will report $0.000000.`
         );
       }
     }

@@ -254,7 +254,7 @@ export class VerificationPipeline {
         judgmentReport: null,
         allIssues: [],
         blockers: [],
-        requiredChecks: [...this.config.requiredChecks],
+        requiredChecks: [],
         checks: [],
         summary: `[wave ${wave.id} ${wave.name}] PASS — no changes to verify`,
         totalDurationMs: 0,
@@ -590,7 +590,7 @@ export class VerificationPipeline {
         });
       }
 
-      if (/\.(env|pem|key|secret|credential)/.test(change.path)) {
+      if (/\.(env|pem|key|secret|credential)($|\.)/.test(change.path)) {
         issues.push({
           stage: "diff-check",
           severity: "blocker",

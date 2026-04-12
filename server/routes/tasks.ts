@@ -123,7 +123,9 @@ async function submitBuildTask(
     submittedAt,
   });
   tracked.status = "running";
-  void ctx.receiptStore.updateTask(taskId, { status: "running" });
+  void ctx.receiptStore.updateTask(taskId, { status: "running" }).catch((err: unknown) =>
+    console.error("[tasks] receiptStore update failed:", err),
+  );
 
   ctx.eventBus.emit({
     type: "run_started",
@@ -147,7 +149,9 @@ async function submitBuildTask(
       status: tracked.status,
       completedAt: tracked.completedAt,
       error: null,
-    });
+    }).catch((err: unknown) =>
+      console.error("[tasks] receiptStore update failed:", err),
+    );
 
     ctx.eventBus.emit({
       type: "run_complete",
@@ -182,7 +186,9 @@ async function submitBuildTask(
       status: "failed",
       completedAt: tracked.completedAt,
       error: tracked.error,
-    });
+    }).catch((err: unknown) =>
+      console.error("[tasks] receiptStore update failed:", err),
+    );
 
     ctx.eventBus.emit({
       type: "run_complete",

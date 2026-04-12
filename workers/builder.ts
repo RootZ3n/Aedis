@@ -318,16 +318,17 @@ export class BuilderWorker extends AbstractWorker {
       );
 
       // Build fallback chain
+      const runId = this.extractRunId(assignment);
       const chain = this.buildInvocationChain(
         primaryProvider as Provider,
         primaryModel,
         prompt,
         assignment.tokenBudget,
         sectionInfo !== null,
+        runId,
       );
 
       // Look up (or create) the per-run fallback context.
-      const runId = this.extractRunId(assignment);
       const runCtx = this.getOrCreateRunContext(runId);
 
       console.log(
@@ -356,7 +357,7 @@ export class BuilderWorker extends AbstractWorker {
         fullContent,
         sectionInfo !== null,
       );
-      this.enforceForbiddenChanges(contract, updatedContent);
+      this.enforceForbiddenChanges(contract, updatedContent, fullContent);
 
       if (updatedContent === fullContent) {
         throw new Error("Model returned no effective file changes");
@@ -493,6 +494,7 @@ export class BuilderWorker extends AbstractWorker {
     prompt: string,
     tokenBudget: number,
     sectionMode: boolean,
+    runId?: string,
   ): InvokeConfig[] {
     const systemPrompt = sectionMode
       ? "You are the Builder worker in Aedis. You are editing a SECTION of a large file. Return ONLY a unified diff with ORIGINAL file line numbers (do not restart at 1). No markdown fences. No explanations. No full file content — that would corrupt the file."
@@ -504,6 +506,7 @@ export class BuilderWorker extends AbstractWorker {
       prompt,
       systemPrompt,
       maxTokens: tokenBudget,
+      ...(runId ? { runId } : {}),
     }];
 
     if (this.fallbackModel && this.fallbackModel.provider !== primaryProvider) {
@@ -513,6 +516,7 @@ export class BuilderWorker extends AbstractWorker {
         prompt,
         systemPrompt,
         maxTokens: tokenBudget,
+        ...(runId ? { runId } : {}),
       });
     }
 
@@ -884,11 +888,17 @@ export class BuilderWorker extends AbstractWorker {
     );
   }
 
-  private enforceForbiddenChanges(contract: TaskContract, updatedContent: string): void {
-    const lowered = updatedContent.toLowerCase();
+  private enforceForbiddenChanges(contract: TaskContract, updatedContent: string, originalContent: string): void {
+    // Only check content the builder actually introduced — if the
+    // forbidden string already existed in the original file, that's
+    // not a builder violation.
     for (const forbidden of contract.forbiddenChanges) {
       if (!forbidden) continue;
-      if (lowered.includes(forbidden.toLowerCase())) {
+      const loweredForbidden = forbidden.toLowerCase();
+      if (
+        updatedContent.toLowerCase().includes(loweredForbidden) &&
+        !originalContent.toLowerCase().includes(loweredForbidden)
+      ) {
         throw new Error(`Builder output violates forbidden change rule: ${forbidden}`);
       }
     }

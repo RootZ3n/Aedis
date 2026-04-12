@@ -34,6 +34,15 @@ async function promptContainsExistingPath(raw: string, projectRoot: string): Pro
   return false;
 }
 
+/**
+ * Extract lowercase words (3+ chars) from a string for overlap checks.
+ */
+function extractWords(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase().match(/[a-z]{3,}/g) ?? [],
+  );
+}
+
 async function rewriteWithLocalModel(
   raw: string,
   context: GatedContext,
@@ -64,7 +73,25 @@ async function rewriteWithLocalModel(
       maxBuffer: 1024 * 1024,
     });
     const normalized = stdout.trim();
-    return normalized.length > 0 ? normalized : raw;
+    if (normalized.length === 0) return raw;
+
+    // Quality gate: reject normalization that looks like garbage.
+    // If the result is suspiciously short or shares no words with
+    // the original, the model likely hallucinated or mangled it.
+    const rawWords = extractWords(raw);
+    const normalizedWords = extractWords(normalized);
+    const overlap = [...rawWords].filter((w) => normalizedWords.has(w)).length;
+
+    if (normalized.length < 10 || (rawWords.size > 0 && overlap === 0)) {
+      console.warn(
+        `[normalizer] WARN: normalization may have mangled prompt — ` +
+        `raw="${raw.slice(0, 80)}" normalized="${normalized.slice(0, 80)}" ` +
+        `(len=${normalized.length}, wordOverlap=${overlap}/${rawWords.size}). Using original.`,
+      );
+      return raw;
+    }
+
+    return normalized;
   } catch {
     return raw;
   }
