@@ -11,6 +11,8 @@ import { randomUUID } from "crypto";
 import { existsSync } from "fs";
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import { askLoqui } from "../../core/loqui.js";
+import { routeLoquiInput, type LoquiRouteDecision } from "../../core/loqui-router.js";
+import type { LoquiIntentContext } from "../../core/loqui-intent.js";
 import type { ServerContext } from "../index.js";
 
 // ─── Request/Response Schemas ────────────────────────────────────────
@@ -34,6 +36,19 @@ interface LoquiBody {
   repoPath: string;
 }
 
+/**
+ * Unified Loqui route request body. A single freeform input stream
+ * that the classifier will route to build / answer / resume /
+ * clarify. The `context` field is optional — the UI passes it when
+ * it knows about a prior run so the classifier can emit resume_run
+ * or status intents safely (see core/loqui-intent.ts Rule B).
+ */
+interface LoquiUnifiedBody {
+  input: string;
+  repoPath: string;
+  context?: LoquiIntentContext;
+}
+
 // ─── In-memory run tracker (bridges POST → Coordinator → WS) ────────
 
 interface TrackedRun {
@@ -51,6 +66,116 @@ const trackedRuns = new Map<string, TrackedRun>();
 
 export function getTrackedRun(taskId: string): TrackedRun | undefined {
   return trackedRuns.get(taskId);
+}
+
+/**
+ * Shared build-submit helper. Dispatches a build task through the
+ * Coordinator and registers the tracked run state. Used by both the
+ * legacy POST /tasks handler and the new unified POST /tasks/loqui
+ * path so we get exactly one code path for "start a build." The
+ * response shape (task_id + prompt + repo_path) is the same for
+ * both, which keeps the UI's optimistic-run bookkeeping identical
+ * whether the request came from the hero form or Loqui.
+ */
+function submitBuildTask(
+  ctx: ServerContext,
+  prompt: string,
+  repoPath: string | undefined,
+  exclusions: string[] | undefined,
+): { taskId: string; prompt: string; repoPath: string | null } {
+  const taskId = `task_${randomUUID().slice(0, 8)}`;
+  const tracked: TrackedRun = {
+    taskId,
+    runId: null,
+    status: "queued",
+    prompt,
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    receipt: null,
+    error: null,
+  };
+  trackedRuns.set(taskId, tracked);
+
+  ctx.eventBus.emit({
+    type: "run_started",
+    payload: { taskId, prompt: tracked.prompt, status: "queued", repoPath: repoPath ?? null },
+  });
+
+  console.log(`[tasks] calling coordinator.submit for taskId=${taskId} (projectRoot=${repoPath ?? "(default)"})...`);
+  ctx.coordinator.submit({
+    input: tracked.prompt,
+    exclusions,
+    ...(repoPath ? { projectRoot: repoPath } : {}),
+  }).then((receipt) => {
+    console.log(`[tasks] coordinator.submit resolved: taskId=${taskId}, verdict=${receipt.verdict}, cost=$${receipt.totalCost.estimatedCostUsd}`);
+    tracked.runId = receipt.runId;
+    tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
+    tracked.completedAt = new Date().toISOString();
+    tracked.receipt = receipt;
+
+    ctx.eventBus.emit({
+      type: "run_complete",
+      payload: {
+        taskId,
+        runId: receipt.runId,
+        verdict: receipt.verdict,
+        totalCostUsd: receipt.totalCost.estimatedCostUsd,
+        durationMs: receipt.durationMs,
+        executionVerified: receipt.executionVerified,
+        executionReason: receipt.executionGateReason,
+      },
+    });
+
+    ctx.eventBus.emit({
+      type: "receipt_generated",
+      payload: { taskId, runId: receipt.runId, receiptId: receipt.id, receipt },
+    });
+  }).catch((err) => {
+    console.error("═══ COORDINATOR SUBMIT FAILED ═══");
+    console.error("taskId:", taskId);
+    console.error("prompt:", tracked.prompt.slice(0, 200));
+    console.error("repoPath:", repoPath ?? "(default)");
+    console.error("error:", err instanceof Error ? err.message : err);
+    console.error("stack:", err instanceof Error ? err.stack : "");
+    console.error("═════════════════════════════════");
+
+    tracked.status = "failed";
+    tracked.completedAt = new Date().toISOString();
+    tracked.error = err instanceof Error ? err.message : String(err);
+
+    ctx.eventBus.emit({
+      type: "run_complete",
+      payload: {
+        taskId,
+        verdict: "failed",
+        error: tracked.error,
+        executionVerified: false,
+      },
+    });
+  });
+
+  return { taskId, prompt, repoPath: repoPath ?? null };
+}
+
+/**
+ * Find the most recent tracked run so the unified Loqui route can
+ * reconstruct the "continuation" prompt for a resume_run intent.
+ * Returns null when the session has no prior runs — the classifier
+ * already guards against this but the handler double-checks so a
+ * stale client context cannot spawn a resume against nothing.
+ */
+function findLatestTrackedRun(): TrackedRun | null {
+  let latest: TrackedRun | null = null;
+  for (const run of trackedRuns.values()) {
+    if (!latest) {
+      latest = run;
+      continue;
+    }
+    if (run.submittedAt > latest.submittedAt) {
+      latest = run;
+    }
+  }
+  return latest;
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────
@@ -85,6 +210,140 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
 
       const answer = await askLoqui(question, repoPath);
       reply.send({ answer });
+    }
+  );
+
+  /**
+   * POST /tasks/loqui/unified — Unified Loqui intent routing.
+   *
+   * Accepts one freeform input string, runs it through the
+   * classifier + router, and dispatches to the correct backend path.
+   * The UI sends every Loqui chat message here — there is no more
+   * "mode" to pick at submit time.
+   *
+   * Response shape (always the same top-level wrapper):
+   *   {
+   *     route: "build" | "answer" | "clarify",
+   *     intent, label, reason, confidence, signals,
+   *     ...plus a route-specific payload:
+   *       build   → { task_id, prompt, repo_path }
+   *       answer  → { answer }
+   *       clarify → { clarification }
+   *   }
+   *
+   * The `signals` field exists so the UI (and later audit tooling)
+   * can show *why* Loqui picked the route it picked — this preserves
+   * the inspectability constraint from the execution-truth work.
+   */
+  fastify.post<{ Body: LoquiUnifiedBody }>(
+    "/loqui/unified",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["input", "repoPath"],
+          properties: {
+            input: { type: "string", minLength: 1 },
+            repoPath: { type: "string", minLength: 1 },
+            context: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                activeRunId: { type: ["string", "null"] },
+                lastRunId: { type: ["string", "null"] },
+                lastRunVerdict: { type: ["string", "null"] },
+                previousMessageWasBuild: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Body: LoquiUnifiedBody }>, reply: FastifyReply) => {
+      const { input, repoPath } = request.body;
+      const routerContext: LoquiIntentContext = request.body.context ?? {};
+
+      if (!existsSync(repoPath)) {
+        reply.code(400).send({
+          error: "Bad request",
+          message: `repoPath does not exist on this host: ${repoPath}`,
+        });
+        return;
+      }
+
+      const decision: LoquiRouteDecision = routeLoquiInput({ input, context: routerContext });
+      console.log(
+        `[tasks] /loqui/unified: action=${decision.action} intent=${decision.intent} ` +
+        `label=${decision.label} confidence=${decision.confidence.toFixed(2)} ` +
+        `reason="${decision.reason}" signals=${decision.signals.length}`,
+      );
+
+      // Base envelope every response shares. Gives the UI a stable
+      // shape to hang its intent badge / signal audit off of, no
+      // matter which backend path actually ran.
+      const envelope = {
+        route: decision.action,
+        intent: decision.intent,
+        label: decision.label,
+        reason: decision.reason,
+        confidence: decision.confidence,
+        signals: [...decision.signals],
+        original_input: decision.originalInput,
+      };
+
+      switch (decision.action) {
+        case "build": {
+          const result = submitBuildTask(ctx(), decision.effectivePrompt, repoPath, undefined);
+          reply.code(202).send({
+            ...envelope,
+            task_id: result.taskId,
+            prompt: result.prompt,
+            repo_path: result.repoPath,
+            status: "queued",
+            message: "Build task submitted. Watch the worker grid and Lumen log for progress.",
+          });
+          return;
+        }
+
+        case "resume": {
+          // Stitch the new input onto the most recent tracked run's
+          // prompt so the Coordinator sees a self-contained request.
+          // If no prior run exists on the server (e.g. because this
+          // server was restarted since the UI learned about it), we
+          // fall back to treating the input as a bare build rather
+          // than failing — the user's intent to "continue" is clear
+          // even if we don't have the history to reference.
+          const prior = findLatestTrackedRun();
+          const stitched = prior
+            ? `Continue the prior build (${prior.taskId}): "${prior.prompt}". Follow-up instruction: ${decision.originalInput}`
+            : decision.originalInput;
+          const result = submitBuildTask(ctx(), stitched, repoPath, undefined);
+          reply.code(202).send({
+            ...envelope,
+            task_id: result.taskId,
+            prompt: result.prompt,
+            repo_path: result.repoPath,
+            resumed_from: prior?.taskId ?? null,
+            status: "queued",
+            message: prior
+              ? `Resuming from ${prior.taskId}. New build task submitted.`
+              : "No prior run found in this session — submitted as a fresh build.",
+          });
+          return;
+        }
+
+        case "answer": {
+          const answer = await askLoqui(decision.effectivePrompt, repoPath);
+          reply.send({ ...envelope, answer });
+          return;
+        }
+
+        case "clarify":
+        default: {
+          reply.send({ ...envelope, clarification: decision.clarification });
+          return;
+        }
+      }
     }
   );
 
@@ -148,86 +407,13 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         }
       }
 
-      const taskId = `task_${randomUUID().slice(0, 8)}`;
-      const tracked: TrackedRun = {
-        taskId,
-        runId: null,
-        status: "queued",
-        prompt: prompt.trim(),
-        submittedAt: new Date().toISOString(),
-        completedAt: null,
-        receipt: null,
-        error: null,
-      };
-      trackedRuns.set(taskId, tracked);
-
-      // Emit queued event immediately so WebSocket subscribers see it
-      ctx().eventBus.emit({
-        type: "run_started",
-        payload: { taskId, prompt: tracked.prompt, status: "queued", repoPath: repoPath ?? null },
-      });
-
-      // Fire coordinator — runs async, updates tracked state.
-      // Pass repoPath through as projectRoot so the Coordinator and
-      // workers operate against the requested repo, not against the API
-      // server's cwd. When repoPath is undefined, projectRoot is omitted
-      // from the submission and the Coordinator falls back to its
-      // config.projectRoot default.
-      console.log(`[tasks] calling coordinator.submit for taskId=${taskId} (projectRoot=${repoPath ?? "(default)"})...`);
-      ctx().coordinator.submit({
-        input: tracked.prompt,
-        exclusions: request.body.exclusions,
-        ...(repoPath ? { projectRoot: repoPath } : {}),
-      }).then((receipt) => {
-        console.log(`[tasks] coordinator.submit resolved: taskId=${taskId}, verdict=${receipt.verdict}, cost=$${receipt.totalCost.estimatedCostUsd}`);
-        tracked.runId = receipt.runId;
-        tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
-        tracked.completedAt = new Date().toISOString();
-        tracked.receipt = receipt;
-
-        ctx().eventBus.emit({
-          type: "run_complete",
-          payload: {
-            taskId,
-            runId: receipt.runId,
-            verdict: receipt.verdict,
-            totalCostUsd: receipt.totalCost.estimatedCostUsd,
-            durationMs: receipt.durationMs,
-          },
-        });
-
-        ctx().eventBus.emit({
-          type: "receipt_generated",
-          payload: { taskId, runId: receipt.runId, receiptId: receipt.id, receipt },
-        });
-      }).catch((err) => {
-        console.error("═══ COORDINATOR SUBMIT FAILED ═══");
-        console.error("taskId:", taskId);
-        console.error("prompt:", tracked.prompt.slice(0, 200));
-        console.error("repoPath:", repoPath ?? "(default)");
-        console.error("error:", err instanceof Error ? err.message : err);
-        console.error("stack:", err instanceof Error ? err.stack : "");
-        console.error("═════════════════════════════════");
-
-        tracked.status = "failed";
-        tracked.completedAt = new Date().toISOString();
-        tracked.error = err instanceof Error ? err.message : String(err);
-
-        ctx().eventBus.emit({
-          type: "run_complete",
-          payload: {
-            taskId,
-            verdict: "failed",
-            error: tracked.error,
-          },
-        });
-      });
+      const result = submitBuildTask(ctx(), prompt.trim(), repoPath, request.body.exclusions);
 
       reply.code(202).send({
-        task_id: taskId,
+        task_id: result.taskId,
         status: "queued",
-        prompt: tracked.prompt,
-        repo_path: repoPath ?? null,
+        prompt: result.prompt,
+        repo_path: result.repoPath,
         message: "Task submitted. Connect to /ws and subscribe to receive live updates.",
       });
     }

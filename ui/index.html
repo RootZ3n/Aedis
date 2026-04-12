@@ -972,53 +972,73 @@
       border-radius: 14px;
     }
 
-    /* Loqui form: input takes the flex slot, then the mode toggle, then
-       the send button. The toggle is a tight segmented control so the
-       whole row stays on one line on desktop. */
-    .loqui-form {
+    /* Unified Loqui form — single input + send button. The old
+       build/ask mode toggle is gone; intent is classified by the
+       backend (see core/loqui-router.ts) and surfaced via the
+       intent badge on each message bubble. */
+    .loqui-unified-form {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto auto;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 12px;
       align-items: stretch;
     }
 
-    .loqui-mode-toggle {
+    /* Intent badge shown on assistant/user bubbles after routing.
+       Small chip with a per-intent accent color. Informational only
+       — never a click target. */
+    .loqui-intent-badge {
       display: inline-flex;
-      border-radius: 16px;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      background: rgba(12, 18, 32, 0.92);
-      min-height: 54px;
-    }
-
-    .loqui-mode-toggle button {
-      border: none;
-      background: transparent;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(12, 18, 32, 0.72);
       color: var(--gray);
       font-family: var(--font-mono);
-      font-size: 11px;
-      letter-spacing: 0.16em;
+      font-size: 10px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
-      padding: 0 16px;
-      cursor: pointer;
-      transition: background 200ms ease, color 200ms ease;
-      min-width: 64px;
+      margin-right: 8px;
+      vertical-align: middle;
     }
 
-    .loqui-mode-toggle button:hover {
-      color: var(--ink);
-    }
-
-    .loqui-mode-toggle button.active.ask {
-      background: rgba(77, 245, 200, 0.16);
-      color: var(--teal);
-      box-shadow: inset 0 0 16px rgba(77, 245, 200, 0.18);
-    }
-
-    .loqui-mode-toggle button.active.build {
-      background: rgba(251, 146, 60, 0.18);
+    .loqui-intent-badge.building {
       color: var(--orange);
-      box-shadow: inset 0 0 16px rgba(251, 146, 60, 0.22);
+      border-color: rgba(251, 146, 60, 0.38);
+      background: rgba(251, 146, 60, 0.08);
+    }
+
+    .loqui-intent-badge.answering,
+    .loqui-intent-badge.explaining {
+      color: var(--teal);
+      border-color: rgba(77, 245, 200, 0.34);
+      background: rgba(77, 245, 200, 0.06);
+    }
+
+    .loqui-intent-badge.planning,
+    .loqui-intent-badge.dry-run {
+      color: #a78bfa;
+      border-color: rgba(167, 139, 250, 0.36);
+      background: rgba(167, 139, 250, 0.08);
+    }
+
+    .loqui-intent-badge.checking-status {
+      color: #60a5fa;
+      border-color: rgba(96, 165, 250, 0.36);
+      background: rgba(96, 165, 250, 0.08);
+    }
+
+    .loqui-intent-badge.resuming {
+      color: var(--orange);
+      border-color: rgba(251, 146, 60, 0.38);
+      background: rgba(251, 146, 60, 0.08);
+    }
+
+    .loqui-intent-badge.clarifying {
+      color: #fbbf24;
+      border-color: rgba(251, 191, 36, 0.38);
+      background: rgba(251, 191, 36, 0.08);
     }
 
     @media (max-width: 1240px) {
@@ -1042,15 +1062,13 @@
       .receipt-metrics,
       .settings-item,
       .worker-grid,
-      .loqui-form {
+      .loqui-unified-form {
         grid-template-columns: 1fr;
       }
       .glyph-card { min-height: 86px; }
       .loqui-msg { max-width: 92%; }
       .lumen-box { font-size: 13px; }
       .lumen-line.big { font-size: 18px; }
-      .loqui-mode-toggle { width: 100%; }
-      .loqui-mode-toggle button { flex: 1; }
     }
   </style>
 </head>
@@ -1109,22 +1127,18 @@
       <!-- 2. Loqui chat panel -->
       <section class="panel loqui-panel">
         <div class="loqui-row">
-          <div class="label">Loqui — Ask or Build</div>
-          <span class="tiny" id="loqui-mode-tag">ask · qwen3.6-plus</span>
+          <div class="label">Loqui</div>
+          <span class="tiny" id="loqui-mode-tag">unified · intent routing</span>
         </div>
         <div id="loqui-log" class="loqui-log"></div>
-        <form id="loqui-form" class="loqui-form">
+        <form id="loqui-form" class="loqui-unified-form">
           <input
             id="loqui-input"
             class="field"
             type="text"
-            placeholder="Ask Aedis anything about this repo..."
+            placeholder="Ask, plan, or build — Loqui routes it."
             autocomplete="off"
           />
-          <div class="loqui-mode-toggle" role="group" aria-label="Loqui mode">
-            <button type="button" id="loqui-mode-ask" class="ask active">Ask</button>
-            <button type="button" id="loqui-mode-build" class="build">Build</button>
-          </div>
           <button id="loqui-send" class="button" type="submit">Send</button>
         </form>
       </section>
@@ -1208,13 +1222,11 @@
       repoPath: 'aedis.repoPath',
       modelConfig: 'aedis.modelConfig',
       runHistory: 'aedis.runHistory',
-      loquiMode: 'aedis.loquiMode',
     };
     const LEGACY_STORAGE_KEYS = {
       repoPath: 'zendorium.repoPath',
       modelConfig: 'zendorium.modelConfig',
       runHistory: 'zendorium.runHistory',
-      loquiMode: 'zendorium.loquiMode',
     };
     try {
       for (const name of Object.keys(STORAGE_KEYS)) {
@@ -1306,10 +1318,15 @@
       loqui: {
         messages: [],
         thinking: false,
-        mode: 'ask',
+        // Unified Intent Routing v1: there is no user-facing mode.
+        // `lastIntent` holds the classifier's most recent decision
+        // so the thinking indicator and the follow-up badge can
+        // mirror the intent Loqui is acting on.
+        lastIntent: null,
         // Map<taskId, { prompt, submittedAt }> — tasks that Loqui
-        // submitted via build mode and is still waiting to summarize
-        // once run_complete arrives. Populated in runBuildFromLoqui,
+        // submitted as a build and is still waiting to summarize
+        // once run_complete arrives. Populated in the unified
+        // submit handler when the router returns action=build,
         // drained in maybeHandleLoquiBuildCompletion. Not serialized
         // to localStorage; a reload drops any in-flight follow-ups,
         // which is fine because the underlying run is still visible
@@ -1523,203 +1540,206 @@
       }
     }
 
-    // ─── Loqui mode + chat ───────────────────────────────────────
+    // ─── Loqui unified chat ───────────────────────────────────
     //
-    // Loqui has two modes that share the same input field:
-    //   ask   → POST /tasks/loqui, render answer as a chat bubble
-    //   build → POST /tasks (the same endpoint the hero RUN button hits),
-    //           create a real run object, render a confirmation bubble,
-    //           and let the rest of the UI (workers, lumen, history)
-    //           pick up the run from the WebSocket like any other build.
+    // Unified Intent Routing v1: there is no mode toggle. Every
+    // Loqui message goes to POST /tasks/loqui/unified, which runs
+    // the input through the classifier (core/loqui-intent.ts) +
+    // router (core/loqui-router.ts) and returns one of four
+    // route actions: build, answer, resume, clarify.
     //
-    // The repo field is shared with the hero — both flows read state.repoPath
-    // (which the hero's repo-input keeps in sync via persistRepoPath).
-
-    function setLoquiMode(mode) {
-      const next = mode === 'build' ? 'build' : 'ask';
-      state.loqui.mode = next;
-      try {
-        window.localStorage.setItem(STORAGE_KEYS.loquiMode, next);
-      } catch {
-        // Private mode / quota — non-fatal, just won't survive reload.
-      }
-
-      const askBtn = document.getElementById('loqui-mode-ask');
-      const buildBtn = document.getElementById('loqui-mode-build');
-      if (askBtn) askBtn.classList.toggle('active', next === 'ask');
-      if (buildBtn) buildBtn.classList.toggle('active', next === 'build');
-
-      const input = document.getElementById('loqui-input');
-      if (input) {
-        input.placeholder = next === 'build'
-          ? 'Describe what to build...'
-          : 'Ask Aedis anything about this repo...';
-      }
-
-      const send = document.getElementById('loqui-send');
-      if (send) {
-        send.classList.toggle('build', next === 'build');
-        send.textContent = next === 'build' ? 'Build' : 'Ask';
-      }
-
-      const tag = document.getElementById('loqui-mode-tag');
-      if (tag) {
-        tag.textContent = next === 'build'
-          ? 'build · /tasks'
-          : 'ask · qwen3.6-plus';
-      }
-    }
-
-    function restoreLoquiMode() {
-      try {
-        const saved = window.localStorage.getItem(STORAGE_KEYS.loquiMode);
-        if (saved === 'build' || saved === 'ask') {
-          setLoquiMode(saved);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-      setLoquiMode('ask');
-    }
+    // The UI reads the returned envelope ({ route, intent, label,
+    // reason, signals, ... }) and renders a per-message intent
+    // badge so the user can always see which path Loqui took and
+    // why. The repo field is shared with the hero — both flows
+    // read state.repoPath (kept in sync by persistRepoPath).
 
     async function submitLoqui(event) {
       event.preventDefault();
       if (state.loqui.thinking) return;
-      const input = document.getElementById('loqui-input');
-      const text = input.value.trim();
+      const inputEl = document.getElementById('loqui-input');
+      const text = inputEl.value.trim();
       if (!text) return;
 
-      // Snapshot the mode at submit time so a mid-flight toggle can't
-      // race the response. Subsequent UI updates use this same value.
-      const mode = state.loqui.mode;
       const repoPath = state.repoPath || '.';
 
-      state.loqui.messages.push({
+      // Push the user bubble with no intent badge yet — the backend
+      // is the source of truth for intent, so we wait for its
+      // response before deciding what to show. The label field is
+      // filled in once the route decision comes back.
+      const userMessage = {
         role: 'user',
         text,
-        mode,
+        label: '',
         at: new Date().toISOString(),
-      });
+      };
+      state.loqui.messages.push(userMessage);
       state.loqui.thinking = true;
-      input.value = '';
+      inputEl.value = '';
       renderLoqui();
 
-      try {
-        if (mode === 'build') {
-          await runBuildFromLoqui(text, repoPath);
-        } else {
-          await runAskFromLoqui(text, repoPath);
+      // Snapshot whatever conversational context we have so the
+      // classifier can emit resume_run / status safely. Rule B in
+      // the classifier downgrades these intents when there is no
+      // prior run, so sending a null here is not dangerous — it's
+      // just less informed.
+      const previousMessageWasBuild = (() => {
+        for (let i = state.loqui.messages.length - 2; i >= 0; i -= 1) {
+          const msg = state.loqui.messages[i];
+          if (msg.role === 'user') {
+            return msg.label === 'Building' || msg.label === 'Resuming';
+          }
         }
+        return false;
+      })();
+      const routerContext = {
+        activeRunId: state.active && state.active.status === 'running' ? state.active.id : null,
+        lastRunId: state.currentRunId || null,
+        lastRunVerdict: state.active && state.active.verdict ? String(state.active.verdict) : null,
+        previousMessageWasBuild,
+      };
+
+      try {
+        const res = await fetch(`${API_BASE}/tasks/loqui/unified`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: text, repoPath, context: routerContext }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.message || body.error || `HTTP ${res.status}`);
+        }
+        const data = await res.json().catch(() => ({}));
+        handleRouteResponse(text, repoPath, data);
       } catch (err) {
         console.error('loqui submit error', err);
         state.loqui.messages.push({
           role: 'assistant',
-          text: `${mode === 'build' ? 'Build' : 'Loqui'} error: ${err && err.message ? err.message : String(err)}`,
-          mode,
+          text: `Loqui error: ${err && err.message ? err.message : String(err)}`,
+          label: 'Error',
           at: new Date().toISOString(),
           error: true,
         });
       } finally {
         state.loqui.thinking = false;
-        // Full render so the worker grid / history / lumen panels pick up
-        // any new run created by build mode, plus refreshes the chat log.
+        state.loqui.lastIntent = null;
+        // Full render so the worker grid / history / lumen panels
+        // pick up any run created by a build/resume route, plus
+        // refreshes the chat log.
         render();
       }
     }
 
-    async function runAskFromLoqui(question, repoPath) {
-      const res = await fetch(`${API_BASE}/tasks/loqui`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, repoPath }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || body.error || `HTTP ${res.status}`);
+    /**
+     * Handle a unified route response. The envelope is:
+     *   { route, intent, label, reason, confidence, signals, ... }
+     * Per-route extras:
+     *   build / resume → { task_id, prompt, repo_path }
+     *   answer         → { answer }
+     *   clarify        → { clarification }
+     */
+    function handleRouteResponse(originalText, repoPath, data) {
+      const route = String(data.route || '');
+      const label = String(data.label || (route === 'build' ? 'Building' : route === 'answer' ? 'Answering' : 'Clarifying'));
+
+      // Back-tag the user bubble with the intent Loqui decided —
+      // this is the "visible intent feedback" the task calls for.
+      for (let i = state.loqui.messages.length - 1; i >= 0; i -= 1) {
+        const msg = state.loqui.messages[i];
+        if (msg.role === 'user' && !msg.label) {
+          msg.label = label;
+          msg.reason = String(data.reason || '');
+          msg.confidence = Number(data.confidence || 0);
+          msg.signals = Array.isArray(data.signals) ? data.signals.slice(0, 8) : [];
+          break;
+        }
       }
-      const data = await res.json().catch(() => ({}));
-      const answer = String(
-        data.answer ?? data.response ?? data.text ?? data.message ?? ''
-      ).trim() || '(no answer returned)';
-      state.loqui.messages.push({
-        role: 'assistant',
-        text: answer,
-        mode: 'ask',
-        at: new Date().toISOString(),
-      });
-    }
+      state.loqui.lastIntent = label;
 
-    async function runBuildFromLoqui(prompt, repoPath) {
-      // Mirror the optimistic-run pattern from submitPrompt: create a local
-      // run object so the worker grid / lumen / history panels show
-      // something immediately, then promote its id to the server's task_id
-      // once the POST resolves.
-      const tempId = `pending-${Date.now().toString(36)}`;
-      const run = createEmptyRun();
-      run.id = tempId;
-      run.prompt = prompt;
-      run.repoPath = repoPath;
-      run.status = 'queued';
-      run.startedAt = new Date().toISOString();
-      pushLumen(run, { color: 'gray', icon: '✉', text: `Submitting (loqui): ${truncate(prompt, 60)}` });
-      state.active = run;
-      state.currentRunId = tempId;
-      state.runs.unshift(run);
-      state.history = dedupeHistory([tempId, ...state.history]);
+      if (route === 'build' || route === 'resume') {
+        const taskId = data.task_id || data.taskId;
+        if (!taskId) {
+          state.loqui.messages.push({
+            role: 'assistant',
+            text: `Loqui tried to ${route} but no task_id came back.`,
+            label: 'Error',
+            at: new Date().toISOString(),
+            error: true,
+          });
+          return;
+        }
 
-      const res = await fetch(`${API_BASE}/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, repoPath }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        // Mark the local run failed before bubbling so the hero shows
-        // FAILED instead of staying QUEUED forever.
-        run.status = 'failed';
-        run.completedAt = new Date().toISOString();
-        pushLumen(run, {
-          color: 'red',
-          icon: '❌',
-          text: `Build submit failed — HTTP ${res.status}`,
-        });
-        throw new Error(body.message || body.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      const taskId = data.task_id || data.taskId || tempId;
-
-      if (taskId !== tempId) {
+        // Optimistic run bookkeeping — same pattern as the hero
+        // submitPrompt path. Creates a local run object so the
+        // worker grid / lumen / history panels show something
+        // immediately, then subscribes to WS updates for live state.
+        const run = createEmptyRun();
         run.id = taskId;
-        state.history = dedupeHistory([taskId, ...state.history.filter((entry) => entry !== tempId)]);
+        run.prompt = data.prompt || originalText;
+        run.repoPath = data.repo_path || repoPath;
+        run.status = 'queued';
+        run.startedAt = new Date().toISOString();
+        pushLumen(run, {
+          color: 'gray',
+          icon: '✉',
+          text: `${route === 'resume' ? 'Resuming' : 'Submitting'} (loqui): ${truncate(run.prompt, 60)}`,
+        });
+        state.active = run;
         state.currentRunId = taskId;
+        state.runs.unshift(run);
+        state.history = dedupeHistory([taskId, ...state.history]);
+
+        if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+          try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
+        }
+
+        state.loqui.pendingBuilds.set(taskId, {
+          prompt: run.prompt,
+          submittedAt: new Date().toISOString(),
+        });
+
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: `${route === 'resume' ? 'Resume queued' : 'Build queued'} — task ${taskId}. Watch the worker grid and Lumen log for progress.`,
+          label,
+          at: new Date().toISOString(),
+        });
+        return;
       }
-      pushLumen(run, { color: 'gray', icon: '✓', text: `Task accepted (${taskId})` });
 
-      // Subscribe over WS so live events route to this task.
-      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-        try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
+      if (route === 'answer') {
+        const answer = String(
+          data.answer ?? data.response ?? data.text ?? data.message ?? ''
+        ).trim() || '(no answer returned)';
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: answer,
+          label,
+          at: new Date().toISOString(),
+        });
+        return;
       }
 
-      // Register this task for post-run Loqui follow-up. When
-      // run_complete fires for this taskId, ingestEvent will call
-      // maybeHandleLoquiBuildCompletion which POSTs to /tasks/loqui
-      // and pushes the summary back into the chat. We store the
-      // original prompt so the follow-up question can reference what
-      // the user actually asked for, not just the bare verdict.
-      state.loqui.pendingBuilds.set(taskId, {
-        prompt,
-        submittedAt: new Date().toISOString(),
-      });
+      if (route === 'clarify') {
+        const clarification = String(data.clarification || 'Could you clarify what you want me to do?');
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: clarification,
+          label,
+          at: new Date().toISOString(),
+        });
+        return;
+      }
 
-      // Confirmation bubble in the chat. Tells the user the build is
-      // queued and where to watch progress — keeps the chat coherent
-      // even though the heavy lifting happens in the worker grid.
+      // Unknown route — defensive fallthrough. Never silently
+      // succeed; render the raw envelope as an error so nothing
+      // looks like a fake completion.
       state.loqui.messages.push({
         role: 'assistant',
-        text: `Build queued — task ${taskId}. Watch the worker grid and Lumen log for progress.`,
-        mode: 'build',
+        text: `Loqui returned an unknown route: ${route}`,
+        label: 'Error',
         at: new Date().toISOString(),
+        error: true,
       });
     }
 
@@ -1770,6 +1790,12 @@
       render();
 
       try {
+        // Follow-up summary goes through the legacy /tasks/loqui
+        // (direct askLoqui) path — the unified router is for user
+        // input, not for system-generated summaries. Using the
+        // direct path here keeps the behavior identical to pre-v1
+        // and avoids a spurious second classification of the
+        // summary request we just wrote ourselves.
         const res = await fetch(`${API_BASE}/tasks/loqui`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1786,7 +1812,7 @@
         state.loqui.messages.push({
           role: 'assistant',
           text: answer,
-          mode: 'ask',
+          label: 'Answering',
           at: new Date().toISOString(),
         });
       } catch (err) {
@@ -1794,7 +1820,7 @@
         state.loqui.messages.push({
           role: 'assistant',
           text: `Loqui follow-up failed: ${msg}`,
-          mode: 'ask',
+          label: 'Error',
           at: new Date().toISOString(),
           error: true,
         });
@@ -2670,23 +2696,24 @@
       const parts = [];
 
       if (messages.length === 0 && !state.loqui.thinking) {
-        parts.push('<div class="loqui-empty">Ask Loqui about this repo, or switch to Build mode to queue a real task. Both share the repo path from the hero.</div>');
+        parts.push('<div class="loqui-empty">Ask, plan, or build — Loqui routes it. Try "what files handle auth?", "show me the plan first", or "build a capability registry".</div>');
       } else {
         for (const msg of messages) {
           const isUser = msg.role === 'user';
           const cls = isUser ? 'user' : 'assistant';
-          const modeCls = msg.mode === 'build' && isUser ? ' build' : '';
+          const buildCls = (msg.label === 'Building' || msg.label === 'Resuming') && isUser ? ' build' : '';
           const errCls = msg.error ? ' error' : '';
-          const tag = msg.mode === 'build'
-            ? '<span class="mode-tag">Build</span>'
-            : (isUser ? '<span class="mode-tag">Ask</span>' : '');
-          parts.push(`<div class="loqui-msg ${cls}${modeCls}${errCls}">${tag}${esc(msg.text)}</div>`);
+          const badge = msg.label ? renderIntentBadge(msg.label) : '';
+          const titleAttr = msg.reason ? ` title="${esc(msg.reason)}"` : '';
+          parts.push(`<div class="loqui-msg ${cls}${buildCls}${errCls}"${titleAttr}>${badge}${esc(msg.text)}</div>`);
         }
       }
 
       if (state.loqui.thinking) {
-        const thinkingClass = state.loqui.mode === 'build' ? 'loqui-thinking build' : 'loqui-thinking';
-        const verb = state.loqui.mode === 'build' ? 'Building' : 'Thinking';
+        const intent = state.loqui.lastIntent || '';
+        const isBuildish = intent === 'Building' || intent === 'Resuming';
+        const thinkingClass = isBuildish ? 'loqui-thinking build' : 'loqui-thinking';
+        const verb = intent || 'Routing';
         parts.push(
           `<div class="${thinkingClass}">` +
             esc(verb) +
@@ -2701,12 +2728,21 @@
       const button = document.getElementById('loqui-send');
       if (button) {
         button.disabled = state.loqui.thinking;
-        if (state.loqui.thinking) {
-          button.textContent = 'Wait…';
-        } else {
-          button.textContent = state.loqui.mode === 'build' ? 'Build' : 'Ask';
-        }
+        button.textContent = state.loqui.thinking ? 'Wait…' : 'Send';
       }
+    }
+
+    /**
+     * Render the per-message intent badge. The label values come
+     * from core/loqui-router.ts's LoquiIntentLabel type; the class
+     * map here mirrors the CSS rules further up so adding a new
+     * label only requires touching both sides.
+     */
+    function renderIntentBadge(label) {
+      const cls = String(label)
+        .toLowerCase()
+        .replace(/\s+/g, '-');
+      return `<span class="loqui-intent-badge ${esc(cls)}">${esc(label)}</span>`;
     }
 
     function renderGraph() {
@@ -2858,15 +2894,12 @@
     window.selectRun = selectRun;
     document.getElementById('prompt-form').addEventListener('submit', submitPrompt);
     document.getElementById('loqui-form').addEventListener('submit', submitLoqui);
-    document.getElementById('loqui-mode-ask').addEventListener('click', () => setLoquiMode('ask'));
-    document.getElementById('loqui-mode-build').addEventListener('click', () => setLoquiMode('build'));
     document.getElementById('config-save').addEventListener('click', saveModelConfig);
     document.getElementById('repo-input').addEventListener('change', persistRepoPath);
     document.getElementById('repo-input').addEventListener('blur', persistRepoPath);
 
     loadRepoPath();
     restoreRuns();
-    restoreLoquiMode();
     renderSettings();
     render();
     connect();
