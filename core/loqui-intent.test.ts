@@ -136,11 +136,17 @@ test("router: plan intent → action=answer, prompt reframed to request a plan",
   assert.match(r.effectivePrompt, /plan|proposed|steps/i);
 });
 
-test("router: dry_run intent → action=answer, prompt tells Loqui not to write files", () => {
+test("router: dry_run intent → action=dry_run so server calls the grounded planner", () => {
+  // Preflight + Dry Run System v1: dry_run now routes to its
+  // own action. The server handler calls generateDryRun instead
+  // of askLoqui, so the user gets a grounded structured plan.
   const r = routeLoquiInput({ input: "don't change anything, just show me the plan" });
-  assert.equal(r.action, "answer");
+  assert.equal(r.action, "dry_run");
   assert.equal(r.label, "Dry Run");
-  assert.match(r.effectivePrompt, /do not write|without actually|no changes/i);
+  // The router does NOT reframe the prompt anymore — the
+  // planner works off the raw input so it can be passed through
+  // to the charter analyzer as-is.
+  assert.equal(r.effectivePrompt, "don't change anything, just show me the plan");
 });
 
 test("router: explain intent → action=answer, reframed as an explanation ask", () => {

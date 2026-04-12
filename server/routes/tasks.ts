@@ -13,6 +13,7 @@ import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import { askLoqui } from "../../core/loqui.js";
 import { routeLoquiInput, type LoquiRouteDecision } from "../../core/loqui-router.js";
 import type { LoquiIntentContext } from "../../core/loqui-intent.js";
+import { generateDryRun } from "../../core/dry-run.js";
 import type { ServerContext } from "../index.js";
 
 // ─── Request/Response Schemas ────────────────────────────────────────
@@ -338,12 +339,61 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           return;
         }
 
+        case "dry_run": {
+          // Preflight + Dry Run System v1 — grounded structured
+          // plan produced by generateDryRun. Nothing is written,
+          // no worker runs. The plan reuses every planning
+          // primitive the Coordinator uses at runtime, so the
+          // steps the user sees here match what would happen if
+          // they submitted the same request for real.
+          const plan = generateDryRun({ input: decision.originalInput, projectRoot: repoPath });
+          reply.send({ ...envelope, plan });
+          return;
+        }
+
         case "clarify":
         default: {
           reply.send({ ...envelope, clarification: decision.clarification });
           return;
         }
       }
+    }
+  );
+
+  /**
+   * POST /tasks/dry-run — Direct dry-run entry point.
+   *
+   * Skips the classifier and produces a structured dry-run plan
+   * from a raw prompt + repoPath. Used by API clients that
+   * already know they want a plan (no natural-language gate).
+   * Response shape mirrors the `dry_run` action from the
+   * unified route: { plan: DryRunPlan }.
+   */
+  fastify.post<{ Body: { input: string; repoPath: string } }>(
+    "/dry-run",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["input", "repoPath"],
+          properties: {
+            input: { type: "string", minLength: 1 },
+            repoPath: { type: "string", minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { input, repoPath } = request.body;
+      if (!existsSync(repoPath)) {
+        reply.code(400).send({
+          error: "Bad request",
+          message: `repoPath does not exist on this host: ${repoPath}`,
+        });
+        return;
+      }
+      const plan = generateDryRun({ input, projectRoot: repoPath });
+      reply.send({ plan });
     }
   );
 

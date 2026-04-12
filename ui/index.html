@@ -1854,6 +1854,25 @@
         return;
       }
 
+      if (route === 'dry_run') {
+        // Preflight + Dry Run System v1: the server returned a
+        // structured DryRunPlan. Render it as a plain-English
+        // paragraph in the chat so the user gets a readable
+        // answer, and also stash the raw plan on the message so
+        // a follow-up "run it for real" action can reuse it
+        // later.
+        const plan = data.plan || {};
+        const text = formatDryRunPlanForChat(plan);
+        state.loqui.messages.push({
+          role: 'assistant',
+          text,
+          label,
+          at: new Date().toISOString(),
+          dryRunPlan: plan,
+        });
+        return;
+      }
+
       if (route === 'clarify') {
         const clarification = String(data.clarification || 'Could you clarify what you want me to do?');
         state.loqui.messages.push({
@@ -1875,6 +1894,67 @@
         at: new Date().toISOString(),
         error: true,
       });
+    }
+
+    /**
+     * Turn a DryRunPlan (from core/dry-run.ts via the server) into
+     * a multi-line chat bubble. Kept in the UI rather than the
+     * core module because the shape is small and UI-specific —
+     * the server-side module already exposes a `narrative` field,
+     * but the chat bubble wants a slightly different layout with
+     * bullet-like lines for steps, files, risk, cost, and
+     * confidence so it reads naturally inline.
+     */
+    function formatDryRunPlanForChat(plan) {
+      if (!plan || typeof plan !== 'object') {
+        return 'Loqui returned an empty dry-run plan.';
+      }
+      const lines = [];
+      if (plan.headline) lines.push(plan.headline);
+
+      const preflight = plan.preflight || {};
+      if (preflight.blocked) {
+        lines.push('');
+        lines.push('⛔ Preflight would BLOCK this request:');
+        for (const f of (preflight.findings || []).filter((x) => x.severity === 'block').slice(0, 4)) {
+          lines.push(`  • ${f.message}${f.suggestion ? ' — ' + f.suggestion : ''}`);
+        }
+      } else if (preflight.hasWarnings) {
+        const warns = (preflight.findings || []).filter((x) => x.severity === 'warn');
+        lines.push('');
+        lines.push(`⚠ Preflight warnings (${warns.length}):`);
+        for (const f of warns.slice(0, 3)) {
+          lines.push(`  • ${f.message}`);
+        }
+      }
+
+      if (Array.isArray(plan.steps) && plan.steps.length > 0) {
+        lines.push('');
+        lines.push('Steps Aedis would run:');
+        for (const step of plan.steps.slice(0, 10)) {
+          const files = Array.isArray(step.targetFiles) && step.targetFiles.length > 0
+            ? ` (${step.targetFiles.slice(0, 3).join(', ')}${step.targetFiles.length > 3 ? '…' : ''})`
+            : '';
+          lines.push(`  ${step.stage}: ${step.description}${files}`);
+        }
+      }
+
+      if (Array.isArray(plan.filesLikelyTouched) && plan.filesLikelyTouched.length > 0) {
+        lines.push('');
+        lines.push(`Files likely touched: ${plan.filesLikelyTouched.slice(0, 6).join(', ')}${plan.filesLikelyTouched.length > 6 ? `, +${plan.filesLikelyTouched.length - 6} more` : ''}`);
+      }
+
+      const cost = plan.estimatedCost || {};
+      const conf = plan.confidence || {};
+      const confPct = Math.round(Number(conf.overall || 0) * 100);
+      lines.push('');
+      lines.push(
+        `Risk: ${plan.riskLevel || 'unknown'}  ·  ` +
+        `Cost: ${cost.display || '$0.00'}  ·  ` +
+        `Confidence: ${confPct}%`
+      );
+
+      return lines.join('\n');
     }
 
     /**

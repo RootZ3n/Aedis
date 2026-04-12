@@ -41,7 +41,7 @@ import { classifyLoquiIntent, type LoquiIntent, type LoquiIntentContext, type Lo
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type LoquiRouteAction = "build" | "answer" | "clarify" | "resume";
+export type LoquiRouteAction = "build" | "answer" | "clarify" | "resume" | "dry_run";
 
 /**
  * UI-facing labels for the intent badge. The classifier internal
@@ -159,15 +159,17 @@ export function decisionFromClassification(
 
     case "dry_run":
       return {
-        action: "answer",
+        // Preflight + Dry Run System v1: dry_run now routes to a
+        // dedicated action. The server handler calls generateDryRun
+        // instead of askLoqui, so the user gets a grounded
+        // structured plan (preflight + steps + files + risk +
+        // cost + confidence) instead of a model hallucinating what
+        // it would do.
+        action: "dry_run",
         intent: "dry_run",
         label: "Dry Run",
         originalInput: original,
-        effectivePrompt:
-          `The user asked for a dry-run (no changes). Produce a concrete step-by-step plan ` +
-          `for the request below, describing exactly which files you would touch and what ` +
-          `changes you would make, without actually doing anything. Do not write any files. ` +
-          `Request: ${original}`,
+        effectivePrompt: original,
         reason: classification.reason,
         confidence: classification.confidence,
         signals: classification.signals,
