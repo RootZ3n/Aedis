@@ -1167,6 +1167,13 @@ export class Coordinator {
           return false;
         }
 
+        if (file.endsWith(".test.ts") || file.endsWith(".spec.ts")) {
+          console.log(`[coordinator] dropping test file from deliverables: ${file}`);
+          decisions.push(`  drop ${file} (test file excluded from deliverables)`);
+          didFilter = true;
+          return false;
+        }
+
         const exists = this.fileExists(file, active.projectRoot);
         const isTest = this.isTestFile(file);
         const wasExplicit = isExplicit(file);

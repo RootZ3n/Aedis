@@ -1,7 +1,7 @@
 #!/bin/bash
 # Aedis Cost Summary — reads memory.json, prints cost stats
 
-MEMORY="/mnt/ai/Zendorium/.aedis/memory.json"
+MEMORY="/mnt/ai/aedis/.aedis/memory.json"
 
 if [[ ! -f "$MEMORY" ]]; then
   echo "Error: ${MEMORY} not found"

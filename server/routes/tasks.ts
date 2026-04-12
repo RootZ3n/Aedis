@@ -4,6 +4,7 @@
  * POST /tasks       — Submit a new task, returns { task_id, run_id }
  * GET  /tasks/:id   — Status + current run state
  * GET  /tasks/:id/receipts — Full receipt bundle
+ * POST /tasks/:id/cancel — Cancel a running task
  * DELETE /tasks/:id — Cancel a running task
  */
 
@@ -304,6 +305,110 @@ async function findKnownRunById(
 
 export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   const ctx = (): ServerContext => fastify.ctx;
+
+  async function cancelTrackedTask(id: string): Promise<{
+    ok: boolean;
+    taskId: string;
+    runId: string | null;
+    message: string;
+  }> {
+    const tracked = trackedRuns.get(id);
+    if (tracked && tracked.runId) {
+      const cancelled = ctx().coordinator.cancel(tracked.runId);
+      if (cancelled) {
+        tracked.status = "cancelled";
+        tracked.completedAt = new Date().toISOString();
+        tracked.error = "Cancelled by user";
+        await ctx().receiptStore.updateTask(tracked.taskId, {
+          status: "cancelled",
+          completedAt: tracked.completedAt,
+          error: tracked.error,
+        });
+        ctx().eventBus.emit({
+          type: "run_cancelled",
+          payload: {
+            taskId: tracked.taskId,
+            runId: tracked.runId,
+            status: "cancelled",
+            verdict: "cancelled",
+            completedAt: tracked.completedAt,
+            error: tracked.error,
+          },
+        });
+        return {
+          ok: true,
+          taskId: tracked.taskId,
+          runId: tracked.runId,
+          message: "Run cancellation requested",
+        };
+      }
+    }
+
+    const persistedTask = await ctx().receiptStore.getTask(id) ?? await ctx().receiptStore.getTaskByRunId(id);
+    if (persistedTask) {
+      const cancelled = ctx().coordinator.cancel(persistedTask.runId);
+      if (cancelled) {
+        const completedAt = new Date().toISOString();
+        await ctx().receiptStore.updateTask(persistedTask.taskId, {
+          status: "cancelled",
+          completedAt,
+          error: "Cancelled by user",
+        });
+        const trackedPersisted = trackedRuns.get(persistedTask.taskId);
+        if (trackedPersisted) {
+          trackedPersisted.status = "cancelled";
+          trackedPersisted.completedAt = completedAt;
+          trackedPersisted.error = "Cancelled by user";
+        }
+        ctx().eventBus.emit({
+          type: "run_cancelled",
+          payload: {
+            taskId: persistedTask.taskId,
+            runId: persistedTask.runId,
+            status: "cancelled",
+            verdict: "cancelled",
+            completedAt,
+            error: "Cancelled by user",
+          },
+        });
+        return {
+          ok: true,
+          taskId: persistedTask.taskId,
+          runId: persistedTask.runId,
+          message: "Run cancellation requested",
+        };
+      }
+    }
+
+    const cancelled = ctx().coordinator.cancel(id);
+    if (cancelled) {
+      const completedAt = new Date().toISOString();
+      ctx().eventBus.emit({
+        type: "run_cancelled",
+        payload: {
+          taskId: id,
+          runId: id,
+          status: "cancelled",
+          verdict: "cancelled",
+          completedAt,
+          error: "Cancelled by user",
+        },
+      });
+      return {
+        ok: true,
+        taskId: id,
+        runId: id,
+        message: "Run cancellation requested",
+      };
+    }
+
+    return {
+      ok: false,
+      taskId: id,
+      runId: null,
+      message: `No active run found with ID "${id}"`,
+    };
+  }
 
   function toTaskStatus(
     status: "RUNNING" | "COMPLETE" | "FAILED" | "ABORTED" | "CRASHED" | "INTERRUPTED",
@@ -758,53 +863,49 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /**
+   * POST /tasks/:id/cancel — Cancel a running task.
+   */
+  fastify.post<{ Params: TaskParams }>(
+    "/:id/cancel",
+    async (request: FastifyRequest<{ Params: TaskParams }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      const result = await cancelTrackedTask(id);
+      if (!result.ok) {
+        reply.code(404).send({
+          error: "Not found",
+          message: result.message,
+        });
+        return;
+      }
+      reply.send({
+        task_id: result.taskId,
+        run_id: result.runId,
+        status: "cancelled",
+        message: result.message,
+      });
+    }
+  );
+
+  /**
    * DELETE /tasks/:id — Cancel a running task.
    */
   fastify.delete<{ Params: TaskParams }>(
     "/:id",
     async (request: FastifyRequest<{ Params: TaskParams }>, reply: FastifyReply) => {
       const { id } = request.params;
-
-      const tracked = trackedRuns.get(id);
-      if (tracked && tracked.runId) {
-        const cancelled = ctx().coordinator.cancel(tracked.runId);
-        if (cancelled) {
-          tracked.status = "cancelled";
-          tracked.completedAt = new Date().toISOString();
-          void ctx().receiptStore.updateTask(id, {
-            status: "cancelled",
-            completedAt: tracked.completedAt,
-            error: "Cancelled by user",
-          });
-          reply.send({ task_id: id, status: "cancelled", message: "Run cancellation requested" });
-          return;
-        }
-      }
-
-      const persistedTask = await ctx().receiptStore.getTask(id) ?? await ctx().receiptStore.getTaskByRunId(id);
-      if (persistedTask) {
-        const cancelled = ctx().coordinator.cancel(persistedTask.runId);
-        if (cancelled) {
-          void ctx().receiptStore.updateTask(id, {
-            status: "cancelled",
-            completedAt: new Date().toISOString(),
-            error: "Cancelled by user",
-          });
-          reply.send({ task_id: id, run_id: persistedTask.runId, status: "cancelled", message: "Run cancellation requested" });
-          return;
-        }
-      }
-
-      // Try cancelling by run ID directly
-      const cancelled = ctx().coordinator.cancel(id);
-      if (cancelled) {
-        reply.send({ task_id: id, status: "cancelled", message: "Run cancellation requested" });
+      const result = await cancelTrackedTask(id);
+      if (!result.ok) {
+        reply.code(404).send({
+          error: "Not found",
+          message: result.message,
+        });
         return;
       }
-
-      reply.code(404).send({
-        error: "Not found",
-        message: `No active run found with ID "${id}"`,
+      reply.send({
+        task_id: result.taskId,
+        run_id: result.runId,
+        status: "cancelled",
+        message: result.message,
       });
     }
   );

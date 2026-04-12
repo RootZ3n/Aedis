@@ -45,6 +45,7 @@ export type AedisEventType =
   | "merge_approved"
   | "merge_blocked"
   | "commit_created"
+  | "run_cancelled"
   | "run_complete"
   | "run_receipt"
   | "system_event"

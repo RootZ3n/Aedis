@@ -181,7 +181,7 @@ export class ScoutWorker extends AbstractWorker {
         ...recentFiles,
         ...clusterFiles,
         ...baseTargetFiles,
-      ]));
+      ])).filter((p) => !p.endsWith(".test.ts") && !p.endsWith(".spec.ts"));
 
       const reads: ScoutFileRead[] = [];
       const summaries: FileSymbolSummary[] = [];
@@ -190,7 +190,20 @@ export class ScoutWorker extends AbstractWorker {
       const patterns: CodePattern[] = [];
 
       for (const file of targetFiles.slice(0, 8)) {
-        const fileRead = await this.readFile(file, projectRoot);
+        let fileRead: ScoutFileRead;
+        try {
+          fileRead = await this.readFile(file, projectRoot);
+        } catch (err: unknown) {
+          // Skip files that don't exist on disk (ENOENT) rather than
+          // failing the entire scout run. Charter-generated targets
+          // and memory-suggested files may reference paths that were
+          // renamed, deleted, or never created.
+          if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+            console.warn(`[scout] skipping missing file: ${file}`);
+            continue;
+          }
+          throw err;
+        }
         reads.push(fileRead);
         touchedFiles.push({ path: fileRead.path, operation: "read" });
         this.logFileTouch(assignment.task.id, fileRead.path, "read");
