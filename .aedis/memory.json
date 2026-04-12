@@ -1,13 +1,94 @@
 {
-  "projectRoot": "/mnt/ai/Zendorium",
+  "projectRoot": "/mnt/ai/aedis",
   "language": "typescript",
   "recentFiles": [
+    "server/routes/tasks.ts",
+    "server/index.ts",
+    "server/middleware/auth.ts",
+    "server/routes/config.ts",
+    "server/routes/health.ts",
+    "server/routes/loqui.ts",
+    "server/routes/metrics.ts",
+    "core/model-invoker.ts",
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "core/change-set.ts",
+    "core/charter.ts",
+    "core/confidence-scoring.ts",
     "core/context-gate.ts",
     "core/project-memory.ts",
     "core/vision.ts",
     "core/loqui.ts"
   ],
   "recentTasks": [
+    {
+      "prompt": "fix server/routes/tasks.ts",
+      "normalizedPrompt": "fix server/routes/tasks.ts",
+      "verdict": "failed",
+      "commitSha": null,
+      "cost": 0.019919,
+      "timestamp": "2026-04-12T18:28:34.376Z",
+      "filesTouched": [
+        "server/routes/tasks.ts",
+        "server/index.ts",
+        "server/middleware/auth.ts",
+        "server/routes/config.ts",
+        "server/routes/health.ts",
+        "server/routes/loqui.ts",
+        "server/routes/metrics.ts"
+      ],
+      "scopeType": "multi-file",
+      "complexityTier": "3",
+      "resultSummary": "failed",
+      "failureSummary": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval",
+      "affectedSystems": [
+        "server"
+      ],
+      "changeTypes": [
+        "modify"
+      ]
+    },
+    {
+      "prompt": "in core/model-invoker.ts, add a comment to the invokeModel function explaining the timeout default",
+      "normalizedPrompt": "in core/model-invoker.ts, add a comment to the invokeModel function explaining the timeout default",
+      "verdict": "failed",
+      "commitSha": null,
+      "cost": 0.019855,
+      "timestamp": "2026-04-12T18:28:31.083Z",
+      "filesTouched": [
+        "core/model-invoker.ts",
+        "core/aedis-memory.ts",
+        "core/blast-radius.ts",
+        "core/change-set.ts",
+        "core/charter.ts",
+        "core/confidence-scoring.ts"
+      ],
+      "scopeType": "multi-file",
+      "complexityTier": "3",
+      "resultSummary": "failed",
+      "failureSummary": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval",
+      "affectedSystems": [
+        "core"
+      ],
+      "changeTypes": [
+        "modify"
+      ]
+    },
+    {
+      "prompt": "fix submitBuildTask",
+      "normalizedPrompt": "fix submitBuildTask",
+      "verdict": "failed",
+      "commitSha": null,
+      "cost": 0,
+      "timestamp": "2026-04-12T18:27:44.286Z",
+      "filesTouched": [],
+      "scopeType": "single-file",
+      "complexityTier": "0",
+      "resultSummary": "failed",
+      "failureSummary": "Pre-build coherence failed: No task node covers this deliverable",
+      "affectedSystems": [],
+      "changeTypes": []
+    },
     {
       "prompt": "in core/project-memory.ts and core/context-gate.ts, add JSDoc comments above every exported function",
       "verdict": "partial",
@@ -78,16 +159,34 @@
       "filesTouched": [
         "core/project-memory.ts"
       ]
-    },
-    {
-      "prompt": "Prompt: in core/project-memory.ts, add a JSDoc comment above the loadMemory function Repo: /mnt/ai/Zendorium",
-      "verdict": "partial",
-      "commitSha": "fde029f760fef7e28b413e4808f5065a0ddc9080",
-      "cost": 0.023258,
-      "timestamp": "2026-04-11T15:12:19.367Z"
     }
   ],
   "fileClusters": [
+    {
+      "files": [
+        "server/index.ts",
+        "server/middleware/auth.ts",
+        "server/routes/config.ts",
+        "server/routes/health.ts",
+        "server/routes/loqui.ts",
+        "server/routes/metrics.ts",
+        "server/routes/tasks.ts"
+      ],
+      "changedTogether": 1,
+      "lastSeen": "2026-04-12T18:28:34.376Z"
+    },
+    {
+      "files": [
+        "core/aedis-memory.ts",
+        "core/blast-radius.ts",
+        "core/change-set.ts",
+        "core/charter.ts",
+        "core/confidence-scoring.ts",
+        "core/model-invoker.ts"
+      ],
+      "changedTogether": 1,
+      "lastSeen": "2026-04-12T18:28:31.083Z"
+    },
     {
       "files": [
         "core/context-gate.ts",
@@ -97,6 +196,6 @@
       "lastSeen": "2026-04-11T17:59:49.600Z"
     }
   ],
-  "updatedAt": "2026-04-11T17:59:49.601Z",
+  "updatedAt": "2026-04-12T18:28:34.376Z",
   "schemaVersion": 1
 }

@@ -89,23 +89,57 @@ export function getAllTrackedRuns(): readonly TrackedRun[] {
 export type { TrackedRun };
 
 /**
+ * Result from submitBuildTask — may be a running build, a clarification
+ * request, or a decomposition plan.
+ */
+type BuildSubmitResult =
+  | { kind: "running"; taskId: string; runId: string; prompt: string; repoPath: string | null }
+  | { kind: "needs_clarification"; question: string }
+  | { kind: "needs_decomposition"; taskId: string; plan: unknown; message: string };
+
+/**
  * Shared build-submit helper. Dispatches a build task through the
- * Coordinator and registers the tracked run state. Used by both the
- * legacy POST /tasks handler and the new unified POST /tasks/loqui
- * path so we get exactly one code path for "start a build." The
- * response shape (task_id + run_id + prompt + repo_path) is the same for
- * both, which keeps the UI's optimistic-run bookkeeping identical
- * whether the request came from the hero form or Loqui.
+ * Coordinator (via submitWithGates) and registers the tracked run state.
+ * Used by both the legacy POST /tasks handler and the new unified POST
+ * /tasks/loqui path so we get exactly one code path for "start a build."
+ *
+ * Now returns a discriminated union so callers can handle clarification
+ * and decomposition gates without starting execution.
  */
 async function submitBuildTask(
   ctx: ServerContext,
   prompt: string,
   repoPath: string | undefined,
   exclusions: string[] | undefined,
-): Promise<{ taskId: string; runId: string; prompt: string; repoPath: string | null }> {
+): Promise<BuildSubmitResult> {
   const taskId = `task_${randomUUID().slice(0, 8)}`;
   const runId = randomUUID();
   const submittedAt = new Date().toISOString();
+
+  // Run pre-execution gates (ambiguity + decomposition)
+  const gateResult = await ctx.coordinator.submitWithGates({
+    runId,
+    input: prompt,
+    exclusions,
+    ...(repoPath ? { projectRoot: repoPath } : {}),
+  });
+
+  if (gateResult.kind === "needs_clarification") {
+    console.log(`[tasks] clarification needed for prompt: "${prompt.slice(0, 80)}"`);
+    return { kind: "needs_clarification", question: gateResult.question };
+  }
+
+  if (gateResult.kind === "needs_decomposition") {
+    console.log(`[tasks] decomposition needed — ${(gateResult.plan as any).waves?.length ?? 0} wave(s)`);
+    return {
+      kind: "needs_decomposition",
+      taskId,
+      plan: gateResult.plan,
+      message: gateResult.message,
+    };
+  }
+
+  // Gate passed — execution started
   const tracked: TrackedRun = {
     taskId,
     runId,
@@ -133,13 +167,10 @@ async function submitBuildTask(
     payload: { taskId, runId, prompt: tracked.prompt, status: "running", repoPath: repoPath ?? null },
   });
 
-  console.log(`[tasks] calling coordinator.submit for taskId=${taskId} (projectRoot=${repoPath ?? "(default)"})...`);
-  ctx.coordinator.submit({
-    runId,
-    input: tracked.prompt,
-    exclusions,
-    ...(repoPath ? { projectRoot: repoPath } : {}),
-  }).then((receipt) => {
+  console.log(`[tasks] coordinator executing for taskId=${taskId} (projectRoot=${repoPath ?? "(default)"})...`);
+
+  // The receipt promise is already running from submitWithGates
+  gateResult.receipt.then((receipt) => {
     console.log(`[tasks] coordinator.submit resolved: taskId=${taskId}, verdict=${receipt.verdict}, cost=$${receipt.totalCost.estimatedCostUsd}`);
     tracked.runId = receipt.runId;
     tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
@@ -203,7 +234,7 @@ async function submitBuildTask(
     });
   });
 
-  return { taskId, runId, prompt, repoPath: repoPath ?? null };
+  return { kind: "running", taskId, runId, prompt, repoPath: repoPath ?? null };
 }
 
 /**
@@ -539,6 +570,25 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       switch (decision.action) {
         case "build": {
           const result = await submitBuildTask(ctx(), decision.effectivePrompt, repoPath, undefined);
+          if (result.kind === "needs_clarification") {
+            reply.send({
+              ...envelope,
+              route: "clarify",
+              status: "needs_clarification",
+              clarification: result.question,
+            });
+            return;
+          }
+          if (result.kind === "needs_decomposition") {
+            reply.code(202).send({
+              ...envelope,
+              status: "needs_decomposition",
+              task_id: result.taskId,
+              plan: result.plan,
+              message: result.message,
+            });
+            return;
+          }
           reply.code(202).send({
             ...envelope,
             task_id: result.taskId,
@@ -567,6 +617,25 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
             ? `Continue the prior build (${prior.runId}): "${prior.prompt}". Follow-up instruction: ${decision.originalInput}`
             : decision.originalInput;
           const result = await submitBuildTask(ctx(), stitched, repoPath, undefined);
+          if (result.kind === "needs_clarification") {
+            reply.send({
+              ...envelope,
+              route: "clarify",
+              status: "needs_clarification",
+              clarification: result.question,
+            });
+            return;
+          }
+          if (result.kind === "needs_decomposition") {
+            reply.code(202).send({
+              ...envelope,
+              status: "needs_decomposition",
+              task_id: result.taskId,
+              plan: result.plan,
+              message: result.message,
+            });
+            return;
+          }
           reply.code(202).send({
             ...envelope,
             task_id: result.taskId,
@@ -707,6 +776,24 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const result = await submitBuildTask(ctx(), prompt.trim(), repoPath, request.body.exclusions);
+
+      if (result.kind === "needs_clarification") {
+        reply.code(202).send({
+          status: "needs_clarification",
+          question: result.question,
+        });
+        return;
+      }
+
+      if (result.kind === "needs_decomposition") {
+        reply.code(202).send({
+          status: "needs_decomposition",
+          task_id: result.taskId,
+          plan: result.plan,
+          message: result.message,
+        });
+        return;
+      }
 
       reply.code(202).send({
         task_id: result.taskId,
@@ -882,6 +969,73 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         run_id: result.runId,
         status: "cancelled",
         message: result.message,
+      });
+    }
+  );
+
+  /**
+   * POST /tasks/:id/approve — Approve a pending decomposition plan and
+   * resume execution.
+   */
+  fastify.post<{ Params: TaskParams }>(
+    "/:id/approve",
+    async (request: FastifyRequest<{ Params: TaskParams }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      const result = ctx().coordinator.approvePlan(id);
+
+      if (!result) {
+        reply.code(404).send({
+          error: "Not found",
+          message: `No pending plan found with ID "${id}"`,
+        });
+        return;
+      }
+
+      const taskId = `task_${randomUUID().slice(0, 8)}`;
+      const runId = randomUUID();
+      const submittedAt = new Date().toISOString();
+
+      const tracked: TrackedRun = {
+        taskId,
+        runId,
+        status: "running",
+        prompt: `(approved plan ${id})`,
+        submittedAt,
+        completedAt: null,
+        receipt: null,
+        error: null,
+      };
+      trackedRuns.set(taskId, tracked);
+
+      result.receipt.then((receipt) => {
+        tracked.runId = receipt.runId;
+        tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
+        tracked.completedAt = new Date().toISOString();
+        tracked.receipt = receipt;
+
+        ctx().eventBus.emit({
+          type: "run_complete",
+          payload: {
+            taskId,
+            runId: receipt.runId,
+            verdict: receipt.verdict,
+            totalCostUsd: receipt.totalCost.estimatedCostUsd,
+            durationMs: receipt.durationMs,
+            executionVerified: receipt.executionVerified,
+            executionReason: receipt.executionGateReason,
+          },
+        });
+      }).catch((err) => {
+        tracked.status = "failed";
+        tracked.completedAt = new Date().toISOString();
+        tracked.error = err instanceof Error ? err.message : String(err);
+      });
+
+      reply.code(202).send({
+        task_id: taskId,
+        run_id: runId,
+        status: "running",
+        message: `Plan "${id}" approved. Execution started.`,
       });
     }
   );

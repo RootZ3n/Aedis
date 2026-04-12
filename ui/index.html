@@ -890,6 +890,8 @@ body .app::before{
 .loqui-intent-badge.checking-status{color:#60a5fa;border-color:rgba(96,165,250,.36);background:rgba(96,165,250,.08)}
 .loqui-intent-badge.resuming{color:var(--orange);border-color:rgba(251,146,60,.38);background:rgba(251,146,60,.08)}
 .loqui-intent-badge.clarifying{color:#fbbf24;border-color:rgba(251,191,36,.38);background:rgba(251,191,36,.08)}
+.loqui-msg.needs-clarification .loqui-msg-text{border-left:3px solid #fbbf24;padding-left:10px;color:#fbbf24}
+.loqui-msg.needs-decomposition .loqui-msg-text{border-left:3px solid var(--violet);padding-left:10px;white-space:pre-wrap}
 
 /* ─── Settings ──────────────────────────────────────────────────── */
 .settings-panel{display:grid;gap:12px;padding:18px}
@@ -1156,6 +1158,8 @@ body .app::before{
       builder: [
         { model: 'qwen3.6-plus', provider: 'modelstudio', label: 'qwen3.6-plus' },
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
+        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'minimax-coding', provider: 'minimax', label: 'minimax-coding' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
         { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
@@ -1164,11 +1168,15 @@ body .app::before{
         { model: 'qwen3.5:9b', provider: 'ollama', label: 'qwen3.5:9b' },
         { model: 'qwen3.5:4b', provider: 'ollama', label: 'qwen3.5:4b' },
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
+        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       verifier: [{ model: 'local', provider: 'local', label: 'local' }],
       integrator: [
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
+        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
+        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
         { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
@@ -1176,11 +1184,15 @@ body .app::before{
       escalation: [
         { model: 'claude-opus-4-6', provider: 'anthropic', label: 'claude-opus-4-6' },
         { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
+        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
+        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
         { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       coordinator: [
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
+        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
+        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
         { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
         { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
@@ -1654,6 +1666,42 @@ body .app::before{
           label,
           at: new Date().toISOString(),
           dryRunPlan: plan,
+        });
+        return;
+      }
+
+      // GAP 1 — Needs clarification (ambiguous prompt)
+      if (data.status === 'needs_clarification') {
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: data.question || data.clarification || 'Which file or function should I modify? Be specific.',
+          label: 'Clarify',
+          at: new Date().toISOString(),
+          needsClarification: true,
+        });
+        return;
+      }
+
+      // GAP 2 — Needs decomposition (large scope)
+      if (data.status === 'needs_decomposition') {
+        const plan = data.plan || {};
+        const waves = Array.isArray(plan.waves) ? plan.waves : [];
+        let planText = data.message || 'This task is large. Here\'s how I\'d break it down:';
+        planText += '\n\n';
+        for (const wave of waves) {
+          planText += `Wave ${wave.id}: ${wave.name}\n`;
+          for (const file of (wave.files || [])) {
+            planText += `  - ${file}\n`;
+          }
+        }
+        planText += '\nReply "approve" to proceed or refine the plan.';
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: planText,
+          label: 'Decompose',
+          at: new Date().toISOString(),
+          needsDecomposition: true,
+          pendingPlanId: data.task_id || null,
         });
         return;
       }
@@ -2871,9 +2919,11 @@ body .app::before{
           const cls = isUser ? 'user' : 'assistant';
           const buildCls = (msg.label === 'Building' || msg.label === 'Resuming') && isUser ? ' build' : '';
           const errCls = msg.error ? ' error' : '';
+          const clarifyCls = msg.needsClarification ? ' needs-clarification' : '';
+          const decomposeCls = msg.needsDecomposition ? ' needs-decomposition' : '';
           const badge = msg.label ? renderIntentBadge(msg.label) : '';
           const titleAttr = msg.reason ? ` title="${esc(msg.reason)}"` : '';
-          parts.push(`<div class="loqui-msg ${cls}${buildCls}${errCls}"${titleAttr}>${badge}${esc(msg.text)}</div>`);
+          parts.push(`<div class="loqui-msg ${cls}${buildCls}${errCls}${clarifyCls}${decomposeCls}"${titleAttr}>${badge}<span class="loqui-msg-text">${esc(msg.text)}</span></div>`);
         }
       }
 

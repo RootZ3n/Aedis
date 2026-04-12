@@ -11,6 +11,8 @@
  *   - openai: https://api.openai.com/v1/chat/completions + OPENAI_API_KEY
  *   - minimax: MiniMax chat completions + MINIMAX_API_KEY
  *   - zai: OpenAI-compatible, ZAI_BASE_URL + ZAI_API_KEY
+ *   - glm-5.1-openrouter: GLM-5.1 via OpenRouter (z-ai/glm-5.1) + OPENROUTER_API_KEY
+ *   - glm-5.1-direct: GLM-5.1 via ZAI direct (open.bigmodel.cn) + ZAI_API_KEY
  *   - portum: OpenAI-compatible, http://localhost:18797/v1/chat/completions, no API key
  *   - local: mock response, zero cost
  *
@@ -43,6 +45,8 @@ export type Provider =
   | "openai"
   | "minimax"
   | "zai"
+  | "glm-5.1-openrouter"
+  | "glm-5.1-direct"
   | "portum"
   | "local";
 
@@ -84,10 +88,12 @@ export interface FallbackInvokeResult extends InvokeResult {
  */
 export interface RunInvocationContext {
   readonly timedOutProviders: Set<Provider>;
+  /** Number of confidence-based escalations performed in this run. */
+  escalationCount: number;
 }
 
 export function createRunInvocationContext(): RunInvocationContext {
-  return { timedOutProviders: new Set<Provider>() };
+  return { timedOutProviders: new Set<Provider>(), escalationCount: 0 };
 }
 
 // ─── Last-resort fallback ────────────────────────────────────────────
@@ -125,6 +131,8 @@ const COST_PER_1K: Record<string, { input: number; output: number }> = {
   "minimax-coding":  { input: 0.0004, output: 0.0016 },
   // ZAI
   "glm-5.1":        { input: 0.002,  output: 0.006  },
+  // GLM-5.1 via OpenRouter ($0.95/M in, $3.15/M out)
+  "z-ai/glm-5.1":   { input: 0.00095, output: 0.00315 },
 };
 
 function estimateCost(model: string, tokensIn: number, tokensOut: number): number {
@@ -226,6 +234,20 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
           process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4/",
           requireEnv("ZAI_API_KEY"),
           model, prompt, systemPrompt, maxTokens,
+        );
+        break;
+      case "glm-5.1-openrouter":
+        result = await invokeOpenAICompatible(
+          "https://openrouter.ai/api/v1",
+          requireEnv("OPENROUTER_API_KEY"),
+          "z-ai/glm-5.1", prompt, systemPrompt, maxTokens,
+        );
+        break;
+      case "glm-5.1-direct":
+        result = await invokeOpenAICompatible(
+          "https://open.bigmodel.cn/api/paas/v4",
+          requireEnv("ZAI_API_KEY"),
+          "glm-5.1", prompt, systemPrompt, maxTokens,
         );
         break;
       case "portum":
@@ -579,6 +601,105 @@ async function fetchWithTimeout(
     throw new InvokerError(`Network error calling ${url}: ${err.message ?? err}`, "network");
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// ─── Confidence-Based Escalation ────────────────────────────────────
+
+export interface EscalationResult {
+  /** Whether an escalation was performed. */
+  readonly escalated: boolean;
+  /** The result from the escalation attempt (if escalated). */
+  readonly result: InvokeResult | null;
+  /** The provider used for escalation. */
+  readonly escalationProvider: Provider | null;
+  /** The model used for escalation. */
+  readonly escalationModel: string | null;
+  /** Reason for escalation or why it was skipped. */
+  readonly reason: string;
+}
+
+/**
+ * Check a builder result's confidence and escalate to a better model if
+ * confidence is below the threshold. Capped at 1 escalation per run to
+ * prevent cost runaway.
+ *
+ * @param confidence  The confidence score from the builder result (0-1).
+ * @param config      The original InvokeConfig (prompt, systemPrompt, etc.)
+ *                    to retry with the escalated model.
+ * @param runContext  Per-run invocation context tracking escalation count.
+ * @param threshold   Confidence threshold below which to escalate (default 0.6).
+ * @returns           EscalationResult with the retry outcome.
+ */
+export async function escalateOnLowConfidence(
+  confidence: number,
+  config: InvokeConfig,
+  runContext: RunInvocationContext,
+  threshold: number = 0.6,
+): Promise<EscalationResult> {
+  if (confidence >= threshold) {
+    return {
+      escalated: false,
+      result: null,
+      escalationProvider: null,
+      escalationModel: null,
+      reason: `confidence ${(confidence * 100).toFixed(0)}% >= ${(threshold * 100).toFixed(0)}% threshold — no escalation needed`,
+    };
+  }
+
+  if (runContext.escalationCount >= 1) {
+    console.log(
+      `[model-invoker] low confidence (${(confidence * 100).toFixed(0)}%) but escalation cap reached (${runContext.escalationCount}/1) — skipping retry`,
+    );
+    return {
+      escalated: false,
+      result: null,
+      escalationProvider: null,
+      escalationModel: null,
+      reason: `confidence ${(confidence * 100).toFixed(0)}% below threshold but escalation cap (1 per run) already reached`,
+    };
+  }
+
+  const escalationProvider: Provider = "anthropic";
+  const escalationModel = "claude-sonnet-4-6";
+
+  console.log(
+    `[model-invoker] low confidence (${(confidence * 100).toFixed(0)}%) — escalating to ${escalationProvider}/${escalationModel} for retry`,
+  );
+
+  runContext.escalationCount += 1;
+
+  try {
+    const result = await invokeModel({
+      ...config,
+      provider: escalationProvider,
+      model: escalationModel,
+    });
+
+    console.log(
+      `[model-invoker] escalation to ${escalationProvider}/${escalationModel} succeeded — ` +
+      `${result.tokensIn}in/${result.tokensOut}out $${result.costUsd.toFixed(6)}`,
+    );
+
+    return {
+      escalated: true,
+      result,
+      escalationProvider,
+      escalationModel,
+      reason: `confidence ${(confidence * 100).toFixed(0)}% below ${(threshold * 100).toFixed(0)}% threshold — escalated to ${escalationModel}`,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[model-invoker] escalation to ${escalationProvider}/${escalationModel} failed: ${msg}`,
+    );
+    return {
+      escalated: true,
+      result: null,
+      escalationProvider,
+      escalationModel,
+      reason: `escalation attempted but failed: ${msg}`,
+    };
   }
 }
 

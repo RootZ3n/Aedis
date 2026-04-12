@@ -53,7 +53,7 @@ import {
   type Assumption,
   type Deliverable,
 } from "./intent.js";
-import { getCallLog } from "./model-invoker.js";
+import { getCallLog, escalateOnLowConfidence, createRunInvocationContext, type RunInvocationContext } from "./model-invoker.js";
 import { captureAndAnalyze } from "./vision.js";
 import {
   CharterGenerator,
@@ -120,6 +120,7 @@ import {
 import { loadMemory, recordTask } from "./project-memory.js";
 import {
   gateContext,
+  gateContextForArchitectural,
   gateContextForWave,
   mergeGatedContext,
   type GatedContext,
@@ -138,6 +139,7 @@ import { determineRunVerdict } from "./coordinator-lifecycle.js";
 import { estimateBlastRadius, type BlastRadiusEstimate } from "./blast-radius.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
+
 import { createChangeSet, type ChangeSet } from "./change-set.js";
 import { extractInvariants } from "./invariant-extractor.js";
 import { planChangeSet, type Plan, type PlanWave } from "./multi-file-planner.js";
@@ -186,6 +188,52 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   autoCommit: true,
   workBranch: "aedis/run",
 };
+
+/**
+ * Detect whether a prompt is too ambiguous to execute without clarification.
+ * Returns true if the prompt is fewer than 8 words AND contains no file
+ * path AND contains no function/class name pattern.
+ */
+function detectAmbiguity(input: string): boolean {
+  const trimmed = input.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length >= 8) return false;
+
+  // Check for file path patterns (contains / or . with extension)
+  const hasFilePath = /[A-Za-z0-9_-]+\/[A-Za-z0-9._/-]+/.test(trimmed) ||
+    /[A-Za-z0-9_-]+\.[tj]sx?$/.test(trimmed) ||
+    /[A-Za-z0-9_-]+\.(?:py|rs|go|java|rb|css|html|json|yaml|yml|toml|md)/.test(trimmed);
+  if (hasFilePath) return false;
+
+  // Check for function/class name patterns (camelCase, PascalCase, snake_case identifiers)
+  const hasFunctionOrClass =
+    /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b/.test(trimmed) ||   // camelCase
+    /\b[A-Z][a-zA-Z0-9]{2,}\b/.test(trimmed) ||                  // PascalCase
+    /\b[a-z]+_[a-z]+\b/.test(trimmed);                            // snake_case
+  if (hasFunctionOrClass) return false;
+
+  return true;
+}
+
+/**
+ * Result of a task submission — may be immediate execution, a
+ * clarification request, or a decomposition plan requiring approval.
+ */
+export type TaskSubmissionResult =
+  | { kind: "executing"; receipt: Promise<RunReceipt> }
+  | { kind: "needs_clarification"; question: string }
+  | { kind: "needs_decomposition"; plan: Plan; message: string };
+
+/**
+ * Pending decomposition plan awaiting user approval. Stored in
+ * Coordinator.pendingPlans so POST /tasks/:id/approve can resume.
+ */
+interface PendingPlan {
+  submission: TaskSubmission;
+  plan: Plan;
+  scopeClassification: ScopeClassification;
+  createdAt: string;
+}
 
 export interface TaskSubmission {
   /** Raw user request (natural language) */
@@ -276,6 +324,17 @@ export interface RunReceipt {
    * finishes and compare it to the post-run actuals.
    */
   readonly blastRadius: BlastRadiusEstimate | null;
+  /**
+   * GAP 4 — Confidence-based model escalation. Records whether
+   * an escalation was triggered, which model was used, and why.
+   * Null when no builder triggered an escalation.
+   */
+  readonly escalation?: {
+    readonly triggered: boolean;
+    readonly fromConfidence: number;
+    readonly toModel: string;
+    readonly reason: string;
+  } | null;
 }
 
 // ─── Coordinator ─────────────────────────────────────────────────────
@@ -295,6 +354,8 @@ export class Coordinator {
 
   /** Active runs indexed by run ID */
   private activeRuns = new Map<string, ActiveRun>();
+  /** Pending decomposition plans awaiting approval, indexed by task ID */
+  private pendingPlans = new Map<string, PendingPlan>();
 
   constructor(
     config: Partial<CoordinatorConfig>,
@@ -317,6 +378,100 @@ export class Coordinator {
   }
 
   // ─── Public API ────────────────────────────────────────────────────
+
+  /**
+   * Submit a task with pre-execution gates (ambiguity detection +
+   * decomposition). Returns a discriminated union so the route handler
+   * can respond with the appropriate HTTP status / body.
+   */
+  async submitWithGates(submission: TaskSubmission): Promise<TaskSubmissionResult> {
+    const input = submission.input.trim();
+
+    // GAP 1 — Ambiguity detection
+    if (detectAmbiguity(input)) {
+      console.log(`[coordinator] ambiguity detected — prompt too vague: "${input}"`);
+      return {
+        kind: "needs_clarification",
+        question: "Which file or function should I modify? Be specific.",
+      };
+    }
+
+    // GAP 2 — Decomposition gate: run scope classification early
+    // to check if decomposition is recommended before full execution.
+    const effectiveProjectRoot = submission.projectRoot ?? this.config.projectRoot;
+    const projectMemory = await loadMemory(effectiveProjectRoot);
+    const gated = gateContext(projectMemory, input);
+    const normalizedInput = await normalizePrompt(input, gated, effectiveProjectRoot);
+
+    const analysis = this.charterGen.analyzeRequest(normalizedInput);
+    const charter = this.charterGen.generateCharter(analysis);
+    const charterTargets = Array.from(
+      new Set(charter.deliverables.flatMap((d) => [...d.targetFiles])),
+    );
+    const scopeClassification = classifyScope(normalizedInput, charterTargets);
+
+    if (scopeClassification.recommendDecompose) {
+      console.log(
+        `[coordinator] large scope detected (blast=${scopeClassification.blastRadius}) — generating decomposition plan`,
+      );
+      const constraints = [
+        ...this.charterGen.generateDefaultConstraints(analysis),
+        ...(submission.extraConstraints ?? []),
+      ];
+      const intent = createIntent({
+        runId: randomUUID(),
+        userRequest: normalizedInput,
+        charter,
+        constraints,
+        exclusions: submission.exclusions,
+      });
+      const baseChangeSet = createChangeSet(intent, charterTargets);
+      const invariants = await extractInvariants(charterTargets, effectiveProjectRoot);
+      const changeSet: ChangeSet = Object.freeze({
+        ...baseChangeSet,
+        invariants: Object.freeze(invariants),
+      });
+      const plan = planChangeSet(changeSet, normalizedInput);
+      const taskId = `plan_${randomUUID().slice(0, 8)}`;
+
+      this.pendingPlans.set(taskId, {
+        submission,
+        plan,
+        scopeClassification,
+        createdAt: new Date().toISOString(),
+      });
+
+      return {
+        kind: "needs_decomposition",
+        plan,
+        message: `This task is large (blast radius ${scopeClassification.blastRadius}, ${plan.waves.length} wave(s)). Here's how I'd break it down. Reply 'approve' to proceed or refine the plan.`,
+      };
+    }
+
+    // No gates tripped — proceed with full execution
+    const receiptPromise = this.submit(submission);
+    return { kind: "executing", receipt: receiptPromise };
+  }
+
+  /**
+   * Approve a pending decomposition plan and resume execution.
+   * Returns null if no pending plan found for the given taskId.
+   */
+  approvePlan(taskId: string): { receipt: Promise<RunReceipt> } | null {
+    const pending = this.pendingPlans.get(taskId);
+    if (!pending) return null;
+    this.pendingPlans.delete(taskId);
+    console.log(`[coordinator] plan approved for ${taskId} — resuming execution`);
+    const receipt = this.submit(pending.submission);
+    return { receipt };
+  }
+
+  /**
+   * Get a pending plan by task ID, if one exists.
+   */
+  getPendingPlan(taskId: string): PendingPlan | undefined {
+    return this.pendingPlans.get(taskId);
+  }
 
   /**
    * Submit a task and run the full build pipeline.
@@ -385,6 +540,27 @@ export class Coordinator {
     );
     if (scopeClassification.recommendDecompose) {
       console.warn("[coordinator] WARN: large scope detected — consider decomposing this task.");
+    }
+
+    // GAP 3 — Architectural context gate: when scope is architectural,
+    // build a repo-wide hub-file index and merge it into the gated
+    // context so workers see the most-connected files regardless of
+    // prompt relevance. The hub summary is injected as a memoryNote.
+    if (scopeClassification.type === "architectural") {
+      console.log("[coordinator] architectural scope — building hub-file index for context gate");
+      try {
+        const repoIndex = await this.buildRepoHubIndex(effectiveProjectRoot);
+        const archContext = gateContextForArchitectural(projectMemory, normalizedInput, repoIndex);
+        gatedContext = mergeGatedContext(gatedContext, archContext);
+        console.log(
+          `[coordinator] architectural gate: injected ${repoIndex.length} hub files, ` +
+          `${archContext.inclusionLog?.length ?? 0} inclusion log entries`,
+        );
+      } catch (err) {
+        console.warn(
+          `[coordinator] architectural gate failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     // Human-Readable Execution + Trust Layer v1 — compute a user-
@@ -513,6 +689,7 @@ export class Coordinator {
       waveVerifications: [],
       rawUserPrompt: input,
       blastRadius,
+      runInvocationContext: createRunInvocationContext(),
     };
     this.activeRuns.set(run.id, active);
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
@@ -1397,6 +1574,49 @@ export class Coordinator {
             acceptedBy: "coordinator",
             taskId: node.runTaskId,
           });
+        }
+      }
+
+      // GAP 4 — Confidence-based escalation: if a builder completed
+      // with low confidence, retry with a better model (capped at 1
+      // escalation per run). The escalation result is logged and
+      // added to the run receipt via the workerResults array.
+      for (const { node, result } of results) {
+        if (
+          node.workerType === "builder" &&
+          result.success &&
+          typeof result.confidence === "number" &&
+          result.confidence < 0.6 &&
+          active.runInvocationContext.escalationCount < 1
+        ) {
+          console.log(
+            `[coordinator] GAP4: builder ${node.id.slice(0, 6)} confidence=${(result.confidence * 100).toFixed(0)}% — attempting escalation`,
+          );
+          const escalation = await escalateOnLowConfidence(
+            result.confidence,
+            {
+              provider: "anthropic",
+              model: "claude-sonnet-4-6",
+              prompt: active.normalizedInput,
+              systemPrompt: `You are a senior software engineer. The previous attempt had low confidence (${(result.confidence * 100).toFixed(0)}%). Review and improve the output.`,
+              runId: run.id,
+            },
+            active.runInvocationContext,
+          );
+          if (escalation.escalated && escalation.result) {
+            console.log(
+              `[coordinator] GAP4: escalation succeeded — cost=$${escalation.result.costUsd.toFixed(6)}`,
+            );
+            recordDecision(run, {
+              description: `Confidence escalation: builder ${node.id.slice(0, 6)} at ${(result.confidence * 100).toFixed(0)}% → retried with ${escalation.escalationModel}`,
+              madeBy: "coordinator",
+              taskId: node.runTaskId,
+              alternatives: ["Accept low-confidence result"],
+              rationale: escalation.reason,
+            });
+          } else {
+            console.log(`[coordinator] GAP4: escalation skipped/failed — ${escalation.reason}`);
+          }
         }
       }
 
@@ -2382,6 +2602,14 @@ export class Coordinator {
       executionReceipts: executionDecision ? [...executionDecision.workerReceipts] : [],
       humanSummary: null,
       blastRadius: active.blastRadius ?? null,
+      escalation: active.runInvocationContext.escalationCount > 0
+        ? {
+            triggered: true,
+            fromConfidence: 0,
+            toModel: "claude-sonnet-4-6",
+            reason: `${active.runInvocationContext.escalationCount} escalation(s) triggered due to low builder confidence`,
+          }
+        : null,
     };
 
     // Compose the human-readable summary from the receipt we just
@@ -2557,6 +2785,69 @@ export class Coordinator {
     });
   }
 
+  // ─── Repo Hub Index (GAP 3) ─────────────────────────────────────────
+
+  /**
+   * Build a lightweight repo import-connectivity index by scanning
+   * TypeScript/JavaScript files for import statements and counting
+   * how many files import each target. Returns the top N most-imported
+   * files sorted by import count descending.
+   */
+  private async buildRepoHubIndex(
+    projectRoot: string,
+  ): Promise<{ file: string; importedByCount: number }[]> {
+    const { readdir, readFile } = await import("fs/promises");
+    const { join, relative } = await import("path");
+
+    const importCounts = new Map<string, number>();
+
+    async function walkDir(dir: string): Promise<string[]> {
+      const files: string[] = [];
+      try {
+        const entries = await readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") continue;
+          const fullPath = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            files.push(...await walkDir(fullPath));
+          } else if (/\.[tj]sx?$/.test(entry.name)) {
+            files.push(fullPath);
+          }
+        }
+      } catch { /* ignore permission errors */ }
+      return files;
+    }
+
+    const allFiles = await walkDir(projectRoot);
+    const importPattern = /(?:from\s+['"]|import\s+['"]|require\s*\(\s*['"])([^'"]+)['"]/g;
+
+    for (const filePath of allFiles) {
+      try {
+        const content = await readFile(filePath, "utf-8");
+        let match: RegExpExecArray | null;
+        while ((match = importPattern.exec(content)) !== null) {
+          const importPath = match[1];
+          if (!importPath || importPath.startsWith(".")) {
+            // Resolve relative imports to a canonical path
+            const resolvedDir = join(filePath, "..");
+            let resolved = join(resolvedDir, importPath);
+            // Strip .js extension used in ESM imports
+            resolved = resolved.replace(/\.js$/, ".ts");
+            const rel = relative(projectRoot, resolved);
+            importCounts.set(rel, (importCounts.get(rel) ?? 0) + 1);
+          } else {
+            // External package — skip
+          }
+        }
+      } catch { /* skip unreadable files */ }
+    }
+
+    return [...importCounts.entries()]
+      .map(([file, count]) => ({ file, importedByCount: count }))
+      .sort((a, b) => b.importedByCount - a.importedByCount)
+      .slice(0, 10);
+  }
+
   // ─── Event Helpers ─────────────────────────────────────────────────
 
   private emit(event: AedisEvent): void {
@@ -2650,6 +2941,8 @@ interface ActiveRun {
    * run summary for after-run comparison.
    */
   blastRadius: BlastRadiusEstimate | null;
+  /** Per-run invocation context for confidence-based escalation (GAP 4). */
+  runInvocationContext: RunInvocationContext;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────

@@ -1,0 +1,58 @@
+{
+  "id": "aedis-outcome:c8d82dc2-fe34-4d6e-bc7b-23991061833c",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/model-invoker.ts, add a comment to the invokeModel function explaining the timeout default",
+  "summary": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval",
+  "raw": "{\n  \"issues\": [\n    \"Debug logging added without contract approval\",\n    \"Worker \\\"critic\\\" (task 82e6381f-92bc-40ca-a7e9-0e322304b91b) reported no touched files\",\n    \"Worker critic: Debug logging added without contract approval\",\n    \"Worker verifier: Worker critic: Debug logging added without contract approval\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval\",\n        \"files\": [\n          \"core/model-invoker.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:invariants-unsatisfied\",\n        \"message\": \"Change-set coherence verdict failed.\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-1\",\n        \"message\": \"Wave 1 (schema/types) verification failed: [wave 1 schema/types] FAIL — 4/6 stages passed, confidence 84%, 1 blockers, checks typecheck:pass, tests:fail, skipped checks: lint\",\n        \"files\": [\n          \"core/model-invoker.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval\",\n        \"files\": [\n          \"core/model-invoker.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:invariants-unsatisfied\",\n        \"message\": \"Change-set coherence verdict failed.\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-1\",\n        \"message\": \"Wave 1 (schema/types) verification failed: [wave 1 schema/types] FAIL — 4/6 stages passed, confidence 84%, 1 blockers, checks typecheck:pass, tests:fail, skipped checks: lint\",\n        \"files\": [\n          \"core/model-invoker.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-12T18:28:31.083Z",
+  "updatedAt": "2026-04-12T18:28:31.092Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "core/change-set.ts",
+    "core/charter.ts",
+    "core/confidence-scoring.ts",
+    "core/model-invoker.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c8d82dc2-fe34-4d6e-bc7b-23991061833c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3eb7e15c-bc00-44a4-a73e-1f7a8fdf0d55",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:c8d82dc2-fe34-4d6e-bc7b-23991061833c",
+    "aedis-task:c8d82dc2-fe34-4d6e-bc7b-23991061833c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c8d82dc2-fe34-4d6e-bc7b-23991061833c"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c8d82dc2-fe34-4d6e-bc7b-23991061833c"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval"
+  }
+}

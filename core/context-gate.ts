@@ -47,6 +47,7 @@ const MAX_RELEVANT_FILES = 10;
 const MAX_RECENT_TASKS = 3;
 const MAX_WAVE_INVARIANTS = 12;
 const MAX_WAVE_SIBLINGS = 6;
+const MAX_ARCHITECTURAL_HUB_FILES = 10;
 
 /**
  * Base context gate — used when there is no wave context yet (single-file
@@ -164,6 +165,51 @@ export function gateContextForWave(inputs: WaveContextInputs): GatedContext {
     ...base,
     waveInvariants,
     waveSiblings: rankedSiblings.map((entry) => entry.file),
+    inclusionLog: log,
+  };
+}
+
+/**
+ * Architectural-mode gate — triggered when scopeClassification.type === 'architectural'.
+ * Reads the repo index to find the top 10 most-connected files (files imported
+ * by the most other files), includes those as context regardless of prompt
+ * relevance, and injects a repo-wide summary at the top of every worker prompt.
+ */
+export function gateContextForArchitectural(
+  memory: ProjectMemory,
+  prompt: string,
+  repoIndex: { file: string; importedByCount: number }[],
+): GatedContext {
+  const base = gateContext(memory, prompt);
+  const log: string[] = [];
+
+  for (const file of base.relevantFiles) {
+    log.push(`relevant: ${file} — prompt word match on project memory`);
+  }
+
+  // Find top N most-connected hub files from the repo index
+  const sorted = [...repoIndex]
+    .sort((a, b) => b.importedByCount - a.importedByCount)
+    .slice(0, MAX_ARCHITECTURAL_HUB_FILES);
+
+  const hubFiles = sorted.map((entry) => entry.file);
+  for (const entry of sorted) {
+    log.push(
+      `hub: ${entry.file} — imported by ${entry.importedByCount} file(s) (architectural mode)`,
+    );
+  }
+
+  // Merge hub files into relevant files, deduped
+  const allRelevant = uniqueStrings([...base.relevantFiles, ...hubFiles]);
+
+  const architecturalNote =
+    `This is an architectural change. Key hub files: ${hubFiles.join(", ")}. ` +
+    `Proceed with awareness of downstream impact.`;
+
+  return {
+    ...base,
+    relevantFiles: allRelevant,
+    memoryNotes: [...(base.memoryNotes ?? []), architecturalNote],
     inclusionLog: log,
   };
 }
