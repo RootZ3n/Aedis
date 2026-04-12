@@ -739,12 +739,84 @@ export class VerificationPipeline {
 // ─── Hook Factories ──────────────────────────────────────────────────
 
 /**
+ * Detect whether a package.json at `dir` has a "lint" script.
+ */
+async function hasLintScript(dir: string): Promise<boolean> {
+  try {
+    const { readFile: rf } = await import("fs/promises");
+    const { join } = await import("path");
+    const raw = await rf(join(dir, "package.json"), "utf8");
+    const pkg = JSON.parse(raw) as { scripts?: Record<string, string> };
+    return Boolean(pkg.scripts?.["lint"]);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detect pnpm workspace: if pnpm-workspace.yaml exists at `root`,
+ * find the closest package directory for one of the changed files.
+ * Returns the package dir to run lint from, or null if not a workspace.
+ */
+async function findPnpmWorkspacePackageDir(
+  root: string,
+  changedFiles: string[],
+): Promise<string | null> {
+  try {
+    const { access } = await import("fs/promises");
+    const { join, dirname } = await import("path");
+    await access(join(root, "pnpm-workspace.yaml"));
+
+    // Walk up from the first changed file to find the nearest
+    // package.json that isn't the root's.
+    for (const file of changedFiles) {
+      let dir = dirname(join(root, file));
+      while (dir.length >= root.length) {
+        if (dir === root) break;
+        try {
+          await access(join(dir, "package.json"));
+          return dir;
+        } catch {
+          dir = dirname(dir);
+        }
+      }
+    }
+  } catch {
+    // No pnpm-workspace.yaml — not a workspace
+  }
+  return null;
+}
+
+/**
+ * Check if an error message indicates a missing npm script rather
+ * than an actual lint failure.
+ */
+function isMissingScriptError(stderr: string, stdout: string): boolean {
+  const combined = `${stderr}\n${stdout}`.toLowerCase();
+  return (
+    combined.includes("missing script") ||
+    combined.includes('npm err! missing script: "lint"') ||
+    combined.includes("error: script \"lint\" not found") ||
+    combined.includes('npm error missing script: "lint"')
+  );
+}
+
+/**
  * Create a lint hook that shells out to a linter.
+ *
+ * Workspace-aware:
+ *   - If pnpm-workspace.yaml exists, finds the nearest package dir
+ *     for the changed files and runs lint there.
+ *   - If no lint script exists in the target package.json, returns
+ *     a passing result with an advisory skip (not a blocker).
+ *   - If the lint command fails with "Missing script", treats it
+ *     as a skip rather than a failure.
  */
 export function createLintHook(config: {
   name?: string;
   command: string;
   args?: string[];
+  projectRoot?: string;
   parseOutput?: (stdout: string) => VerificationIssue[];
 }): ToolHook {
   return {
@@ -753,13 +825,47 @@ export function createLintHook(config: {
     kind: "lint",
     async execute(changedFiles: string[]): Promise<ToolHookResult> {
       const start = Date.now();
-      try {
-        const { execFile } = await import("child_process");
-        const { promisify } = await import("util");
-        const exec = promisify(execFile);
+      const { execFile } = await import("child_process");
+      const { promisify } = await import("util");
+      const exec = promisify(execFile);
 
+      // Resolve the directory to run lint from.
+      const root = config.projectRoot ?? process.cwd();
+      let cwd = root;
+
+      // Check for pnpm workspace — run from the package dir, not root.
+      const workspacePkgDir = await findPnpmWorkspacePackageDir(root, changedFiles);
+      if (workspacePkgDir) {
+        cwd = workspacePkgDir;
+        console.log(`[lint] pnpm workspace detected — running from ${cwd}`);
+      }
+
+      // If the target directory has no lint script, skip gracefully.
+      if (!(await hasLintScript(cwd))) {
+        // Also check root as fallback (monorepo root may have the script)
+        if (cwd !== root && (await hasLintScript(root))) {
+          cwd = root;
+          console.log(`[lint] no lint script in workspace package, using root`);
+        } else {
+          console.log(`[lint] no lint script found in ${cwd} — skipping`);
+          return {
+            passed: true,
+            issues: [{
+              stage: "lint",
+              severity: "info",
+              message: `No lint script in package.json — skipped`,
+            }],
+            stdout: "",
+            stderr: "",
+            exitCode: 0,
+            durationMs: Date.now() - start,
+          };
+        }
+      }
+
+      try {
         const args = [...(config.args ?? []), ...changedFiles];
-        const result = await exec(config.command, args, { timeout: 30_000 });
+        const result = await exec(config.command, args, { timeout: 30_000, cwd });
 
         return {
           passed: true,
@@ -770,19 +876,39 @@ export function createLintHook(config: {
           durationMs: Date.now() - start,
         };
       } catch (err: any) {
+        const stderr: string = err.stderr ?? "";
+        const stdout: string = err.stdout ?? "";
+
+        // "Missing script" is a config issue, not a lint failure.
+        if (isMissingScriptError(stderr, stdout)) {
+          console.log(`[lint] lint script missing at runtime — treating as skip`);
+          return {
+            passed: true,
+            issues: [{
+              stage: "lint",
+              severity: "info",
+              message: `Lint script not found — skipped`,
+            }],
+            stdout,
+            stderr,
+            exitCode: 0,
+            durationMs: Date.now() - start,
+          };
+        }
+
         const issues: VerificationIssue[] = config.parseOutput
-          ? config.parseOutput(err.stdout ?? "")
+          ? config.parseOutput(stdout)
           : [{
               stage: "lint",
               severity: "error",
-              message: err.stderr ?? err.message ?? "Lint failed",
+              message: stderr || err.message || "Lint failed",
             }];
 
         return {
           passed: false,
           issues,
-          stdout: err.stdout,
-          stderr: err.stderr,
+          stdout,
+          stderr,
           exitCode: err.code ?? 1,
           durationMs: Date.now() - start,
         };

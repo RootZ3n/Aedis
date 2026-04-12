@@ -1,0 +1,59 @@
+{
+  "id": "aedis-suggestions:c8ae3344-4927-4ea6-a293-c7c149079a45",
+  "space": "aedis/project/mnt-ai-squidley-v2",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for c8ae3344-4927-4ea6-a293-c7c149079a45",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: Missing required lint verification hook Validate apps/api/src/lib/personality-loader.ts, apps/api/src/config/advisor-policy.ts, apps/api/src/config/mod…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-12T12:02:50.834Z",
+  "updatedAt": "2026-04-12T12:02:50.899Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/lib/personality-loader.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c8ae3344-4927-4ea6-a293-c7c149079a45",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "fa784e40-a816-41df-83d9-3f10999610b6",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "5d1b4c02-cc4f-431a-9041-f938450adc70",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:c8ae3344-4927-4ea6-a293-c7c149079a45",
+    "aedis-run:c8ae3344-4927-4ea6-a293-c7c149079a45",
+    "aedis-task:c8ae3344-4927-4ea6-a293-c7c149079a45"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c8ae3344-4927-4ea6-a293-c7c149079a45"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c8ae3344-4927-4ea6-a293-c7c149079a45"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 4
+  }
+}
