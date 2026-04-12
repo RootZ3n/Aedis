@@ -34,6 +34,8 @@ import { runRoutes } from "./routes/runs.js";
 import { workerRoutes } from "./routes/workers.js";
 import { healthRoutes } from "./routes/health.js";
 import { configRoutes } from "./routes/config.js";
+import { metricsRoutes } from "./routes/metrics.js";
+import { loquiRoutes } from "./routes/loqui.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -183,6 +185,9 @@ export async function createServer(
   await server.register(workerRoutes, { prefix: "/workers" });
   await server.register(healthRoutes);
   await server.register(configRoutes, { prefix: "/config" });
+  // Metrics + External API Layer v1 — read-only external surface.
+  await server.register(metricsRoutes, { prefix: "/metrics" });
+  await server.register(loquiRoutes, { prefix: "/loqui" });
 
   // ─── WebSocket endpoint ────────────────────────────────────────
 

@@ -70,6 +70,24 @@ export function getTrackedRun(taskId: string): TrackedRun | undefined {
 }
 
 /**
+ * Snapshot of every tracked run, newest first. Read-only — returns
+ * a fresh array so callers can iterate / sort / slice without
+ * touching the internal Map. Used by the external API layer
+ * (Metrics + External API v1) so /metrics, /runs, and /runs/:id
+ * can aggregate across the same registry that /tasks writes to,
+ * without importing the private Map or creating a second source
+ * of truth.
+ */
+export function getAllTrackedRuns(): readonly TrackedRun[] {
+  const out = [...trackedRuns.values()];
+  out.sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
+  return out;
+}
+
+/** Exported type for the external API routes. */
+export type { TrackedRun };
+
+/**
  * Shared build-submit helper. Dispatches a build task through the
  * Coordinator and registers the tracked run state. Used by both the
  * legacy POST /tasks handler and the new unified POST /tasks/loqui

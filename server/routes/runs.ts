@@ -10,6 +10,12 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerContext } from "../index.js";
 import type { WireMessage } from "../websocket.js";
+import {
+  projectRunList,
+  projectRunDetail,
+  type TrackedRunLike,
+} from "../../core/metrics.js";
+import { getAllTrackedRuns, getTrackedRun } from "./tasks.js";
 
 // ─── Request Schemas ─────────────────────────────────────────────────
 
@@ -29,6 +35,12 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /runs — List recent runs with summary.
+   *
+   * Metrics + External API v1: prefers the tracked-run registry
+   * (populated by POST /tasks) so every list item carries the
+   * grounded summary, classification, confidence, and cost from
+   * the RunReceipt. Falls back to the event-bus projection when
+   * the registry is empty (tests, fresh boot, legacy clients).
    */
   fastify.get<{ Querystring: RunsQuery }>(
     "/",
@@ -36,10 +48,28 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
       const limit = Math.min(request.query.limit ?? 20, 100);
       const statusFilter = request.query.status;
 
-      // Pull from event history — in production this would be a database
+      const tracked = getAllTrackedRuns() as unknown as readonly TrackedRunLike[];
+      if (tracked.length > 0) {
+        const projected = projectRunList(tracked, limit)
+          .filter(
+            (run) =>
+              !statusFilter ||
+              run.status === statusFilter ||
+              run.classification === statusFilter,
+          );
+        reply.send({
+          runs: projected,
+          total: projected.length,
+          source: "tracked-runs",
+        });
+        return;
+      }
+
+      // Fallback: event-bus projection. Unchanged from the
+      // pre-v1 implementation so existing clients and tests keep
+      // working when the tracked registry is empty.
       const events = ctx().eventBus.recentEvents(500);
 
-      // Group events by run
       const runMap = new Map<string, WireMessage[]>();
       for (const event of events) {
         const runId = (event.payload as any).runId;
@@ -49,7 +79,6 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
         runMap.set(runId, existing);
       }
 
-      // Build summaries
       const runs = [...runMap.entries()]
         .map(([runId, runEvents]) => {
           const started = runEvents.find((e) => e.type === "run_started");
@@ -73,19 +102,45 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
       reply.send({
         runs,
         total: runs.length,
+        source: "event-bus",
       });
     }
   );
 
   /**
    * GET /runs/:id — Full run detail including task graph state.
+   *
+   * Metrics + External API v1: first checks the tracked-run
+   * registry. If `id` matches a tracked task or run ID, returns
+   * the projected detail (receipts + files changed + summary +
+   * confidence + errors) — the response shape the external API
+   * contract specifies. Active-run and event-bus fallbacks are
+   * preserved so in-flight lookups and legacy event-only runs
+   * continue to work.
    */
   fastify.get<{ Params: RunParams }>(
     "/:id",
     async (request: FastifyRequest<{ Params: RunParams }>, reply: FastifyReply) => {
       const { id } = request.params;
 
-      // Check active runs first
+      // Try tracked registry first — either the task_id or the
+      // runId. `getTrackedRun` keys on task_id; a linear scan
+      // covers the runId case without needing a second index.
+      const byTaskId = getTrackedRun(id);
+      const tracked =
+        byTaskId ??
+        (getAllTrackedRuns() as unknown as readonly TrackedRunLike[]).find(
+          (r) => r.runId === id,
+        );
+      if (tracked) {
+        const detail = projectRunDetail(tracked as unknown as TrackedRunLike);
+        if (detail) {
+          reply.send({ ...detail, source: "tracked-runs" });
+          return;
+        }
+      }
+
+      // Check active runs (in-flight coordinator state)
       const active = ctx().coordinator.getRunStatus(id);
       if (active) {
         reply.send({
