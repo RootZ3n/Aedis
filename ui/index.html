@@ -6,7 +6,7 @@
   <title>Aedis</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       color-scheme: dark;
@@ -27,7 +27,7 @@
       --panel: rgba(8, 12, 24, 0.72);
       --panel-strong: rgba(11, 16, 32, 0.92);
       --shadow: 0 20px 80px rgba(0, 0, 0, 0.55);
-      --font-ui: "Trebuchet MS", "Segoe UI", sans-serif;
+      --font-ui: "Space Grotesk", "Trebuchet MS", "Segoe UI", sans-serif;
       --font-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
       --font-lumen: "DM Mono", "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
     }
@@ -62,6 +62,29 @@
     @keyframes pulseGlow {
       0%, 100% { transform: translateY(0) scale(1); filter: brightness(1); }
       50% { transform: translateY(-1px) scale(1.02); filter: brightness(1.2); }
+    }
+
+    @keyframes breathe {
+      0%, 100% { opacity: 0.7; }
+      50% { opacity: 1; }
+    }
+
+    @keyframes borderBreathe {
+      0%, 100% {
+        border-color: rgba(132, 201, 255, 0.14);
+        box-shadow:
+          inset 0 1px 0 rgba(186, 236, 255, 0.08),
+          inset 0 0 28px rgba(20, 50, 90, 0.18),
+          0 18px 44px rgba(0, 0, 0, 0.3);
+      }
+      50% {
+        border-color: rgba(132, 201, 255, 0.24);
+        box-shadow:
+          inset 0 1px 0 rgba(186, 236, 255, 0.14),
+          inset 0 0 34px rgba(20, 50, 90, 0.24),
+          0 18px 44px rgba(0, 0, 0, 0.36),
+          0 0 22px rgba(111, 217, 255, 0.10);
+      }
     }
 
     @keyframes idleBadgePulse {
@@ -141,11 +164,31 @@
     }
 
     .panel {
-      background: linear-gradient(180deg, rgba(10, 15, 28, 0.88), rgba(6, 10, 20, 0.92));
-      border: 1px solid var(--line);
+      position: relative;
+      background:
+        radial-gradient(circle at 18% 18%, rgba(111, 217, 255, 0.08), transparent 32%),
+        radial-gradient(circle at 84% 16%, rgba(188, 140, 255, 0.08), transparent 28%),
+        linear-gradient(180deg, rgba(10, 15, 28, 0.9), rgba(6, 10, 20, 0.94));
+      border: 1px solid rgba(132, 201, 255, 0.16);
       border-radius: 24px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
+      box-shadow:
+        inset 0 1px 0 rgba(186, 236, 255, 0.1),
+        inset 0 0 28px rgba(20, 50, 90, 0.18),
+        var(--shadow);
+      backdrop-filter: blur(16px);
+      animation: borderBreathe 6s ease-in-out infinite;
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 8%;
+      right: 8%;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(111,217,255,0.7) 0%, rgba(77,245,200,0.58) 28%, rgba(188,140,255,0.54) 62%, rgba(245,158,11,0.48) 100%);
+      opacity: 0.82;
+      pointer-events: none;
     }
 
     .hero {
@@ -186,7 +229,7 @@
       margin: 0;
       font-size: clamp(40px, 6vw, 88px);
       line-height: 0.95;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--ink);
       text-shadow: 0 0 18px rgba(251, 146, 60, 0.18);
@@ -264,11 +307,11 @@
       width: fit-content;
       padding: 8px 12px;
       border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid rgba(132,201,255,0.16);
       font-family: var(--font-mono);
       font-size: 11px;
       color: var(--muted);
-      background: rgba(255,255,255,0.03);
+      background: rgba(7,16,34,0.62);
     }
 
     .socket-dot {
@@ -277,6 +320,7 @@
       border-radius: 999px;
       background: currentColor;
       box-shadow: 0 0 14px currentColor;
+      animation: breathe 2.2s ease-in-out infinite;
     }
 
     .prompt-form {
@@ -449,6 +493,21 @@
         workerActivate 0.9s ease-out 1;
     }
 
+    .worker-card.active .worker-badge[data-status="waiting"] {
+      position: relative;
+      color: transparent;
+    }
+
+    .worker-card.active .worker-badge[data-status="waiting"]::after {
+      content: "running";
+      position: absolute;
+      inset: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+    }
+
     .worker-card.idle {
       opacity: 0.8;
       filter: saturate(0.9);
@@ -527,7 +586,7 @@
 
     .graph-shell {
       border-radius: 22px;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid rgba(132,201,255,0.14);
       background:
         radial-gradient(circle at 50% 18%, rgba(77, 245, 200, 0.06), transparent 34%),
         radial-gradient(circle at 15% 80%, rgba(167, 139, 250, 0.06), transparent 24%),
@@ -554,7 +613,8 @@
     .history-card,
     .settings-item {
       border-radius: 18px;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid rgba(132,201,255,0.14);
+      border-top: 2px solid rgba(132,201,255,0.22);
       background: var(--panel);
       padding: 14px;
     }
@@ -1243,13 +1303,25 @@
       modelConfig: { ...DEFAULT_MODEL_CONFIG },
       repoPath: '.',
       submitting: false,
-      loqui: { messages: [], thinking: false, mode: 'ask' }
+      loqui: {
+        messages: [],
+        thinking: false,
+        mode: 'ask',
+        // Map<taskId, { prompt, submittedAt }> — tasks that Loqui
+        // submitted via build mode and is still waiting to summarize
+        // once run_complete arrives. Populated in runBuildFromLoqui,
+        // drained in maybeHandleLoquiBuildCompletion. Not serialized
+        // to localStorage; a reload drops any in-flight follow-ups,
+        // which is fine because the underlying run is still visible
+        // in the worker grid and Lumen log.
+        pendingBuilds: new Map(),
+      }
     };
 
     function createEmptyRun() {
       const workers = {};
       for (const role of ROLE_ORDER) {
-        workers[role] = { role, status: 'idle', model: 'unassigned', currentTask: 'waiting', note: '' };
+        workers[role] = { role, status: 'idle', model: 'unassigned', currentTask: 'waiting', note: '', active: false };
       }
       return {
         id: null,
@@ -1265,7 +1337,12 @@
         graph: { nodes: [], edges: [] },
         workers,
         receipts: [],
-        lumen: []
+        lumen: [],
+        // Execution Truth Enforcement v1 — set to true/false by the
+        // coordinator execution gate events. null = gate has not run
+        // yet, which the UI treats as "unknown" rather than success.
+        executionVerified: null,
+        executionReason: '',
       };
     }
 
@@ -1624,6 +1701,17 @@
         try { state.socket.send(JSON.stringify({ type: 'subscribe', taskId })); } catch {}
       }
 
+      // Register this task for post-run Loqui follow-up. When
+      // run_complete fires for this taskId, ingestEvent will call
+      // maybeHandleLoquiBuildCompletion which POSTs to /tasks/loqui
+      // and pushes the summary back into the chat. We store the
+      // original prompt so the follow-up question can reference what
+      // the user actually asked for, not just the bare verdict.
+      state.loqui.pendingBuilds.set(taskId, {
+        prompt,
+        submittedAt: new Date().toISOString(),
+      });
+
       // Confirmation bubble in the chat. Tells the user the build is
       // queued and where to watch progress — keeps the chat coherent
       // even though the heavy lifting happens in the worker grid.
@@ -1633,6 +1721,87 @@
         mode: 'build',
         at: new Date().toISOString(),
       });
+    }
+
+    /**
+     * Post-run follow-up: after a Loqui-initiated build completes,
+     * ask Loqui to summarize what happened and suggest the next step.
+     * Hooked from ingestEvent on the run_complete / done event path.
+     *
+     * `run` is the local run object ingestEvent has already mutated
+     * with verdict / commitSha / totalCostUsd from the event stream,
+     * so we read from both the payload (highest priority) and the run
+     * (fallback, since run_complete payloads don't always carry full
+     * cost/sha — commit_created fires earlier and populates run.commitSha).
+     *
+     * Any network / parse failure is surfaced as an error bubble so
+     * the user isn't left wondering why the loop never closed.
+     */
+    async function maybeHandleLoquiBuildCompletion(run, payload) {
+      if (!run || !run.id) return;
+      const pending = state.loqui.pendingBuilds.get(run.id);
+      if (!pending) return;
+      // Drain immediately so a duplicate run_complete (retry, resume,
+      // late catchup from history) can't fire a second follow-up.
+      state.loqui.pendingBuilds.delete(run.id);
+
+      const verdict = String(
+        payload.verdict || payload.status || run.verdict || 'complete'
+      );
+      const commitSha = String(
+        payload.commitSha || payload.commit_sha || payload.sha || run.commitSha || ''
+      );
+      const costNum = Number(
+        payload.totalCostUsd ?? payload.total_cost_usd ?? run.totalCostUsd ?? 0,
+      );
+      const costStr = Number.isFinite(costNum) ? costNum.toFixed(4) : '0.0000';
+      const shaDisplay = commitSha ? commitSha.slice(0, 8) : 'none';
+
+      const question =
+        `The build task just completed with verdict=${verdict}, ` +
+        `cost=$${costStr}, commit=${shaDisplay}. ` +
+        `The original request was: "${pending.prompt}". ` +
+        `Summarize what was done and suggest the logical next step.`;
+
+      // Show a thinking indicator in the chat so the user knows Loqui
+      // is about to speak. We reuse the existing thinking flag rather
+      // than inventing a second one — render() already handles it.
+      state.loqui.thinking = true;
+      render();
+
+      try {
+        const res = await fetch(`${API_BASE}/tasks/loqui`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, repoPath: run.repoPath || state.repoPath || '.' }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.message || body.error || `HTTP ${res.status}`);
+        }
+        const data = await res.json().catch(() => ({}));
+        const answer = String(
+          data.answer ?? data.response ?? data.text ?? data.message ?? ''
+        ).trim() || '(Loqui returned no summary)';
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: answer,
+          mode: 'ask',
+          at: new Date().toISOString(),
+        });
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: `Loqui follow-up failed: ${msg}`,
+          mode: 'ask',
+          at: new Date().toISOString(),
+          error: true,
+        });
+      } finally {
+        state.loqui.thinking = false;
+        render();
+      }
     }
 
     function dedupeHistory(items) {
@@ -1821,25 +1990,106 @@
           return;
         }
 
+        // Execution Truth Enforcement v1 — fired by the coordinator
+        // execution gate. These events are the single source of
+        // truth for whether a run actually produced real work. They
+        // always arrive BEFORE run_complete so Lumen can render the
+        // real outcome before any trailing "complete" flourish.
+        case 'execution_verified': {
+          const counts = payload.counts || {};
+          const created = Number(counts.filesCreated || 0);
+          const modified = Number(counts.filesModified || 0);
+          const deleted = Number(counts.filesDeleted || 0);
+          const parts = [];
+          if (created) parts.push(`${created} created`);
+          if (modified) parts.push(`${modified} modified`);
+          if (deleted) parts.push(`${deleted} deleted`);
+          const detail = parts.length > 0 ? parts.join(', ') : 'evidence captured';
+          run.executionVerified = true;
+          run.executionReason = String(payload.reason || '');
+          pushLumen(run, {
+            color: 'bright-teal',
+            icon: '✓',
+            text: `Execution verified — ${detail}`,
+            big: true,
+            verdictClass: 'complete',
+          });
+          return;
+        }
+
+        case 'execution_failed': {
+          const reason = String(
+            payload.reason ||
+            payload.errorMessage ||
+            payload.error ||
+            'no real output produced'
+          );
+          run.executionVerified = false;
+          run.executionReason = reason;
+          pushLumen(run, {
+            color: 'red',
+            icon: '⛔',
+            text: `Execution failed — ${truncate(reason, 120)}`,
+            big: true,
+            verdictClass: 'failed',
+          });
+          return;
+        }
+
         case 'run_complete':
         case 'done': {
+          // Defer to the execution gate's verdict first — if we
+          // already saw an execution_verified / execution_failed
+          // event for this run, that is the authoritative outcome
+          // and run_complete just closes the loop silently.
+          if (run.executionVerified === true) {
+            return;
+          }
+          if (run.executionVerified === false && run.executionReason) {
+            return;
+          }
+
           const verdictRaw = String(
             payload.verdict || payload.status || 'complete'
           ).toLowerCase();
+          // run_complete no longer gets to say "complete" on its own.
+          // If the gate never decided, we treat this as an unknown
+          // state and render it as a failure so the UI never lies.
+          const executionVerifiedFromPayload =
+            payload.executionVerified === true ||
+            payload.execution_verified === true;
+          const executionReasonFromPayload = String(
+            payload.executionReason || payload.execution_reason || ''
+          );
+          if (executionVerifiedFromPayload) {
+            run.executionVerified = true;
+            pushLumen(run, {
+              color: 'bright-teal',
+              icon: '✓',
+              text: `Execution verified${executionReasonFromPayload ? ' — ' + truncate(executionReasonFromPayload, 120) : ''}`,
+              big: true,
+              verdictClass: 'complete',
+            });
+            return;
+          }
           const verdictClass =
             verdictRaw.includes('fail') || verdictRaw.includes('error') ? 'failed'
             : verdictRaw.includes('partial') ? 'partial'
             : verdictRaw.includes('cancel') || verdictRaw.includes('abort') ? 'cancelled'
-            : 'complete';
+            : 'failed'; // strict: unknown gate state is a failure
           const icon =
-            verdictClass === 'failed' ? '❌'
+            verdictClass === 'failed' ? '⛔'
             : verdictClass === 'partial' ? '◐'
             : verdictClass === 'cancelled' ? '⊘'
-            : '◆';
+            : '⛔';
+          const text =
+            verdictClass === 'failed'
+              ? `Execution failed — ${truncate(executionReasonFromPayload || 'no real output', 120)}`
+              : verdictRaw.toUpperCase();
           pushLumen(run, {
             color: '',
             icon,
-            text: verdictRaw.toUpperCase(),
+            text,
             big: true,
             verdictClass,
           });
@@ -1874,6 +2124,17 @@
       if (payload.verdict) run.verdict = String(payload.verdict);
       if (payload.commitSha || payload.commit_sha) run.commitSha = String(payload.commitSha || payload.commit_sha);
       if (type === 'commit_created' && payload.sha) run.commitSha = String(payload.sha);
+
+      // Close the Loqui build loop. If this run was submitted via
+      // build-mode and we're now seeing its completion event, fire
+      // the follow-up question that asks Loqui to summarize what
+      // happened and suggest the next step. Field updates above have
+      // already run, so run.verdict / run.commitSha / run.totalCostUsd
+      // reflect the latest event stream state even when the
+      // run_complete payload itself is sparse.
+      if (type === 'run_complete' || type === 'done') {
+        maybeHandleLoquiBuildCompletion(run, payload);
+      }
 
       if (Array.isArray(payload.receipts)) {
         run.receipts = payload.receipts.map((receipt) => normalizeReceipt(receipt));
@@ -1944,7 +2205,33 @@
       if (payload.task && !payload.graph) mergeTaskIntoGraph(run, payload.task, type);
       if (payload.node) mergeTaskIntoGraph(run, payload.node, type);
 
+      if (type === 'worker_assigned') {
+        const workerType = String(
+          payload.workerType ||
+          payload.worker_type ||
+          (payload.task && (payload.task.workerType || payload.task.worker_type)) ||
+          ''
+        ).toLowerCase();
+        setActiveWorker(run, workerType);
+      }
+
+      if (type === 'task_complete' || type === 'task_failed' || type === 'run_complete') {
+        clearActiveWorkers(run);
+      }
+
       render();
+    }
+
+    function clearActiveWorkers(run) {
+      for (const role of ROLE_ORDER) {
+        run.workers[role].active = false;
+      }
+    }
+
+    function setActiveWorker(run, workerType) {
+      clearActiveWorkers(run);
+      if (!ROLE_ORDER.includes(workerType)) return;
+      run.workers[workerType].active = true;
     }
 
     function appendReceipt(run, receipt) {
@@ -2063,12 +2350,14 @@
       for (const item of workers) {
         const role = String(item.role || item.workerType || item.worker_type || inferWorkerType(item.name || '')).toLowerCase();
         if (!ROLE_ORDER.includes(role)) continue;
+        const previous = run.workers[role] || {};
         run.workers[role] = {
           role,
           status: String(item.status || 'idle'),
           model: String(item.model || item.assignedModel || item.assigned_model || 'unassigned'),
           currentTask: String(item.currentTask || item.task || item.current_task || 'waiting'),
           note: String(item.note || item.detail || ''),
+          active: item.active != null ? Boolean(item.active) : Boolean(previous.active),
         };
       }
     }
@@ -2235,14 +2524,15 @@
         const worker = state.active.workers[role];
         const normalized = String(worker.status || 'idle').toLowerCase();
         const isFailed = /(fail|error)/.test(normalized);
-        const isActive = /(active|running|busy|assigned|working)/.test(normalized);
+        const isActive = Boolean(worker.active);
         const isIdle = !isActive && !isFailed;
         const accent = ROLE_COLORS[role];
+        const badgeStatus = String(worker.status || 'waiting').trim().toLowerCase();
         return `
-          <article class="worker-card ${isActive ? 'active' : ''} ${isIdle ? 'idle' : ''} ${isFailed ? 'failed' : ''}" style="--accent:${accent}">
+          <article class="worker-card ${isActive ? 'active' : ''} ${isIdle ? 'idle' : ''} ${isFailed ? 'failed' : ''}" data-worker-type="${esc(role)}" style="--accent:${accent}">
             <div class="worker-top">
               <div class="worker-role">${esc(role)}</div>
-              <span class="worker-badge">${esc(worker.status)}</span>
+              <span class="worker-badge" data-status="${esc(badgeStatus)}">${esc(worker.status)}</span>
             </div>
             <div class="worker-main">${esc(compactTask(worker.currentTask))}</div>
             <div class="tiny-row">

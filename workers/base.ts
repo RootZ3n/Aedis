@@ -19,6 +19,7 @@
 import type { IntentObject } from "../core/intent.js";
 import type { AssembledContext } from "../core/context-assembler.js";
 import type { GatedContext } from "../core/context-gate.js";
+import type { ExecutionReceipt } from "../core/execution-gate.js";
 import type { CostEntry, Issue, RunTask, RunState } from "../core/runstate.js";
 
 // ─── Worker Types ────────────────────────────────────────────────────
@@ -144,6 +145,14 @@ export interface WorkerResult {
   readonly assumptions: readonly string[];
   /** Wall-clock milliseconds */
   readonly durationMs: number;
+  /**
+   * Optional self-reported execution receipt. Workers that know
+   * exactly what they produced can populate this directly; workers
+   * that leave it unset get a receipt synthesized by the Execution
+   * Gate from `touchedFiles` + `output` at the end of the run. Either
+   * way, every run ends with one receipt per worker in the RunReceipt.
+   */
+  readonly executionReceipt?: ExecutionReceipt;
 }
 
 export interface TouchedFile {

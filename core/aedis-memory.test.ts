@@ -90,6 +90,53 @@ test("buildExecutionContext favors same repo and file area while surfacing landm
   assert.equal(gated.strictVerification, true);
 });
 
+test("persist → retrieve round trip surfaces prior failures and successes on the same file", async () => {
+  const runtime = createFakeRuntime();
+  const adapter = new AedisMemoryAdapter(runtime);
+
+  // A prior failed run on core/coordinator.ts…
+  await adapter.persistRunMemory(samplePersistInput({
+    receipt: sampleReceipt("failed"),
+    verificationReceipt: sampleVerification("fail"),
+    mergeDecision: sampleMergeDecision("block"),
+  }));
+  // …and a second failed run on the same file (two is the landmine threshold).
+  await adapter.persistRunMemory({
+    ...samplePersistInput({
+      receipt: { ...sampleReceipt("failed"), runId: "run-2", id: "receipt-2", intentId: "intent-2" },
+      verificationReceipt: { ...sampleVerification("fail"), runId: "run-2", id: "verify-2" },
+      mergeDecision: sampleMergeDecision("block"),
+    }),
+  });
+  // …and finally a successful run in the same area to validate success recall.
+  await adapter.persistRunMemory({
+    ...samplePersistInput({
+      receipt: { ...sampleReceipt("success"), runId: "run-3", id: "receipt-3", intentId: "intent-3" },
+      verificationReceipt: { ...sampleVerification("pass"), runId: "run-3", id: "verify-3" },
+      mergeDecision: sampleMergeDecision("apply"),
+    }),
+  });
+
+  const context = await adapter.buildExecutionContext({
+    projectRoot: "/repo/aedis",
+    prompt: "regression in coordinator dispatch",
+    projectMemory: sampleProjectMemory(),
+    scopeClassification: { type: "single-file", blastRadius: 2, recommendDecompose: false, reason: "single-file" },
+    targetFiles: ["core/coordinator.ts"],
+  });
+
+  assert.ok(context.relevantFiles.includes("core/coordinator.ts"));
+  assert.ok(
+    context.landmines.some((line) => line.includes("core/coordinator.ts") && line.includes("failed")),
+    `expected landmine on core/coordinator.ts, got: ${JSON.stringify(context.landmines)}`,
+  );
+  assert.ok(
+    context.safeApproaches.some((line) => line.toLowerCase().includes("success") || line.toLowerCase().includes("scope")),
+    `expected a success pattern to surface, got: ${JSON.stringify(context.safeApproaches)}`,
+  );
+  assert.equal(context.strictVerification, true, "landmines should force strict verification");
+});
+
 test("buildExecutionContext stays narrow and does not over-inject unrelated history", async () => {
   const runtime = createFakeRuntime();
   for (let i = 0; i < 12; i += 1) {
@@ -138,7 +185,22 @@ function createFakeRuntime(): AedisMemoryRuntime & { entries: MemoryEntryRecord[
     },
     contextGate: {
       async buildContextPack(request) {
-        const filtered = filterEntries(entries, request).slice(0, Number(request["maxEntries"] ?? 6));
+        // Rank: failure space first (landmine recall beats everything),
+        // then success (safe-pattern recall), then files, then project,
+        // then runs. This mirrors the real substrate's prioritization of
+        // diagnostic-over-chronicle signals when a query names file paths.
+        const priority = (space: string): number => {
+          if (space === "aedis/failures") return 0;
+          if (space === "aedis/success") return 1;
+          if (space === "aedis/files") return 2;
+          if (space.startsWith("aedis/project/")) return 3;
+          if (space === "aedis/runs") return 4;
+          return 5;
+        };
+        const filtered = filterEntries(entries, request)
+          .slice()
+          .sort((a, b) => priority(a.space) - priority(b.space))
+          .slice(0, Number(request["maxEntries"] ?? 6));
         return {
           entries: filtered.map((entry) => ({ entry, score: 1, reasons: [`repo:${entry.repoId ?? ""}`] })),
           totalChars: 0,
@@ -253,6 +315,10 @@ function sampleReceipt(verdict: RunReceipt["verdict"]): RunReceipt {
     totalCost: { model: "test", inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.12 },
     commitSha: verdict === "success" ? "abc123" : null,
     durationMs: 1000,
+    executionVerified: verdict === "success",
+    executionGateReason: verdict === "success" ? "test fixture: verified" : "test fixture: not verified",
+    executionEvidence: [],
+    executionReceipts: [],
   };
 }
 

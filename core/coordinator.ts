@@ -118,6 +118,12 @@ import {
   type GatedContext,
 } from "./context-gate.js";
 import { getAedisMemoryAdapter, toGatedContext } from "./aedis-memory.js";
+import {
+  evaluateExecutionGate,
+  type ExecutionEvidence,
+  type ExecutionGateDecision,
+  type ExecutionReceipt,
+} from "./execution-gate.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
 import { createChangeSet, type ChangeSet } from "./change-set.js";
@@ -216,6 +222,22 @@ export interface RunReceipt {
   readonly commitSha: string | null;
   readonly durationMs: number;
   readonly memorySuggestions?: readonly string[];
+  /**
+   * Execution Truth Enforcement v1. `executionVerified` is the single
+   * authority on whether the run produced real, verifiable work —
+   * files created/modified/deleted on disk, a real commit SHA, or an
+   * explicit read-only output. When false, the run is forced to the
+   * "failed" verdict regardless of how other gates scored, and
+   * `executionGateReason` explains why.
+   *
+   * `executionEvidence` is the full audit trail of what the gate
+   * observed; `executionReceipts` is one synthesized receipt per
+   * worker so Lumen can render "exactly what changed" per stage.
+   */
+  readonly executionVerified: boolean;
+  readonly executionGateReason: string;
+  readonly executionEvidence: readonly ExecutionEvidence[];
+  readonly executionReceipts: readonly ExecutionReceipt[];
 }
 
 // ─── Coordinator ─────────────────────────────────────────────────────
@@ -379,6 +401,19 @@ export class Coordinator {
           landmines: memoryContext.landmines,
           strictVerification: memoryContext.strictVerification,
         }));
+        if (memoryContext.inclusionLog.length > 0) {
+          console.log(
+            `[coordinator] memory-backed gate: ${memoryContext.inclusionLog.length} item(s) in inclusion log`,
+          );
+          for (const line of memoryContext.inclusionLog) {
+            console.log(`[coordinator] memory-backed   ${line}`);
+          }
+        }
+        if (memoryContext.memoryNotes.length > 0) {
+          console.log(
+            `[coordinator] memory-backed gate: ${memoryContext.memoryNotes.length} high-signal note(s) injected`,
+          );
+        }
       }
     } catch (err) {
       console.warn(`[coordinator] memory-backed gate unavailable: ${err instanceof Error ? err.message : String(err)}`);
@@ -663,13 +698,42 @@ export class Coordinator {
         }
       }
 
-      // Finalize
-      console.log(`[coordinator] FINALIZE — verdict=${verdict} (cancelled=${active.cancelled} phase=${run.phase} hasFailedNodes=${hasFailedNodes(active.graph)} workerResults=${active.workerResults.length})`);
+      // Execution Truth Enforcement v1 — the single authority on
+      // whether this run actually produced real, verifiable work.
+      // Runs AFTER every other gate so it sees the final state of
+      // changes / commitSha / verification, and its decision can
+      // override the verdict: a "success" from determineVerdict that
+      // produces zero evidence is forced to "failed" here.
+      const executionDecision = evaluateExecutionGate({
+        runId: run.id,
+        projectRoot: active.projectRoot,
+        workerResults: active.workerResults,
+        changes: active.changes,
+        commitSha,
+        verificationReceipt,
+        graphNodeCount: active.graph.nodes.length,
+        cancelled: active.cancelled,
+        thrownError: null,
+      });
+      this.logExecutionDecision(executionDecision);
 
-      if (verdict === "success" || verdict === "partial") {
+      const verdictAfterGate: RunReceipt["verdict"] =
+        !executionDecision.executionVerified && (verdict === "success" || verdict === "partial")
+          ? "failed"
+          : verdict;
+
+      // Finalize
+      console.log(`[coordinator] FINALIZE — verdict=${verdictAfterGate} (pre-gate=${verdict} executionVerified=${executionDecision.executionVerified} cancelled=${active.cancelled} phase=${run.phase} hasFailedNodes=${hasFailedNodes(active.graph)} workerResults=${active.workerResults.length})`);
+
+      if (verdictAfterGate === "success" || verdictAfterGate === "partial") {
         advancePhase(run, "complete");
       } else {
-        failRun(run, "Build did not pass all checks");
+        failRun(
+          run,
+          !executionDecision.executionVerified
+            ? executionDecision.reason
+            : "Build did not pass all checks",
+        );
       }
 
       const receipt = this.buildReceipt(
@@ -679,6 +743,8 @@ export class Coordinator {
         commitSha,
         Date.now() - startTime,
         mergeDecision,
+        executionDecision,
+        verdictAfterGate,
       );
       active.memorySuggestions = await this.persistMemoryArtifacts(
         active,
@@ -694,9 +760,13 @@ export class Coordinator {
         ? { ...receipt, memorySuggestions: [...active.memorySuggestions] }
         : receipt;
 
-      console.log(`[coordinator] ═══ submit() exit — verdict=${verdict} duration=${Date.now() - startTime}ms`);
-      this.emit({ type: "run_complete", payload: { runId: run.id, verdict } });
-      this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id } });
+      // Emit execution_verified / execution_failed BEFORE run_complete
+      // so the UI can render real state before any "complete" flourish.
+      this.emitExecutionEvent(run.id, executionDecision);
+
+      console.log(`[coordinator] ═══ submit() exit — verdict=${verdictAfterGate} duration=${Date.now() - startTime}ms`);
+      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason } });
+      this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id, receipt: finalReceipt } });
 
       return finalReceipt;
     } catch (err) {
@@ -716,7 +786,35 @@ export class Coordinator {
       console.error(`[coordinator]   duration before failure:   ${Date.now() - startTime}ms`);
 
       failRun(run, errMessage);
-      const receipt = this.buildReceipt(active, verificationReceipt, judgmentReport, null, Date.now() - startTime);
+
+      // Execution gate on the exception path — a thrown error is
+      // always an "errored" verdict and can never flip to success.
+      // The gate still collects whatever evidence exists (partial
+      // file writes, etc.) so the receipt tells the truth about
+      // what got done before the failure.
+      const executionDecision = evaluateExecutionGate({
+        runId: run.id,
+        projectRoot: active.projectRoot,
+        workerResults: active.workerResults,
+        changes: active.changes,
+        commitSha: null,
+        verificationReceipt,
+        graphNodeCount: active.graph.nodes.length,
+        cancelled: active.cancelled,
+        thrownError: err instanceof Error ? err : new Error(errMessage),
+      });
+      this.logExecutionDecision(executionDecision);
+
+      const receipt = this.buildReceipt(
+        active,
+        verificationReceipt,
+        judgmentReport,
+        null,
+        Date.now() - startTime,
+        null,
+        executionDecision,
+        "failed",
+      );
       active.memorySuggestions = await this.persistMemoryArtifacts(
         active,
         input,
@@ -730,7 +828,11 @@ export class Coordinator {
       const finalReceipt: RunReceipt = active.memorySuggestions.length > 0
         ? { ...receipt, memorySuggestions: [...active.memorySuggestions] }
         : receipt;
+
+      this.emitExecutionEvent(run.id, executionDecision);
       console.log(`[coordinator] ═══ submit() exit (failed) — verdict=${receipt.verdict} duration=${Date.now() - startTime}ms`);
+      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: "failed", executionVerified: false, executionReason: executionDecision.reason, error: errMessage } });
+      this.emit({ type: "receipt_generated", payload: { receiptId: finalReceipt.id, receipt: finalReceipt } });
       return finalReceipt;
     } finally {
       this.activeRuns.delete(run.id);
@@ -1868,6 +1970,8 @@ export class Coordinator {
     commitSha: string | null,
     durationMs: number,
     mergeDecision: MergeDecision | null = null,
+    executionDecision: ExecutionGateDecision | null = null,
+    verdictOverride: RunReceipt["verdict"] | null = null,
   ): RunReceipt {
     // Aggregate cost from worker results.
     let inputTokens = 0;
@@ -1936,12 +2040,22 @@ export class Coordinator {
       ? { model: model || "unknown", inputTokens, outputTokens, estimatedCostUsd }
       : active.run.totalCost;
 
+    // Determine the verdict: prefer the override passed by submit()
+    // (which has already applied execution-gate truth enforcement),
+    // fall back to determineVerdict for legacy/test callers.
+    const rawVerdict = this.determineVerdict(active, verificationReceipt, judgmentReport, mergeDecision);
+    const verdict: RunReceipt["verdict"] =
+      verdictOverride ??
+      (executionDecision && !executionDecision.executionVerified && (rawVerdict === "success" || rawVerdict === "partial")
+        ? "failed"
+        : rawVerdict);
+
     return {
       id: randomUUID(),
       runId: active.run.id,
       intentId: active.intent.id,
       timestamp: new Date().toISOString(),
-      verdict: this.determineVerdict(active, verificationReceipt, judgmentReport, mergeDecision),
+      verdict,
       summary: getRunSummary(active.run),
       graphSummary: getGraphSummary(active.graph),
       verificationReceipt,
@@ -1951,7 +2065,60 @@ export class Coordinator {
       totalCost: aggregatedCost,
       commitSha,
       durationMs,
+      executionVerified: executionDecision?.executionVerified ?? false,
+      executionGateReason:
+        executionDecision?.reason ??
+        "Execution gate was not evaluated for this run",
+      executionEvidence: executionDecision ? [...executionDecision.evidence] : [],
+      executionReceipts: executionDecision ? [...executionDecision.workerReceipts] : [],
     };
+  }
+
+  /**
+   * Emit the appropriate execution event so the UI can render real
+   * state. "execution_verified" is fired when the gate saw at least
+   * one piece of verifiable evidence; "execution_failed" is fired
+   * otherwise (no-op, cancelled, or errored).
+   */
+  private emitExecutionEvent(runId: string, decision: ExecutionGateDecision): void {
+    if (decision.executionVerified) {
+      this.emit({
+        type: "execution_verified",
+        payload: {
+          runId,
+          reason: decision.reason,
+          counts: decision.counts,
+          evidence: decision.evidence,
+          receipts: decision.workerReceipts,
+        },
+      });
+      return;
+    }
+    this.emit({
+      type: "execution_failed",
+      payload: {
+        runId,
+        reason: decision.reason,
+        verdict: decision.verdict,
+        errorMessage: decision.errorMessage,
+        counts: decision.counts,
+        evidence: decision.evidence,
+        receipts: decision.workerReceipts,
+      },
+    });
+  }
+
+  private logExecutionDecision(decision: ExecutionGateDecision): void {
+    console.log(
+      `[coordinator] execution-gate: verdict=${decision.verdict} ` +
+      `verified=${decision.executionVerified} ` +
+      `evidence=${decision.counts.evidenceItems} ` +
+      `(created=${decision.counts.filesCreated} modified=${decision.counts.filesModified} deleted=${decision.counts.filesDeleted}) ` +
+      `reason="${decision.reason}"`,
+    );
+    if (!decision.executionVerified && decision.errorMessage) {
+      console.error(`[coordinator] execution-gate: errored — ${decision.errorMessage}`);
+    }
   }
 
   private async persistMemoryArtifacts(

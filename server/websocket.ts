@@ -46,7 +46,9 @@ export type AedisEventType =
   | "merge_blocked"
   | "commit_created"
   | "run_complete"
-  | "receipt_generated";
+  | "receipt_generated"
+  | "execution_verified"
+  | "execution_failed";
 
 /**
  * @deprecated Use AedisEventType. Alias kept for downstream code that

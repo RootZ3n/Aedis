@@ -7,24 +7,23 @@
  *      from core/context-gate.ts)
  *   3. building a single prompt that includes language, gated files, and
  *      the last three task summaries
- *   4. calling a local Ollama model (qwen3.6-plus, non-streaming) and
- *      returning the response text
+ *   4. calling OpenRouter (xiaomi/mimo-v2-pro) and returning the response text
  *
  * Designed to never throw. Any failure — empty question, missing memory,
- * Ollama unreachable, malformed JSON, model error — is converted into a
+ * network unreachable, malformed JSON, model error — is converted into a
  * human-readable string so callers don't need defensive try/catch.
  */
 
 import { gateContext, type GatedContext } from "./context-gate.js";
 import { loadMemory, type TaskSummary } from "./project-memory.js";
 
-const OLLAMA_URL = "http://localhost:11434/api/generate";
-const MODEL = "qwen3.6-plus";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = "xiaomi/mimo-v2-pro";
 const REQUEST_TIMEOUT_MS = 120_000;
 
-interface OllamaGenerateResponse {
-  readonly response?: string;
-  readonly error?: string;
+interface OpenRouterMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -41,15 +40,13 @@ export async function askLoqui(
     const gated = gateContext(memory, trimmed);
     const lastTasks = memory.recentTasks.slice(0, 3);
     const prompt = buildPrompt(trimmed, gated, lastTasks);
-    return await callOllama(prompt);
+    return await callOpenRouter(prompt);
   } catch (err) {
-    // Outer guard for anything not already caught downstream — guarantees
-    // we never throw out of askLoqui regardless of how the call site uses it.
     return `Loqui: ${describe(err)}`;
   }
 }
 
-// ─── Internals ───────────────────────────────────────────────────────
+// ─── Internals ──────────────────────────────────────────────────────
 
 function buildPrompt(
   question: string,
@@ -93,40 +90,54 @@ function buildPrompt(
   return lines.join("\n");
 }
 
-async function callOllama(prompt: string): Promise<string> {
+async function callOpenRouter(prompt: string): Promise<string> {
+  const apiKey = process.env["OPENROUTER_API_KEY"];
+  if (!apiKey) return "Loqui: OPENROUTER_API_KEY is not set in environment.";
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const res = await fetch(OLLAMA_URL, {
+    const messages: OpenRouterMessage[] = [
+      {
+        role: "system",
+        content: "You are Loqui, the conversational reasoning interface for Aedis. Answer concisely and concretely.",
+      },
+      { role: "user", content: prompt },
+    ];
+
+    const res = await fetch(OPENROUTER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
         model: MODEL,
-        prompt,
+        messages,
         stream: false,
-        system: "You are Loqui, the conversational reasoning interface for Aedis.",
       }),
       signal: controller.signal,
     });
 
     if (!res.ok) {
       const detail = await safeReadBody(res);
-      return `Loqui: model HTTP ${res.status}${detail ? ` — ${detail}` : ""}.`;
+      return `Loqui: OpenRouter HTTP ${res.status}${detail ? ` — ${detail}` : ""}.`;
     }
 
     const raw = await res.text();
-    let parsed: OllamaGenerateResponse;
+    let parsed: { choices?: Array<{ message?: { content?: string } }> };
     try {
-      parsed = JSON.parse(raw) as OllamaGenerateResponse;
+      parsed = JSON.parse(raw) as typeof parsed;
     } catch {
-      return "Loqui: could not parse model response.";
+      return "Loqui: could not parse OpenRouter response.";
     }
 
-    if (parsed.error) return `Loqui: model error — ${parsed.error}`;
-
-    const text = (parsed.response ?? "").trim();
-    return text.length > 0 ? text : "Loqui: model returned an empty response.";
+    const choice = parsed.choices?.[0];
+    const content = choice?.message?.content ?? "";
+    return content.trim().length > 0
+      ? content.trim()
+      : "Loqui: model returned an empty response.";
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return `Loqui: model call timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s.`;
