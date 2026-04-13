@@ -45,6 +45,7 @@ import { metricsRoutes } from "./routes/metrics.js";
 import { loquiRoutes } from "./routes/loqui.js";
 import { trustRoutes } from "./routes/trust.js";
 import { proveRoutes } from "./routes/prove.js";
+import { campaignRoutes } from "./routes/campaign.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -269,6 +270,7 @@ export async function createServer(
   await server.register(loquiRoutes, { prefix: "/loqui" });
   await server.register(trustRoutes, { prefix: "/trust" });
   await server.register(proveRoutes, { prefix: "/prove" });
+  await server.register(campaignRoutes, { prefix: "/campaign" });
 
   // ─── Approval gate endpoints ──────────────────────────────────
 
