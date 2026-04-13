@@ -56,6 +56,17 @@ const DEFAULT_FALLBACK: { provider: Provider; model: string } = {
 const MAX_RUN_CONTEXTS = 50;
 
 // ─── Critic Worker ───────────────────────────────────────────────────
+//
+// RESPONSIBILITY: Evaluates the PROPOSED DIFF for quality and correctness.
+// The Critic answers: "Is this diff good?" — reviewing code quality,
+// correctness, adherence to the charter, and suggesting changes.
+//
+// This is distinct from:
+//   - Verifier: evaluates REPO STATE after apply (tests, lint, typecheck)
+//   - IntegrationJudge: evaluates cross-file structural coherence
+//   - Velum: evaluates security concerns (injection, secrets)
+//
+// The Critic does NOT run tests, lint, or typecheck. It reviews the diff.
 
 export class CriticWorker extends AbstractWorker {
   readonly type = "critic" as const;

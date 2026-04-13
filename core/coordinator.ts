@@ -891,6 +891,38 @@ export class Coordinator {
       await this.runPreBuildCoherence(active);
       console.log(`[coordinator] PHASE 5 done — coherence passed`);
 
+      // ── Baseline Test Snapshot ────────────────────────────────────
+      // Capture test results BEFORE execution so we can distinguish
+      // pre-existing failures from new regressions after the Builder runs.
+      const verifier = this.verificationPipelineFor(active);
+      let testBaseline: import("./verification-pipeline.js").TestBaseline | null = null;
+      try {
+        testBaseline = await verifier.captureBaseline(charterTargets);
+        if (testBaseline) {
+          console.log(
+            `[coordinator] verification.baseline: ${testBaseline.totalTests} test(s), ${testBaseline.failedTests} failing`,
+          );
+          await this.persistReceiptCheckpoint(active, {
+            at: new Date().toISOString(),
+            type: "worker_step",
+            status: "RUNNING",
+            phase: run.phase,
+            summary: `verification.baseline: ${testBaseline.totalTests} tests, ${testBaseline.failedTests} failing`,
+            details: {
+              totalTests: testBaseline.totalTests,
+              failedTests: testBaseline.failedTests,
+              failingTestNames: testBaseline.failingTestNames,
+            },
+          });
+        } else {
+          console.log(`[coordinator] verification.baseline: no test hooks configured — skipping`);
+        }
+      } catch (err) {
+        console.warn(
+          `[coordinator] verification.baseline failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
       // Phase 6–7: Execute (Scout → Build → Rehearsal Loop)
       console.log(`[coordinator] PHASE 6: ExecuteGraph — entering with ${active.graph.nodes.length} node(s)`);
       await this.executeGraph(active);
@@ -1007,24 +1039,80 @@ export class Coordinator {
       // already happened inside executeGraph (see verifyCompletedWaves).
       if (judgmentReport?.passed && !active.cancelled) {
         const isMultiFile = active.changeSet.filesInScope.length > 1;
-        const verifier = this.verificationPipelineFor(active);
+        const phase9Verifier = this.verificationPipelineFor(active);
+
+        // ── Preflight integration check ──────────────────────────────
+        // Lightweight check: imports/exports exist, basic type alignment.
+        // If this fails, skip expensive full verification and fail early.
+        const preflight = active.judge.preflight(active.changes);
         console.log(
-          `[coordinator] PHASE 9: Verification — entering (${isMultiFile ? "change-set" : "single-file"} scope)`,
+          `[coordinator] PHASE 9 preflight: passed=${preflight.passed} (${preflight.durationMs}ms)` +
+          (preflight.issues.length > 0 ? ` issues: ${preflight.issues.join("; ")}` : ""),
         );
-        verificationReceipt = isMultiFile
-          ? await verifier.verifyChangeSet(
-              active.intent,
-              run,
-              active.changeSet,
-              active.changes,
-              active.workerResults,
-            )
-          : await verifier.verify(
-              active.intent,
-              run,
-              active.changes,
-              active.workerResults,
-            );
+        if (!preflight.passed) {
+          console.error(`[coordinator] PHASE 9 preflight FAILED — skipping full verification`);
+          // Synthesize a failing verification receipt from the preflight
+          verificationReceipt = {
+            id: randomUUID(),
+            runId: run.id,
+            intentId: active.intent.id,
+            timestamp: new Date().toISOString(),
+            verdict: "fail",
+            confidenceScore: 0,
+            stages: [{
+              stage: "cross-file-check",
+              name: "Integration Preflight",
+              passed: false,
+              score: 0,
+              issues: preflight.issues.map((msg) => ({
+                stage: "cross-file-check" as const,
+                severity: "blocker" as const,
+                message: msg,
+              })),
+              durationMs: preflight.durationMs,
+              details: `Preflight failed: ${preflight.issues.join("; ")}`,
+            }],
+            judgmentReport: null,
+            allIssues: preflight.issues.map((msg) => ({
+              stage: "cross-file-check" as const,
+              severity: "blocker" as const,
+              message: msg,
+            })),
+            blockers: preflight.issues.map((msg) => ({
+              stage: "cross-file-check" as const,
+              severity: "blocker" as const,
+              message: msg,
+            })),
+            requiredChecks: [],
+            checks: [],
+            summary: `PREFLIGHT FAIL — ${preflight.issues.join("; ")}`,
+            totalDurationMs: preflight.durationMs,
+            fileCoverage: null,
+            coverageRatio: null,
+            validatedRatio: null,
+          };
+        } else {
+          console.log(
+            `[coordinator] PHASE 9: Verification — entering (${isMultiFile ? "change-set" : "single-file"} scope)`,
+          );
+          verificationReceipt = isMultiFile
+            ? await phase9Verifier.verifyChangeSet(
+                active.intent,
+                run,
+                active.changeSet,
+                active.changes,
+                active.workerResults,
+                testBaseline,
+              )
+            : await phase9Verifier.verify(
+                active.intent,
+                run,
+                active.changes,
+                active.workerResults,
+                null,
+                testBaseline,
+              );
+        }
         console.log(`[coordinator] PHASE 9 done — verdict=${verificationReceipt.verdict} summary=${verificationReceipt.summary}`);
         await this.persistReceiptCheckpoint(active, {
           at: new Date().toISOString(),

@@ -1,17 +1,28 @@
 /**
- * VerificationPipeline — Multi-stage verification for build outputs.
+ * VerificationPipeline — Post-apply repo-level verification.
  *
- * Runs a sequence of verification stages against the changeset:
+ * RESPONSIBILITY: The Verifier evaluates the REPO STATE after changes
+ * are applied. It answers "is the repo healthy after this change?"
+ *
+ * This is distinct from the Critic, which evaluates the PROPOSED DIFF
+ * before apply. The Critic answers "is this diff good?" — the Verifier
+ * answers "did applying it break anything?"
+ *
+ * Stages:
  *   1. Diff check — validate change structure and format
  *   2. Contract check — verify interface/type contracts
  *   3. Cross-file check — delegate to IntegrationJudge
  *   4. Lint/typecheck hooks — run external tooling
- *   5. Confidence scoring — aggregate results into a score
- *   6. Receipt generation — produce pass/fail audit receipt
+ *   5. Test baseline comparison — detect new test failures
+ *   6. Confidence scoring — aggregate results into a score
+ *   7. Receipt generation — produce pass/fail audit receipt
  *
- * Each stage produces a StageResult. The pipeline aggregates all
- * results into a VerificationReceipt — the final verdict on whether
- * the changeset is safe to apply.
+ * Baseline test snapshots:
+ *   captureBaseline() runs tests BEFORE execution and stores results.
+ *   After execution, verify() runs tests again and compares:
+ *     - New failures → FAIL (the change broke something)
+ *     - Same failures → IGNORE (pre-existing, not our fault)
+ *     - Fewer failures → POSITIVE SIGNAL (change fixed something)
  */
 
 import { randomUUID } from "crypto";
@@ -195,6 +206,30 @@ export interface VerificationCheckResult {
   readonly details: string;
 }
 
+// ─── Baseline Test Snapshot ──────────────────────────────────────────
+
+/**
+ * Snapshot of test results captured BEFORE execution begins.
+ * Used by verify() to distinguish pre-existing failures from
+ * new regressions introduced by the builder.
+ */
+export interface TestBaseline {
+  readonly capturedAt: string;
+  readonly totalTests: number;
+  readonly failedTests: number;
+  /** Names/identifiers of tests that were already failing. */
+  readonly failingTestNames: readonly string[];
+  /** Raw hook result for audit trail. */
+  readonly hookResult: ToolHookResult | null;
+}
+
+export interface BaselineComparison {
+  readonly newFailures: readonly string[];
+  readonly fixedTests: readonly string[];
+  readonly preExistingFailures: readonly string[];
+  readonly signal: "positive" | "neutral" | "negative";
+}
+
 /**
  * A ToolHook runs an external tool (lint, typecheck, test) against
  * the changeset and returns structured results.
@@ -285,6 +320,7 @@ export class VerificationPipeline {
     changeSet: ChangeSet,
     changes: readonly FileChange[],
     workerResults: readonly WorkerResult[],
+    baseline?: TestBaseline | null,
   ): Promise<VerificationReceipt> {
     const scopedFiles = new Set(
       changeSet.filesInScope.map((f) => f.path),
@@ -294,7 +330,7 @@ export class VerificationPipeline {
         ? changes
         : changes.filter((c) => scopedFiles.has(c.path));
 
-    const receipt = await this.verify(intent, runState, scopedChanges, workerResults, changeSet);
+    const receipt = await this.verify(intent, runState, scopedChanges, workerResults, changeSet, baseline);
     return {
       ...receipt,
       scope: { kind: "change-set", fileCount: scopedChanges.length },
@@ -372,7 +408,16 @@ export class VerificationPipeline {
   }
 
   /**
-   * Run the full verification pipeline against a changeset.
+   * Run the full post-apply verification pipeline against a changeset.
+   *
+   * RESPONSIBILITY: Evaluates REPO STATE after changes are applied.
+   * This is NOT the Critic — the Critic evaluates the proposed diff.
+   * The Verifier answers: "did applying this diff break the repo?"
+   *
+   * When a baseline is provided, test results are compared against it:
+   *   - New failures → blocker (change introduced regression)
+   *   - Same failures → ignored (pre-existing, not our fault)
+   *   - Fewer failures → positive signal logged on receipt
    */
   async verify(
     intent: IntentObject,
@@ -380,6 +425,7 @@ export class VerificationPipeline {
     changes: readonly FileChange[],
     workerResults: readonly WorkerResult[],
     changeSet?: ChangeSet | null,
+    baseline?: TestBaseline | null,
   ): Promise<VerificationReceipt> {
     const startTime = Date.now();
     const stages: StageResult[] = [];
@@ -555,6 +601,68 @@ export class VerificationPipeline {
       }
     }
 
+    // ─── Baseline comparison ────────────────────────────────────────
+    // Compare post-execution test results against the pre-execution
+    // baseline. New failures are blockers; pre-existing failures are
+    // ignored; fewer failures are a positive signal.
+    let baselineComparison: BaselineComparison | null = null;
+    if (baseline && !aborted) {
+      baselineComparison = this.compareWithBaseline(baseline, stages);
+      console.log(
+        `[verification] baseline comparison: signal=${baselineComparison.signal} ` +
+        `new=${baselineComparison.newFailures.length} fixed=${baselineComparison.fixedTests.length} ` +
+        `preExisting=${baselineComparison.preExistingFailures.length}`,
+      );
+      // New failures are blockers — the change introduced regressions
+      for (const failure of baselineComparison.newFailures) {
+        stages.push({
+          stage: "custom-hook",
+          name: "Baseline Regression",
+          passed: false,
+          score: 0,
+          issues: [{
+            stage: "custom-hook",
+            severity: "blocker",
+            message: `New test failure (not in baseline): ${failure}`,
+          }],
+          durationMs: 0,
+          details: `Regression: ${failure}`,
+        });
+      }
+      // Fixed tests are a positive signal — log but don't affect verdict
+      if (baselineComparison.fixedTests.length > 0) {
+        console.log(
+          `[verification] positive: ${baselineComparison.fixedTests.length} previously-failing test(s) now pass`,
+        );
+      }
+      // Pre-existing failures: downgrade any blockers from test hooks
+      // that match baseline failures to warnings (not our fault)
+      for (const stage of stages) {
+        if (stage.stage !== "custom-hook") continue;
+        const downgraded = stage.issues.map((issue) => {
+          if (
+            (issue.severity === "blocker" || issue.severity === "error") &&
+            baseline.failingTestNames.includes(issue.message)
+          ) {
+            return { ...issue, severity: "warning" as const };
+          }
+          return issue;
+        });
+        if (downgraded.some((d, i) => d !== stage.issues[i])) {
+          // Replace the stage with downgraded issues
+          const idx = stages.indexOf(stage);
+          if (idx !== -1) {
+            (stages as StageResult[])[idx] = {
+              ...stage,
+              issues: downgraded,
+              passed: !downgraded.some((i) => i.severity === "blocker"),
+              score: downgraded.some((i) => i.severity === "blocker") ? 0 : 0.8,
+            };
+          }
+        }
+      }
+    }
+
     // Aggregate
     const totalDurationMs = Date.now() - startTime;
     const allIssues = stages.flatMap((s) => s.issues);
@@ -617,6 +725,15 @@ export class VerificationPipeline {
     }
     if (strictFailures.length > 0) {
       summaryParts.push(`strict mode: ${strictFailures.join("; ")}`);
+    }
+    if (baselineComparison) {
+      if (baselineComparison.signal === "negative") {
+        summaryParts.push(`baseline: ${baselineComparison.newFailures.length} new regression(s)`);
+      } else if (baselineComparison.signal === "positive") {
+        summaryParts.push(`baseline: ${baselineComparison.fixedTests.length} test(s) fixed`);
+      } else if (baselineComparison.preExistingFailures.length > 0) {
+        summaryParts.push(`baseline: ${baselineComparison.preExistingFailures.length} pre-existing failure(s) ignored`);
+      }
     }
 
     return {
@@ -957,6 +1074,107 @@ export class VerificationPipeline {
     }
 
     return totalWeight > 0 ? weightedSum / totalWeight : 1;
+  }
+
+  // ─── Baseline Test Snapshot ──────────────────────────────────────────
+
+  /**
+   * Capture test results BEFORE execution begins. Runs all configured
+   * test hooks (kind === "tests") against the current repo state and
+   * stores the failing test names. Returns null if no test hooks are
+   * configured.
+   *
+   * Receipt: verification.baseline
+   */
+  async captureBaseline(changedFiles: string[]): Promise<TestBaseline | null> {
+    const testHooks = this.config.hooks.filter((h) => h.kind === "tests");
+    if (testHooks.length === 0) return null;
+
+    const failingTestNames: string[] = [];
+    let totalTests = 0;
+    let failedTests = 0;
+    let hookResult: ToolHookResult | null = null;
+
+    for (const hook of testHooks) {
+      try {
+        const result = await hook.execute(changedFiles);
+        hookResult = result;
+        // Extract failing test names from issues
+        for (const issue of result.issues) {
+          if (issue.severity === "error" || issue.severity === "blocker") {
+            failingTestNames.push(issue.message);
+            failedTests++;
+          }
+          totalTests++;
+        }
+        // If no issues but passed, count as 1 passing test suite
+        if (result.issues.length === 0 && result.passed) {
+          totalTests++;
+        }
+      } catch (err) {
+        console.warn(
+          `[verification] baseline capture failed for hook "${hook.name}": ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return {
+      capturedAt: new Date().toISOString(),
+      totalTests,
+      failedTests,
+      failingTestNames,
+      hookResult,
+    };
+  }
+
+  /**
+   * Compare post-execution test results against a baseline snapshot.
+   * Returns a structured comparison:
+   *   - newFailures: tests that fail now but passed before → NEGATIVE
+   *   - fixedTests: tests that passed now but failed before → POSITIVE
+   *   - preExistingFailures: tests that failed both times → NEUTRAL
+   */
+  compareWithBaseline(
+    baseline: TestBaseline,
+    postStages: readonly StageResult[],
+  ): BaselineComparison {
+    const baselineSet = new Set(baseline.failingTestNames);
+
+    // Collect current failures from test-related stages
+    const currentFailures = new Set<string>();
+    for (const stage of postStages) {
+      if (stage.stage !== "custom-hook") continue;
+      for (const issue of stage.issues) {
+        if (issue.severity === "error" || issue.severity === "blocker") {
+          currentFailures.add(issue.message);
+        }
+      }
+    }
+
+    const newFailures: string[] = [];
+    const fixedTests: string[] = [];
+    const preExistingFailures: string[] = [];
+
+    for (const failure of currentFailures) {
+      if (baselineSet.has(failure)) {
+        preExistingFailures.push(failure);
+      } else {
+        newFailures.push(failure);
+      }
+    }
+
+    for (const baseline of baselineSet) {
+      if (!currentFailures.has(baseline)) {
+        fixedTests.push(baseline);
+      }
+    }
+
+    const signal: BaselineComparison["signal"] =
+      newFailures.length > 0 ? "negative" :
+      fixedTests.length > 0 ? "positive" :
+      "neutral";
+
+    return { newFailures, fixedTests, preExistingFailures, signal };
   }
 }
 

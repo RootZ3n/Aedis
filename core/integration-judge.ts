@@ -1,8 +1,13 @@
 /**
  * IntegrationJudge — Cross-file coherence validation.
  *
- * After workers produce changes, the IntegrationJudge evaluates whether
- * the combined changeset is internally consistent:
+ * RESPONSIBILITY: Evaluates whether the combined changeset is internally
+ * consistent AFTER the Builder produces changes, BEFORE final apply.
+ * This is distinct from:
+ *   - Critic: evaluates the PROPOSED DIFF for quality/correctness
+ *   - Verifier: evaluates the REPO STATE after apply (tests, lint, typecheck)
+ *
+ * The Judge focuses on structural coherence across files:
  *   - Type alignment: do modified exports match their consumers?
  *   - Import coherence: are all imports resolvable after changes?
  *   - Contract adherence: do implementations match their interfaces?
@@ -10,6 +15,10 @@
  *   - Intent alignment: do the changes fulfill the Charter's deliverables?
  *   - Cross-file coherence: orphaned refs, partial migrations, and an
  *     overall import/export alignment score across the actual diffs.
+ *
+ * Also provides a lightweight `preflight()` check that runs BEFORE
+ * full verification — import/export existence + basic type alignment.
+ * If preflight fails, skip the expensive full verification.
  *
  * The Judge runs at VerificationCheckpoints and before final apply.
  * It produces a JudgmentReport with pass/fail verdicts per check and
@@ -71,6 +80,18 @@ export interface JudgmentIssue {
   readonly message: string;
   readonly files: readonly string[];
   readonly suggestedFix?: string;
+}
+
+/**
+ * Lightweight preflight result. Runs BEFORE full verification to
+ * fail early on broken imports/exports and basic type misalignment.
+ * Much cheaper than the full judge() — no assumption checking, no
+ * intent alignment, no manifest completeness.
+ */
+export interface PreflightResult {
+  readonly passed: boolean;
+  readonly issues: readonly string[];
+  readonly durationMs: number;
 }
 
 // ─── Cross-file structural findings ──────────────────────────────────
@@ -210,6 +231,45 @@ export class IntegrationJudge {
       blockers,
       warnings,
       summary: this.buildSummary(checks, coherenceScore, passed),
+    };
+  }
+
+  // ─── Preflight Check ─────────────────────────────────────────────
+
+  /**
+   * Lightweight integration preflight — runs BEFORE full verification.
+   *
+   * Checks only:
+   *   1. Import coherence: do imports reference files that exist?
+   *   2. Type alignment: do removed exports still have consumers?
+   *
+   * If preflight fails, the full verify() will also fail, so we can
+   * skip the expensive external tool hooks (lint, typecheck, tests)
+   * and fail early with a clear diagnostic.
+   *
+   * Does NOT duplicate the full judge() — it reuses checkTypeAlignment
+   * and checkImportCoherence internally but skips everything else.
+   */
+  preflight(changes: readonly FileChange[]): PreflightResult {
+    const start = Date.now();
+    const issues: string[] = [];
+
+    // Check 1: imports resolve
+    const importCheck = this.checkImportCoherence(changes);
+    if (!importCheck.passed) {
+      issues.push(importCheck.details);
+    }
+
+    // Check 2: type alignment — removed exports not still referenced
+    const typeCheck = this.checkTypeAlignment(changes);
+    if (!typeCheck.passed) {
+      issues.push(typeCheck.details);
+    }
+
+    return {
+      passed: issues.length === 0,
+      issues,
+      durationMs: Date.now() - start,
     };
   }
 

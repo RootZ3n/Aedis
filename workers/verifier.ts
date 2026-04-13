@@ -38,6 +38,18 @@ export interface VerifierWorkerConfig {
   readonly verificationConfig?: Partial<VerificationPipelineConfig>;
 }
 
+// RESPONSIBILITY: Evaluates REPO STATE after changes are applied.
+// The Verifier answers: "Did applying this diff break the repo?"
+// It runs tests, lint, typecheck, and the full verification pipeline.
+//
+// This is distinct from:
+//   - Critic: evaluates the PROPOSED DIFF for quality/correctness
+//   - IntegrationJudge: evaluates cross-file structural coherence
+//   - Velum: evaluates security concerns (injection, secrets)
+//
+// The Verifier does NOT review code quality or correctness of the diff.
+// It verifies that the repo is healthy after the change is applied.
+
 export class VerifierWorker extends AbstractWorker {
   readonly type = "verifier" as const;
   readonly name = "Verifier Worker";
