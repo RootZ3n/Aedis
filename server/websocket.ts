@@ -56,7 +56,8 @@ export type AedisEventType =
   | "run_summary"
   | "evaluation_started"
   | "evaluation_complete"
-  | "evaluation_failed";
+  | "evaluation_failed"
+  | "trust_updated";
 
 /**
  * @deprecated Use AedisEventType. Alias kept for downstream code that

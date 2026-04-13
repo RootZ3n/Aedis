@@ -270,3 +270,225 @@ export function builtinProveSuites(): ProveSuite[] {
     },
   ];
 }
+
+// ─── Cross-repo proving ─────────────────────────────────────────────
+
+export interface RepoProfile {
+  readonly path: string;
+  readonly name: string;
+  readonly language: string;
+  readonly hasTests: boolean;
+  readonly hasTsConfig: boolean;
+  readonly hasPackageJson: boolean;
+  readonly fileCount: number;
+  readonly readinessLevel: string;
+  readonly readinessWarnings: readonly string[];
+}
+
+export interface ProveReport {
+  readonly repo: RepoProfile;
+  readonly suite: string;
+  readonly results: readonly ProveResult[];
+  readonly summary: ProveSuiteResult["summary"];
+  readonly portabilityAssessment: string;
+  readonly recommendation: "safe" | "safe-with-review" | "risky" | "blocked";
+  readonly timestamp: string;
+}
+
+/**
+ * Profile a repo to understand its shape before running prove cases.
+ */
+export async function profileRepo(projectRoot: string): Promise<RepoProfile> {
+  const { existsSync, readdirSync } = await import("node:fs");
+  const { basename } = await import("node:path");
+
+  const hasTsConfig = existsSync(`${projectRoot}/tsconfig.json`);
+  const hasPackageJson = existsSync(`${projectRoot}/package.json`);
+
+  // Count source files (lightweight — top 3 levels only)
+  let fileCount = 0;
+  const hasTests = hasTestDirectory(projectRoot);
+  try {
+    const walk = (dir: string, depth: number) => {
+      if (depth > 3) return;
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.name === "node_modules" || e.name === ".git" || e.name === "dist") continue;
+        if (e.isDirectory()) walk(`${dir}/${e.name}`, depth + 1);
+        else if (/\.[jt]sx?$/.test(e.name)) fileCount++;
+      }
+    };
+    walk(projectRoot, 0);
+  } catch { /* permission errors */ }
+
+  const readiness = assessRepoReadiness({
+    projectRoot,
+    changedFiles: [],
+    verificationReceipt: null,
+  });
+
+  const memory = await loadMemory(projectRoot);
+
+  return {
+    path: projectRoot,
+    name: basename(projectRoot),
+    language: memory.language,
+    hasTests,
+    hasTsConfig,
+    hasPackageJson,
+    fileCount,
+    readinessLevel: readiness.level,
+    readinessWarnings: [...readiness.warnings],
+  };
+}
+
+function hasTestDirectory(root: string): boolean {
+  const { existsSync } = require("node:fs");
+  return (
+    existsSync(`${root}/__tests__`) ||
+    existsSync(`${root}/tests`) ||
+    existsSync(`${root}/test`) ||
+    existsSync(`${root}/src/__tests__`)
+  );
+}
+
+/**
+ * Build a standard prove suite for an arbitrary repo.
+ * Generates cases appropriate to the repo's shape.
+ */
+export function buildRepoProveSuite(profile: RepoProfile): ProveSuite {
+  const cases: ProveCase[] = [
+    {
+      name: "single-file fix",
+      projectRoot: profile.path,
+      prompt: "fix a bug in the main module",
+      expectedOutcome: "success",
+    },
+    {
+      name: "multi-file feature",
+      projectRoot: profile.path,
+      prompt: "add a new feature that requires 3-4 files",
+      expectedOutcome: profile.hasTests ? "success" : "partial",
+    },
+    {
+      name: "broad refactor",
+      projectRoot: profile.path,
+      prompt: "refactor all utility functions across the codebase",
+      expectedOutcome: profile.fileCount > 20 ? "failure" : "partial",
+    },
+  ];
+
+  if (!profile.hasTests) {
+    cases.push({
+      name: "missing test coverage",
+      projectRoot: profile.path,
+      prompt: "add tests for the core module",
+      expectedOutcome: "partial",
+      expectedIssues: ["missing-tests"],
+    });
+  }
+
+  return {
+    name: `cross-repo:${profile.name}`,
+    cases,
+  };
+}
+
+/**
+ * Run a full cross-repo prove workflow: profile → suite → run → report.
+ */
+export async function proveRepo(projectRoot: string): Promise<ProveReport> {
+  const profile = await profileRepo(projectRoot);
+  const suite = buildRepoProveSuite(profile);
+  const result = await runProveSuite(suite);
+
+  const passRate = result.summary.total > 0
+    ? result.summary.passed / result.summary.total
+    : 0;
+
+  const recommendation: ProveReport["recommendation"] =
+    passRate >= 0.8 ? "safe" :
+    passRate >= 0.5 ? "safe-with-review" :
+    passRate > 0 ? "risky" :
+    "blocked";
+
+  const portabilityParts: string[] = [];
+  if (profile.readinessLevel !== "normal") {
+    portabilityParts.push(`repo readiness: ${profile.readinessLevel}`);
+  }
+  if (!profile.hasTsConfig && profile.language === "typescript") {
+    portabilityParts.push("missing tsconfig.json");
+  }
+  if (!profile.hasTests) {
+    portabilityParts.push("no test directory detected");
+  }
+  if (profile.readinessWarnings.length > 0) {
+    portabilityParts.push(profile.readinessWarnings[0]);
+  }
+  const portabilityAssessment = portabilityParts.length > 0
+    ? portabilityParts.join("; ")
+    : "no portability issues detected";
+
+  return {
+    repo: profile,
+    suite: suite.name,
+    results: result.results,
+    summary: result.summary,
+    portabilityAssessment,
+    recommendation,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+// ─── Persistence ────────────────────────────────────────────────────
+
+const MAX_STORED_REPORTS = 20;
+
+/**
+ * Persist a prove report to .aedis/prove-history.json.
+ * Capped at MAX_STORED_REPORTS entries.
+ */
+export async function persistProveReport(
+  storageRoot: string,
+  report: ProveReport,
+): Promise<void> {
+  const { mkdir, readFile, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+
+  const dir = join(storageRoot, ".aedis");
+  const path = join(dir, "prove-history.json");
+
+  await mkdir(dir, { recursive: true });
+
+  let history: ProveReport[] = [];
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) history = parsed;
+  } catch { /* file doesn't exist yet */ }
+
+  history.unshift(report);
+  history = history.slice(0, MAX_STORED_REPORTS);
+
+  await writeFile(path, JSON.stringify(history, null, 2), "utf8");
+}
+
+/**
+ * Load prove history from .aedis/prove-history.json.
+ */
+export async function loadProveHistory(
+  storageRoot: string,
+): Promise<ProveReport[]> {
+  const { readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+
+  const path = join(storageRoot, ".aedis", "prove-history.json");
+
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.slice(0, MAX_STORED_REPORTS) : [];
+  } catch {
+    return [];
+  }
+}

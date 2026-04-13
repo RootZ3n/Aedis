@@ -1,9 +1,11 @@
 /**
  * Prove API — Aedis proving harness endpoints.
  *
- * POST /prove/run    — Run a single prove case
- * POST /prove/suite  — Run a full prove suite
- * GET  /prove/suites — List available built-in suites
+ * GET  /prove/suites       — List available built-in suites
+ * POST /prove/run          — Run a single prove case
+ * POST /prove/suite        — Run a full prove suite
+ * POST /prove/repo         — Run cross-repo proving workflow
+ * GET  /prove/history      — Load prove history
  */
 
 import type { FastifyPluginAsync } from "fastify";
@@ -12,6 +14,10 @@ import {
   runProveCase,
   runProveSuite,
   builtinProveSuites,
+  proveRepo,
+  profileRepo,
+  persistProveReport,
+  loadProveHistory,
   type ProveCase,
   type ProveSuite,
 } from "../../core/proving-harness.js";
@@ -102,4 +108,69 @@ export const proveRoutes: FastifyPluginAsync = async (fastify) => {
       }
     },
   );
+
+  /**
+   * POST /prove/repo — Run the full cross-repo proving workflow.
+   * Body: { repoPath: string }
+   * Profiles the repo, generates appropriate test cases, runs them,
+   * and persists the report.
+   */
+  fastify.post<{ Body: { repoPath: string } }>(
+    "/repo",
+    async (request, reply) => {
+      try {
+        const repoPath = request.body.repoPath;
+        if (!repoPath) {
+          reply.status(400).send({ error: "repoPath is required" });
+          return;
+        }
+
+        const report = await proveRepo(repoPath);
+
+        // Persist to the Aedis project root (not the tested repo)
+        await persistProveReport(fastify.ctx.config.projectRoot, report);
+
+        reply.send(report);
+      } catch (err) {
+        reply.status(500).send({
+          error: "Repo proving failed",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  /**
+   * POST /prove/profile — Profile a repo without running tests.
+   * Body: { repoPath: string }
+   */
+  fastify.post<{ Body: { repoPath: string } }>(
+    "/profile",
+    async (request, reply) => {
+      try {
+        const profile = await profileRepo(request.body.repoPath ?? fastify.ctx.config.projectRoot);
+        reply.send(profile);
+      } catch (err) {
+        reply.status(500).send({
+          error: "Repo profiling failed",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  /**
+   * GET /prove/history — Load prove history.
+   */
+  fastify.get("/history", async (_request, reply) => {
+    try {
+      const history = await loadProveHistory(fastify.ctx.config.projectRoot);
+      reply.send({ reports: history, total: history.length });
+    } catch (err) {
+      reply.status(500).send({
+        error: "Prove history unavailable",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 };

@@ -103,6 +103,27 @@ export interface RunSummary {
    * can render them as audit tooltips without repeating the rule.
    */
   readonly factors: readonly string[];
+
+  // ─── First-class trust instrumentation ────────────────────────────
+  // These replace heuristic extraction in the trust dashboard.
+  // Each field is computed once during summary generation and stored
+  // directly so downstream consumers never parse strings.
+
+  /** Exact git diff confirmation ratio (0-1). Null when git diff didn't run. */
+  readonly gitDiffConfirmationRatio: number | null;
+  /** Whether strict mode was active for this run. */
+  readonly strictModeEnabled: boolean;
+  /** Confidence dampening factor applied from pattern history (0.8-1.0). 1.0 = no dampening. */
+  readonly confidenceDampeningApplied: number;
+  /** Historical reliability tier for the matched task archetype. Null when no pattern matched. */
+  readonly historicalReliabilityTier: "reliable" | "risky" | "caution" | "unknown" | null;
+  /**
+   * Evaluation alignment status — direct from Crucibulum disagreement analysis.
+   * Null when no evaluation ran.
+   */
+  readonly evaluationAlignmentStatus: "aligned" | "aedis-overconfident" | "aedis-underconfident" | null;
+  /** True when Aedis confidence >= 0.7 and evaluation failed. */
+  readonly overconfidenceFlag: boolean;
 }
 
 export interface RunSummaryInput {
@@ -146,6 +167,8 @@ export interface RunSummaryInput {
    */
   readonly confidenceDampening?: number;
   readonly strictMode?: boolean;
+  /** Historical reliability tier for the matched task archetype. */
+  readonly historicalReliabilityTier?: "reliable" | "risky" | "caution" | "unknown" | null;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -313,6 +336,17 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     cost,
     failureExplanation,
     factors: classificationResult.factors,
+
+    // First-class trust instrumentation — no heuristic extraction needed
+    gitDiffConfirmationRatio: input.gitDiffConfirmationRatio ?? null,
+    strictModeEnabled: input.strictMode ?? false,
+    confidenceDampeningApplied: dampening,
+    historicalReliabilityTier: input.historicalReliabilityTier ?? null,
+    evaluationAlignmentStatus: receipt.evaluation?.disagreement?.direction ?? null,
+    overconfidenceFlag: (
+      confidence.overall >= 0.7 &&
+      receipt.evaluation?.aggregate?.overallPass === false
+    ),
   };
 }
 

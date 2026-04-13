@@ -482,6 +482,20 @@ export function shouldRecommendStrictMode(
   return pattern.verificationGapRate >= 0.5 || pattern.reliabilityTier === "risky";
 }
 
+/**
+ * Get the historical reliability tier for a task pattern.
+ * Returns null when no pattern matches.
+ */
+export function getReliabilityTier(
+  memory: ProjectMemory,
+  input: { prompt: string; scopeType?: string },
+): TaskPatternProfile["reliabilityTier"] | null {
+  const taskTypeKey = deriveTaskTypeKey(input.prompt, input.scopeType);
+  const pattern = memory.taskPatterns.find((p) => p.taskTypeKey === taskTypeKey);
+  if (!pattern) return null;
+  return pattern.reliabilityTier;
+}
+
 function updateFileClusters(
   clusters: readonly FileCluster[],
   touchedFiles: readonly string[],

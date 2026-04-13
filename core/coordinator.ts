@@ -122,6 +122,7 @@ import {
   findPatternWarnings,
   findHistoricalInsights,
   getConfidenceDampening,
+  getReliabilityTier,
   shouldRecommendStrictMode,
   loadMemory,
   recordTask,
@@ -760,6 +761,7 @@ export class Coordinator {
       patternWarnings,
       historicalInsights: findHistoricalInsights(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }).map((i) => i.line),
       confidenceDampening: getConfidenceDampening(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }),
+      historicalReliabilityTier: getReliabilityTier(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }),
     };
     this.activeRuns.set(run.id, active);
     if (active.confidenceDampening < 1.0) {
@@ -1258,6 +1260,8 @@ export class Coordinator {
       console.log(`[coordinator] ═══ submit() exit — verdict=${verdictAfterGate} duration=${Date.now() - startTime}ms`);
       this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason, classification: evaluatedReceipt.humanSummary?.classification ?? null } });
       this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: evaluatedReceipt.id, receipt: evaluatedReceipt } });
+      // Notify trust dashboard consumers that trust data has changed.
+      this.emit({ type: "trust_updated", payload: { runId: run.id, confidence: evaluatedReceipt.humanSummary?.confidence?.overall ?? 0, verdict: verdictAfterGate } });
 
       return evaluatedReceipt;
     } catch (err) {
@@ -1326,6 +1330,7 @@ export class Coordinator {
       console.log(`[coordinator] ═══ submit() exit (failed) — verdict=${receipt.verdict} duration=${Date.now() - startTime}ms`);
       this.emit({ type: "run_complete", payload: { runId: run.id, verdict: "failed", executionVerified: false, executionReason: executionDecision.reason, error: errMessage, classification: finalReceipt.humanSummary?.classification ?? null } });
       this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: finalReceipt.id, receipt: finalReceipt } });
+      this.emit({ type: "trust_updated", payload: { runId: run.id, confidence: 0, verdict: "failed" } });
       return finalReceipt;
     } finally {
       this.activeRuns.delete(run.id);
@@ -3158,6 +3163,7 @@ export class Coordinator {
       historicalInsights: active.historicalInsights,
       confidenceDampening: active.confidenceDampening,
       strictMode: active.gatedContext.strictVerification === true || this.config.verificationConfig?.strictMode === true || shouldRecommendStrictMode(active.projectMemory, { prompt: active.normalizedInput, scopeType: active.scopeClassification?.type }),
+      historicalReliabilityTier: active.historicalReliabilityTier,
     });
   }
 
@@ -3490,6 +3496,8 @@ interface ActiveRun {
   historicalInsights: string[];
   /** Confidence dampening factor from pattern history (0.8-1.0). */
   confidenceDampening: number;
+  /** Historical reliability tier for the matched task archetype. */
+  historicalReliabilityTier: "reliable" | "risky" | "caution" | "unknown" | null;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────

@@ -38,6 +38,11 @@ export interface TrustHistoryEntry {
   readonly evaluationPassed: boolean | null;
   readonly disagreementSeverity: string | null;
   readonly disagreementDirection: string | null;
+  // ─── First-class fields (from RunSummary trust instrumentation) ───
+  readonly confidenceDampeningApplied: number;
+  readonly historicalReliabilityTier: string | null;
+  readonly overconfidenceFlag: boolean;
+  readonly evaluationAlignmentStatus: string | null;
 }
 
 // ─── Dashboard Aggregates ───────────────────────────────────────────
@@ -141,16 +146,23 @@ export function extractTrustEntry(receipt: RunReceipt): TrustHistoryEntry {
     verificationCoverageRatio: vr?.coverageRatio ?? ed?.verificationCoverageRatio ?? null,
     validationDepthRatio: vr?.validatedRatio ?? ed?.validatedRatio ?? null,
     typeErrorCount: ed?.typeScriptErrors ?? 0,
-    gitDiffConfirmationRatio: ed?.gitDiffConsistency?.includes("fully matched") ? 1.0
-      : ed?.gitDiffConsistency?.includes("mismatch") ? 0.5
-      : null,
+    gitDiffConfirmationRatio: hs?.gitDiffConfirmationRatio
+      ?? (ed?.gitDiffConsistency?.includes("fully matched") ? 1.0
+        : ed?.gitDiffConsistency?.includes("mismatch") ? 0.5
+        : null),
     repoReadinessLevel: ed?.repoReadiness?.level ?? "normal",
-    strictMode: hs?.confidence?.penalties?.some((p: string) => p.includes("strict mode")) ?? false,
+    strictMode: hs?.strictModeEnabled
+      ?? hs?.confidence?.penalties?.some((p: string) => p.includes("strict mode"))
+      ?? false,
     outcome: receipt.verdict,
     evaluationScore: ev?.aggregate?.averageScore ?? null,
     evaluationPassed: ev?.aggregate?.overallPass ?? null,
     disagreementSeverity: ev?.disagreement?.severity ?? null,
     disagreementDirection: ev?.disagreement?.direction ?? null,
+    confidenceDampeningApplied: hs?.confidenceDampeningApplied ?? 1.0,
+    historicalReliabilityTier: hs?.historicalReliabilityTier ?? null,
+    overconfidenceFlag: hs?.overconfidenceFlag ?? false,
+    evaluationAlignmentStatus: hs?.evaluationAlignmentStatus ?? null,
   };
 }
 
@@ -431,7 +443,11 @@ function computeCalibration(
     .filter((e) => typeof e.evaluationScore === "number" || e.confidence > 0)
     .slice(0, 30)
     .map((e): CalibrationEntry => {
-      const dampening = dampeningByArchetype.get(e.scopeType) ?? 1.0;
+      // Prefer the first-class dampening stored on the receipt;
+      // fall back to pattern memory lookup for older receipts.
+      const dampening = e.confidenceDampeningApplied < 1.0
+        ? e.confidenceDampeningApplied
+        : (dampeningByArchetype.get(e.scopeType) ?? 1.0);
       const calibrated = dampening < 1.0
         ? r4(e.confidence * dampening)
         : null;
