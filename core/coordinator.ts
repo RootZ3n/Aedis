@@ -173,8 +173,17 @@ export interface CoordinatorConfig {
   maxRecoveryAttempts: number;
   /** Auto-commit at task boundaries */
   autoCommit: boolean;
+  /**
+   * Require external approval before committing.
+   * When true, MergeGate approval pauses the run with status "awaiting_approval"
+   * instead of auto-committing. The run can then be approved via approveRun(runId).
+   * This implements the DOCTRINE requirement: "user approves final apply".
+   */
+  requireApproval: boolean;
   /** Git branch to work on (created if needed) */
   workBranch: string;
+  /** Maximum seconds for external commands (git, npm test, etc). Default: 120 */
+  externalCommandTimeoutSec: number;
   /** CharterGenerator config overrides */
   charterConfig?: Partial<CharterGeneratorConfig>;
   /** Verification configuration, including required external hooks. */
@@ -186,7 +195,9 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   maxRehearsalRounds: 3,
   maxRecoveryAttempts: 2,
   autoCommit: true,
+  requireApproval: false,
   workBranch: "aedis/run",
+  externalCommandTimeoutSec: 120,
 };
 
 /**
@@ -354,6 +365,8 @@ export class Coordinator {
 
   /** Active runs indexed by run ID */
   private activeRuns = new Map<string, ActiveRun>();
+  /** Runs awaiting external approval before commit (requireApproval mode) */
+  private pendingApproval = new Map<string, ActiveRun>();
   /** Pending decomposition plans awaiting approval, indexed by task ID */
   private pendingPlans = new Map<string, PendingPlan>();
 
@@ -947,6 +960,31 @@ export class Coordinator {
         !active.cancelled &&
         changeCount > 0 &&
         mergeDecision.action === "apply";
+
+      // Approval gate: if requireApproval is true, pause instead of auto-committing.
+      // The run transitions to "awaiting_approval" and waits for external signal.
+      if (canCommit && this.config.requireApproval) {
+        console.log(`[coordinator] PHASE 10: APPROVAL REQUIRED — ${changeCount} change(s) ready. Pausing for external approval.`);
+        this.emit({ type: "system_event", payload: { runId: run.id, event: "approval_required", changeCount } });
+        recordDecision(active.run, {
+          description: `Commit paused — requireApproval=true. ${changeCount} files ready to commit.`,
+          madeBy: "coordinator",
+          taskId: null,
+          alternatives: ["Auto-commit (requireApproval=false)", "Reject and rollback"],
+          rationale: "DOCTRINE: user approves final apply",
+        });
+        // Store the active run for later approval via approveRun()
+        this.pendingApproval.set(run.id, active);
+        // Patch receipt — run is paused awaiting approval
+        void this.receiptStore.patchRun(run.id, {
+          status: "RUNNING",
+          taskSummary: `Awaiting approval — ${changeCount} change(s) ready to commit`,
+        });
+        // Return a partial receipt indicating approval is needed
+        const durationMs = Date.now() - new Date(active.run.startedAt).getTime();
+        const awaitReceipt = this.buildReceipt(active, null, null, null, durationMs, mergeDecision, null, "partial");
+        return awaitReceipt;
+      }
 
       if (canCommit) {
         console.log(`[coordinator] PHASE 10: committing ${changeCount} change(s) (active.changes=${active.changes.length}, filesTouched=${active.run.filesTouched.length}) in ${active.projectRoot}...`);
@@ -2226,6 +2264,73 @@ export class Coordinator {
    * explicitly so the operator knows which files need manual review.
    * Newly-created files (operation === "create") are removed outright.
    */
+  // ─── Approval Gate API ──────────────────────────────────────────────
+
+  /**
+   * Approve a run that is paused in "awaiting_approval" state.
+   * Completes the commit and returns the final receipt.
+   * This implements the DOCTRINE requirement for human-in-the-loop.
+   */
+  async approveRun(runId: string): Promise<{ ok: boolean; commitSha?: string; error?: string }> {
+    const active = this.pendingApproval.get(runId);
+    if (!active) return { ok: false, error: `No pending approval for run ${runId}` };
+
+    console.log(`[coordinator] APPROVAL RECEIVED for run ${runId} — committing...`);
+    this.pendingApproval.delete(runId);
+
+    try {
+      const commitSha = await this.gitCommit(active);
+      if (commitSha) {
+        console.log(`[coordinator] APPROVED COMMIT ${commitSha.slice(0, 8)} for run ${runId}`);
+        this.emit({ type: "commit_created", payload: { runId, sha: commitSha } });
+        return { ok: true, commitSha };
+      } else {
+        console.error(`[coordinator] APPROVED but commit failed for run ${runId} — rolling back`);
+        return { ok: false, error: "Commit failed after approval — changes rolled back" };
+      }
+    } catch (err) {
+      return { ok: false, error: `Commit threw: ${String(err instanceof Error ? err.message : err)}` };
+    }
+  }
+
+  /**
+   * Reject a run that is paused in "awaiting_approval" state.
+   * Rolls back all changes and marks the run as failed.
+   */
+  async rejectRun(runId: string): Promise<{ ok: boolean; error?: string }> {
+    const active = this.pendingApproval.get(runId);
+    if (!active) return { ok: false, error: `No pending approval for run ${runId}` };
+
+    console.log(`[coordinator] REJECTION received for run ${runId} — rolling back...`);
+    this.pendingApproval.delete(runId);
+
+    // Roll back all builder changes
+    for (const change of active.changes) {
+      if (change.originalContent) {
+        const { resolve } = await import("path");
+        const { writeFile } = await import("fs/promises");
+        const absPath = resolve(active.projectRoot, change.path);
+        await writeFile(absPath, change.originalContent, "utf-8");
+      }
+    }
+
+    console.log(`[coordinator] Run ${runId} rejected and rolled back`);
+    return { ok: true };
+  }
+
+  /** Get list of runs awaiting approval */
+  getPendingApprovals(): Array<{ runId: string; changeCount: number; files: string[] }> {
+    const result: Array<{ runId: string; changeCount: number; files: string[] }> = [];
+    for (const [runId, active] of this.pendingApproval) {
+      result.push({
+        runId,
+        changeCount: active.changes.length,
+        files: active.changes.map(c => c.path),
+      });
+    }
+    return result;
+  }
+
   private async rollbackChanges(active: ActiveRun, decision: MergeDecision): Promise<void> {
     if (active.changes.length === 0) {
       console.log(`[coordinator] rollbackChanges: no changes to roll back`);

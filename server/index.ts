@@ -262,6 +262,23 @@ export async function createServer(
   await server.register(metricsRoutes, { prefix: "/metrics" });
   await server.register(loquiRoutes, { prefix: "/loqui" });
 
+  // ─── Approval gate endpoints ──────────────────────────────────
+
+  server.get("/approvals/pending", async (_req, reply) => {
+    const pending = coordinator.getPendingApprovals();
+    reply.send({ ok: true, pending });
+  });
+
+  server.post<{ Params: { runId: string } }>("/approvals/:runId/approve", async (req, reply) => {
+    const result = await coordinator.approveRun(req.params.runId);
+    reply.send(result);
+  });
+
+  server.post<{ Params: { runId: string } }>("/approvals/:runId/reject", async (req, reply) => {
+    const result = await coordinator.rejectRun(req.params.runId);
+    reply.send(result);
+  });
+
   // ─── WebSocket endpoint ────────────────────────────────────────
 
   server.register(async function (fastify) {
