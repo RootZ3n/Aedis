@@ -1,11 +1,45 @@
 import type { ChangeSet } from "./change-set.js";
+import type { ImportGraph } from "./import-graph.js";
+
+export type WaveStatus =
+  | "pending"
+  | "in-progress"
+  | "checkpoint-evaluating"
+  | "passed"
+  | "failed"
+  | "halted"      // downstream wave halted because an upstream failed
+  | "skipped";    // wave had no files
+
+export interface WaveCheckpointResult {
+  readonly evaluated: boolean;
+  readonly passed: boolean;
+  readonly reason: string;
+  readonly timestamp: string | null;
+  /** Confidence at the point of this checkpoint. */
+  readonly confidenceAtCheckpoint: number | null;
+  /** Files that failed verification in this wave. */
+  readonly failedFiles: readonly string[];
+}
 
 export interface PlanWave {
-  id: number;
-  name: string;
-  files: string[];
-  dependsOn: number[];
-  verificationCheckpoint: string;
+  readonly id: number;
+  readonly name: string;
+  readonly files: readonly string[];
+  readonly dependsOn: readonly number[];
+  readonly verificationCheckpoint: string;
+  /**
+   * Mutable status — updated by the Coordinator as waves execute.
+   * Starts as "pending". Transitions:
+   *   pending → in-progress → checkpoint-evaluating → passed | failed
+   *   pending → halted (if upstream wave failed)
+   *   pending → skipped (if wave has no files)
+   */
+  status: WaveStatus;
+  /**
+   * Checkpoint evaluation result. Null until the checkpoint is run.
+   * If the checkpoint fails, all downstream waves should be halted.
+   */
+  checkpointResult: WaveCheckpointResult | null;
 }
 
 export interface PlanEdge {
@@ -83,7 +117,46 @@ function buildCheckpoint(waveId: number, prompt: string, files: readonly string[
   }
 }
 
-export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
+/**
+ * Classify a file's wave using both filename heuristics and import
+ * graph data. When the graph is available, files that have no
+ * in-scope consumers (leaf nodes) stay in their heuristic wave,
+ * but files that are imported by many other scope files get
+ * promoted to an earlier wave (they should change first).
+ */
+function classifyWaveWithGraph(
+  file: string,
+  scopeFiles: readonly string[],
+  graph: ImportGraph | null,
+): number {
+  const baseWave = classifyWave(file);
+
+  if (!graph) return baseWave;
+
+  const fileSet = new Set(scopeFiles);
+  const consumers = graph.getImportedBy(file).filter((f) => fileSet.has(f));
+  const imports = graph.getImports(file).filter((f) => fileSet.has(f));
+
+  // Files consumed by many scope files are foundational — promote
+  // to wave 1 if they're not already tests/docs
+  if (consumers.length >= 3 && baseWave === 2) {
+    return 1;
+  }
+
+  // Files that import many scope files but are consumed by none
+  // are integration endpoints — promote to wave 4
+  if (imports.length >= 3 && consumers.length === 0 && baseWave === 2) {
+    return 4;
+  }
+
+  return baseWave;
+}
+
+export function planChangeSet(
+  changeSet: ChangeSet,
+  prompt: string,
+  importGraph?: ImportGraph | null,
+): Plan {
   const files = normalizeChangeSet(changeSet);
   const buckets = new Map<number, string[]>([
     [1, []],
@@ -93,7 +166,7 @@ export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
   ]);
 
   for (const file of files) {
-    const waveId = classifyWave(file);
+    const waveId = classifyWaveWithGraph(file, files, importGraph ?? null);
     buckets.get(waveId)?.push(file);
   }
 
@@ -104,6 +177,8 @@ export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
       files: buckets.get(1) ?? [],
       dependsOn: [],
       verificationCheckpoint: buildCheckpoint(1, prompt, buckets.get(1) ?? []),
+      status: (buckets.get(1) ?? []).length === 0 ? "skipped" : "pending",
+      checkpointResult: null,
     },
     {
       id: 2,
@@ -111,6 +186,8 @@ export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
       files: buckets.get(2) ?? [],
       dependsOn: [1],
       verificationCheckpoint: buildCheckpoint(2, prompt, buckets.get(2) ?? []),
+      status: (buckets.get(2) ?? []).length === 0 ? "skipped" : "pending",
+      checkpointResult: null,
     },
     {
       id: 3,
@@ -118,6 +195,8 @@ export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
       files: buckets.get(3) ?? [],
       dependsOn: [1, 2],
       verificationCheckpoint: buildCheckpoint(3, prompt, buckets.get(3) ?? []),
+      status: (buckets.get(3) ?? []).length === 0 ? "skipped" : "pending",
+      checkpointResult: null,
     },
     {
       id: 4,
@@ -125,6 +204,8 @@ export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
       files: buckets.get(4) ?? [],
       dependsOn: [1, 2, 3],
       verificationCheckpoint: buildCheckpoint(4, prompt, buckets.get(4) ?? []),
+      status: (buckets.get(4) ?? []).length === 0 ? "skipped" : "pending",
+      checkpointResult: null,
     },
   ];
 
@@ -140,4 +221,93 @@ export function planChangeSet(changeSet: ChangeSet, prompt: string): Plan {
     waves,
     dependencyEdges,
   };
+}
+
+// ─── Wave Lifecycle Helpers ─────────────────────────────────────────
+
+/** Start a wave. Only valid from "pending" status. */
+export function startWave(wave: PlanWave): void {
+  if (wave.status !== "pending") return;
+  wave.status = "in-progress";
+}
+
+/**
+ * Record the result of a wave's checkpoint evaluation.
+ * If the checkpoint fails, halts all downstream waves in the plan.
+ */
+export function completeWaveCheckpoint(
+  plan: Plan,
+  waveId: number,
+  result: Omit<WaveCheckpointResult, "evaluated">,
+): void {
+  const wave = plan.waves.find((w) => w.id === waveId);
+  if (!wave) return;
+
+  wave.status = "checkpoint-evaluating";
+  wave.checkpointResult = { ...result, evaluated: true };
+  wave.status = result.passed ? "passed" : "failed";
+
+  if (!result.passed) {
+    haltDownstreamWaves(plan, waveId);
+  }
+}
+
+/**
+ * Halt all waves that depend (transitively) on the given wave.
+ * Called when a wave fails its checkpoint — prevents blindly
+ * continuing through broken state.
+ */
+export function haltDownstreamWaves(plan: Plan, failedWaveId: number): void {
+  const halted = new Set<number>();
+  const queue = [failedWaveId];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const wave of plan.waves) {
+      if (wave.dependsOn.includes(current) && !halted.has(wave.id)) {
+        if (wave.status === "pending") {
+          wave.status = "halted";
+          halted.add(wave.id);
+          queue.push(wave.id);
+        }
+      }
+    }
+  }
+}
+
+/** Check if all non-skipped waves have a terminal status. */
+export function isAllWavesTerminal(plan: Plan): boolean {
+  return plan.waves.every(
+    (w) => w.status === "passed" || w.status === "failed" || w.status === "halted" || w.status === "skipped",
+  );
+}
+
+/** Check if any required wave (non-skipped) failed or was halted. */
+export function hasWaveFailures(plan: Plan): boolean {
+  return plan.waves.some(
+    (w) => w.status === "failed" || w.status === "halted",
+  );
+}
+
+/** Summarize wave outcomes for receipts. */
+export function summarizeWaveOutcomes(plan: Plan): readonly WaveOutcomeSummary[] {
+  return plan.waves.map((w) => ({
+    waveId: w.id,
+    name: w.name,
+    fileCount: w.files.length,
+    status: w.status,
+    checkpointPassed: w.checkpointResult?.passed ?? null,
+    checkpointReason: w.checkpointResult?.reason ?? null,
+    failedFiles: w.checkpointResult?.failedFiles ?? [],
+  }));
+}
+
+export interface WaveOutcomeSummary {
+  readonly waveId: number;
+  readonly name: string;
+  readonly fileCount: number;
+  readonly status: WaveStatus;
+  readonly checkpointPassed: boolean | null;
+  readonly checkpointReason: string | null;
+  readonly failedFiles: readonly string[];
 }

@@ -20,6 +20,7 @@
  */
 
 import type { ScopeClassification } from "./scope-classifier.js";
+import { classifyFileSensitivity } from "./change-set.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -50,6 +51,26 @@ export interface BlastRadiusEstimate {
    * for tooltips ("high because: migration keyword, 8+ files").
    */
   readonly signals: readonly string[];
+  /**
+   * Sensitive file summary from the change manifest. Populated
+   * when charterFiles are provided in the input.
+   */
+  readonly sensitiveFileSummary: SensitiveFileSummary;
+  /**
+   * Whether this blast radius estimate recommends blocking
+   * autonomous apply — i.e., requiring explicit human approval
+   * before changes are committed. True when critical files are
+   * touched or blast radius is high with sensitive content.
+   */
+  readonly blockAutonomousApply: boolean;
+}
+
+export interface SensitiveFileSummary {
+  readonly normalCount: number;
+  readonly sensitiveCount: number;
+  readonly criticalCount: number;
+  readonly sensitiveFiles: readonly string[];
+  readonly criticalFiles: readonly string[];
 }
 
 export interface BlastRadiusInput {
@@ -58,6 +79,8 @@ export interface BlastRadiusInput {
   readonly charterFileCount?: number;
   /** Optional prompt — lets us surface destructive verbs. */
   readonly prompt?: string;
+  /** File paths from the change manifest — enables per-file sensitivity analysis. */
+  readonly charterFiles?: readonly string[];
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -108,6 +131,17 @@ export function estimateBlastRadius(input: BlastRadiusInput): BlastRadiusEstimat
     security,
   });
 
+  const sensitiveFileSummary = analyzeSensitiveFiles(input.charterFiles ?? []);
+  if (sensitiveFileSummary.criticalCount > 0) signals.push(`critical-files:${sensitiveFileSummary.criticalCount}`);
+  if (sensitiveFileSummary.sensitiveCount > 0) signals.push(`sensitive-files:${sensitiveFileSummary.sensitiveCount}`);
+
+  // Block autonomous apply when critical files are touched, or
+  // when high blast radius combines with any sensitive content.
+  const blockAutonomousApply =
+    sensitiveFileSummary.criticalCount > 0 ||
+    (level === "high" && sensitiveFileSummary.sensitiveCount > 0) ||
+    (destructive && security);
+
   return {
     level,
     scopeType,
@@ -116,7 +150,35 @@ export function estimateBlastRadius(input: BlastRadiusInput): BlastRadiusEstimat
     recommendDecompose,
     rationale,
     signals,
+    sensitiveFileSummary,
+    blockAutonomousApply,
   };
+}
+
+function analyzeSensitiveFiles(files: readonly string[]): SensitiveFileSummary {
+  let normalCount = 0;
+  let sensitiveCount = 0;
+  let criticalCount = 0;
+  const sensitiveFiles: string[] = [];
+  const criticalFiles: string[] = [];
+
+  for (const file of files) {
+    const sensitivity = classifyFileSensitivity(file);
+    switch (sensitivity) {
+      case "critical":
+        criticalCount++;
+        criticalFiles.push(file);
+        break;
+      case "sensitive":
+        sensitiveCount++;
+        sensitiveFiles.push(file);
+        break;
+      default:
+        normalCount++;
+    }
+  }
+
+  return { normalCount, sensitiveCount, criticalCount, sensitiveFiles, criticalFiles };
 }
 
 // ─── Internals ───────────────────────────────────────────────────────

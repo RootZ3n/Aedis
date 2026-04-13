@@ -53,7 +53,10 @@ export type AedisEventType =
   | "execution_verified"
   | "execution_failed"
   | "blast_radius_estimated"
-  | "run_summary";
+  | "run_summary"
+  | "evaluation_started"
+  | "evaluation_complete"
+  | "evaluation_failed";
 
 /**
  * @deprecated Use AedisEventType. Alias kept for downstream code that

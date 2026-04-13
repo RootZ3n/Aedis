@@ -309,6 +309,7 @@ function withSummary(receipt: RunReceipt, prompt: string): RunReceipt {
       blastRadius: 1,
       recommendDecompose: false,
       reason: "test",
+      governance: { decompositionRequired: false, approvalRequired: false, escalationRecommended: false, wavesRequired: false },
     },
     changes: receipt.executionEvidence
       .filter((e) => e.kind === "file_modified" || e.kind === "file_created" || e.kind === "file_deleted")
@@ -353,6 +354,9 @@ function baseReceipt(opts: BaseReceiptOpts): RunReceipt {
         checks: [],
         summary: `verification ${opts.verification.verdict}`,
         totalDurationMs: 10,
+        fileCoverage: null,
+        coverageRatio: null,
+        validatedRatio: null,
       }
     : null;
 
@@ -429,5 +433,6 @@ function baseReceipt(opts: BaseReceiptOpts): RunReceipt {
     executionReceipts: [],
     humanSummary: null,
     blastRadius: null,
+    evaluation: null,
   };
 }

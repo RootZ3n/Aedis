@@ -117,7 +117,15 @@ import {
   type VerificationPipelineConfig,
   type VerificationReceipt,
 } from "./verification-pipeline.js";
-import { loadMemory, recordTask } from "./project-memory.js";
+import {
+  deriveTaskTypeKey,
+  findPatternWarnings,
+  findHistoricalInsights,
+  getConfidenceDampening,
+  shouldRecommendStrictMode,
+  loadMemory,
+  recordTask,
+} from "./project-memory.js";
 import {
   gateContext,
   gateContextForArchitectural,
@@ -141,6 +149,12 @@ import { normalizePrompt } from "./prompt-normalizer.js";
 import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
 
 import { createChangeSet, type ChangeSet } from "./change-set.js";
+import {
+  PostRunEvaluator,
+  type EvaluationAttachment,
+  type EvaluationInput,
+} from "./post-run-evaluator.js";
+import { type CrucibulumConfig, DEFAULT_CRUCIBULUM_CONFIG } from "./crucibulum-client.js";
 import { extractInvariants } from "./invariant-extractor.js";
 import { planChangeSet, type Plan, type PlanWave } from "./multi-file-planner.js";
 import { runRepairPass, type RepairResult } from "./repair-pass.js";
@@ -150,6 +164,8 @@ import {
   type MergeDecision,
   type MergeFinding,
 } from "./merge-gate.js";
+import { verifyGitDiff, type GitDiffResult } from "./git-diff-verifier.js";
+import { findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -188,6 +204,8 @@ export interface CoordinatorConfig {
   charterConfig?: Partial<CharterGeneratorConfig>;
   /** Verification configuration, including required external hooks. */
   verificationConfig?: Partial<VerificationPipelineConfig>;
+  /** Post-run Crucibulum evaluation configuration. */
+  evaluationConfig?: Partial<CrucibulumConfig>;
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -346,6 +364,13 @@ export interface RunReceipt {
     readonly toModel: string;
     readonly reason: string;
   } | null;
+  /**
+   * Post-run Crucibulum evaluation results. Null when evaluation
+   * is disabled, was not triggered for this outcome, or the run
+   * hasn't been evaluated yet. Contains structured results, scores,
+   * disagreement analysis, and confidence adjustments.
+   */
+  readonly evaluation: EvaluationAttachment | null;
 }
 
 // ─── Coordinator ─────────────────────────────────────────────────────
@@ -362,6 +387,7 @@ export class Coordinator {
   private workerRegistry: WorkerRegistry;
   private eventBus: EventBus | null;
   private receiptStore: ReceiptStore;
+  private evaluator: PostRunEvaluator;
 
   /** Active runs indexed by run ID */
   private activeRuns = new Map<string, ActiveRun>();
@@ -369,6 +395,8 @@ export class Coordinator {
   private pendingApproval = new Map<string, ActiveRun>();
   /** Pending decomposition plans awaiting approval, indexed by task ID */
   private pendingPlans = new Map<string, PendingPlan>();
+  /** Cached repo hub index per projectRoot. TTL: 5 minutes. */
+  private hubIndexCache = new Map<string, { result: { file: string; importedByCount: number }[]; timestamp: number }>();
 
   constructor(
     config: Partial<CoordinatorConfig>,
@@ -388,6 +416,7 @@ export class Coordinator {
     this.workerRegistry = workerRegistry;
     this.eventBus = eventBus ?? null;
     this.receiptStore = receiptStore ?? new ReceiptStore(this.config.projectRoot);
+    this.evaluator = new PostRunEvaluator(this.config.evaluationConfig);
   }
 
   // ─── Public API ────────────────────────────────────────────────────
@@ -605,6 +634,18 @@ export class Coordinator {
       },
     });
 
+    // Governance enforcement: scope classification governance triggers
+    // must materially affect execution, not just be advisory metadata.
+    const governance = scopeClassification.governance;
+    // Effective approval requirement: config.requireApproval OR governance says so
+    const effectiveRequireApproval = this.config.requireApproval || governance.approvalRequired;
+    if (governance.approvalRequired && !this.config.requireApproval) {
+      console.log(`[coordinator] GOVERNANCE: scope requires approval (${scopeClassification.type}) — approval enforced for this run`);
+    }
+    if (governance.escalationRecommended) {
+      console.log(`[coordinator] GOVERNANCE: escalation recommended for ${scopeClassification.type} scope`);
+    }
+
     // Phase 2: Intent
     console.log(`[coordinator] PHASE 2: Intent — creating and validating`);
     const intent = createIntent({
@@ -636,11 +677,23 @@ export class Coordinator {
     });
     console.log(`[coordinator] invariants: ${invariants.length} cross-file alignment constraints found.`);
     const plan =
-      scopeClassification.type === "multi-file" || scopeClassification.type === "architectural"
+      scopeClassification.type === "multi-file" || scopeClassification.type === "architectural" || governance.wavesRequired
         ? planChangeSet(changeSet, normalizedInput)
         : undefined;
     if (plan) {
       console.log(`[coordinator] multi-file plan: ${plan.waves.length} wave(s).`);
+    }
+    const patternWarnings = findPatternWarnings(projectMemory, {
+      prompt: normalizedInput,
+      scopeType: scopeClassification.type,
+      plannedFilesCount: changeSet.filesInScope.length,
+    });
+    if (patternWarnings.length > 0) {
+      gatedContext = mergeGatedContext(gatedContext, {
+        memoryNotes: patternWarnings,
+        suggestedNextSteps: ["Review whether the planned file set is broad enough for this task pattern."],
+      });
+      console.log(`[coordinator] pattern memory: ${patternWarnings.length} warning(s) injected`);
     }
 
     try {
@@ -703,8 +756,18 @@ export class Coordinator {
       rawUserPrompt: input,
       blastRadius,
       runInvocationContext: createRunInvocationContext(),
+      gitDiffResult: null,
+      patternWarnings,
+      historicalInsights: findHistoricalInsights(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }).map((i) => i.line),
+      confidenceDampening: getConfidenceDampening(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }),
     };
     this.activeRuns.set(run.id, active);
+    if (active.confidenceDampening < 1.0) {
+      console.log(`[coordinator] LEARNING: confidence dampening ${active.confidenceDampening.toFixed(2)} applied for task type (historical overconfidence)`);
+    }
+    if (active.historicalInsights.length > 0) {
+      console.log(`[coordinator] LEARNING: ${active.historicalInsights.length} historical insight(s) for explanation layer`);
+    }
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
     console.log(`[coordinator] changeSet created: ${charterTargets.length} file(s), scope=${active.scopeClassification?.type ?? "unknown"}`);
     await this.receiptStore.beginRun({
@@ -784,7 +847,8 @@ export class Coordinator {
           run,
           active.changes,
           active.workerResults,
-          "pre-apply"
+          "pre-apply",
+          active.changeSet,
         );
         recordCoherenceCheck(run, {
           phase: "post-build",
@@ -817,18 +881,19 @@ export class Coordinator {
       // already happened inside executeGraph (see verifyCompletedWaves).
       if (judgmentReport?.passed && !active.cancelled) {
         const isMultiFile = active.changeSet.filesInScope.length > 1;
+        const verifier = this.verificationPipelineFor(active);
         console.log(
           `[coordinator] PHASE 9: Verification — entering (${isMultiFile ? "change-set" : "single-file"} scope)`,
         );
         verificationReceipt = isMultiFile
-          ? await this.verifier.verifyChangeSet(
+          ? await verifier.verifyChangeSet(
               active.intent,
               run,
               active.changeSet,
               active.changes,
               active.workerResults,
             )
-          : await this.verifier.verify(
+          : await verifier.verify(
               active.intent,
               run,
               active.changes,
@@ -883,6 +948,47 @@ export class Coordinator {
         };
       }
 
+      // Phase 9d: GitDiffVerifier — reconcile manifest vs on-disk truth
+      // before the merge gate. This catches files that were declared but
+      // never changed, and files that changed but were never declared.
+      // The result feeds into merge-gate findings and confidence scoring.
+      let gitDiffResult: GitDiffResult | null = null;
+      if (!active.cancelled && active.changes.length > 0) {
+        try {
+          const manifestFiles = active.changeSet.filesInScope.map((f) => f.path);
+          const createdFiles = active.changes
+            .filter((c) => c.operation === "create")
+            .map((c) => c.path);
+          gitDiffResult = await verifyGitDiff({
+            projectRoot: active.projectRoot,
+            manifestFiles,
+            createdFiles,
+          });
+          active.gitDiffResult = gitDiffResult;
+          console.log(
+            `[coordinator] PHASE 9d: GitDiffVerifier — ${gitDiffResult.summary} ` +
+            `(ratio=${gitDiffResult.confirmationRatio.toFixed(2)} passed=${gitDiffResult.passed})`,
+          );
+        } catch (err) {
+          // Git diff failure is a signal-quality issue — we couldn't verify
+          // on-disk truth. Log it as a warning and create a synthetic failed
+          // result so the merge gate knows verification couldn't confirm truth.
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn(`[coordinator] PHASE 9d: GitDiffVerifier failed: ${errMsg}`);
+          gitDiffResult = {
+            actualChangedFiles: [],
+            expectedButUnchanged: [],
+            undeclaredChanges: [],
+            confirmed: [],
+            passed: false,
+            confirmationRatio: 0,
+            summary: `git diff verification failed: ${errMsg}`,
+            rawDiffStat: "",
+          };
+          active.gitDiffResult = gitDiffResult;
+        }
+      }
+
       // Phase 9c: MergeGate — the single source of truth for "can we
       // apply / commit". Replaces the old advisory behaviour where
       // merge_blocked was emitted and the commit happened anyway.
@@ -898,10 +1004,15 @@ export class Coordinator {
       // but the gate decision needs them so `action` becomes "block"
       // and the commit is prevented.
       const waveFailures = this.waveFailureFindings(active);
+      // Inject git diff findings — undeclared changes and missing manifest
+      // files are critical because they indicate the on-disk state diverged
+      // from what was declared.
+      const gitDiffFindings = this.gitDiffFindings(gitDiffResult);
+      const extraFindings = [...waveFailures, ...gitDiffFindings];
       const mergeDecision: MergeDecision =
-        waveFailures.length === 0
+        extraFindings.length === 0
           ? baseDecision
-          : this.mergeInFindings(baseDecision, waveFailures);
+          : this.mergeInFindings(baseDecision, extraFindings);
       this.logMergeDecision(mergeDecision);
       this.recordMergeDecision(active, mergeDecision);
 
@@ -962,9 +1073,11 @@ export class Coordinator {
         mergeDecision.action === "apply";
 
       // Approval gate: if requireApproval is true, pause instead of auto-committing.
-      // The run transitions to "awaiting_approval" and waits for external signal.
-      if (canCommit && this.config.requireApproval) {
+      // The run transitions to "awaiting_approval" — a first-class, explicit state.
+      // The run is NOT complete, NOT partial, NOT failed. It is paused.
+      if (canCommit && effectiveRequireApproval) {
         console.log(`[coordinator] PHASE 10: APPROVAL REQUIRED — ${changeCount} change(s) ready. Pausing for external approval.`);
+        advancePhase(run, "awaiting_approval");
         this.emit({ type: "system_event", payload: { runId: run.id, event: "approval_required", changeCount } });
         recordDecision(active.run, {
           description: `Commit paused — requireApproval=true. ${changeCount} files ready to commit.`,
@@ -975,14 +1088,16 @@ export class Coordinator {
         });
         // Store the active run for later approval via approveRun()
         this.pendingApproval.set(run.id, active);
-        // Patch receipt — run is paused awaiting approval
+        // Patch receipt — run is paused awaiting approval (NOT "RUNNING" — truthful)
         void this.receiptStore.patchRun(run.id, {
-          status: "RUNNING",
+          status: "AWAITING_APPROVAL",
           taskSummary: `Awaiting approval — ${changeCount} change(s) ready to commit`,
         });
-        // Return a partial receipt indicating approval is needed
+        // Return a receipt that reflects the awaiting_approval state truthfully.
+        // verdict is "partial" because the run is not yet complete — but the
+        // phase is "awaiting_approval" which the UI must show distinctly.
         const durationMs = Date.now() - new Date(active.run.startedAt).getTime();
-        const awaitReceipt = this.buildReceipt(active, null, null, null, durationMs, mergeDecision, null, "partial");
+        const awaitReceipt = this.buildReceipt(active, verificationReceipt, judgmentReport, null, durationMs, mergeDecision, null, "partial");
         return awaitReceipt;
       }
 
@@ -993,13 +1108,12 @@ export class Coordinator {
           console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
           this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
         } else {
-          // Merge gate approved but commit failed — this is a critical
-          // failure. The builder's changes are on disk but not committed,
-          // leaving the repo in an inconsistent state. Roll back and
-          // force the verdict to "failed".
+          // Merge gate approved but commit failed — explicit commit_failed
+          // terminal state. Roll back on-disk changes to leave the repo clean.
           console.error(`[coordinator] PHASE 10 FAILED — gitCommit returned null. Rolling back builder changes.`);
           await this.rollbackChanges(active, mergeDecision);
-          failRun(run, "Merge gate approved but git commit failed — changes rolled back");
+          run.failureReason = "Merge gate approved but git commit failed — changes rolled back";
+          advancePhase(run, "commit_failed");
         }
       } else if (this.config.autoCommit && !active.cancelled) {
         console.log(`[coordinator] PHASE 10 SKIPPED — no changes to commit (active.changes=0, filesTouched=0)`);
@@ -1102,11 +1216,50 @@ export class Coordinator {
       // to for "here is the plain-English story of this run."
       this.emitRunSummary(run.id, finalReceipt);
 
-      console.log(`[coordinator] ═══ submit() exit — verdict=${verdictAfterGate} duration=${Date.now() - startTime}ms`);
-      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason, classification: finalReceipt.humanSummary?.classification ?? null } });
-      this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: finalReceipt.id, receipt: finalReceipt } });
+      // ─── Post-run Crucibulum evaluation (non-blocking) ────────
+      // Runs after the receipt is built so evaluation failures
+      // never corrupt the Aedis run. Results are attached to the
+      // receipt and persisted separately.
+      let evaluatedReceipt = finalReceipt;
+      if (this.evaluator.shouldEvaluate(verdictAfterGate)) {
+        try {
+          console.log(`[coordinator] POST-RUN EVALUATION — triggering Crucibulum for run ${run.id}`);
+          this.emit({ type: "evaluation_started", payload: { runId: run.id } });
+          const evalInput: EvaluationInput = {
+            runId: run.id,
+            verdict: verdictAfterGate,
+            aedisConfidence: finalReceipt.humanSummary?.confidence?.overall ?? 0.5,
+            scopeType: active.scopeClassification?.type ?? "unknown",
+            filesChanged: active.changes.map((c) => c.path),
+            commitSha,
+            taskSummary: active.intent.charter.objective,
+          };
+          const evaluation = await this.evaluator.evaluate(evalInput);
+          evaluatedReceipt = {
+            ...finalReceipt,
+            evaluation,
+          };
+          evaluatedReceipt = {
+            ...evaluatedReceipt,
+            humanSummary: this.composeHumanSummary(active, evaluatedReceipt),
+          };
+          await this.persistFinalReceipt(active, evaluatedReceipt);
+          console.log(`[coordinator] POST-RUN EVALUATION — ${evaluation.completed ? "completed" : "incomplete"}: ${evaluation.aggregate?.summary ?? evaluation.reason}`);
+          if (evaluation.disagreement?.escalate) {
+            console.log(`[coordinator] EVALUATION DISAGREEMENT — ${evaluation.disagreement.summary}`);
+          }
+          this.emit({ type: "evaluation_complete", payload: { runId: run.id, evaluation } });
+        } catch (evalErr) {
+          console.log(`[coordinator] POST-RUN EVALUATION FAILED (non-fatal): ${evalErr}`);
+          this.emit({ type: "evaluation_failed", payload: { runId: run.id, error: String(evalErr) } });
+        }
+      }
 
-      return finalReceipt;
+      console.log(`[coordinator] ═══ submit() exit — verdict=${verdictAfterGate} duration=${Date.now() - startTime}ms`);
+      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason, classification: evaluatedReceipt.humanSummary?.classification ?? null } });
+      this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: evaluatedReceipt.id, receipt: evaluatedReceipt } });
+
+      return evaluatedReceipt;
     } catch (err) {
       const errMessage = err instanceof Error ? err.message : String(err);
       const errStack = err instanceof Error ? err.stack : undefined;
@@ -1382,13 +1535,6 @@ export class Coordinator {
           return false;
         }
 
-        if (file.endsWith(".test.ts") || file.endsWith(".spec.ts")) {
-          console.log(`[coordinator] dropping test file from deliverables: ${file}`);
-          decisions.push(`  drop ${file} (test file excluded from deliverables)`);
-          didFilter = true;
-          return false;
-        }
-
         const exists = this.fileExists(file, active.projectRoot);
         const isTest = this.isTestFile(file);
         const wasExplicit = isExplicit(file);
@@ -1398,10 +1544,19 @@ export class Coordinator {
           return true;
         }
 
-        if (isTest && !explicitTestRequest && !exists) {
-          decisions.push(`  drop ${file} (auto-generated test for non-existent file)`);
-          didFilter = true;
-          return false;
+        // Test files: keep existing tests (they pair with implementation files
+        // and should be updated). Only drop auto-generated test targets for
+        // implementation files that don't exist yet.
+        if (isTest) {
+          if (exists) {
+            decisions.push(`  keep ${file} (existing test file — paired with implementation)`);
+            return true;
+          }
+          if (!explicitTestRequest) {
+            decisions.push(`  drop ${file} (auto-generated test for non-existent file)`);
+            didFilter = true;
+            return false;
+          }
         }
 
         decisions.push(`  keep ${file}${exists ? "" : " (will be created)"}`);
@@ -1454,7 +1609,33 @@ export class Coordinator {
       deduped.push({ ...d, targetFiles: uniqueFiles });
     }
 
-    console.log(`[coordinator] prepareDeliverablesForGraph: ${deduped.length} deliverable(s) after filter+dedup`);
+    // ── PHASE 4 — Test pair injection ───────────────────────────────────
+    // For implementation files that have existing test files, inject the
+    // test as an optional deliverable so verification is more complete.
+    // Only injects tests that EXIST on disk — does not create phantom targets.
+    if (!explicitTestRequest) {
+      const allTargetFiles = deduped.flatMap((d) => d.targetFiles);
+      const missingTests = findMissingTestFiles(allTargetFiles, active.projectRoot);
+      if (missingTests.length > 0) {
+        const testFiles = missingTests
+          .map((p) => p.testPath!)
+          .filter((t) => !seenPaths.has(resolve(active.projectRoot, t)));
+        if (testFiles.length > 0) {
+          deduped.push({
+            type: "test" as any,
+            description: `Test pairs for changed implementation files`,
+            targetFiles: testFiles,
+          });
+          for (const t of testFiles) {
+            seenPaths.add(resolve(active.projectRoot, t));
+            decisions.push(`  inject ${t} (test pair for implementation file)`);
+          }
+          console.log(`[coordinator] prepareDeliverablesForGraph: injected ${testFiles.length} test pair(s)`);
+        }
+      }
+    }
+
+    console.log(`[coordinator] prepareDeliverablesForGraph: ${deduped.length} deliverable(s) after filter+dedup+test-inject`);
     for (const decision of decisions) {
       console.log(`[coordinator]${decision}`);
     }
@@ -1506,6 +1687,50 @@ export class Coordinator {
    * given files, or null if no wave matches (single-file runs or
    * deliverables whose files fell outside the plan).
    */
+  /**
+   * Wave gating: when the run has a plan with wavesRequired governance,
+   * filter builder nodes so only those belonging to waves whose upstream
+   * dependencies have completed are dispatched. Non-builder nodes are
+   * always passed through — they are pipeline-stage nodes (scout, critic,
+   * verifier, integrator) and don't belong to waves.
+   *
+   * When no plan or no wavesRequired governance, returns all nodes unchanged.
+   */
+  private applyWaveGating(active: ActiveRun, dispatchable: TaskNode[]): TaskNode[] {
+    const plan = active.plan;
+    const governance = active.scopeClassification?.governance;
+    if (!plan || !governance?.wavesRequired) return dispatchable;
+
+    // Determine which waves are complete — a wave is complete when all
+    // builder nodes with that waveId have finished (completed or failed).
+    const completedWaveIds = new Set<number>();
+    for (const wave of plan.waves) {
+      const waveBuilderNodes = active.graph.nodes.filter(
+        (n) => n.workerType === "builder" && n.metadata.waveId === wave.id,
+      );
+      if (waveBuilderNodes.length === 0 || waveBuilderNodes.every((n) => n.status === "completed" || n.status === "failed")) {
+        completedWaveIds.add(wave.id);
+      }
+    }
+
+    return dispatchable.filter((node) => {
+      if (node.workerType !== "builder") return true;
+      const waveId = typeof node.metadata.waveId === "number" ? node.metadata.waveId : null;
+      if (waveId == null) return true; // no wave assignment — pass through
+
+      const wave = plan.waves.find((w) => w.id === waveId);
+      if (!wave) return true;
+
+      // Check all upstream waves are complete
+      for (const depWaveId of wave.dependsOn) {
+        if (!completedWaveIds.has(depWaveId)) {
+          return false; // upstream wave not yet complete — hold back
+        }
+      }
+      return true;
+    });
+  }
+
   private resolveWaveForFiles(
     plan: Plan | undefined,
     files: readonly string[],
@@ -1571,8 +1796,20 @@ export class Coordinator {
         break;
       }
 
-      const phases = dispatchable.map((n) => n.workerType);
-      console.log(`[coordinator] executeGraph: dispatching ${dispatchable.length} node(s) of type(s) [${phases.join(", ")}]`);
+      // Wave enforcement: when governance requires waves, only dispatch
+      // builder nodes belonging to waves whose upstream waves have completed.
+      // Non-builder nodes (scout, critic, verifier, integrator) are not
+      // wave-gated — they always dispatch when topologically ready.
+      const waveGated = this.applyWaveGating(active, dispatchable);
+      if (waveGated.length === 0 && dispatchable.length > 0) {
+        // All dispatchable nodes were wave-gated — this means upstream
+        // waves haven't completed yet. Wait for current wave to finish.
+        console.log(`[coordinator] executeGraph: all ${dispatchable.length} dispatchable node(s) wave-gated — waiting for current wave`);
+        continue;
+      }
+
+      const phases = waveGated.map((n) => n.workerType);
+      console.log(`[coordinator] executeGraph: dispatching ${waveGated.length} node(s) of type(s) [${phases.join(", ")}]${waveGated.length < dispatchable.length ? ` (${dispatchable.length - waveGated.length} wave-gated)` : ""}`);
       if (phases.includes("scout") && run.phase === "scouting") {
         // already in scouting
       } else if (phases.includes("builder")) {
@@ -1586,7 +1823,7 @@ export class Coordinator {
       }
 
       const results = await Promise.all(
-        dispatchable.map((node) => this.dispatchNode(active, node))
+        waveGated.map((node) => this.dispatchNode(active, node))
       );
 
       for (const { node, result } of results) {
@@ -1962,7 +2199,7 @@ export class Coordinator {
     }
 
     const recoveryAttempts = active.run.decisions.filter(
-      (d) => d.description.startsWith("Recovery attempt")
+      (d) => d.description.startsWith("Recovery attempt") || d.description.startsWith("Recovery:"),
     ).length;
 
     console.log(`[coordinator] attemptRecovery: ${failedNodes.length} failed node(s), attempt ${recoveryAttempts + 1}/${this.config.maxRecoveryAttempts}`);
@@ -1976,32 +2213,73 @@ export class Coordinator {
       return false;
     }
 
+    // Use the structured RecoveryEngine to classify failures and choose strategies
+    const { RecoveryEngine } = await import("./recovery-engine.js");
+    const engine = new RecoveryEngine();
+    const costBudget = {
+      currentTier: 0,
+      maxTier: 2,
+      fundedTier: 2,
+      spentUsd: active.run.totalCost?.estimatedCostUsd ?? 0,
+      remainingUsd: 1.0 - (active.run.totalCost?.estimatedCostUsd ?? 0),
+    };
+
     this.emit({
       type: "recovery_attempted",
       payload: { runId: active.run.id, attempt: recoveryAttempts + 1 },
     });
 
-    recordDecision(active.run, {
-      description: `Recovery attempt ${recoveryAttempts + 1} for ${failedNodes.length} failed nodes`,
-      madeBy: "coordinator",
-      taskId: null,
-      alternatives: ["Abort run", "Skip failed tasks"],
-      rationale: "Attempting recovery before declaring failure",
-    });
-
+    let anyRecovered = false;
     for (const node of failedNodes) {
+      // Build failure signals from the node's result
+      const result = active.workerResults.find(
+        (wr) => wr.taskId === node.runTaskId || wr.taskId === node.id,
+      );
+      const failureSignals = result?.issues?.map((i) => i.message) ?? [];
+      const recoveryResult = {
+        success: false,
+        failureSignals,
+        verificationPassed: false,
+        contractSatisfied: true,
+        coherencePassed: true,
+      };
+
+      const failureType = engine.analyzeFailure(recoveryResult);
+      const strategy = engine.selectStrategy(failureType, active.run, costBudget);
+
+      console.log(
+        `[coordinator] attemptRecovery: node ${node.id.slice(0, 6)} (${node.workerType}) — ` +
+        `failure=${failureType} strategy=${strategy.name} costDelta=${strategy.costTierDelta}`,
+      );
+
+      recordDecision(active.run, {
+        description: `Recovery: ${strategy.name} for ${node.workerType} node ${node.id.slice(0, 6)} (failure: ${failureType})`,
+        madeBy: "coordinator",
+        taskId: node.runTaskId,
+        alternatives: ["Abort run", "Skip failed tasks"],
+        rationale: strategy.rationale,
+      });
+
+      if (strategy.requiresHumanReview) {
+        console.log(`[coordinator] attemptRecovery: strategy requires human review — skipping node ${node.id.slice(0, 6)}`);
+        continue;
+      }
+
+      // Reset the failed node so it can be re-dispatched
       (node as any).status = "planned";
+      const escalationTier = strategy.costTierDelta > 0 ? "premium" : "standard";
       addEscalationBoundary(
         active.graph,
         node.id,
-        "premium",
-        "Escalated after failure — recovery attempt",
+        escalationTier,
+        `Recovery: ${strategy.name} after ${failureType}`,
         "coordinator"
       );
       markReady(active.graph, node.id);
+      anyRecovered = true;
     }
 
-    return true;
+    return anyRecovered;
   }
 
   // ─── Wave-aware Context Gate (P3) ──────────────────────────────────
@@ -2102,7 +2380,7 @@ export class Coordinator {
     if (!active.plan) return;
 
     for (const wave of active.plan.waves) {
-      const receipt = await this.verifier.verifyWave(
+      const receipt = await this.verificationPipelineFor(active).verifyWave(
         active.intent,
         active.run,
         wave,
@@ -2174,6 +2452,59 @@ export class Coordinator {
         ),
       });
     }
+    return findings;
+  }
+
+  /**
+   * Translate GitDiffVerifier results into merge-gate findings.
+   * Missing required files and undeclared changes are critical.
+   * Discrepancy ratios below 1.0 are advisory.
+   */
+  private gitDiffFindings(result: GitDiffResult | null): MergeFinding[] {
+    if (!result) return [];
+    const findings: MergeFinding[] = [];
+
+    // If git diff itself failed (confirmationRatio=0 and no files), surface
+    // it as advisory — we can't confirm truth but shouldn't block on infra failure.
+    if (result.confirmationRatio === 0 && result.actualChangedFiles.length === 0 && result.summary.includes("failed")) {
+      findings.push({
+        source: "change-set-gate",
+        severity: "advisory",
+        code: "git-diff:unavailable",
+        message: `Git diff verification unavailable: ${result.summary}`,
+      });
+      return findings;
+    }
+
+    if (result.expectedButUnchanged.length > 0) {
+      findings.push({
+        source: "change-set-gate",
+        severity: "critical",
+        code: "git-diff:expected-unchanged",
+        message: `${result.expectedButUnchanged.length} manifest file(s) expected to change but unchanged on disk: ${result.expectedButUnchanged.slice(0, 5).join(", ")}${result.expectedButUnchanged.length > 5 ? "…" : ""}`,
+        files: result.expectedButUnchanged,
+      });
+    }
+
+    if (result.undeclaredChanges.length > 0) {
+      findings.push({
+        source: "change-set-gate",
+        severity: "critical",
+        code: "git-diff:undeclared-changes",
+        message: `${result.undeclaredChanges.length} file(s) changed on disk but not declared in manifest: ${result.undeclaredChanges.slice(0, 5).join(", ")}${result.undeclaredChanges.length > 5 ? "…" : ""}`,
+        files: result.undeclaredChanges,
+      });
+    }
+
+    if (result.passed) {
+      findings.push({
+        source: "change-set-gate",
+        severity: "advisory",
+        code: "git-diff:confirmed",
+        message: `Git diff confirmed: ${result.confirmed.length}/${result.confirmed.length + result.expectedButUnchanged.length} manifest files verified on disk`,
+      });
+    }
+
     return findings;
   }
 
@@ -2281,15 +2612,38 @@ export class Coordinator {
     try {
       const commitSha = await this.gitCommit(active);
       if (commitSha) {
+        advancePhase(active.run, "complete");
         console.log(`[coordinator] APPROVED COMMIT ${commitSha.slice(0, 8)} for run ${runId}`);
         this.emit({ type: "commit_created", payload: { runId, sha: commitSha } });
+        void this.receiptStore.patchRun(runId, {
+          status: "COMPLETE",
+          taskSummary: `Approved and committed: ${commitSha.slice(0, 8)}`,
+          completedAt: new Date().toISOString(),
+        });
         return { ok: true, commitSha };
       } else {
-        console.error(`[coordinator] APPROVED but commit failed for run ${runId} — rolling back`);
+        // Commit failed after approval — explicit commit_failed terminal state
+        advancePhase(active.run, "commit_failed");
+        active.run.failureReason = "Merge gate approved but git commit failed after human approval";
+        await this.rollbackChanges(active, { action: "block", findings: [], critical: [], advisory: [], primaryBlockReason: "commit failed", summary: "commit failed" });
+        console.error(`[coordinator] APPROVED but commit failed for run ${runId} — rolled back, marked commit_failed`);
+        void this.receiptStore.patchRun(runId, {
+          status: "FAILED",
+          taskSummary: "Commit failed after approval — changes rolled back",
+          completedAt: new Date().toISOString(),
+          appendErrors: ["Commit failed after human approval — changes rolled back"],
+        });
         return { ok: false, error: "Commit failed after approval — changes rolled back" };
       }
     } catch (err) {
-      return { ok: false, error: `Commit threw: ${String(err instanceof Error ? err.message : err)}` };
+      advancePhase(active.run, "commit_failed");
+      active.run.failureReason = `Commit threw during approval: ${String(err instanceof Error ? err.message : err)}`;
+      void this.receiptStore.patchRun(runId, {
+        status: "FAILED",
+        taskSummary: active.run.failureReason,
+        completedAt: new Date().toISOString(),
+      });
+      return { ok: false, error: active.run.failureReason };
     }
   }
 
@@ -2304,17 +2658,45 @@ export class Coordinator {
     console.log(`[coordinator] REJECTION received for run ${runId} — rolling back...`);
     this.pendingApproval.delete(runId);
 
-    // Roll back all builder changes
-    for (const change of active.changes) {
-      if (change.originalContent) {
-        const { resolve } = await import("path");
-        const { writeFile } = await import("fs/promises");
-        const absPath = resolve(active.projectRoot, change.path);
-        await writeFile(absPath, change.originalContent, "utf-8");
-      }
-    }
+    // Roll back all builder changes symmetrically (create/modify/delete)
+    await this.rollbackChanges(active, {
+      action: "block",
+      findings: [],
+      critical: [{
+        source: "coordinator",
+        severity: "critical",
+        code: "coordinator:rejected",
+        message: "Run rejected by human during approval",
+      }],
+      advisory: [],
+      primaryBlockReason: "Run rejected by human during approval",
+      summary: "REJECTED — human rejected during approval gate",
+    });
 
-    console.log(`[coordinator] Run ${runId} rejected and rolled back`);
+    // Set the explicit rejected terminal state
+    advancePhase(active.run, "rejected");
+    active.run.failureReason = "Rejected by human during approval gate";
+
+    recordDecision(active.run, {
+      description: "Run rejected by human during approval",
+      madeBy: "human",
+      taskId: null,
+      alternatives: ["Approve and commit"],
+      rationale: "Human rejected the run at the approval gate. All changes rolled back.",
+    });
+
+    void this.receiptStore.patchRun(runId, {
+      status: "REJECTED",
+      taskSummary: "Rejected by human — all changes rolled back",
+      completedAt: new Date().toISOString(),
+      appendErrors: ["Run rejected by human during approval gate"],
+    });
+
+    console.log(`[coordinator] Run ${runId} rejected and rolled back — terminal state: rejected`);
+    this.emit({
+      type: "run_complete",
+      payload: { runId, verdict: "failed", executionVerified: false, executionReason: "Rejected by human", classification: null },
+    });
     return { ok: true };
   }
 
@@ -2715,18 +3097,13 @@ export class Coordinator {
             reason: `${active.runInvocationContext.escalationCount} escalation(s) triggered due to low builder confidence`,
           }
         : null,
+      evaluation: null,
     };
 
     // Compose the human-readable summary from the receipt we just
     // built. Pure function — see core/run-summary.ts.
     const averageWorkerConfidence = this.averageWorkerConfidence(active.workerResults);
-    const humanSummary = generateRunSummary({
-      receipt: baseReceipt,
-      userPrompt: active.rawUserPrompt || active.normalizedInput,
-      scopeClassification: active.scopeClassification ?? null,
-      changes: active.changes.map((c) => ({ path: c.path, operation: c.operation })),
-      averageWorkerConfidence,
-    });
+    const humanSummary = this.composeHumanSummary(active, baseReceipt, averageWorkerConfidence);
     console.log(
       `[coordinator] run summary: classification=${humanSummary.classification} ` +
       `confidence=${Math.round(humanSummary.confidence.overall * 100)}% ` +
@@ -2758,6 +3135,39 @@ export class Coordinator {
       }
     }
     return count > 0 ? total / count : 0;
+  }
+
+  private composeHumanSummary(
+    active: ActiveRun,
+    receipt: RunReceipt,
+    averageWorkerConfidence: number = this.averageWorkerConfidence(active.workerResults),
+  ): RunSummary {
+    return generateRunSummary({
+      receipt,
+      userPrompt: active.rawUserPrompt || active.normalizedInput,
+      scopeClassification: active.scopeClassification ?? null,
+      changes: active.changes.map((c) => ({ path: c.path, operation: c.operation })),
+      averageWorkerConfidence,
+      gitDiffConfirmationRatio: active.gitDiffResult?.confirmationRatio,
+      gitDiffResult: active.gitDiffResult,
+      requiredFiles: active.changeSet.filesInScope
+        .filter((file) => file.necessity === "required")
+        .map((file) => file.path),
+      projectRoot: active.projectRoot,
+      patternWarnings: active.patternWarnings,
+      historicalInsights: active.historicalInsights,
+      confidenceDampening: active.confidenceDampening,
+      strictMode: active.gatedContext.strictVerification === true || this.config.verificationConfig?.strictMode === true || shouldRecommendStrictMode(active.projectMemory, { prompt: active.normalizedInput, scopeType: active.scopeClassification?.type }),
+    });
+  }
+
+  private verificationPipelineFor(active: ActiveRun): VerificationPipeline {
+    const strictMode = active.gatedContext.strictVerification === true || this.config.verificationConfig?.strictMode === true;
+    if (!strictMode) return this.verifier;
+    return new VerificationPipeline({
+      ...this.config.verificationConfig,
+      strictMode: true,
+    });
   }
 
   /**
@@ -2852,6 +3262,17 @@ export class Coordinator {
       successPattern: receipt.verdict === "success" ? "Scoped fix passed commit and verification gates." : undefined,
       affectedSystems: uniqueStrings(filesTouched.map((file) => file.split("/")[0] ?? "").filter(Boolean)),
       changeTypes: uniqueStrings(active.changes.map((change) => change.operation)),
+      taskTypeKey: deriveTaskTypeKey(normalizedInput, active.scopeClassification?.type),
+      plannedFilesCount: active.changeSet.filesInScope.length,
+      missingFiles: active.gitDiffResult?.expectedButUnchanged ?? [],
+      undeclaredFiles: active.gitDiffResult?.undeclaredChanges ?? [],
+      verificationCoverageRatio: verificationReceipt?.coverageRatio ?? null,
+      validatedRatio: verificationReceipt?.validatedRatio ?? null,
+      // Evaluation feedback — thread Crucibulum results into pattern memory
+      aedisConfidence: receipt.humanSummary?.confidence?.overall ?? null,
+      evaluationScore: receipt.evaluation?.aggregate?.averageScore ?? null,
+      evaluationPassed: receipt.evaluation?.aggregate?.overallPass ?? null,
+      disagreementDirection: receipt.evaluation?.disagreement?.direction ?? null,
     });
 
     const memoryAdapter = await getAedisMemoryAdapter();
@@ -2901,6 +3322,15 @@ export class Coordinator {
   private async buildRepoHubIndex(
     projectRoot: string,
   ): Promise<{ file: string; importedByCount: number }[]> {
+    // Cache check — reuse if within 5 minutes. Repo structure doesn't
+    // change within a single Aedis session frequently enough to warrant
+    // re-scanning on every submit.
+    const HUB_INDEX_TTL_MS = 5 * 60 * 1000;
+    const cached = this.hubIndexCache.get(projectRoot);
+    if (cached && Date.now() - cached.timestamp < HUB_INDEX_TTL_MS) {
+      console.log(`[coordinator] buildRepoHubIndex: cache hit for ${projectRoot} (age ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+      return cached.result;
+    }
     const { readdir, readFile } = await import("fs/promises");
     const { join, relative } = await import("path");
 
@@ -2947,10 +3377,14 @@ export class Coordinator {
       } catch { /* skip unreadable files */ }
     }
 
-    return [...importCounts.entries()]
+    const result = [...importCounts.entries()]
       .map(([file, count]) => ({ file, importedByCount: count }))
       .sort((a, b) => b.importedByCount - a.importedByCount)
       .slice(0, 10);
+
+    // Cache the result
+    this.hubIndexCache.set(projectRoot, { result, timestamp: Date.now() });
+    return result;
   }
 
   // ─── Event Helpers ─────────────────────────────────────────────────
@@ -3048,6 +3482,14 @@ interface ActiveRun {
   blastRadius: BlastRadiusEstimate | null;
   /** Per-run invocation context for confidence-based escalation (GAP 4). */
   runInvocationContext: RunInvocationContext;
+  /** GitDiffVerifier result from phase 9d. Null when not run. */
+  gitDiffResult: GitDiffResult | null;
+  /** Lightweight historical warnings inferred from prior similar runs. */
+  patternWarnings: string[];
+  /** Historical insights for the explanation layer. */
+  historicalInsights: string[];
+  /** Confidence dampening factor from pattern history (0.8-1.0). */
+  confidenceDampening: number;
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────

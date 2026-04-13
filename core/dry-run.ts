@@ -413,6 +413,10 @@ function predictiveConfidence(input: {
       planning = 0.9;
       basis.push("planning:single-file scope → 0.90");
       break;
+    case "small-linked":
+      planning = 0.8;
+      basis.push("planning:small-linked scope → 0.80");
+      break;
     case "multi-file":
       planning = 0.72;
       basis.push("planning:multi-file scope → 0.72");
@@ -424,6 +428,10 @@ function predictiveConfidence(input: {
     case "migration":
       planning = 0.38;
       basis.push("planning:migration scope → 0.38");
+      break;
+    case "cross-cutting-sweep":
+      planning = 0.28;
+      basis.push("planning:cross-cutting-sweep scope → 0.28");
       break;
   }
   if (input.scope.recommendDecompose) {
@@ -442,9 +450,11 @@ function predictiveConfidence(input: {
   // changes? Higher for narrow scopes, lower for wide ones.
   let execution = 0.5;
   if (input.scope.type === "single-file") execution = 0.78;
+  if (input.scope.type === "small-linked") execution = 0.68;
   if (input.scope.type === "multi-file") execution = 0.6;
   if (input.scope.type === "architectural") execution = 0.38;
   if (input.scope.type === "migration") execution = 0.34;
+  if (input.scope.type === "cross-cutting-sweep") execution = 0.24;
   if (input.blastRadius.level === "high") execution = Math.max(0.2, execution - 0.15);
   if (input.preflight.blocked) execution = Math.max(0, execution - 0.4);
   basis.push(`execution:predictive by scope+blast → ${execution.toFixed(2)}`);
@@ -453,9 +463,11 @@ function predictiveConfidence(input: {
   // with clean preflight usually verify cleanly.
   let verification = 0.5;
   if (input.scope.type === "single-file" && !input.preflight.hasWarnings) verification = 0.8;
+  else if (input.scope.type === "small-linked" && !input.preflight.hasWarnings) verification = 0.72;
   else if (input.scope.type === "multi-file" && !input.preflight.hasWarnings) verification = 0.65;
   else if (input.scope.type === "architectural") verification = 0.4;
   else if (input.scope.type === "migration") verification = 0.35;
+  else if (input.scope.type === "cross-cutting-sweep") verification = 0.28;
   if (input.preflight.blocked) verification = Math.max(0, verification - 0.35);
   basis.push(`verification:predictive by scope+preflight → ${verification.toFixed(2)}`);
 
@@ -560,6 +572,12 @@ function minimalBlockedPlan(input: {
     blastRadius: 0,
     recommendDecompose: false,
     reason: "charter error — planner did not run",
+    governance: {
+      decompositionRequired: false,
+      approvalRequired: false,
+      escalationRecommended: false,
+      wavesRequired: false,
+    },
   };
   const blastRadius = estimateBlastRadius({
     scopeClassification: scope,
@@ -586,7 +604,12 @@ function minimalBlockedPlan(input: {
       planning: 0,
       execution: 0,
       verification: 0,
-      basis: ["blocked:charter-error → 0"],
+      basis: [
+        "planning:charter-error → 0.00",
+        "execution:charter-error → 0.00",
+        "verification:charter-error → 0.00",
+        "overall:blocked by charter error → 0.00",
+      ],
     },
     headline: `Preflight blocked — ${input.extraBlock.message}`,
     narrative: `Aedis could not plan this request. ${input.extraBlock.message} ${input.extraBlock.suggestion ?? ""}`.trim(),

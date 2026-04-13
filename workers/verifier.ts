@@ -3,6 +3,7 @@ import { recordCoherenceCheck, recordDecision } from "../core/runstate.js";
 import {
   VerificationPipeline,
   type ToolHook,
+  type VerificationPipelineConfig,
   type VerificationReceipt,
 } from "../core/verification-pipeline.js";
 import type { EventBus } from "../server/websocket.js";
@@ -34,6 +35,7 @@ export interface VerifierWorkerConfig {
   readonly typecheckHook?: ToolHook;
   readonly testHook?: ToolHook;
   readonly hooks?: readonly ToolHook[];
+  readonly verificationConfig?: Partial<VerificationPipelineConfig>;
 }
 
 export class VerifierWorker extends AbstractWorker {
@@ -57,7 +59,10 @@ export class VerifierWorker extends AbstractWorker {
     // registry and pass a RunState explicitly.
     this.runState = config.runState ?? null;
     const hooks = [config.lintHook, config.typecheckHook, config.testHook, ...(config.hooks ?? [])].filter((hook): hook is ToolHook => Boolean(hook));
-    this.pipeline = new VerificationPipeline({ hooks });
+    this.pipeline = new VerificationPipeline({
+      ...(config.verificationConfig ?? {}),
+      hooks,
+    });
   }
 
   async estimateCost(_assignment: WorkerAssignment): Promise<CostEntry> {

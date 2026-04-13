@@ -77,7 +77,7 @@ test("buildExecutionContext favors same repo and file area while surfacing landm
     projectRoot: "/repo/aedis",
     prompt: "fix coordinator dispatch",
     projectMemory: sampleProjectMemory(),
-    scopeClassification: { type: "multi-file", blastRadius: 7, recommendDecompose: true, reason: "multi-file" },
+    scopeClassification: { type: "multi-file", blastRadius: 7, recommendDecompose: true, reason: "multi-file", governance: { decompositionRequired: false, approvalRequired: false, escalationRecommended: false, wavesRequired: false } },
     targetFiles: ["core/coordinator.ts"],
   });
 
@@ -121,7 +121,7 @@ test("persist → retrieve round trip surfaces prior failures and successes on t
     projectRoot: "/repo/aedis",
     prompt: "regression in coordinator dispatch",
     projectMemory: sampleProjectMemory(),
-    scopeClassification: { type: "single-file", blastRadius: 2, recommendDecompose: false, reason: "single-file" },
+    scopeClassification: { type: "single-file", blastRadius: 2, recommendDecompose: false, reason: "single-file", governance: { decompositionRequired: false, approvalRequired: false, escalationRecommended: false, wavesRequired: false } },
     targetFiles: ["core/coordinator.ts"],
   });
 
@@ -244,7 +244,7 @@ function samplePersistInput(overrides?: Partial<{
   mergeDecision: MergeDecision | null;
   repairResult: RepairResult | null;
   commitSha: string | null;
-  scopeClassification: { type: "multi-file"; blastRadius: number; recommendDecompose: boolean; reason: string };
+  scopeClassification: { type: "multi-file"; blastRadius: number; recommendDecompose: boolean; reason: string; governance: { decompositionRequired: boolean; approvalRequired: boolean; escalationRecommended: boolean; wavesRequired: boolean } };
 } {
   return {
     projectRoot: "/repo/aedis",
@@ -259,7 +259,7 @@ function samplePersistInput(overrides?: Partial<{
     mergeDecision: overrides?.mergeDecision ?? sampleMergeDecision("apply"),
     repairResult: { repairsAttempted: 1, repairsApplied: 1, issues: [] },
     commitSha: "abc123def456",
-    scopeClassification: { type: "multi-file", blastRadius: 7, recommendDecompose: true, reason: "multi-file" },
+    scopeClassification: { type: "multi-file", blastRadius: 7, recommendDecompose: true, reason: "multi-file", governance: { decompositionRequired: false, approvalRequired: false, escalationRecommended: false, wavesRequired: false } },
   };
 }
 
@@ -270,6 +270,7 @@ function sampleProjectMemory(): ProjectMemory {
     recentFiles: ["core/coordinator.ts", "core/context-gate.ts"],
     recentTasks: [],
     fileClusters: [{ files: ["core/coordinator.ts", "core/context-gate.ts"], changedTogether: 3, lastSeen: "2026-04-11T17:00:00.000Z" }],
+    taskPatterns: [],
     updatedAt: "2026-04-11T17:00:00.000Z",
     schemaVersion: 1,
   };
@@ -321,6 +322,7 @@ function sampleReceipt(verdict: RunReceipt["verdict"]): RunReceipt {
     executionReceipts: [],
     humanSummary: null,
     blastRadius: null,
+    evaluation: null,
   };
 }
 
@@ -340,6 +342,9 @@ function sampleVerification(verdict: VerificationReceipt["verdict"]): Verificati
     checks: [],
     summary: `verification ${verdict}`,
     totalDurationMs: 100,
+    fileCoverage: null,
+    coverageRatio: null,
+    validatedRatio: null,
   };
 }
 
@@ -368,6 +373,8 @@ function sampleRunState(): RunState {
     totalCost: { model: "test", inputTokens: 10, outputTokens: 20, estimatedCostUsd: 0.12 },
     completedAt: "2026-04-11T17:10:00.000Z",
     failureReason: null,
+    fileOutcomes: [],
+    multiFileOutcome: null,
   };
 }
 

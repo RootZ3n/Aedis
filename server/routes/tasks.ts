@@ -442,16 +442,19 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   }
 
   function toTaskStatus(
-    status: "RUNNING" | "COMPLETE" | "FAILED" | "ABORTED" | "CRASHED" | "INTERRUPTED",
+    status: import("../../core/receipt-store.js").PersistentRunStatus,
   ): TrackedRun["status"] {
     switch (status) {
       case "RUNNING":
+        return "running";
+      case "AWAITING_APPROVAL":
         return "running";
       case "COMPLETE":
         return "complete";
       case "ABORTED":
       case "INTERRUPTED":
         return "cancelled";
+      case "REJECTED":
       case "CRASHED":
       case "FAILED":
       default:

@@ -11,7 +11,9 @@ export type PersistentRunStatus =
   | "FAILED"
   | "ABORTED"
   | "CRASHED"
-  | "INTERRUPTED";
+  | "INTERRUPTED"
+  | "AWAITING_APPROVAL"
+  | "REJECTED";
 
 export interface ReceiptCheckpoint {
   readonly at: string;

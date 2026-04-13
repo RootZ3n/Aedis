@@ -18,6 +18,7 @@
 
 import type { RunReceipt } from "./coordinator.js";
 import type { ScopeClassification } from "./scope-classifier.js";
+import type { EvaluationAttachment } from "./post-run-evaluator.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -74,6 +75,60 @@ export interface ConfidenceInput {
   readonly partialSuccess?: boolean;
   /** Sensitive files touched (configs, security, auth). */
   readonly sensitiveFilesTouched?: number;
+  /** Critical files touched (auth, secrets, credentials). */
+  readonly criticalFilesTouched?: number;
+
+  // ─── Multi-file depth signals ───────────────────────────────────
+  /**
+   * Ratio of files in the change manifest that were actually verified
+   * by at least one verification stage. 0-1. Undefined for single-file
+   * runs where coverage is implicit.
+   */
+  readonly verificationCoverageRatio?: number;
+  /**
+   * Ratio of waves that passed their checkpoint. 0-1. Undefined for
+   * runs without wave-based execution.
+   */
+  readonly waveCompletionRatio?: number;
+  /**
+   * Ratio of declared scope files that reached "complete" or "verified"
+   * status. 0-1. Measures manifest follow-through.
+   */
+  readonly manifestCompletionRatio?: number;
+  /**
+   * Whether any wave was halted due to an upstream failure. Indicates
+   * the run was structurally incomplete, not just partially successful.
+   */
+  readonly wavesHalted?: boolean;
+  /**
+   * Ratio of changed files that were actively validated by tool-based
+   * checks (lint, typecheck, tests) vs only passively checked
+   * (diff-check, contract-check). 0-1. Undefined for single-file runs.
+   */
+  readonly validationDepthRatio?: number;
+  /**
+   * Number of changed files that have active validation errors
+   * (type errors, lint errors). Unlike verificationCoverageRatio
+   * which measures breadth, this measures how many files failed
+   * active checks.
+   */
+  readonly filesWithActiveErrors?: number;
+  /**
+   * Git diff confirmation ratio — what fraction of manifest files
+   * were confirmed as actually changed on disk. 0-1. Undefined when
+   * git diff verification didn't run.
+   */
+  readonly gitDiffConfirmationRatio?: number;
+  /** Count of on-disk changes not declared in the manifest. */
+  readonly undeclaredChangesCount?: number;
+  /** Count of expected manifest files that never changed on disk. */
+  readonly expectedButUnchangedCount?: number;
+  /** Repo portability/readiness penalty derived from heuristics. */
+  readonly repoReadinessPenalty?: number;
+  /** Optional post-run evaluation attachment for calibration. */
+  readonly evaluation?: EvaluationAttachment | null;
+  /** Strict mode is enabled for this run. */
+  readonly strictMode?: boolean;
 }
 
 // ─── Weights ─────────────────────────────────────────────────────────
@@ -116,8 +171,15 @@ export function scoreRunConfidence(input: ConfidenceInput): ConfidenceBreakdown 
     }
   }
 
+  overall = applyEvaluationCalibration(overall, input, basis, penalties);
+
+  if (!input.receipt.executionVerified) {
+    overall = Math.min(overall, 0.35);
+    basis.push("overall:execution unverified cap → 0.35 max");
+  }
+
   basis.push(
-    `overall = ${W_PLAN}·plan(${plan.toFixed(2)}) + ${W_EXEC}·exec(${exec.toFixed(2)}) + ${W_CRITIC}·crit(${critic.toFixed(2)}) + ${W_VERIFY}·verify(${verify.toFixed(2)}) + ${W_RISK}·risk(${risk.toFixed(2)}) = ${overall.toFixed(2)}`,
+    `overall = ${W_PLAN}·planning(${plan.toFixed(2)}) + ${W_EXEC}·execution(${exec.toFixed(2)}) + ${W_CRITIC}·critic(${critic.toFixed(2)}) + ${W_VERIFY}·verification(${verify.toFixed(2)}) + ${W_RISK}·risk(${risk.toFixed(2)}) = ${overall.toFixed(2)}`,
   );
 
   const decision = decideFromConfidence(overall);
@@ -170,25 +232,25 @@ function scorePlanning(input: ConfidenceInput, basis: string[]): number {
   switch (scope.type) {
     case "single-file":
       score = 0.9;
-      basis.push("plan:single-file → 0.90 (bounded scope)");
+      basis.push("planning:single-file → 0.90 (bounded scope)");
       break;
     case "multi-file":
       score = 0.7;
-      basis.push("plan:multi-file → 0.70 (coordinated scope)");
+      basis.push("planning:multi-file → 0.70 (coordinated scope)");
       break;
     case "architectural":
       score = 0.4;
-      basis.push("plan:architectural → 0.40 (wide surface)");
+      basis.push("planning:architectural → 0.40 (wide surface)");
       break;
     case "migration":
       score = 0.35;
-      basis.push("plan:migration → 0.35 (migration scope)");
+      basis.push("planning:migration → 0.35 (migration scope)");
       break;
   }
 
   if (scope.recommendDecompose) {
     score = Math.max(0, score - 0.1);
-    basis.push("plan:decompose-recommended → -0.10");
+    basis.push("planning:decompose-recommended → -0.10");
   }
 
   return clamp01(score);
@@ -200,9 +262,9 @@ function scoreExecution(input: ConfidenceInput, basis: string[]): number {
 
   if (receipt.executionVerified) {
     score = 0.70;
-    basis.push("exec:gate verified → 0.70");
+    basis.push("execution:gate verified → 0.70");
   } else {
-    basis.push("exec:gate NOT verified → 0.00");
+    basis.push("execution:gate NOT verified → 0.00");
     return 0;
   }
 
@@ -210,23 +272,23 @@ function scoreExecution(input: ConfidenceInput, basis: string[]): number {
   const evidenceCount = receipt.executionEvidence?.length ?? 0;
   if (evidenceCount >= 3) {
     score += 0.10;
-    basis.push(`exec:${evidenceCount} evidence items → +0.10`);
+    basis.push(`execution:${evidenceCount} evidence items → +0.10`);
   } else if (evidenceCount >= 1) {
     score += 0.05;
-    basis.push(`exec:${evidenceCount} evidence item(s) → +0.05`);
+    basis.push(`execution:${evidenceCount} evidence item(s) → +0.05`);
   }
 
   // Commit produced
   if (receipt.commitSha) {
     score += 0.10;
-    basis.push(`exec:commit ${receipt.commitSha.slice(0, 8)} → +0.10`);
+    basis.push(`execution:commit ${receipt.commitSha.slice(0, 8)} → +0.10`);
   }
 
   // Worker confidence signal
   if (typeof input.averageWorkerConfidence === "number" && input.averageWorkerConfidence > 0) {
     const boost = (input.averageWorkerConfidence - 0.5) * 0.15;
     score += boost;
-    basis.push(`exec:avg worker conf ${input.averageWorkerConfidence.toFixed(2)} → ${boost >= 0 ? "+" : ""}${boost.toFixed(2)}`);
+    basis.push(`execution:avg worker conf ${input.averageWorkerConfidence.toFixed(2)} → ${boost >= 0 ? "+" : ""}${boost.toFixed(2)}`);
   }
 
   // Failed graph nodes
@@ -234,7 +296,7 @@ function scoreExecution(input: ConfidenceInput, basis: string[]): number {
   if (failed > 0) {
     const penalty = 0.15 * Math.min(failed, 3);
     score -= penalty;
-    basis.push(`exec:${failed} failed node(s) → -${penalty.toFixed(2)}`);
+    basis.push(`execution:${failed} failed node(s) → -${penalty.toFixed(2)}`);
   }
 
   return clamp01(score);
@@ -285,26 +347,26 @@ function scoreCritic(input: ConfidenceInput, basis: string[]): number {
 function scoreVerification(input: ConfidenceInput, basis: string[]): number {
   const v = input.receipt.verificationReceipt;
   if (!v) {
-    basis.push("verify:not run → 0.25 (no positive signal)");
+    basis.push("verification:not run → 0.25 (no positive signal)");
     return 0.25;
   }
   switch (v.verdict) {
     case "pass": {
       const score = 0.6 + v.confidenceScore * 0.4;
-      basis.push(`verify:pass (pipeline conf ${v.confidenceScore.toFixed(2)}) → ${score.toFixed(2)}`);
+      basis.push(`verification:pass (pipeline conf ${v.confidenceScore.toFixed(2)}) → ${score.toFixed(2)}`);
       return clamp01(score);
     }
     case "pass-with-warnings": {
       const score = 0.5 + v.confidenceScore * 0.25;
-      basis.push(`verify:pass-with-warnings (pipeline conf ${v.confidenceScore.toFixed(2)}) → ${score.toFixed(2)}`);
+      basis.push(`verification:pass-with-warnings (pipeline conf ${v.confidenceScore.toFixed(2)}) → ${score.toFixed(2)}`);
       return clamp01(score);
     }
     case "fail": {
-      basis.push("verify:fail → 0.05");
+      basis.push("verification:fail → 0.05");
       return 0.05;
     }
     default:
-      basis.push(`verify:unknown(${v.verdict}) → 0.25`);
+      basis.push(`verification:unknown(${v.verdict}) → 0.25`);
       return 0.25;
   }
 }
@@ -365,11 +427,171 @@ function scoreRisk(input: ConfidenceInput, basis: string[], penalties: string[])
     basis.push(`risk:sensitive files → -${penalty.toFixed(2)}`);
   }
 
+  // Critical files (auth, secrets) — heavier penalty than sensitive
+  if (typeof input.criticalFilesTouched === "number" && input.criticalFilesTouched > 0) {
+    const penalty = input.criticalFilesTouched * 0.15;
+    score -= penalty;
+    penalties.push(`${input.criticalFilesTouched} critical file(s) → -${penalty.toFixed(2)}`);
+    basis.push(`risk:critical files → -${penalty.toFixed(2)}`);
+  }
+
+  // ─── Multi-file depth penalties ────────────────────────────────
+
+  // Shallow verification — penalize when verification didn't cover
+  // the full file set. A multi-file run with 40% coverage is not
+  // trustworthy even if the verified files passed.
+  if (typeof input.verificationCoverageRatio === "number" && input.verificationCoverageRatio < 1.0) {
+    const gap = 1.0 - input.verificationCoverageRatio;
+    const penalty = gap * 0.20; // up to -0.20 for zero coverage
+    score -= penalty;
+    penalties.push(`verification coverage ${(input.verificationCoverageRatio * 100).toFixed(0)}% → -${penalty.toFixed(2)}`);
+    basis.push(`risk:shallow verification → -${penalty.toFixed(2)}`);
+  }
+
+  // Incomplete waves — penalize when some waves failed or halted
+  if (typeof input.waveCompletionRatio === "number" && input.waveCompletionRatio < 1.0) {
+    const gap = 1.0 - input.waveCompletionRatio;
+    const penalty = gap * 0.25; // up to -0.25 for zero completion
+    score -= penalty;
+    penalties.push(`wave completion ${(input.waveCompletionRatio * 100).toFixed(0)}% → -${penalty.toFixed(2)}`);
+    basis.push(`risk:incomplete waves → -${penalty.toFixed(2)}`);
+  }
+
+  // Manifest follow-through — penalize when declared scope items
+  // were not completed
+  if (typeof input.manifestCompletionRatio === "number" && input.manifestCompletionRatio < 1.0) {
+    const gap = 1.0 - input.manifestCompletionRatio;
+    const penalty = gap * 0.15; // up to -0.15 for zero completion
+    score -= penalty;
+    penalties.push(`manifest completion ${(input.manifestCompletionRatio * 100).toFixed(0)}% → -${penalty.toFixed(2)}`);
+    basis.push(`risk:incomplete manifest → -${penalty.toFixed(2)}`);
+  }
+
+  // Halted waves — structural incompleteness, not just partial success
+  if (input.wavesHalted) {
+    score -= 0.10;
+    penalties.push("waves halted (upstream failure cascade) → -0.10");
+    basis.push("risk:halted waves → -0.10");
+  }
+
+  // ─── Signal-quality penalties ──────────────────────────────────
+
+  // Shallow validation — files were structurally checked but not
+  // validated by lint/typecheck/tests. Much weaker signal than
+  // active validation.
+  if (typeof input.validationDepthRatio === "number" && input.validationDepthRatio < 1.0) {
+    const gap = 1.0 - input.validationDepthRatio;
+    const penalty = gap * 0.15; // up to -0.15 for zero active validation
+    score -= penalty;
+    penalties.push(`active validation depth ${(input.validationDepthRatio * 100).toFixed(0)}% → -${penalty.toFixed(2)}`);
+    basis.push(`risk:shallow validation → -${penalty.toFixed(2)}`);
+  }
+
+  // Files with active validation errors — each failing file is a
+  // concrete quality signal, heavier than generic breadth penalties
+  if (typeof input.filesWithActiveErrors === "number" && input.filesWithActiveErrors > 0) {
+    const penalty = Math.min(input.filesWithActiveErrors * 0.08, 0.30);
+    score -= penalty;
+    penalties.push(`${input.filesWithActiveErrors} file(s) with active errors → -${penalty.toFixed(2)}`);
+    basis.push(`risk:active errors → -${penalty.toFixed(2)}`);
+  }
+
+  // Git diff discrepancy — manifest doesn't match actual disk state.
+  // This is a strong signal of diff application failure or scope drift.
+  if (typeof input.gitDiffConfirmationRatio === "number" && input.gitDiffConfirmationRatio < 1.0) {
+    const gap = 1.0 - input.gitDiffConfirmationRatio;
+    const penalty = gap * 0.25; // up to -0.25 for total mismatch
+    score -= penalty;
+    penalties.push(`git diff confirmation ${(input.gitDiffConfirmationRatio * 100).toFixed(0)}% → -${penalty.toFixed(2)}`);
+    basis.push(`risk:git diff mismatch → -${penalty.toFixed(2)}`);
+  }
+
+  if (typeof input.undeclaredChangesCount === "number" && input.undeclaredChangesCount > 0) {
+    const penalty = Math.min(input.undeclaredChangesCount * 0.08, 0.24);
+    score -= penalty;
+    penalties.push(`${input.undeclaredChangesCount} undeclared change(s) → -${penalty.toFixed(2)}`);
+    basis.push(`risk:undeclared changes → -${penalty.toFixed(2)}`);
+  }
+
+  if (typeof input.expectedButUnchangedCount === "number" && input.expectedButUnchangedCount > 0) {
+    const penalty = Math.min(input.expectedButUnchangedCount * 0.06, 0.18);
+    score -= penalty;
+    penalties.push(`${input.expectedButUnchangedCount} expected file(s) unchanged → -${penalty.toFixed(2)}`);
+    basis.push(`risk:manifest mismatch → -${penalty.toFixed(2)}`);
+  }
+
+  if (typeof input.repoReadinessPenalty === "number" && input.repoReadinessPenalty > 0) {
+    score -= input.repoReadinessPenalty;
+    penalties.push(`repo readiness caution → -${input.repoReadinessPenalty.toFixed(2)}`);
+    basis.push(`risk:repo readiness → -${input.repoReadinessPenalty.toFixed(2)}`);
+  }
+
+  if (input.strictMode) {
+    basis.push("risk:strict mode active → higher evidence bar");
+    if ((input.verificationCoverageRatio ?? 1) < 1 || (input.validationDepthRatio ?? 1) < 1) {
+      score -= 0.08;
+      penalties.push("strict mode with partial verification → -0.08");
+      basis.push("risk:strict mode partial verification → -0.08");
+    }
+  }
+
   if (score >= 1.0) {
     basis.push("risk:clean → 1.00 (no risk factors)");
   }
 
   return clamp01(score);
+}
+
+function applyEvaluationCalibration(
+  overall: number,
+  input: ConfidenceInput,
+  basis: string[],
+  penalties: string[],
+): number {
+  const evaluation = input.evaluation ?? input.receipt.evaluation;
+  if (!evaluation) {
+    basis.push("evaluation:not available → no confidence adjustment");
+    return overall;
+  }
+  if (!evaluation.completed || !evaluation.aggregate) {
+    basis.push("evaluation:incomplete → no confidence boost");
+    return overall;
+  }
+
+  let adjusted = overall;
+  const aggregate = evaluation.aggregate;
+  const disagreement = evaluation.disagreement;
+
+  if (!aggregate.overallPass) {
+    adjusted = clamp01(adjusted - 0.12);
+    penalties.push("evaluation failed → -0.12");
+    basis.push(`evaluation:failed (${aggregate.summary}) → -0.12`);
+  } else if (aggregate.averageScore >= 0.88) {
+    adjusted = clamp01(adjusted + 0.04);
+    basis.push(`evaluation:strong pass (${aggregate.averageScore.toFixed(2)}) → +0.04`);
+  } else {
+    basis.push(`evaluation:pass (${aggregate.averageScore.toFixed(2)}) → no major adjustment`);
+  }
+
+  if (disagreement?.direction === "aedis-overconfident") {
+    const penalty = disagreement.severity === "critical" ? 0.12 : disagreement.severity === "significant" ? 0.08 : 0.04;
+    adjusted = clamp01(adjusted - penalty);
+    penalties.push(`evaluation disagreement (${disagreement.severity}) → -${penalty.toFixed(2)}`);
+    basis.push(`evaluation:overconfidence disagreement (${disagreement.severity}) → -${penalty.toFixed(2)}`);
+  }
+
+  if (evaluation.confidenceAdjustment?.direction === "upgrade" && evaluation.confidenceAdjustment.delta > 0) {
+    const boost = Math.min(evaluation.confidenceAdjustment.delta, 0.05);
+    adjusted = clamp01(adjusted + boost);
+    basis.push(`evaluation:recommended upgrade → +${boost.toFixed(2)}`);
+  } else if (evaluation.confidenceAdjustment?.direction === "downgrade" && evaluation.confidenceAdjustment.delta < 0) {
+    const penalty = Math.min(Math.abs(evaluation.confidenceAdjustment.delta), 0.08);
+    adjusted = clamp01(adjusted - penalty);
+    penalties.push(`evaluation recommended downgrade → -${penalty.toFixed(2)}`);
+    basis.push(`evaluation:recommended downgrade → -${penalty.toFixed(2)}`);
+  }
+
+  return adjusted;
 }
 
 // ─── Worker-level confidence helpers ────────────────────────────────

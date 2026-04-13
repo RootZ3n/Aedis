@@ -21,6 +21,8 @@ export function buildRunSummaryPayload(runId: string, receipt: RunReceipt): Reco
     filesTouchedCount: summary.filesTouchedCount,
     verification: summary.verification,
     verificationChecks: summary.verificationChecks,
+    explanationLines: summary.explanationLines,
+    explanationDetails: summary.explanationDetails,
     blastRadius: summary.blastRadius,
     confidence: summary.confidence,
     cost: summary.cost,

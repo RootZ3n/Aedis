@@ -58,6 +58,59 @@ export interface VerificationIssue {
 
 // ─── Verification Receipt ────────────────────────────────────────────
 
+/**
+ * Verification depth levels for per-file coverage.
+ *
+ * "checked" = structural/syntactic examination only (diff-check,
+ *   contract-check). These verify the change is well-formed but
+ *   don't execute external tools against the file.
+ *
+ * "validated" = active tool-based verification (typecheck, lint,
+ *   tests, custom hooks). These run real compilers/linters against
+ *   the file and provide much stronger trust signal.
+ *
+ * The confidence scorer should penalize files that were only
+ * "checked" but not "validated" — passive checks alone don't
+ * catch runtime or semantic errors.
+ */
+export type VerificationDepth = "none" | "checked" | "validated";
+
+/** Stages that provide passive/structural checks only. */
+const PASSIVE_STAGES: ReadonlySet<VerificationStage> = new Set([
+  "diff-check", "contract-check", "cross-file-check",
+]);
+
+/** Stages that provide active/tool-based validation. */
+const ACTIVE_STAGES: ReadonlySet<VerificationStage> = new Set([
+  "lint", "typecheck", "custom-hook",
+]);
+
+/**
+ * Per-file verification coverage: tracks which verification stages
+ * actually examined each file. Enables the confidence scorer to
+ * penalize runs where verification was shallow relative to the
+ * change manifest.
+ */
+export interface FileVerificationCoverage {
+  readonly path: string;
+  /** Stages that produced at least one issue (pass or fail) for this file. */
+  readonly verifiedByStages: readonly VerificationStage[];
+  /** True if the file was examined by at least one substantive stage. */
+  readonly verified: boolean;
+  /**
+   * Depth of verification for this file:
+   *   - "none"      — no stage examined this file
+   *   - "checked"   — only structural/passive stages (diff, contract, cross-file)
+   *   - "validated"  — at least one active stage (lint, typecheck, tests)
+   */
+  readonly depth: VerificationDepth;
+  /**
+   * True if this file had errors in any active validation stage.
+   * Used by confidence scoring to mark specific files as failing.
+   */
+  readonly hasActiveErrors: boolean;
+}
+
 export interface VerificationReceipt {
   readonly id: string;
   readonly runId: string;
@@ -96,6 +149,37 @@ export interface VerificationReceipt {
   readonly scope?:
     | { readonly kind: "change-set"; readonly fileCount: number }
     | { readonly kind: "wave"; readonly waveId: number; readonly waveName: string; readonly fileCount: number };
+  /**
+   * Per-file verification coverage matrix. Shows which files were
+   * actually examined by which stages. Null for legacy runs that
+   * pre-date this field. The confidence scorer uses the coverage
+   * ratio to penalize shallow verification.
+   */
+  readonly fileCoverage: readonly FileVerificationCoverage[] | null;
+  /**
+   * Ratio of changed files that were verified by at least one
+   * substantive stage. 0-1. Null for legacy runs.
+   */
+  readonly coverageRatio: number | null;
+  /**
+   * Ratio of changed files that were actively validated (lint,
+   * typecheck, tests) vs only passively checked (diff, contract).
+   * A high coverageRatio but low validatedRatio means verification
+   * was shallow — structural checks passed but no tooling confirmed
+   * correctness. Null for legacy runs.
+   */
+  readonly validatedRatio: number | null;
+  /**
+   * Verification authority level:
+   *   - "final" — this is the authoritative verification for the run.
+   *     Only one receipt per run should be "final". The merge gate
+   *     uses this as the primary verification signal.
+   *   - "intermediate" — per-wave or checkpoint verification. Findings
+   *     are supplementary — they feed into the merge gate as additional
+   *     findings but cannot override the final receipt's verdict.
+   * Defaults to "final" for backwards compatibility.
+   */
+  readonly authority?: "final" | "intermediate";
 }
 
 // ─── Hook Types ──────────────────────────────────────────────────────
@@ -145,6 +229,8 @@ export interface VerificationPipelineConfig {
   hooks: ToolHook[];
   /** Checks that must exist and execute before verification can pass. */
   requiredChecks: VerificationCheckKind[];
+  /** Strict mode requires full changed-file verification and validation. */
+  strictMode: boolean;
   /** IntegrationJudge configuration */
   judgeConfig: Partial<IntegrationJudgeConfig>;
   /** Stage weights for confidence scoring */
@@ -156,7 +242,8 @@ const DEFAULT_CONFIG: VerificationPipelineConfig = {
   runAllStages: true,
   timeoutMs: 120_000,
   hooks: [],
-  requiredChecks: [],
+  requiredChecks: ["lint", "typecheck", "tests"],
+  strictMode: false,
   judgeConfig: {},
   stageWeights: {
     "diff-check": 1.0,
@@ -207,7 +294,7 @@ export class VerificationPipeline {
         ? changes
         : changes.filter((c) => scopedFiles.has(c.path));
 
-    const receipt = await this.verify(intent, runState, scopedChanges, workerResults);
+    const receipt = await this.verify(intent, runState, scopedChanges, workerResults, changeSet);
     return {
       ...receipt,
       scope: { kind: "change-set", fileCount: scopedChanges.length },
@@ -264,6 +351,9 @@ export class VerificationPipeline {
           waveName: wave.name,
           fileCount: 0,
         },
+        fileCoverage: [],
+        coverageRatio: 1,
+        validatedRatio: 1,
       };
     }
 
@@ -277,6 +367,7 @@ export class VerificationPipeline {
         fileCount: waveChanges.length,
       },
       summary: `[wave ${wave.id} ${wave.name}] ${receipt.summary}`,
+      authority: "intermediate" as const,
     };
   }
 
@@ -287,7 +378,8 @@ export class VerificationPipeline {
     intent: IntentObject,
     runState: RunState,
     changes: readonly FileChange[],
-    workerResults: readonly WorkerResult[]
+    workerResults: readonly WorkerResult[],
+    changeSet?: ChangeSet | null,
   ): Promise<VerificationReceipt> {
     const startTime = Date.now();
     const stages: StageResult[] = [];
@@ -310,7 +402,7 @@ export class VerificationPipeline {
     let judgmentReport: JudgmentReport | null = null;
     if (!aborted) {
       const crossFileStart = Date.now();
-      judgmentReport = this.judge.judge(intent, runState, changes, workerResults);
+      judgmentReport = this.judge.judge(intent, runState, changes, workerResults, "pre-apply", changeSet);
       stages.push({
         stage: "cross-file-check",
         name: "Cross-File Coherence",
@@ -346,7 +438,9 @@ export class VerificationPipeline {
       );
       for (const kind of this.config.requiredChecks) {
         if (!configuredKinds.has(kind)) {
-          // Missing check = advisory skip, never a blocker.
+          // Required checks fail closed. If a required hook is not
+          // configured, verification must block rather than silently
+          // degrading into a warning-only path.
           checks.push({
             kind,
             name: this.labelForCheck(kind),
@@ -358,17 +452,16 @@ export class VerificationPipeline {
           stages.push({
             stage: this.stageForCheck(kind),
             name: this.labelForCheck(kind),
-            passed: true,
-            score: 1,
+            passed: false,
+            score: 0,
             issues: [{
               stage: this.stageForCheck(kind),
-              severity: "warning",
-              message: `${kind} hook not configured — skipped`,
+              severity: "blocker",
+              message: `${kind} hook not configured — required verification cannot run`,
             }],
             durationMs: 0,
-            details: `${kind} hook not configured — skipped`,
+            details: `${kind} hook not configured — required verification cannot run`,
           });
-          // Never abort on a missing check — it's a skip, not a failure.
         }
       }
 
@@ -467,17 +560,28 @@ export class VerificationPipeline {
     const allIssues = stages.flatMap((s) => s.issues);
     const blockers = allIssues.filter((i) => i.severity === "blocker");
     const confidenceScore = this.computeConfidence(stages);
-    // Missing checks are advisory — only actual blockers and low
-    // confidence scores cause a fail verdict. A check that never ran
-    // (not configured, not installed) is a skip, not a failure.
+    // Required checks fail closed. A check that never ran is itself a
+    // verification failure because the run lacks the promised evidence.
     const missingChecks = this.config.requiredChecks.filter(
       (kind) => !checks.some((check) => check.kind === kind && check.executed),
     );
 
+    // ─── File coverage matrix ──────────────────────────────────────
+    const changedFilePaths = changes.map((c) => c.path);
+    const fileCoverage = this.computeFileCoverage(changedFilePaths, stages);
+    const verifiedCount = fileCoverage.filter((fc) => fc.verified).length;
+    const validatedCount = fileCoverage.filter((fc) => fc.depth === "validated").length;
+    const coverageRatio = changedFilePaths.length > 0
+      ? verifiedCount / changedFilePaths.length
+      : 1;
+    const validatedRatio = changedFilePaths.length > 0
+      ? validatedCount / changedFilePaths.length
+      : 1;
+    const strictFailures = this.strictModeFailures(changedFilePaths, fileCoverage, validatedRatio);
     const verdict: VerificationReceipt["verdict"] =
-      blockers.length > 0 || confidenceScore < this.config.minimumConfidence
+      blockers.length > 0 || missingChecks.length > 0 || strictFailures.length > 0 || confidenceScore < this.config.minimumConfidence
         ? "fail"
-        : allIssues.some((i) => i.severity === "warning") || missingChecks.length > 0
+        : allIssues.some((i) => i.severity === "warning")
           ? "pass-with-warnings"
           : "pass";
 
@@ -496,7 +600,23 @@ export class VerificationPipeline {
       }
     }
     if (missingChecks.length > 0) {
-      summaryParts.push(`skipped checks: ${missingChecks.join(", ")}`);
+      summaryParts.push(`missing required checks: ${missingChecks.join(", ")}`);
+    }
+
+    if (coverageRatio < 1) {
+      summaryParts.push(`file coverage ${(coverageRatio * 100).toFixed(0)}%`);
+    }
+    if (validatedRatio < coverageRatio) {
+      summaryParts.push(`active validation ${(validatedRatio * 100).toFixed(0)}%`);
+    }
+
+    // Surface files that were changed but only passively checked
+    const checkedOnly = fileCoverage.filter((fc) => fc.depth === "checked");
+    if (checkedOnly.length > 0 && changedFilePaths.length > 1) {
+      summaryParts.push(`${checkedOnly.length} file(s) only structurally checked`);
+    }
+    if (strictFailures.length > 0) {
+      summaryParts.push(`strict mode: ${strictFailures.join("; ")}`);
     }
 
     return {
@@ -514,6 +634,9 @@ export class VerificationPipeline {
       checks,
       summary: summaryParts.join(", "),
       totalDurationMs,
+      fileCoverage,
+      coverageRatio,
+      validatedRatio,
     };
   }
 
@@ -528,6 +651,29 @@ export class VerificationPipeline {
     }
   }
 
+  private strictModeFailures(
+    changedFiles: readonly string[],
+    fileCoverage: readonly FileVerificationCoverage[],
+    validatedRatio: number,
+  ): string[] {
+    if (!this.config.strictMode) return [];
+    const failures: string[] = [];
+    const unchecked = fileCoverage.filter((file) => !file.verified).map((file) => file.path);
+    const checkedOnly = fileCoverage.filter((file) => file.depth === "checked").map((file) => file.path);
+
+    if (unchecked.length > 0) {
+      failures.push(`${unchecked.length} file(s) unverified`);
+    }
+    if (checkedOnly.length > 0) {
+      failures.push(`${checkedOnly.length} file(s) only checked`);
+    }
+    if (changedFiles.length > 0 && validatedRatio < 1) {
+      failures.push(`validation depth ${Math.round(validatedRatio * 100)}%`);
+    }
+
+    return failures;
+  }
+
   private stageForCheck(kind: VerificationCheckKind): VerificationStage {
     switch (kind) {
       case "lint":
@@ -537,6 +683,83 @@ export class VerificationPipeline {
       case "tests":
         return "custom-hook";
     }
+  }
+
+  // ─── File Coverage Matrix ──────────────────────────────────────────
+
+  /**
+   * Build per-file verification coverage from stage results. A file
+   * is "verified" if at least one substantive stage (diff-check,
+   * contract-check, cross-file-check, lint, typecheck) produced an
+   * issue referencing it, OR if the stage passed and the file was in
+   * the change set (implicit coverage).
+   *
+   * The confidence scorer uses the resulting coverageRatio to penalize
+   * runs where verification was shallow relative to the change manifest.
+   */
+  private computeFileCoverage(
+    changedFiles: readonly string[],
+    stages: readonly StageResult[],
+  ): FileVerificationCoverage[] {
+    const substantiveStages: ReadonlySet<VerificationStage> = new Set([
+      "diff-check", "contract-check", "cross-file-check", "lint", "typecheck",
+    ]);
+
+    // Build maps: file → set of stages, file → has errors in active stages
+    const coverageMap = new Map<string, Set<VerificationStage>>();
+    const errorMap = new Map<string, boolean>();
+    for (const file of changedFiles) {
+      coverageMap.set(file, new Set());
+      errorMap.set(file, false);
+    }
+
+    for (const stage of stages) {
+      if (!substantiveStages.has(stage.stage)) continue;
+
+      // Files explicitly referenced in issues
+      for (const issue of stage.issues) {
+        if (issue.file && coverageMap.has(issue.file)) {
+          coverageMap.get(issue.file)!.add(stage.stage);
+          // Track errors in active stages (lint, typecheck, tests)
+          if (ACTIVE_STAGES.has(stage.stage) &&
+              (issue.severity === "error" || issue.severity === "blocker")) {
+            errorMap.set(issue.file, true);
+          }
+        }
+      }
+
+      // If the stage passed with no file-specific issues, it
+      // implicitly verified all files in scope (e.g. diff-check
+      // validates every change, typecheck covers the whole project)
+      if (stage.passed && stage.issues.length === 0) {
+        for (const file of changedFiles) {
+          coverageMap.get(file)!.add(stage.stage);
+        }
+      }
+    }
+
+    return changedFiles.map((path) => {
+      const stageSet = coverageMap.get(path) ?? new Set();
+      const hasPassive = [...stageSet].some((s) => PASSIVE_STAGES.has(s));
+      const hasActive = [...stageSet].some((s) => ACTIVE_STAGES.has(s));
+
+      let depth: VerificationDepth;
+      if (hasActive) {
+        depth = "validated";
+      } else if (hasPassive) {
+        depth = "checked";
+      } else {
+        depth = "none";
+      }
+
+      return {
+        path,
+        verifiedByStages: [...stageSet],
+        verified: stageSet.size > 0,
+        depth,
+        hasActiveErrors: errorMap.get(path) ?? false,
+      };
+    });
   }
 
   // ─── Stage Implementations ────────────────────────────────────────
@@ -919,17 +1142,46 @@ export function createLintHook(config: {
 }
 
 /**
+ * Parse tsc output into structured per-file errors.
+ * Exported so other modules can reuse the parser.
+ */
+export function parseTscOutput(stdout: string): VerificationIssue[] {
+  return stdout
+    .split("\n")
+    .filter((line: string) => /\.tsx?\(\d+,\d+\):\s*error/.test(line))
+    .map((line: string) => {
+      const match = line.match(/(.+?)\((\d+),\d+\):\s*error\s+(\w+):\s*(.+)/);
+      return {
+        stage: "typecheck" as const,
+        severity: "error" as const,
+        message: match?.[4] ?? line,
+        file: match?.[1],
+        line: match?.[2] ? parseInt(match[2]) : undefined,
+        rule: match?.[3],
+      };
+    });
+}
+
+/**
  * Create a typecheck hook that shells out to tsc.
+ *
+ * Enhanced to:
+ *   - Parse all tsc errors into structured VerificationIssue objects
+ *   - Separate issues into "changed-file errors" vs "pre-existing errors"
+ *   - Only fail the hook if changed files have type errors
+ *   - Report pre-existing errors as warnings (not blockers)
+ *   - Produce a summary that distinguishes introduced vs inherited errors
  */
 export function createTypecheckHook(config: {
   tscPath?: string;
   project?: string;
+  projectRoot?: string;
 }): ToolHook {
   return {
     name: "TypeScript Check",
     stage: "typecheck",
     kind: "typecheck",
-    async execute(_changedFiles: string[]): Promise<ToolHookResult> {
+    async execute(changedFiles: string[]): Promise<ToolHookResult> {
       const start = Date.now();
       try {
         const { execFile } = await import("child_process");
@@ -941,11 +1193,20 @@ export function createTypecheckHook(config: {
           ? ["--noEmit", ...(config.project ? ["-p", config.project] : [])]
           : ["tsc", "--noEmit", ...(config.project ? ["-p", config.project] : [])];
 
-        const result = await exec(tsc, args, { timeout: 60_000 });
+        const cwd = config.projectRoot ?? process.cwd();
+        const result = await exec(tsc, args, { timeout: 60_000, cwd });
+
+        // tsc succeeded — all changed files pass type check
+        const issues: VerificationIssue[] = changedFiles.map((file) => ({
+          stage: "typecheck" as const,
+          severity: "info" as const,
+          message: `Type check passed`,
+          file,
+        }));
 
         return {
           passed: true,
-          issues: [],
+          issues,
           stdout: result.stdout,
           stderr: result.stderr,
           exitCode: 0,
@@ -953,23 +1214,37 @@ export function createTypecheckHook(config: {
         };
       } catch (err: any) {
         const stdout: string = err.stdout ?? "";
-        const issues: VerificationIssue[] = stdout
-          .split("\n")
-          .filter((line: string) => /\.tsx?\(\d+,\d+\):\s*error/.test(line))
-          .map((line: string) => {
-            const match = line.match(/(.+?)\((\d+),\d+\):\s*error\s+(\w+):\s*(.+)/);
-            return {
-              stage: "typecheck" as const,
-              severity: "error" as const,
-              message: match?.[4] ?? line,
-              file: match?.[1],
-              line: match?.[2] ? parseInt(match[2]) : undefined,
-              rule: match?.[3],
-            };
-          });
+        const allIssues = parseTscOutput(stdout);
+
+        // Separate errors in changed files from pre-existing ones
+        const changedFileSet = new Set(changedFiles.map((f) => f.toLowerCase()));
+        const inScopeIssues: VerificationIssue[] = [];
+        const preExistingIssues: VerificationIssue[] = [];
+
+        for (const issue of allIssues) {
+          const issueFile = issue.file?.toLowerCase() ?? "";
+          const isChanged = changedFileSet.has(issueFile) ||
+            [...changedFileSet].some((cf) => issueFile.endsWith(cf) || cf.endsWith(issueFile));
+
+          if (isChanged) {
+            inScopeIssues.push(issue);
+          } else {
+            // Downgrade pre-existing errors to warnings — they're
+            // not the builder's fault
+            preExistingIssues.push({
+              ...issue,
+              severity: "warning",
+              message: `[pre-existing] ${issue.message}`,
+            });
+          }
+        }
+
+        // Only fail if changed files have errors
+        const passed = inScopeIssues.length === 0;
+        const issues = [...inScopeIssues, ...preExistingIssues];
 
         return {
-          passed: false,
+          passed,
           issues,
           stdout,
           stderr: err.stderr,

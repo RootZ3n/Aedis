@@ -11,16 +11,47 @@ import { randomUUID } from "crypto";
 // ─── Core Types ──────────────────────────────────────────────────────
 
 export type RunPhase =
-  | "charter"      // CharterGenerator producing the objective
-  | "planning"     // Coordinator decomposing into tasks
-  | "scouting"     // Scout workers gathering context
-  | "building"     // Builder workers producing code
-  | "reviewing"    // Critic workers reviewing output
-  | "verifying"    // Verifier workers running tests/checks
-  | "integrating"  // Integrator worker merging results
-  | "complete"     // Run finished successfully
-  | "failed"       // Run terminated with error
-  | "aborted";     // Run cancelled by user or governance
+  | "charter"             // CharterGenerator producing the objective
+  | "planning"            // Coordinator decomposing into tasks
+  | "scouting"            // Scout workers gathering context
+  | "building"            // Builder workers producing code
+  | "reviewing"           // Critic workers reviewing output
+  | "verifying"           // Verifier workers running tests/checks
+  | "integrating"         // Integrator worker merging results
+  | "awaiting_approval"   // Run paused — changes ready, waiting for human approval
+  | "complete"            // Run finished successfully
+  | "failed"              // Run terminated with error
+  | "rejected"            // Run rejected by human during approval
+  | "commit_failed"       // Merge gate approved but git commit failed
+  | "rolled_back"         // Changes were rolled back after failure
+  | "aborted";            // Run cancelled by user or governance
+
+/**
+ * Multi-file run outcome — richer than the binary success/failed
+ * verdict. Used in receipts to clearly communicate what happened.
+ */
+export type MultiFileRunOutcome =
+  | "complete"              // All scope items succeeded and verified
+  | "partial"               // Some scope items succeeded, others failed/skipped
+  | "blocked"               // Run blocked by governance gate (merge gate, approval)
+  | "review_required"       // Run finished but confidence too low for auto-apply
+  | "awaiting_approval"     // Run paused — changes ready, waiting for human approval
+  | "rejected"              // Run rejected by human during approval
+  | "commit_failed"         // Merge gate approved but git commit failed
+  | "rolled_back"           // Changes were reverted due to failure
+  | "failed";              // Run terminated with error
+
+/**
+ * Per-file outcome for multi-file receipts. Each file in the change
+ * manifest gets one of these at run completion.
+ */
+export interface PerFileOutcome {
+  readonly path: string;
+  readonly outcome: "succeeded" | "failed" | "skipped" | "rolled_back";
+  readonly reason: string;
+  readonly waveId: number | null;
+  readonly workerTaskId: string | null;
+}
 
 export type TaskStatus = "pending" | "active" | "completed" | "failed" | "skipped";
 
@@ -111,6 +142,16 @@ export interface RunState {
   totalCost: CostEntry;
   completedAt: string | null;
   failureReason: string | null;
+  /**
+   * Per-file outcomes for multi-file runs. Populated at run completion
+   * by the Coordinator. Empty for single-file runs.
+   */
+  fileOutcomes: PerFileOutcome[];
+  /**
+   * Structured multi-file outcome. Null for single-file runs or
+   * runs that haven't completed yet.
+   */
+  multiFileOutcome: MultiFileRunOutcome | null;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -129,6 +170,8 @@ export function createRunState(intentId: string, runId?: string): RunState {
     totalCost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
     completedAt: null,
     failureReason: null,
+    fileOutcomes: [],
+    multiFileOutcome: null,
   };
 }
 
@@ -139,16 +182,16 @@ export function advancePhase(run: RunState, phase: RunPhase): void {
     "charter", "planning", "scouting", "building",
     "reviewing", "verifying", "integrating", "complete",
   ];
-  const terminalPhases: RunPhase[] = ["complete", "failed", "aborted"];
+  const terminalPhases: RunPhase[] = ["complete", "failed", "rejected", "commit_failed", "rolled_back", "aborted"];
 
   if (terminalPhases.includes(run.phase)) {
     throw new RunStateError(`Cannot advance from terminal phase "${run.phase}"`);
   }
 
-  // Allow jumping to terminal phases from anywhere
-  if (terminalPhases.includes(phase)) {
+  // Allow jumping to terminal phases and awaiting_approval from anywhere
+  if (terminalPhases.includes(phase) || phase === "awaiting_approval") {
     run.phase = phase;
-    if (phase === "complete" || phase === "failed" || phase === "aborted") {
+    if (terminalPhases.includes(phase)) {
       run.completedAt = new Date().toISOString();
     }
     return;
@@ -336,6 +379,55 @@ export interface RunSummary {
   decisions: number;
   issues: { info: number; warning: number; error: number; critical: number };
   duration: number;
+}
+
+// ─── Multi-File Outcome Helpers ──────────────────────────────────────
+
+export function recordFileOutcome(run: RunState, outcome: PerFileOutcome): void {
+  const idx = run.fileOutcomes.findIndex((o) => o.path === outcome.path);
+  if (idx >= 0) {
+    run.fileOutcomes[idx] = outcome;
+  } else {
+    run.fileOutcomes.push(outcome);
+  }
+}
+
+/**
+ * Compute the multi-file run outcome from the current state.
+ * Called by the Coordinator at run completion to produce a
+ * structured outcome for receipts.
+ */
+export function computeMultiFileOutcome(run: RunState): MultiFileRunOutcome {
+  if (run.phase === "aborted") return "failed";
+  if (run.phase === "awaiting_approval") return "awaiting_approval";
+  if (run.phase === "rejected") return "rejected";
+  if (run.phase === "commit_failed") return "commit_failed";
+  if (run.phase === "rolled_back") return "rolled_back";
+  if (run.failureReason) return "failed";
+
+  const outcomes = run.fileOutcomes;
+  if (outcomes.length === 0) {
+    return run.phase === "complete" ? "complete" : "failed";
+  }
+
+  const allRolledBack = outcomes.every((o) => o.outcome === "rolled_back");
+  if (allRolledBack) return "rolled_back";
+
+  const anyFailed = outcomes.some((o) => o.outcome === "failed");
+  const anySucceeded = outcomes.some((o) => o.outcome === "succeeded");
+
+  if (anyFailed && anySucceeded) return "partial";
+  if (anyFailed && !anySucceeded) return "failed";
+
+  return "complete";
+}
+
+/**
+ * Set the multi-file outcome on the run state. Should be called
+ * once at run completion.
+ */
+export function finalizeMultiFileOutcome(run: RunState): void {
+  run.multiFileOutcome = computeMultiFileOutcome(run);
 }
 
 // ─── Internals ───────────────────────────────────────────────────────

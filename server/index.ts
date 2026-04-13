@@ -43,6 +43,8 @@ import { healthRoutes } from "./routes/health.js";
 import { configRoutes } from "./routes/config.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { loquiRoutes } from "./routes/loqui.js";
+import { trustRoutes } from "./routes/trust.js";
+import { proveRoutes } from "./routes/prove.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -128,6 +130,7 @@ function buildVerificationConfig(projectRoot: string): Partial<VerificationPipel
   return {
     hooks,
     requiredChecks: ["lint", "typecheck", "tests"],
+    strictMode: process.env["AEDIS_STRICT_MODE"] === "true",
   };
 }
 
@@ -136,7 +139,10 @@ function buildDefaultRegistry(projectRoot: string, verificationConfig: Partial<V
   registry.register(new ScoutWorker({ projectRoot }));
   registry.register(new BuilderWorker({ projectRoot }));
   registry.register(new CriticWorker({ projectRoot }));
-  registry.register(new VerifierWorker({ hooks: verificationConfig.hooks ?? [] }));
+  registry.register(new VerifierWorker({
+    hooks: verificationConfig.hooks ?? [],
+    verificationConfig,
+  }));
   registry.register(new IntegratorWorker());
   console.log("[server] WorkerRegistry: 5 workers registered — scout, builder, critic, verifier, integrator");
   return registry;
@@ -261,6 +267,8 @@ export async function createServer(
   // Metrics + External API Layer v1 — read-only external surface.
   await server.register(metricsRoutes, { prefix: "/metrics" });
   await server.register(loquiRoutes, { prefix: "/loqui" });
+  await server.register(trustRoutes, { prefix: "/trust" });
+  await server.register(proveRoutes, { prefix: "/prove" });
 
   // ─── Approval gate endpoints ──────────────────────────────────
 

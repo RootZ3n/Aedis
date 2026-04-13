@@ -21,6 +21,7 @@ import { relative, resolve } from "node:path";
 import type { IntentObject, Deliverable } from "./intent.js";
 import type { RunState, AcceptedAssumption } from "./runstate.js";
 import type { FileChange, BuilderOutput, WorkerResult } from "../workers/base.js";
+import type { ChangeSet, FileInclusion } from "./change-set.js";
 
 // ─── Judgment Types ──────────────────────────────────────────────────
 
@@ -162,13 +163,19 @@ export class IntegrationJudge {
 
   /**
    * Run all coherence checks against the combined changeset.
+   *
+   * The optional `changeSet` parameter enables manifest-completeness
+   * checking — verifying that every file declared in the change
+   * manifest was actually touched by the run. When omitted (legacy
+   * callers, single-file runs) the check is skipped.
    */
   judge(
     intent: IntentObject,
     runState: RunState,
     changes: readonly FileChange[],
     workerResults: readonly WorkerResult[],
-    phase: JudgmentReport["phase"] = "pre-apply"
+    phase: JudgmentReport["phase"] = "pre-apply",
+    changeSet?: ChangeSet | null,
   ): JudgmentReport {
     const checks: JudgmentCheck[] = [];
 
@@ -180,6 +187,11 @@ export class IntegrationJudge {
     checks.push(this.checkScopeBoundary(intent, runState, changes));
     checks.push(this.checkRollbackSafety(changes));
     checks.push(this.checkCrossFileCoherence(changes));
+
+    // Manifest completeness — only runs when a ChangeSet is provided
+    if (changeSet) {
+      checks.push(this.checkManifestCompleteness(changeSet, changes));
+    }
 
     const coherenceScore = this.computeCoherenceScore(checks);
     const blockers = this.extractBlockers(checks);
@@ -556,6 +568,79 @@ export class IntegrationJudge {
       score: passed ? 1 : 0,
       details: passed ? "All changes are revertible" : issues.join("; "),
       affectedFiles,
+    };
+  }
+
+  /**
+   * Manifest completeness: verifies that every file declared in the
+   * ChangeSet manifest was actually touched by the run, and that no
+   * required files were left incomplete.
+   *
+   * This catches the scenario where Aedis plans to touch 8 files but
+   * only produces changes for 5 — a common multi-file failure mode
+   * where scope items silently drop.
+   *
+   * Scoring:
+   *   - Required files missing → blocker (these are essential to coherence)
+   *   - Optional files missing → warning (degraded but acceptable)
+   *   - Score is the ratio of completed required files
+   */
+  private checkManifestCompleteness(
+    changeSet: ChangeSet,
+    changes: readonly FileChange[],
+  ): JudgmentCheck {
+    const issues: string[] = [];
+    const affectedFiles: string[] = [];
+    const changedPaths = new Set(changes.map((c) => c.path));
+
+    let requiredTotal = 0;
+    let requiredCompleted = 0;
+    let optionalMissing = 0;
+
+    for (const file of changeSet.filesInScope) {
+      const wasChanged = changedPaths.has(file.path);
+
+      if (file.necessity === "required") {
+        requiredTotal++;
+        if (wasChanged) {
+          requiredCompleted++;
+        } else {
+          issues.push(`Required file "${file.path}" declared in manifest but not changed (${file.whyIncluded})`);
+          affectedFiles.push(file.path);
+        }
+      } else {
+        if (!wasChanged) {
+          optionalMissing++;
+        }
+      }
+    }
+
+    // Also check for undeclared changes — files changed that weren't in the manifest
+    const manifestPaths = new Set(changeSet.filesInScope.map((f) => f.path));
+    const undeclaredChanges = changes
+      .filter((c) => !manifestPaths.has(c.path))
+      .map((c) => c.path);
+
+    if (undeclaredChanges.length > 0) {
+      issues.push(`${undeclaredChanges.length} file(s) changed but not declared in manifest: ${undeclaredChanges.join(", ")}`);
+      affectedFiles.push(...undeclaredChanges);
+    }
+
+    const completionRatio = requiredTotal > 0 ? requiredCompleted / requiredTotal : 1;
+    const hasRequiredGaps = requiredTotal > requiredCompleted;
+    const passed = !hasRequiredGaps && undeclaredChanges.length === 0;
+
+    const details = passed
+      ? `All ${requiredTotal} required file(s) completed${optionalMissing > 0 ? `, ${optionalMissing} optional skipped` : ""}`
+      : issues.join("; ");
+
+    return {
+      name: "Manifest Completeness",
+      category: "intent-alignment",
+      passed,
+      score: completionRatio,
+      details,
+      affectedFiles: [...new Set(affectedFiles)],
     };
   }
 

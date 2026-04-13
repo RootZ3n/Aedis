@@ -43,6 +43,8 @@ import {
   type ConfidenceBreakdown,
 } from "./confidence-scoring.js";
 import { explainFailure, type FailureExplanation } from "./failure-explainer.js";
+import type { GitDiffResult } from "./git-diff-verifier.js";
+import { assessRepoReadiness, type RepoReadinessAssessment } from "./repo-readiness.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -77,6 +79,20 @@ export interface RunSummary {
     passed: boolean;
     required: boolean;
   }[];
+  readonly explanationLines: readonly string[];
+  readonly explanationDetails: {
+    readonly filesByRole: Readonly<Record<"types" | "implementation" | "integration" | "tests", readonly string[]>>;
+    readonly requiredFilesModified: boolean;
+    readonly missingRequiredFiles: readonly string[];
+    readonly undeclaredFiles: readonly string[];
+    readonly verificationCoverageRatio: number | null;
+    readonly validatedRatio: number | null;
+    readonly typeScriptErrors: number;
+    readonly waveSummary: string | null;
+    readonly gitDiffConsistency: string;
+    readonly repoReadiness: RepoReadinessAssessment;
+    readonly patternWarnings: readonly string[];
+  };
   readonly blastRadius: BlastRadiusEstimate;
   readonly confidence: ConfidenceBreakdown;
   readonly cost: RunCostSummary;
@@ -112,6 +128,24 @@ export interface RunSummaryInput {
    * penalize based on worker self-reports.
    */
   readonly averageWorkerConfidence?: number;
+  /**
+   * Git diff confirmation ratio (0-1). Passed from the coordinator's
+   * GitDiffVerifier result. Feeds into confidence scoring to penalize
+   * manifest/disk divergence.
+   */
+  readonly gitDiffConfirmationRatio?: number;
+  readonly gitDiffResult?: GitDiffResult | null;
+  readonly requiredFiles?: readonly string[];
+  readonly projectRoot?: string;
+  readonly patternWarnings?: readonly string[];
+  /** Historical insights from pattern memory for the explanation layer. */
+  readonly historicalInsights?: readonly string[];
+  /**
+   * Confidence dampening factor from historical pattern accuracy (0.8-1.0).
+   * Applied as a multiplier to the final confidence score.
+   */
+  readonly confidenceDampening?: number;
+  readonly strictMode?: boolean;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -125,20 +159,107 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
   const { receipt, userPrompt } = input;
 
   const classificationResult = classifyExecution(receipt);
-  const confidence = scoreRunConfidence({
+
+  // Extract real verification/execution signals from the receipt to
+  // feed into confidence scoring. Without this, the scorer falls back
+  // to generic baseline values and confidence is systematically
+  // overstated for multi-file runs.
+  const vReceipt = receipt.verificationReceipt;
+  const changedFiles = resolveChangesList(input);
+  const verificationCoverageRatio = vReceipt?.coverageRatio ?? undefined;
+  const validationDepthRatio = vReceipt?.validatedRatio ?? undefined;
+  const filesWithActiveErrors = vReceipt?.fileCoverage
+    ? vReceipt.fileCoverage.filter((f) => f.hasActiveErrors).length
+    : undefined;
+
+  // Wave completion: count waves that passed vs total
+  const waveReceipts = receipt.waveVerifications ?? [];
+  const waveCompletionRatio = waveReceipts.length > 0
+    ? waveReceipts.filter((w) => w.verdict === "pass" || w.verdict === "pass-with-warnings").length / waveReceipts.length
+    : undefined;
+  const wavesHalted = waveReceipts.some((w) => w.verdict === "fail");
+
+  // Manifest completion: use git diff confirmation ratio when available
+  // (it measures actual file-level truth), otherwise fall back to graph
+  // node completion (weaker signal — counts task nodes, not files).
+  let manifestCompletionRatio: number | undefined;
+  if (typeof input.gitDiffConfirmationRatio === "number") {
+    // Git diff confirmation is the most trustworthy manifest signal —
+    // it measures which declared files actually changed on disk.
+    manifestCompletionRatio = input.gitDiffConfirmationRatio;
+  } else {
+    const graphSummary = receipt.graphSummary;
+    const totalNodes = graphSummary?.totalNodes ?? 0;
+    const completedNodes = graphSummary?.completed ?? 0;
+    manifestCompletionRatio = totalNodes > 0 ? completedNodes / totalNodes : undefined;
+  }
+
+  // Sensitive/critical file counts from evidence
+  const filesTouched = changedFiles.length;
+  const repoReadiness = assessRepoReadiness({
+    projectRoot: input.projectRoot ?? process.cwd(),
+    changedFiles: changedFiles.map((change) => change.path),
+    verificationReceipt: vReceipt ?? null,
+  });
+
+  const rawConfidence = scoreRunConfidence({
     receipt,
     scopeClassification: input.scopeClassification ?? null,
     averageWorkerConfidence: input.averageWorkerConfidence,
+    filesTouched,
+    verificationCoverageRatio,
+    waveCompletionRatio,
+    manifestCompletionRatio,
+    wavesHalted,
+    validationDepthRatio,
+    filesWithActiveErrors,
+    gitDiffConfirmationRatio: input.gitDiffConfirmationRatio,
+    undeclaredChangesCount: input.gitDiffResult?.undeclaredChanges.length,
+    expectedButUnchangedCount: input.gitDiffResult?.expectedButUnchanged.length,
+    repoReadinessPenalty: repoReadiness.confidencePenalty,
+    evaluation: receipt.evaluation,
+    strictMode: input.strictMode,
   });
+
+  // Apply historical confidence dampening from pattern memory.
+  // When a task type has been repeatedly overconfident, dampen the
+  // score so future runs for the same pattern are more conservative.
+  const dampening = input.confidenceDampening ?? 1.0;
+  const confidence: ConfidenceBreakdown = dampening < 1.0
+    ? applyDampening(rawConfidence, dampening)
+    : rawConfidence;
+
+  const whatChanged = changedFiles;
   const blastRadius = estimateBlastRadius({
     scopeClassification: input.scopeClassification ?? null,
     charterFileCount: input.changes?.length ?? receipt.executionEvidence?.filter((e) => isFileEvidence(e.kind)).length ?? 0,
     prompt: userPrompt,
   });
 
-  const whatChanged = resolveChangesList(input);
   const cost = resolveCost(receipt);
   const verification = receipt.verificationReceipt?.verdict ?? "not-run";
+  const requiredFiles = unique(input.requiredFiles ?? []);
+  const touchedFiles = new Set(changedFiles.map((change) => change.path));
+  const missingRequiredFiles = requiredFiles.filter((file) => !touchedFiles.has(file));
+  const filesByRole = groupFilesByRole(changedFiles.map((change) => change.path));
+  const typeScriptErrors = countTypeScriptErrors(vReceipt);
+  const waveSummary = summarizeWaves(receipt);
+  const gitDiffConsistency = summarizeGitDiff(input.gitDiffResult);
+  const explanationLines = buildExplanationLines({
+    filesByRole,
+    requiredFiles,
+    missingRequiredFiles,
+    undeclaredFiles: input.gitDiffResult?.undeclaredChanges ?? [],
+    verificationReceipt: vReceipt ?? null,
+    typeScriptErrors,
+    waveSummary,
+    gitDiffConsistency,
+    repoReadiness,
+    patternWarnings: input.patternWarnings ?? [],
+    historicalInsights: input.historicalInsights ?? [],
+    strictMode: input.strictMode ?? false,
+    confidence,
+  });
 
   const needsExplanation = classificationResult.classification !== "VERIFIED_SUCCESS";
   const failureExplanation = needsExplanation ? explainFailure(receipt) : null;
@@ -173,6 +294,20 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     filesTouchedCount: whatChanged.length,
     verification,
     verificationChecks: receipt.verificationReceipt?.checks ?? [],
+    explanationLines,
+    explanationDetails: {
+      filesByRole,
+      requiredFilesModified: missingRequiredFiles.length === 0,
+      missingRequiredFiles,
+      undeclaredFiles: input.gitDiffResult?.undeclaredChanges ?? [],
+      verificationCoverageRatio: vReceipt?.coverageRatio ?? null,
+      validatedRatio: vReceipt?.validatedRatio ?? null,
+      typeScriptErrors,
+      waveSummary,
+      gitDiffConsistency,
+      repoReadiness,
+      patternWarnings: [...(input.patternWarnings ?? [])],
+    },
     blastRadius,
     confidence,
     cost,
@@ -345,6 +480,183 @@ function resolveChangesList(input: RunSummaryInput): FileChangeSummary[] {
   return fromEvidence;
 }
 
+function groupFilesByRole(files: readonly string[]): Readonly<Record<"types" | "implementation" | "integration" | "tests", readonly string[]>> {
+  const groups = {
+    types: [] as string[],
+    implementation: [] as string[],
+    integration: [] as string[],
+    tests: [] as string[],
+  };
+
+  for (const file of files) {
+    if (/\.(test|spec)\.[jt]sx?$/.test(file) || /__tests__/.test(file)) {
+      groups.tests.push(file);
+    } else if (/\.d\.ts$/.test(file) || /\/types?\//.test(file)) {
+      groups.types.push(file);
+    } else if (/^package\.json$|^tsconfig.*\.json$|^jest\.config|^vite\.config|^next\.config|\/index\.[jt]sx?$|\/routes?\//.test(file)) {
+      groups.integration.push(file);
+    } else {
+      groups.implementation.push(file);
+    }
+  }
+
+  return groups;
+}
+
+function countTypeScriptErrors(receipt: RunReceipt["verificationReceipt"]): number {
+  if (!receipt) return 0;
+  return receipt.allIssues.filter((issue) =>
+    issue.stage === "typecheck" && (issue.severity === "error" || issue.severity === "blocker"),
+  ).length;
+}
+
+function summarizeWaves(receipt: RunReceipt): string | null {
+  if (!receipt.waveVerifications || receipt.waveVerifications.length === 0) return null;
+  const total = receipt.waveVerifications.length;
+  const passed = receipt.waveVerifications.filter((w) => w.verdict !== "fail").length;
+  const failed = total - passed;
+  const halted = receipt.waveVerifications.some((w) => w.verdict === "fail");
+  // Check ordering — intermediate-authority receipts imply per-wave execution happened in order
+  const ordered = receipt.waveVerifications.every((w) => w.authority === "intermediate" || !w.authority);
+  const parts: string[] = [`${passed}/${total} completed`];
+  if (halted) parts.push(`${failed} halted`);
+  else parts.push("no halts");
+  if (ordered) parts.push("ordering respected");
+  return parts.join(", ");
+}
+
+function summarizeGitDiff(result?: GitDiffResult | null): string {
+  if (!result) return "not verified";
+  if (result.passed) return `fully matched manifest`;
+  const parts: string[] = [];
+  if (result.expectedButUnchanged.length > 0) {
+    parts.push(`${result.expectedButUnchanged.length} expected but unchanged`);
+  }
+  if (result.undeclaredChanges.length > 0) {
+    parts.push(`${result.undeclaredChanges.length} undeclared`);
+  }
+  return `mismatch detected — ${parts.join(", ")}`;
+}
+
+function buildExplanationLines(input: {
+  filesByRole: Readonly<Record<"types" | "implementation" | "integration" | "tests", readonly string[]>>;
+  requiredFiles: readonly string[];
+  missingRequiredFiles: readonly string[];
+  undeclaredFiles: readonly string[];
+  verificationReceipt: RunReceipt["verificationReceipt"];
+  typeScriptErrors: number;
+  waveSummary: string | null;
+  gitDiffConsistency: string;
+  repoReadiness: RepoReadinessAssessment;
+  patternWarnings: readonly string[];
+  historicalInsights: readonly string[];
+  strictMode: boolean;
+  confidence?: ConfidenceBreakdown;
+}): string[] {
+  const lines: string[] = [];
+
+  // Line 1 — Scope: total files + role breakdown
+  const totalFiles =
+    input.filesByRole.types.length +
+    input.filesByRole.implementation.length +
+    input.filesByRole.integration.length +
+    input.filesByRole.tests.length;
+  const roleParts = ([
+    ["types", input.filesByRole.types],
+    ["implementation", input.filesByRole.implementation],
+    ["integration", input.filesByRole.integration],
+    ["tests", input.filesByRole.tests],
+  ] as const)
+    .filter(([, files]) => files.length > 0)
+    .map(([label]) => label);
+  lines.push(
+    totalFiles > 0
+      ? `Updated ${totalFiles} file${plural(totalFiles)} across ${roleParts.join(", ")}`
+      : "No file changes recorded",
+  );
+
+  // Line 2 — Manifest: required + undeclared
+  const requiredOk = input.requiredFiles.length === 0 || input.missingRequiredFiles.length === 0;
+  const undeclaredOk = input.undeclaredFiles.length === 0;
+  if (requiredOk && undeclaredOk) {
+    lines.push(
+      input.requiredFiles.length > 0
+        ? `All ${input.requiredFiles.length} required files completed; no undeclared changes`
+        : "No undeclared changes",
+    );
+  } else {
+    const parts: string[] = [];
+    if (!requiredOk) parts.push(`${input.missingRequiredFiles.length}/${input.requiredFiles.length} required files missing`);
+    if (!undeclaredOk) parts.push(`${input.undeclaredFiles.length} undeclared change${plural(input.undeclaredFiles.length)}`);
+    lines.push(parts.join("; "));
+  }
+
+  // Line 3 — Verification: coverage, validated, TS errors
+  const coverage = input.verificationReceipt?.coverageRatio;
+  const validated = input.verificationReceipt?.validatedRatio;
+  const fileCovCount = input.verificationReceipt?.fileCoverage?.length ?? 0;
+  const validatedCount = input.verificationReceipt?.fileCoverage?.filter((f) => f.depth === "validated").length ?? 0;
+  const coveragePart = typeof coverage === "number" && fileCovCount > 0
+    ? `${fileCovCount}/${fileCovCount} covered`
+    : `coverage ${formatPct(coverage)}`;
+  const validatedPart = typeof validated === "number" && fileCovCount > 0
+    ? `${validatedCount} validated`
+    : `validated ${formatPct(validated)}`;
+  const tsErrorPart = input.typeScriptErrors > 0
+    ? `${input.typeScriptErrors} type error${plural(input.typeScriptErrors)}`
+    : "no type errors";
+  lines.push(`Verification: ${coveragePart}, ${validatedPart}, ${tsErrorPart}`);
+
+  // Line 4 — Waves (if applicable)
+  if (input.waveSummary) {
+    lines.push(`Waves: ${input.waveSummary}`);
+  }
+
+  // Line 5 — Git diff
+  lines.push(`Git diff: ${input.gitDiffConsistency}`);
+
+  // Line 6 — Final verdict
+  if (input.confidence) {
+    const decision = input.confidence.decision;
+    const coherenceLabel =
+      decision === "apply" || decision === "review" ? "coherent change" :
+      decision === "escalate" ? "partial coherence" :
+      "blocked";
+    const actionLabel =
+      decision === "apply" ? "safe for apply" :
+      decision === "review" ? "review required" :
+      decision === "escalate" ? "escalation recommended" :
+      "not safe for apply";
+    lines.push(`Result: ${coherenceLabel} — ${actionLabel}`);
+  }
+
+  // Historical insights and warnings — inject the most relevant
+  // signals as compact note lines. Historical insights take priority
+  // over generic warnings because they carry real outcome data.
+  const notes: string[] = [
+    ...input.historicalInsights.slice(0, 1),
+    ...(input.strictMode ? ["strict mode active"] : []),
+    ...input.repoReadiness.warnings.slice(0, 1),
+    ...input.patternWarnings.slice(0, 1),
+  ];
+  // Only add notes if we have room (cap at 6 lines total)
+  for (const note of notes) {
+    if (lines.length >= 6) break;
+    lines.push(`Note: ${note}`);
+  }
+
+  return lines.slice(0, 6);
+}
+
+function formatPct(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";
+  return `${Math.round(value * 100)}%`;
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
 function resolveCost(receipt: RunReceipt): RunCostSummary {
   const c = receipt.totalCost ?? { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
   const estimatedCostUsd = Number(c.estimatedCostUsd || 0);
@@ -370,6 +682,41 @@ function listFiles(items: readonly FileChangeSummary[], max: number): string {
 
 function plural(n: number): string {
   return n === 1 ? "" : "s";
+}
+
+/**
+ * Apply historical confidence dampening. Creates a new breakdown with
+ * the overall score reduced by the dampening factor, re-derives the
+ * decision, and appends a basis entry explaining the adjustment.
+ */
+function applyDampening(
+  base: ConfidenceBreakdown,
+  factor: number,
+): ConfidenceBreakdown {
+  const dampened = Math.max(0, Math.min(1, base.overall * factor));
+  const delta = base.overall - dampened;
+  if (delta < 0.005) return base; // negligible — skip
+
+  const decision: ConfidenceBreakdown["decision"] =
+    dampened >= 0.85 ? "apply" :
+    dampened >= 0.70 ? "review" :
+    dampened >= 0.50 ? "escalate" :
+    "reject";
+  const pct = (dampened * 100).toFixed(0);
+  const reason =
+    decision === "apply" ? `High confidence (${pct}%) — apply candidate` :
+    decision === "review" ? `Moderate confidence (${pct}%) — human review recommended (history-dampened)` :
+    decision === "escalate" ? `Low confidence (${pct}%) — escalation recommended (history-dampened)` :
+    `Very low confidence (${pct}%) — reject (history-dampened)`;
+
+  return {
+    ...base,
+    overall: dampened,
+    decision,
+    reason,
+    penalties: [...base.penalties, `historical overconfidence dampening (×${factor.toFixed(2)}) → -${delta.toFixed(2)}`],
+    basis: [...base.basis, `learning:history dampening ×${factor.toFixed(2)} → overall ${base.overall.toFixed(2)} → ${dampened.toFixed(2)}`],
+  };
 }
 
 // Re-export so coordinator only imports this module.

@@ -1,18 +1,55 @@
 import type { IntentObject } from "./intent.js";
 import type { Invariant } from "./invariant-extractor.js";
+import type { ImportGraph } from "./import-graph.js";
 
 export type FileStatus =
   | "planned"
   | "in-progress"
   | "blocked"
   | "complete"
-  | "verified";
+  | "verified"
+  | "failed"
+  | "skipped";
+
+export type FileNecessity = "required" | "optional";
+
+export type FileSensitivity = "normal" | "sensitive" | "critical";
 
 export interface FileInclusion {
   readonly path: string;
   readonly whyIncluded: string;
   readonly dependsOn: readonly string[];
   readonly status: FileStatus;
+  /**
+   * Whether this file is required for the change to be coherent, or
+   * optional (e.g. docs, ancillary tests). Optional file failures
+   * degrade to warnings instead of blocking the run.
+   */
+  readonly necessity: FileNecessity;
+  /**
+   * Execution order hint — lower numbers execute first within the
+   * same wave. Derived from dependency depth and file classification.
+   * Zero-indexed.
+   */
+  readonly executionOrder: number;
+  /**
+   * Sensitivity classification for governance. Sensitive and critical
+   * files lower confidence, trigger stronger review, and may block
+   * autonomous apply.
+   */
+  readonly sensitivity: FileSensitivity;
+  /**
+   * Outcome of this file's processing at run completion. Null while
+   * the run is still in progress.
+   */
+  readonly outcome: FileOutcome | null;
+}
+
+export interface FileOutcome {
+  readonly status: "succeeded" | "failed" | "skipped" | "rolled_back";
+  readonly reason: string;
+  /** Wave this file was processed in, if applicable. */
+  readonly waveId: number | null;
 }
 
 export interface CoherenceVerdict {
@@ -38,6 +75,97 @@ function normalizeFiles(files: readonly string[]): string[] {
         .filter((file) => file.length > 0),
     ),
   );
+}
+
+// ─── Sensitive File Detection ────────────────────────────────────────
+
+const CRITICAL_FILE_PATTERNS = [
+  /\bauth\b/i,
+  /\bsecret/i,
+  /\bcredential/i,
+  /\bpassword/i,
+  /\btoken/i,
+  /\bpermission/i,
+  /\.env($|\.)/,
+  /\.(pem|key|cert)$/,
+];
+
+const SENSITIVE_FILE_PATTERNS = [
+  /^package\.json$/,
+  /^package-lock\.json$/,
+  /^pnpm-lock\.yaml$/,
+  /^yarn\.lock$/,
+  /^tsconfig.*\.json$/,
+  /^\.eslintrc/,
+  /^\.prettierrc/,
+  /^Dockerfile/,
+  /^docker-compose/,
+  /\.ya?ml$/,
+  /^Makefile$/,
+  /^\.github\//,
+  /^\.gitlab-ci/,
+  /^jest\.config/,
+  /^vitest\.config/,
+  /^vite\.config/,
+  /^next\.config/,
+  /^webpack\.config/,
+  /\bmigration/i,
+  /\bschema\b.*\.(sql|prisma|graphql)$/i,
+  /^index\.[jt]sx?$/,
+  /\/index\.[jt]sx?$/,
+];
+
+export function classifyFileSensitivity(filePath: string): FileSensitivity {
+  const normalized = filePath.replace(/\\/g, "/");
+  const basename = normalized.includes("/") ? normalized.slice(normalized.lastIndexOf("/") + 1) : normalized;
+
+  if (CRITICAL_FILE_PATTERNS.some((pattern) => pattern.test(normalized) || pattern.test(basename))) {
+    return "critical";
+  }
+  if (SENSITIVE_FILE_PATTERNS.some((pattern) => pattern.test(normalized) || pattern.test(basename))) {
+    return "sensitive";
+  }
+  return "normal";
+}
+
+function classifyNecessity(intent: IntentObject, file: string): FileNecessity {
+  const normalized = file.toLowerCase();
+
+  // Test files and docs are optional — their failure shouldn't block
+  if (
+    normalized.includes("test") ||
+    normalized.includes("spec") ||
+    normalized.endsWith(".md") ||
+    normalized.includes("docs/") ||
+    normalized.includes("__mocks__")
+  ) {
+    return "optional";
+  }
+
+  // Files explicitly listed in deliverables are required
+  const isDeliverable = intent.charter.deliverables.some((d) =>
+    d.targetFiles.some((t) => t === file),
+  );
+  if (isDeliverable) return "required";
+
+  return "required";
+}
+
+function computeExecutionOrder(file: string, dependencyMap: Map<string, string[]>): number {
+  const deps = dependencyMap.get(file) ?? [];
+  if (deps.length === 0) return 0;
+
+  // Simple depth: count max chain length
+  const visited = new Set<string>();
+  function depth(f: string): number {
+    if (visited.has(f)) return 0;
+    visited.add(f);
+    const fileDeps = dependencyMap.get(f) ?? [];
+    if (fileDeps.length === 0) return 0;
+    return 1 + Math.max(...fileDeps.map(depth));
+  }
+
+  return depth(file);
 }
 
 function inferWhyIncluded(intent: IntentObject, file: string): string {
@@ -72,6 +200,33 @@ function inferDependencies(files: readonly string[]): Map<string, string[]> {
       .filter((candidate) => candidate.length <= file.length || candidate.endsWith(".d.ts"))
       .slice(0, 4);
     dependencies.set(file, inferred);
+  }
+
+  return dependencies;
+}
+
+/**
+ * Derive dependencies from a real ImportGraph. For each file in
+ * scope, returns the other in-scope files it imports (direct deps
+ * within the change set).
+ */
+function inferDependenciesFromGraph(
+  files: readonly string[],
+  graph: ImportGraph,
+): Map<string, string[]> {
+  const fileSet = new Set(files);
+  const dependencies = new Map<string, string[]>();
+
+  for (const file of files) {
+    // Direct imports that are also in the change set
+    const imports = graph.getImports(file).filter((dep) => fileSet.has(dep));
+    // Also include files that import this file (reverse deps within scope)
+    // — these are files that will break if this file changes
+    const consumers = graph.getImportedBy(file).filter((dep) => fileSet.has(dep));
+    // Combine and deduplicate — a file depends on its imports AND
+    // is depended on by its consumers, both matter for ordering
+    const combined = [...new Set([...imports, ...consumers])].filter((dep) => dep !== file);
+    dependencies.set(file, combined);
   }
 
   return dependencies;
@@ -123,15 +278,33 @@ function deriveCoherenceVerdict(
   };
 }
 
-export function createChangeSet(intent: IntentObject, files: readonly string[]): ChangeSet {
+/**
+ * Create a ChangeSet with optional ImportGraph-backed dependency
+ * inference. When an ImportGraph is provided, dependencies are
+ * derived from real import/require relationships instead of the
+ * directory-sibling heuristic fallback.
+ */
+export function createChangeSet(
+  intent: IntentObject,
+  files: readonly string[],
+  importGraph?: ImportGraph | null,
+): ChangeSet {
   const normalizedFiles = normalizeFiles(files);
-  const dependencyMap = inferDependencies(normalizedFiles);
+
+  // Use real import data when available, fall back to heuristic
+  const dependencyMap = importGraph
+    ? inferDependenciesFromGraph(normalizedFiles, importGraph)
+    : inferDependencies(normalizedFiles);
 
   const filesInScope: FileInclusion[] = normalizedFiles.map((file) => ({
     path: file,
     whyIncluded: inferWhyIncluded(intent, file),
     dependsOn: dependencyMap.get(file) ?? [],
     status: "planned",
+    necessity: classifyNecessity(intent, file),
+    executionOrder: computeExecutionOrder(file, dependencyMap),
+    sensitivity: classifyFileSensitivity(file),
+    outcome: null,
   }));
 
   const dependencyRelationships = Object.freeze(
@@ -153,4 +326,48 @@ export function createChangeSet(intent: IntentObject, files: readonly string[]):
     acceptanceCriteria,
     coherenceVerdict: Object.freeze(coherenceVerdict),
   });
+}
+
+// ─── Manifest Queries ───────────────────────────────────────────────
+
+/** Count files by sensitivity level. */
+export function countSensitiveFiles(changeSet: ChangeSet): { normal: number; sensitive: number; critical: number } {
+  const counts = { normal: 0, sensitive: 0, critical: 0 };
+  for (const file of changeSet.filesInScope) {
+    counts[file.sensitivity]++;
+  }
+  return counts;
+}
+
+/** Get files sorted by execution order. */
+export function getExecutionOrder(changeSet: ChangeSet): readonly FileInclusion[] {
+  return [...changeSet.filesInScope].sort((a, b) => a.executionOrder - b.executionOrder);
+}
+
+/** Check if any required files have a terminal failure status. */
+export function hasRequiredFileFailures(changeSet: ChangeSet): boolean {
+  return changeSet.filesInScope.some(
+    (f) => f.necessity === "required" && (f.status === "failed" || f.outcome?.status === "failed"),
+  );
+}
+
+/** Produce a per-file outcome summary for receipts. */
+export function summarizeFileOutcomes(changeSet: ChangeSet): readonly FileOutcomeSummary[] {
+  return changeSet.filesInScope.map((f) => ({
+    path: f.path,
+    necessity: f.necessity,
+    sensitivity: f.sensitivity,
+    status: f.outcome?.status ?? (f.status === "verified" || f.status === "complete" ? "succeeded" : "pending"),
+    reason: f.outcome?.reason ?? f.status,
+    waveId: f.outcome?.waveId ?? null,
+  }));
+}
+
+export interface FileOutcomeSummary {
+  readonly path: string;
+  readonly necessity: FileNecessity;
+  readonly sensitivity: FileSensitivity;
+  readonly status: "succeeded" | "failed" | "skipped" | "rolled_back" | "pending";
+  readonly reason: string;
+  readonly waveId: number | null;
 }

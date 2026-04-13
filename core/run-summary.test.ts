@@ -394,6 +394,7 @@ function scope(type: ScopeClassification["type"], radius: number, decompose = fa
     blastRadius: radius,
     recommendDecompose: decompose,
     reason: `test-${type}`,
+    governance: { decompositionRequired: false, approvalRequired: false, escalationRecommended: false, wavesRequired: false },
   };
 }
 
@@ -427,6 +428,9 @@ function receipt(o: ReceiptOverrides): RunReceipt {
         checks: [],
         summary: `verification ${o.verification.verdict}`,
         totalDurationMs: 10,
+        fileCoverage: null,
+        coverageRatio: null,
+        validatedRatio: null,
       }
     : null;
 
@@ -488,5 +492,6 @@ function receipt(o: ReceiptOverrides): RunReceipt {
     executionReceipts: [],
     humanSummary: null,
     blastRadius: null,
+    evaluation: null,
   };
 }
