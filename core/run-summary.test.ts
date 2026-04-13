@@ -494,5 +494,9 @@ function receipt(o: ReceiptOverrides): RunReceipt {
     blastRadius: null,
     evaluation: null,
     confidenceGate: null,
+    patchArtifact: null,
+    workspaceCleanup: null,
+    sourceRepo: null,
+    sourceCommitSha: null,
   };
 }

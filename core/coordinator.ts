@@ -170,6 +170,15 @@ import { scanInput as velumScanInput } from "./velum-input.js";
 import { scanDiff as velumScanDiff, type VelumResult } from "./velum-output.js";
 import { classifyTask, type ImpactClassification, type ImpactLevel } from "./impact-classifier.js";
 import { scoreConfidence, type ConfidenceLevel, type ConfidenceResult } from "./confidence-gate.js";
+import {
+  createWorkspace,
+  discardWorkspace,
+  generatePatch,
+  saveWorkspaceReceipt,
+  type WorkspaceHandle,
+  type WorkspaceCleanupResult,
+  type PatchArtifact,
+} from "./workspace-manager.js";
 import { findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
@@ -385,6 +394,28 @@ export interface RunReceipt {
    * disagreement analysis, and confidence adjustments.
    */
   readonly evaluation: EvaluationAttachment | null;
+  /**
+   * Promotion-ready patch artifact. Contains the unified diff of all
+   * changes made in the workspace. Null on failure paths or when no
+   * changes were produced. This is the artifact used to apply changes
+   * to the source repo in a later promotion step.
+   */
+  readonly patchArtifact: PatchArtifact | null;
+  /**
+   * Workspace cleanup result. Records whether the disposable workspace
+   * was successfully cleaned up. Null when no workspace was created.
+   * cleanup_error is a SEVERE state — the receipt must surface it.
+   */
+  readonly workspaceCleanup: WorkspaceCleanupResult | null;
+  /**
+   * Source repo path (never mutated). Null for legacy runs that
+   * predated the isolated workspace model.
+   */
+  readonly sourceRepo: string | null;
+  /**
+   * Source commit SHA at the time the workspace was created.
+   */
+  readonly sourceCommitSha: string | null;
   /**
    * Discrete confidence gate label. Computed from tests_passed,
    * integration_passed, critic_iterations, and impact_level.
@@ -752,9 +783,31 @@ export class Coordinator {
       console.warn(`[coordinator] memory-backed gate unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Phase 3: RunState
+    // Phase 3: RunState + Isolated Workspace
     console.log(`[coordinator] PHASE 3: RunState — creating`);
     const run = createRunState(intent.id, submission.runId);
+
+    // ── Isolated Workspace ──────────────────────────────────────────
+    // Create a disposable workspace so all mutations happen outside
+    // the source repo. The workspace path becomes the projectRoot for
+    // all worker dispatches, git operations, and verification steps.
+    let workspace: WorkspaceHandle | null = null;
+    let workspaceProjectRoot = effectiveProjectRoot;
+    try {
+      workspace = await createWorkspace(effectiveProjectRoot, run.id);
+      workspaceProjectRoot = workspace.workspacePath;
+      console.log(
+        `[coordinator] workspace created: method=${workspace.method} path=${workspace.workspacePath} ` +
+        `source=${workspace.sourceRepo} sha=${workspace.sourceCommitSha.slice(0, 8)}`,
+      );
+    } catch (err) {
+      console.error(
+        `[coordinator] workspace creation FAILED — falling back to source repo (UNSAFE): ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      );
+      // Fallback: use source repo directly (legacy behavior).
+      // This is logged as a warning — the run is less safe.
+    }
 
     const active: ActiveRun = {
       intent,
@@ -763,7 +816,9 @@ export class Coordinator {
       changes: [],
       workerResults: [],
       cancelled: false,
-      projectRoot: effectiveProjectRoot,
+      projectRoot: workspaceProjectRoot,
+      sourceRepo: effectiveProjectRoot,
+      workspace,
       gatedContext,
       projectMemory,
       normalizedInput,
@@ -778,6 +833,8 @@ export class Coordinator {
       blastRadius,
       runInvocationContext: createRunInvocationContext(),
       gitDiffResult: null,
+      patchArtifact: null,
+      workspaceCleanup: null,
       patternWarnings,
       historicalInsights: findHistoricalInsights(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }).map((i) => i.line),
       confidenceDampening: getConfidenceDampening(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }),
@@ -1399,6 +1456,29 @@ export class Coordinator {
           ? "failed"
           : verdict;
 
+      // ── Patch artifact generation ─────────────────────────────────
+      // On success/partial, generate a promotion-ready patch from the
+      // workspace. On failure, still try to capture the diff for debugging.
+      if (active.workspace && active.changes.length > 0) {
+        try {
+          active.patchArtifact = await generatePatch(active.workspace);
+          console.log(
+            `[coordinator] patch artifact: ${active.patchArtifact.changedFiles.length} file(s), ` +
+            `${active.patchArtifact.diff.length} bytes, commit=${active.patchArtifact.commitSha?.slice(0, 8) ?? "none"}`,
+          );
+          // Save patch to workspace receipts directory
+          await saveWorkspaceReceipt(
+            active.workspace,
+            `patch-${run.id.slice(0, 8)}.diff`,
+            active.patchArtifact.diff,
+          );
+        } catch (err) {
+          console.warn(
+            `[coordinator] patch generation failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       // Finalize
       console.log(`[coordinator] FINALIZE — verdict=${verdictAfterGate} (pre-gate=${verdict} executionVerified=${executionDecision.executionVerified} cancelled=${active.cancelled} phase=${run.phase} hasFailedNodes=${hasFailedNodes(active.graph)} workerResults=${active.workerResults.length})`);
 
@@ -1562,7 +1642,37 @@ export class Coordinator {
       this.emit({ type: "trust_updated", payload: { runId: run.id, confidence: 0, verdict: "failed" } });
       return finalReceipt;
     } finally {
-      this.activeRuns.delete(run.id);
+      // ── Workspace cleanup ───────────────────────────────────────
+      // Clean up the workspace ONLY when the run is terminal (not
+      // awaiting approval). When requireApproval pauses the run,
+      // the workspace must survive until approveRun/rejectRun
+      // processes it — they call gitCommit/rollbackChanges which
+      // need the workspace to exist.
+      const isAwaitingApproval = run.phase === "awaiting_approval";
+      if (active.workspace && !isAwaitingApproval) {
+        const cleanup = await discardWorkspace(active.workspace);
+        active.workspaceCleanup = cleanup;
+        if (!cleanup.success) {
+          console.error(
+            `[coordinator] CLEANUP_ERROR: workspace ${active.workspace.workspacePath} — ${cleanup.error}`,
+          );
+          void this.receiptStore.patchRun(run.id, {
+            status: "CLEANUP_ERROR",
+            appendErrors: [`Workspace cleanup failed: ${cleanup.error}`],
+          });
+        } else {
+          console.log(
+            `[coordinator] workspace cleaned up: method=${cleanup.method} (${cleanup.durationMs}ms)`,
+          );
+        }
+      } else if (isAwaitingApproval && active.workspace) {
+        console.log(
+          `[coordinator] workspace PRESERVED for approval: ${active.workspace.workspacePath}`,
+        );
+      }
+      if (!isAwaitingApproval) {
+        this.activeRuns.delete(run.id);
+      }
     }
   }
 
@@ -2943,6 +3053,10 @@ export class Coordinator {
         completedAt: new Date().toISOString(),
       });
       return { ok: false, error: active.run.failureReason };
+    } finally {
+      // Workspace cleanup after approval/rejection is processed
+      await this.cleanupWorkspaceForApproval(active);
+      this.activeRuns.delete(runId);
     }
   }
 
@@ -2996,6 +3110,11 @@ export class Coordinator {
       type: "run_complete",
       payload: { runId, verdict: "failed", executionVerified: false, executionReason: "Rejected by human", classification: null },
     });
+
+    // Workspace cleanup after rejection
+    await this.cleanupWorkspaceForApproval(active);
+    this.activeRuns.delete(runId);
+
     return { ok: true };
   }
 
@@ -3010,6 +3129,30 @@ export class Coordinator {
       });
     }
     return result;
+  }
+
+  /**
+   * Clean up workspace after approveRun/rejectRun completes.
+   * Separated from the submit() finally block because the approval
+   * path needs the workspace to survive until the user acts.
+   */
+  private async cleanupWorkspaceForApproval(active: ActiveRun): Promise<void> {
+    if (!active.workspace) return;
+    const cleanup = await discardWorkspace(active.workspace);
+    active.workspaceCleanup = cleanup;
+    if (!cleanup.success) {
+      console.error(
+        `[coordinator] CLEANUP_ERROR (post-approval): ${active.workspace.workspacePath} — ${cleanup.error}`,
+      );
+      void this.receiptStore.patchRun(active.run.id, {
+        status: "CLEANUP_ERROR",
+        appendErrors: [`Workspace cleanup failed after approval: ${cleanup.error}`],
+      });
+    } else {
+      console.log(
+        `[coordinator] workspace cleaned up (post-approval): method=${cleanup.method} (${cleanup.durationMs}ms)`,
+      );
+    }
   }
 
   private async rollbackChanges(active: ActiveRun, decision: MergeDecision): Promise<void> {
@@ -3413,6 +3556,10 @@ export class Coordinator {
           }
         : null,
       evaluation: null,
+      patchArtifact: active.patchArtifact ?? null,
+      workspaceCleanup: active.workspaceCleanup ?? null,
+      sourceRepo: active.sourceRepo ?? null,
+      sourceCommitSha: active.workspace?.sourceCommitSha ?? null,
       confidenceGate,
     };
 
@@ -3563,7 +3710,9 @@ export class Coordinator {
       ...active.changes.map((change) => change.path),
       ...active.run.filesTouched.map((touch) => touch.filePath),
     ]);
-    await recordTask(active.projectRoot, {
+    // Write memory to the SOURCE repo, not the workspace.
+    // The workspace is disposable — memory must persist across runs.
+    await recordTask(active.sourceRepo, {
       prompt: rawInput,
       normalizedPrompt: normalizedInput,
       verdict: receipt.verdict,
@@ -3594,8 +3743,9 @@ export class Coordinator {
 
     const memoryAdapter = await getAedisMemoryAdapter();
     if (!memoryAdapter) return [];
+    // Write memory to the SOURCE repo, not the workspace.
     const result = await memoryAdapter.persistRunMemory({
-      projectRoot: active.projectRoot,
+      projectRoot: active.sourceRepo,
       rawInput,
       normalizedPrompt: normalizedInput,
       scopeClassification: active.scopeClassification,
@@ -3722,17 +3872,24 @@ interface ActiveRun {
   workerResults: WorkerResult[];
   cancelled: boolean;
   /**
-   * Effective project root for this submission. Resolved as
-   * `submission.projectRoot ?? this.config.projectRoot` at the top of
-   * submit(). Used by:
-   *   - dispatchNode (attached to assignment.projectRoot)
-   *   - prepareDeliverablesForGraph (path resolution for dedup)
-   *   - fileExists (existence check for deliverable files)
-   *   - gitCommit (cwd for git commands)
-   *   - the per-submit ContextAssembler and IntegrationJudge constructed
-   *     in submit() with this projectRoot
+   * Effective project root for this run. In isolated workspace mode,
+   * this points to the WORKSPACE path, not the source repo. All file
+   * mutations, git operations, and worker dispatches target this path.
+   *
+   * The original source repo path is stored in `sourceRepo`.
    */
   projectRoot: string;
+  /**
+   * Original source repo path. NEVER written to during a run.
+   * Used only for: memory loading, context assembly reads, and
+   * recording the source in receipts.
+   */
+  sourceRepo: string;
+  /**
+   * Workspace handle for isolated execution. Null when workspace
+   * creation is disabled or failed (legacy fallback mode).
+   */
+  workspace: WorkspaceHandle | null;
   /** Gated project memory relevant to the current prompt, for Scout context. */
   gatedContext: GatedContext;
   /**
@@ -3801,6 +3958,10 @@ interface ActiveRun {
   runInvocationContext: RunInvocationContext;
   /** GitDiffVerifier result from phase 9d. Null when not run. */
   gitDiffResult: GitDiffResult | null;
+  /** Promotion-ready patch artifact. Generated after successful execution. */
+  patchArtifact: PatchArtifact | null;
+  /** Workspace cleanup result. Populated in finally block. */
+  workspaceCleanup: WorkspaceCleanupResult | null;
   /** Lightweight historical warnings inferred from prior similar runs. */
   patternWarnings: string[];
   /** Historical insights for the explanation layer. */

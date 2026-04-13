@@ -348,5 +348,9 @@ function receiptFixture(): RunReceipt {
     blastRadius: null,
     evaluation: null,
     confidenceGate: null,
+    patchArtifact: null,
+    workspaceCleanup: null,
+    sourceRepo: null,
+    sourceCommitSha: null,
   };
 }
