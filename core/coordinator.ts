@@ -166,6 +166,9 @@ import {
   type MergeFinding,
 } from "./merge-gate.js";
 import { verifyGitDiff, type GitDiffResult } from "./git-diff-verifier.js";
+import { scanInput as velumScanInput } from "./velum-input.js";
+import { scanDiff as velumScanDiff, type VelumResult } from "./velum-output.js";
+import { classifyTask, type ImpactClassification, type ImpactLevel } from "./impact-classifier.js";
 import { findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
@@ -781,6 +784,81 @@ export class Coordinator {
       phase: run.phase,
     });
 
+    // ── Velum Input Guard ──────────────────────────────────────────
+    // Runs before the Builder touches anything. Block/review/warn/allow.
+    const velumInput = velumScanInput(normalizedInput, gatedContext.memoryNotes);
+    console.log(`[coordinator] velum.input.scan: decision=${velumInput.decision} flags=[${velumInput.flags.join(", ")}]`);
+    await this.persistReceiptCheckpoint(active, {
+      at: new Date().toISOString(),
+      type: "worker_step",
+      status: "RUNNING",
+      phase: run.phase,
+      summary: `velum.input.scan: ${velumInput.decision}`,
+      details: { decision: velumInput.decision, reasons: velumInput.reasons, flags: velumInput.flags },
+    });
+    if (velumInput.decision === "block") {
+      const blockMsg = `Velum input guard blocked execution: ${velumInput.reasons.join("; ")}`;
+      console.error(`[coordinator] ${blockMsg}`);
+      failRun(run, blockMsg);
+      this.emit({ type: "merge_blocked", payload: { runId: run.id, blockers: [blockMsg] } });
+      return this.buildReceipt(active, null, null, null, Date.now() - startTime, null, null, "failed");
+    }
+    if (velumInput.decision === "review" && effectiveRequireApproval) {
+      console.log(`[coordinator] velum.input.scan: review required — pausing for approval`);
+      recordDecision(run, {
+        description: `Velum input guard flagged for review: ${velumInput.reasons.join("; ")}`,
+        madeBy: "velum",
+        taskId: null,
+        alternatives: ["Block execution", "Allow execution"],
+        rationale: velumInput.flags.join(", "),
+      });
+    }
+    if (velumInput.decision === "warn") {
+      console.warn(`[coordinator] velum.input.scan: warnings: ${velumInput.reasons.join("; ")}`);
+      recordDecision(run, {
+        description: `Velum input guard warning: ${velumInput.reasons.join("; ")}`,
+        madeBy: "velum",
+        taskId: null,
+        alternatives: [],
+        rationale: velumInput.flags.join(", "),
+      });
+    }
+
+    // ── Impact Classification Gate ─────────────────────────────────
+    // Runs before the Builder. HIGH → approval required, MEDIUM → strict verification.
+    const impactClassification = classifyTask(normalizedInput, charterTargets);
+    console.log(`[coordinator] impact.classification: level=${impactClassification.level} reasons=[${impactClassification.reasons.join("; ")}]`);
+    await this.persistReceiptCheckpoint(active, {
+      at: new Date().toISOString(),
+      type: "worker_step",
+      status: "RUNNING",
+      phase: run.phase,
+      summary: `impact.classification: ${impactClassification.level}`,
+      details: { level: impactClassification.level, reasons: impactClassification.reasons },
+    });
+    if (impactClassification.level === "high") {
+      console.log(`[coordinator] impact.classification: HIGH — enforcing approval requirement`);
+      // Override effective approval — variable was declared with const, so
+      // we use a mutable alias that downstream code already reads.
+      // effectiveRequireApproval is const, so we shadow it below.
+    }
+    if (impactClassification.level === "medium") {
+      console.log(`[coordinator] impact.classification: MEDIUM — enabling strict verification`);
+      active.gatedContext = mergeGatedContext(active.gatedContext, { strictVerification: true });
+    }
+
+    // Re-derive effectiveRequireApproval to include impact classification
+    const finalRequireApproval = effectiveRequireApproval || impactClassification.level === "high";
+    if (impactClassification.level === "high" && !effectiveRequireApproval) {
+      recordDecision(run, {
+        description: `Impact classification HIGH — approval enforced: ${impactClassification.reasons.join("; ")}`,
+        madeBy: "impact-classifier",
+        taskId: null,
+        alternatives: ["Proceed without approval"],
+        rationale: impactClassification.reasons.join(", "),
+      });
+    }
+
     try {
       // Phase 4: Build TaskGraph
       console.log(`[coordinator] PHASE 4: BuildTaskGraph — entering`);
@@ -818,6 +896,52 @@ export class Coordinator {
       await this.executeGraph(active);
       console.log(`[coordinator] PHASE 6 done — graph state: ${JSON.stringify(getGraphSummary(active.graph))}`);
       console.log(`[coordinator] PHASE 6 trace — builder nodes processed: ${active.graph.nodes.filter(n => n.workerType === 'builder').length}`);
+
+      // ── Velum Output Guard ──────────────────────────────────────
+      // Scan builder output diffs for security issues before Critic.
+      if (active.changes.length > 0 && !active.cancelled) {
+        const combinedDiff = active.changes
+          .map((c) => c.diff ?? (c.content ? `+++ ${c.path}\n${c.content.split("\n").map((l) => `+${l}`).join("\n")}` : ""))
+          .filter(Boolean)
+          .join("\n");
+        const velumOutput = velumScanDiff(combinedDiff);
+        console.log(`[coordinator] velum.output.scan: decision=${velumOutput.decision} flags=[${velumOutput.flags.join(", ")}]`);
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "worker_step",
+          status: "RUNNING",
+          phase: run.phase,
+          summary: `velum.output.scan: ${velumOutput.decision}`,
+          details: { decision: velumOutput.decision, reasons: velumOutput.reasons, flags: velumOutput.flags },
+        });
+        if (velumOutput.decision === "block") {
+          const blockMsg = `Velum output guard blocked: ${velumOutput.reasons.join("; ")}`;
+          console.error(`[coordinator] ${blockMsg}`);
+          failRun(run, blockMsg);
+          this.emit({ type: "merge_blocked", payload: { runId: run.id, blockers: [blockMsg] } });
+          return this.buildReceipt(active, null, null, null, Date.now() - startTime, null, null, "failed");
+        }
+        if (velumOutput.decision === "review") {
+          console.log(`[coordinator] velum.output.scan: review required`);
+          recordDecision(run, {
+            description: `Velum output guard flagged for review: ${velumOutput.reasons.join("; ")}`,
+            madeBy: "velum",
+            taskId: null,
+            alternatives: ["Block execution", "Allow execution"],
+            rationale: velumOutput.flags.join(", "),
+          });
+        }
+        if (velumOutput.decision === "warn") {
+          console.warn(`[coordinator] velum.output.scan: warnings: ${velumOutput.reasons.join("; ")}`);
+          recordDecision(run, {
+            description: `Velum output guard warning: ${velumOutput.reasons.join("; ")}`,
+            madeBy: "velum",
+            taskId: null,
+            alternatives: [],
+            rationale: velumOutput.flags.join(", "),
+          });
+        }
+      }
 
       // Phase 7: Per-wave verification (multi-file only).
       //
@@ -1077,7 +1201,7 @@ export class Coordinator {
       // Approval gate: if requireApproval is true, pause instead of auto-committing.
       // The run transitions to "awaiting_approval" — a first-class, explicit state.
       // The run is NOT complete, NOT partial, NOT failed. It is paused.
-      if (canCommit && effectiveRequireApproval) {
+      if (canCommit && finalRequireApproval) {
         console.log(`[coordinator] PHASE 10: APPROVAL REQUIRED — ${changeCount} change(s) ready. Pausing for external approval.`);
         advancePhase(run, "awaiting_approval");
         this.emit({ type: "system_event", payload: { runId: run.id, event: "approval_required", changeCount } });
