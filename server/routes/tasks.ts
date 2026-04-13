@@ -445,18 +445,32 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     status: import("../../core/receipt-store.js").PersistentRunStatus,
   ): TrackedRun["status"] {
     switch (status) {
+      // Active states
+      case "PROPOSED":
       case "RUNNING":
+      case "EXECUTING_IN_WORKSPACE":
+      case "VERIFICATION_PENDING":
         return "running";
       case "AWAITING_APPROVAL":
+      case "DISAGREEMENT_HOLD":
         return "running";
+      // Terminal success
       case "COMPLETE":
+      case "VERIFIED_PASS":
+      case "READY_FOR_PROMOTION":
         return "complete";
+      // Cancelled
       case "ABORTED":
       case "INTERRUPTED":
         return "cancelled";
+      // Failures
       case "REJECTED":
       case "CRASHED":
+      case "EXECUTION_ERROR":
+      case "CLEANUP_ERROR":
       case "FAILED":
+      case "VERIFIED_FAIL":
+      case "CRUCIBULUM_FAIL":
       default:
         return "failed";
     }

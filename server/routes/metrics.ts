@@ -36,9 +36,9 @@ export const metricsRoutes: FastifyPluginAsync = async (fastify) => {
             taskId: task?.taskId ?? persisted.runId,
             runId: persisted.runId,
             status:
-              persisted.status === "RUNNING"
+              persisted.status === "RUNNING" || persisted.status === "EXECUTING_IN_WORKSPACE" || persisted.status === "PROPOSED" || persisted.status === "VERIFICATION_PENDING"
                 ? "running"
-                : persisted.status === "COMPLETE"
+                : persisted.status === "COMPLETE" || persisted.status === "VERIFIED_PASS" || persisted.status === "READY_FOR_PROMOTION"
                   ? "complete"
                   : persisted.status === "ABORTED" || persisted.status === "INTERRUPTED"
                     ? "cancelled"
@@ -49,13 +49,15 @@ export const metricsRoutes: FastifyPluginAsync = async (fastify) => {
             receipt: persisted.finalReceipt,
             error: persisted.errors[0] ?? task?.error ?? null,
             stateCategory:
-              persisted.status === "RUNNING"
+              persisted.status === "RUNNING" || persisted.status === "EXECUTING_IN_WORKSPACE" || persisted.status === "PROPOSED" || persisted.status === "VERIFICATION_PENDING"
                 ? "in-flight"
-                : persisted.status === "CRASHED"
+                : persisted.status === "CRASHED" || persisted.status === "EXECUTION_ERROR" || persisted.status === "CLEANUP_ERROR"
                   ? "crashed"
-                  : persisted.status === "COMPLETE"
+                  : persisted.status === "COMPLETE" || persisted.status === "VERIFIED_PASS" || persisted.status === "READY_FOR_PROMOTION"
                     ? "completed"
-                    : "failed",
+                    : persisted.status === "DISAGREEMENT_HOLD"
+                      ? "blocked"
+                      : "failed",
           };
         }),
       );

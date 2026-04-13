@@ -5,15 +5,52 @@ import { join } from "node:path";
 import type { RunReceipt } from "./coordinator.js";
 import type { CostEntry } from "./runstate.js";
 
+/**
+ * Canonical run status language. These statuses are the ONLY labels
+ * that should appear in receipts, API payloads, and UI displays.
+ *
+ * Truth rules:
+ *   - "PROPOSED" is the initial state before execution starts
+ *   - "EXECUTING_IN_WORKSPACE" replaces "RUNNING" — makes it clear
+ *     execution is happening in an isolated workspace, not applied
+ *   - "VERIFICATION_PENDING" means build finished but tests/checks
+ *     haven't run yet — must NOT be shown as "success"
+ *   - "VERIFIED_PASS" means verification completed and passed
+ *   - "VERIFIED_FAIL" means verification completed and failed
+ *   - "CRUCIBULUM_FAIL" means the Crucibulum evaluator disagreed
+ *     with the Aedis verdict — this is a FAILURE, not advisory
+ *   - "DISAGREEMENT_HOLD" means Crucibulum and Aedis disagree
+ *     but the run is held for human review — treated as BLOCKED
+ *   - "EXECUTION_ERROR" replaces "CRASHED" — explicit error state
+ *   - "CLEANUP_ERROR" means workspace cleanup failed — SEVERE
+ *   - "READY_FOR_PROMOTION" means all gates passed and the run
+ *     is ready to be applied to the source branch — does NOT
+ *     imply already applied
+ *
+ * "success" must NEVER be shown before verification completes.
+ * Advisory confidence must NOT override Crucibulum verdict.
+ */
 export type PersistentRunStatus =
+  | "PROPOSED"
+  | "EXECUTING_IN_WORKSPACE"
+  | "VERIFICATION_PENDING"
+  | "VERIFIED_PASS"
+  | "VERIFIED_FAIL"
+  | "CRUCIBULUM_FAIL"
+  | "DISAGREEMENT_HOLD"
+  | "EXECUTION_ERROR"
+  | "CLEANUP_ERROR"
+  | "READY_FOR_PROMOTION"
+  | "ABORTED"
+  | "INTERRUPTED"
+  | "AWAITING_APPROVAL"
+  | "REJECTED"
+  // Legacy aliases — still accepted for reading old receipts.
+  // New code should never WRITE these.
   | "RUNNING"
   | "COMPLETE"
   | "FAILED"
-  | "ABORTED"
-  | "CRASHED"
-  | "INTERRUPTED"
-  | "AWAITING_APPROVAL"
-  | "REJECTED";
+  | "CRASHED";
 
 export interface ReceiptCheckpoint {
   readonly at: string;
@@ -182,12 +219,12 @@ export class ReceiptStore {
       taskSummary: input.taskSummary,
       startedAt: input.startedAt,
       phase: input.phase,
-      status: "RUNNING",
+      status: "EXECUTING_IN_WORKSPACE",
       appendCheckpoints: [
         {
           at: input.startedAt,
           type: "run_started",
-          status: "RUNNING",
+          status: "EXECUTING_IN_WORKSPACE",
           phase: input.phase,
           summary: input.taskSummary,
         },
@@ -303,21 +340,21 @@ export class ReceiptStore {
       const index = await this.readIndexFile();
       let changed = 0;
       for (const entry of index.runs) {
-        if (entry.status !== "RUNNING") continue;
+        if (entry.status !== "RUNNING" && entry.status !== "EXECUTING_IN_WORKSPACE" && entry.status !== "PROPOSED") continue;
         const run = await this.readRunFile(entry.runId);
-        if (!run || run.status !== "RUNNING") continue;
+        if (!run || (run.status !== "RUNNING" && run.status !== "EXECUTING_IN_WORKSPACE" && run.status !== "PROPOSED")) continue;
         const now = new Date().toISOString();
         const next = this.applyPatch(
           run,
           {
-            status: "CRASHED",
+            status: "EXECUTION_ERROR",
             completedAt: now,
             appendErrors: [reason],
             appendCheckpoints: [
               {
                 at: now,
                 type: "startup_recovery",
-                status: "CRASHED",
+                status: "EXECUTION_ERROR",
                 phase: run.phase,
                 summary: reason,
               },
@@ -326,7 +363,7 @@ export class ReceiptStore {
           now,
         );
         await this.writeRunFile(next);
-        entry.status = "CRASHED";
+        entry.status = "EXECUTION_ERROR";
         entry.completedAt = now;
         entry.updatedAt = now;
         entry.summary = next.humanSummary && typeof next.humanSummary === "object" && "headline" in next.humanSummary
@@ -405,7 +442,7 @@ export class ReceiptStore {
       completedAt: null,
       prompt: "",
       taskSummary: "",
-      status: "RUNNING",
+      status: "PROPOSED",
       phase: null,
       finalClassification: null,
       totalCost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },

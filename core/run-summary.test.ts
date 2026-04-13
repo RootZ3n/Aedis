@@ -493,5 +493,6 @@ function receipt(o: ReceiptOverrides): RunReceipt {
     humanSummary: null,
     blastRadius: null,
     evaluation: null,
+    confidenceGate: null,
   };
 }

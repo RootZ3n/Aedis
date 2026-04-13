@@ -347,5 +347,6 @@ function receiptFixture(): RunReceipt {
     humanSummary: null,
     blastRadius: null,
     evaluation: null,
+    confidenceGate: null,
   };
 }

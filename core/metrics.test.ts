@@ -434,5 +434,6 @@ function baseReceipt(opts: BaseReceiptOpts): RunReceipt {
     humanSummary: null,
     blastRadius: null,
     evaluation: null,
+    confidenceGate: null,
   };
 }

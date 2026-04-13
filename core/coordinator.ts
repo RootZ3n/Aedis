@@ -169,6 +169,7 @@ import { verifyGitDiff, type GitDiffResult } from "./git-diff-verifier.js";
 import { scanInput as velumScanInput } from "./velum-input.js";
 import { scanDiff as velumScanDiff, type VelumResult } from "./velum-output.js";
 import { classifyTask, type ImpactClassification, type ImpactLevel } from "./impact-classifier.js";
+import { scoreConfidence, type ConfidenceLevel, type ConfidenceResult } from "./confidence-gate.js";
 import { findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
@@ -210,6 +211,12 @@ export interface CoordinatorConfig {
   verificationConfig?: Partial<VerificationPipelineConfig>;
   /** Post-run Crucibulum evaluation configuration. */
   evaluationConfig?: Partial<CrucibulumConfig>;
+  /** Maximum total graph iterations before forced abort. Default: 50 */
+  maxGraphIterations: number;
+  /** Maximum seconds for the entire run. Default: 600 (10 min) */
+  maxRunTimeoutSec: number;
+  /** Maximum seconds per individual dispatch stage. Default: 180 */
+  maxStageTimeoutSec: number;
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -220,6 +227,9 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   requireApproval: false,
   workBranch: "aedis/run",
   externalCommandTimeoutSec: 120,
+  maxGraphIterations: 50,
+  maxRunTimeoutSec: 600,
+  maxStageTimeoutSec: 180,
 };
 
 /**
@@ -375,6 +385,13 @@ export interface RunReceipt {
    * disagreement analysis, and confidence adjustments.
    */
   readonly evaluation: EvaluationAttachment | null;
+  /**
+   * Discrete confidence gate label. Computed from tests_passed,
+   * integration_passed, critic_iterations, and impact_level.
+   * "high" | "medium" | "low". Null on early-exit paths where
+   * the gate inputs aren't available.
+   */
+  readonly confidenceGate: ConfidenceResult | null;
 }
 
 // ─── Coordinator ─────────────────────────────────────────────────────
@@ -791,7 +808,7 @@ export class Coordinator {
     await this.persistReceiptCheckpoint(active, {
       at: new Date().toISOString(),
       type: "worker_step",
-      status: "RUNNING",
+      status: "EXECUTING_IN_WORKSPACE",
       phase: run.phase,
       summary: `velum.input.scan: ${velumInput.decision}`,
       details: { decision: velumInput.decision, reasons: velumInput.reasons, flags: velumInput.flags },
@@ -831,7 +848,7 @@ export class Coordinator {
     await this.persistReceiptCheckpoint(active, {
       at: new Date().toISOString(),
       type: "worker_step",
-      status: "RUNNING",
+      status: "EXECUTING_IN_WORKSPACE",
       phase: run.phase,
       summary: `impact.classification: ${impactClassification.level}`,
       details: { level: impactClassification.level, reasons: impactClassification.reasons },
@@ -879,7 +896,7 @@ export class Coordinator {
       await this.persistReceiptCheckpoint(active, {
         at: new Date().toISOString(),
         type: "planner_finished",
-        status: "RUNNING",
+        status: "EXECUTING_IN_WORKSPACE",
         phase: run.phase,
         summary: `Planner built ${active.graph.nodes.length} task node(s)`,
         details: { graphSummary: summaryAfterBuild },
@@ -905,7 +922,7 @@ export class Coordinator {
           await this.persistReceiptCheckpoint(active, {
             at: new Date().toISOString(),
             type: "worker_step",
-            status: "RUNNING",
+            status: "EXECUTING_IN_WORKSPACE",
             phase: run.phase,
             summary: `verification.baseline: ${testBaseline.totalTests} tests, ${testBaseline.failedTests} failing`,
             details: {
@@ -941,7 +958,7 @@ export class Coordinator {
         await this.persistReceiptCheckpoint(active, {
           at: new Date().toISOString(),
           type: "worker_step",
-          status: "RUNNING",
+          status: "EXECUTING_IN_WORKSPACE",
           phase: run.phase,
           summary: `velum.output.scan: ${velumOutput.decision}`,
           details: { decision: velumOutput.decision, reasons: velumOutput.reasons, flags: velumOutput.flags },
@@ -1117,7 +1134,7 @@ export class Coordinator {
         await this.persistReceiptCheckpoint(active, {
           at: new Date().toISOString(),
           type: "verification_result",
-          status: "RUNNING",
+          status: "EXECUTING_IN_WORKSPACE",
           phase: run.phase,
           summary: verificationReceipt.summary,
           details: { verdict: verificationReceipt.verdict },
@@ -1251,7 +1268,7 @@ export class Coordinator {
         await this.persistReceiptCheckpoint(active, {
           at: new Date().toISOString(),
           type: "failure_occurred",
-          status: "FAILED",
+          status: "VERIFIED_FAIL",
           phase: run.phase,
           summary: mergeDecision.primaryBlockReason,
           details: { summary: mergeDecision.summary },
@@ -1993,8 +2010,42 @@ export class Coordinator {
       console.warn(`[coordinator] executeGraph: graph is ALREADY COMPLETE on entry — loop will not execute. Node statuses: ${graph.nodes.map(n => `${n.workerType}=${n.status}`).join(", ")}`);
     }
 
+    const graphStartTime = Date.now();
+
     while (!isGraphComplete(graph) && !active.cancelled) {
       iteration++;
+
+      // ── Execution limits ────────────────────────────────────────
+      if (iteration > this.config.maxGraphIterations) {
+        const msg = `execution.limits: max graph iterations (${this.config.maxGraphIterations}) exceeded`;
+        console.error(`[coordinator] ${msg}`);
+        failRun(run, msg);
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "EXECUTION_ERROR",
+          phase: run.phase,
+          summary: msg,
+          details: { limit: "maxGraphIterations", value: this.config.maxGraphIterations, actual: iteration },
+        });
+        break;
+      }
+      const elapsedSec = (Date.now() - graphStartTime) / 1000;
+      if (elapsedSec > this.config.maxRunTimeoutSec) {
+        const msg = `execution.limits: run timeout (${this.config.maxRunTimeoutSec}s) exceeded at ${Math.round(elapsedSec)}s`;
+        console.error(`[coordinator] ${msg}`);
+        failRun(run, msg);
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "EXECUTION_ERROR",
+          phase: run.phase,
+          summary: msg,
+          details: { limit: "maxRunTimeoutSec", value: this.config.maxRunTimeoutSec, actual: Math.round(elapsedSec) },
+        });
+        break;
+      }
+
       const dispatchable = getDispatchableNodes(graph);
       console.log(`[coordinator] executeGraph: iteration ${iteration} — ${dispatchable.length} dispatchable, isComplete=${isGraphComplete(graph)} hasFailedNodes=${hasFailedNodes(graph)}`);
 
@@ -2039,8 +2090,39 @@ export class Coordinator {
         if (run.phase !== "integrating") advancePhase(run, "integrating");
       }
 
+      const stageTimeoutMs = this.config.maxStageTimeoutSec * 1000;
       const results = await Promise.all(
-        waveGated.map((node) => this.dispatchNode(active, node))
+        waveGated.map(async (node) => {
+          const stageStart = Date.now();
+          const result = await Promise.race([
+            this.dispatchNode(active, node),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`)),
+                stageTimeoutMs,
+              ),
+            ),
+          ]).catch((err): { node: TaskNode; result: WorkerResult } => {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[coordinator] ${msg}`);
+            return {
+              node,
+              result: {
+                taskId: node.runTaskId ?? node.id,
+                workerType: node.workerType,
+                success: false,
+                confidence: 0,
+                output: { kind: node.workerType } as WorkerResult["output"],
+                touchedFiles: [],
+                issues: [{ severity: "error" as const, message: msg }],
+                assumptions: [],
+                cost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+                durationMs: Date.now() - stageStart,
+              },
+            };
+          });
+          return result;
+        })
       );
 
       for (const { node, result } of results) {
@@ -2833,7 +2915,7 @@ export class Coordinator {
         console.log(`[coordinator] APPROVED COMMIT ${commitSha.slice(0, 8)} for run ${runId}`);
         this.emit({ type: "commit_created", payload: { runId, sha: commitSha } });
         void this.receiptStore.patchRun(runId, {
-          status: "COMPLETE",
+          status: "READY_FOR_PROMOTION",
           taskSummary: `Approved and committed: ${commitSha.slice(0, 8)}`,
           completedAt: new Date().toISOString(),
         });
@@ -2845,7 +2927,7 @@ export class Coordinator {
         await this.rollbackChanges(active, { action: "block", findings: [], critical: [], advisory: [], primaryBlockReason: "commit failed", summary: "commit failed" });
         console.error(`[coordinator] APPROVED but commit failed for run ${runId} — rolled back, marked commit_failed`);
         void this.receiptStore.patchRun(runId, {
-          status: "FAILED",
+          status: "EXECUTION_ERROR",
           taskSummary: "Commit failed after approval — changes rolled back",
           completedAt: new Date().toISOString(),
           appendErrors: ["Commit failed after human approval — changes rolled back"],
@@ -2856,7 +2938,7 @@ export class Coordinator {
       advancePhase(active.run, "commit_failed");
       active.run.failureReason = `Commit threw during approval: ${String(err instanceof Error ? err.message : err)}`;
       void this.receiptStore.patchRun(runId, {
-        status: "FAILED",
+        status: "EXECUTION_ERROR",
         taskSummary: active.run.failureReason,
         completedAt: new Date().toISOString(),
       });
@@ -3279,6 +3361,22 @@ export class Coordinator {
         ? "failed"
         : rawVerdict);
 
+    // ── Confidence gate ────────────────────────────────────────────
+    // Compute a discrete confidence label from the gate signals.
+    const criticIterations = active.run.decisions.filter(
+      (d) => d.description.startsWith("Rehearsal round"),
+    ).length;
+    const confidenceGate = scoreConfidence({
+      testsPassed: verificationReceipt?.verdict !== "fail",
+      integrationPassed: judgmentReport?.passed ?? false,
+      criticIterations,
+      impactLevel: active.scopeClassification?.type === "architectural" ? "high"
+        : (active.changeSet.filesInScope.length > 1 ? "medium" : "low"),
+    });
+    console.log(
+      `[coordinator] confidence.gate: level=${confidenceGate.level} reasons=[${confidenceGate.reasons.join("; ")}]`,
+    );
+
     // Build the receipt without humanSummary first, then compose
     // the summary from the receipt itself (the summary generator
     // reads receipt fields like executionVerified, executionEvidence,
@@ -3315,6 +3413,7 @@ export class Coordinator {
           }
         : null,
       evaluation: null,
+      confidenceGate,
     };
 
     // Compose the human-readable summary from the receipt we just

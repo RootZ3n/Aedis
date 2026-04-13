@@ -33,7 +33,7 @@ export interface TrackedRunLike {
   readonly completedAt: string | null;
   readonly receipt: RunReceipt | null | unknown;
   readonly error: string | null;
-  readonly stateCategory?: "in-flight" | "completed" | "failed" | "crashed";
+  readonly stateCategory?: "in-flight" | "completed" | "failed" | "crashed" | "blocked";
 }
 
 export interface MetricsSnapshot {

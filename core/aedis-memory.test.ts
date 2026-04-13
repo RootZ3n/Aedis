@@ -323,6 +323,7 @@ function sampleReceipt(verdict: RunReceipt["verdict"]): RunReceipt {
     humanSummary: null,
     blastRadius: null,
     evaluation: null,
+    confidenceGate: null,
   };
 }
 
