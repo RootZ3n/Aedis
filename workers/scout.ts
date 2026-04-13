@@ -22,11 +22,9 @@ const DEFAULT_IGNORE = new Set(["node_modules", ".git", "dist", "coverage", ".ne
 /**
  * Fixed scout confidence (0..1). Scout is heuristic and does not
  * invoke a model, so confidence is a calibration constant rather than
- * a measurement. The same value is used for both the live event emit
- * and the WorkerResult so the Lumen stream and the receipt always
- * agree.
+ * Computed per-run from actual scan quality signals.
  */
-const SCOUT_CONFIDENCE = 0.92;
+import { computeScoutConfidence } from "../core/confidence-scoring.js";
 
 export interface ScoutFileRead {
   readonly path: string;
@@ -262,6 +260,17 @@ export class ScoutWorker extends AbstractWorker {
         },
       };
 
+      // Compute scout confidence from actual scan signals
+      const highestComplexity = complexity.length > 0
+        ? (complexity.reduce((a, b) => a.score > b.score ? a : b).bucket)
+        : ("low" as const);
+      const scoutConfidence = computeScoutConfidence({
+        filesRead: reads.length,
+        filesRequested: targetFiles.length,
+        gitStatusAvailable: gitStatus !== null,
+        complexityLevel: highestComplexity,
+      });
+
       this.eventBus?.emit({
         type: "scout_complete",
         payload: {
@@ -269,13 +278,13 @@ export class ScoutWorker extends AbstractWorker {
           workerType: this.type,
           touchedFiles: touchedFiles.map((file) => file.path),
           risk: riskAssessment.level,
-          confidence: SCOUT_CONFIDENCE,
+          confidence: scoutConfidence,
         },
       });
 
       return this.success(assignment, output, {
         cost: this.zeroCost(),
-        confidence: SCOUT_CONFIDENCE,
+        confidence: scoutConfidence,
         touchedFiles,
         issues: [],
         durationMs: Date.now() - startedAt,

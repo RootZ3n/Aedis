@@ -106,13 +106,7 @@ const PROMPT_CHAR_CAP = PROMPT_TOKEN_CAP * 4;     // 32_000
 const CONTEXT_TOKEN_CAP = 6_000;
 const CONTEXT_CHAR_CAP = CONTEXT_TOKEN_CAP * 4;   // 24_000
 const LARGE_FILE_CHAR_THRESHOLD = 16_000;
-/**
- * Calibrated builder confidence (0..1). Used for both the
- * builder_complete event emit and the returned WorkerResult so the
- * Lumen stream and the receipt always agree. Builders that later grow
- * real per-run confidence should update both sites together.
- */
-const BUILDER_CONFIDENCE = 0.78;
+import { computeBuilderConfidence } from "../core/confidence-scoring.js";
 
 // Reserved overhead for separators and the "Relevant context:" header
 // when computing the available context budget.
@@ -405,6 +399,19 @@ export class BuilderWorker extends AbstractWorker {
         rawModelResponse: response.text,
       };
 
+      // Compute builder confidence from actual run signals
+      const originalLines = fullContent.split("\n").length;
+      const changedLines = Math.abs(updatedContent.split("\n").length - originalLines) + (diff ? diff.split("\n").filter(l => l.startsWith("+") || l.startsWith("-")).length : 0);
+      const builderConfidence = computeBuilderConfidence({
+        diffApplied: true, // we got here, so diff applied
+        sectionEdit: sectionInfo !== null,
+        sectionRetention: sectionInfo ? updatedContent.split("\n").length / originalLines : undefined,
+        usedFallback: response.usedProvider !== primaryProvider,
+        linesChanged: changedLines,
+        totalLines: originalLines,
+        filesModified: 1,
+      });
+
       this.eventBus?.emit({
         type: "builder_complete",
         payload: {
@@ -421,17 +428,13 @@ export class BuilderWorker extends AbstractWorker {
           sectionRange: sectionInfo
             ? { startLine: sectionInfo.startLine, endLine: sectionInfo.endLine, totalLines: sectionInfo.totalLines }
             : null,
-          // Carry the same confidence the WorkerResult will report so
-          // Lumen shows the real number instead of a "?" on live
-          // events. The coordinator also emits a duplicate builder_complete
-          // after the worker returns; both now agree.
-          confidence: BUILDER_CONFIDENCE,
+          confidence: builderConfidence,
         },
       });
 
       return this.success(assignment, output, {
         cost,
-        confidence: BUILDER_CONFIDENCE,
+        confidence: builderConfidence,
         touchedFiles: [
           { path: relativePath, operation: "read" },
           { path: relativePath, operation: "modify" },
