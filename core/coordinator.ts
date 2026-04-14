@@ -469,6 +469,69 @@ export class Coordinator {
     this.eventBus = eventBus ?? null;
     this.receiptStore = receiptStore ?? new ReceiptStore(this.config.projectRoot);
     this.evaluator = new PostRunEvaluator(this.config.evaluationConfig);
+
+    // Startup recovery: scan for orphaned AWAITING_APPROVAL runs that were
+    // left behind by a previous process crash or restart. These runs have
+    // preserved workspaces and pending changes that need to be rolled back
+    // since we can't resume approval without the user's context.
+    this.recoverPendingApprovals().catch((err) => {
+      console.error(`[coordinator] startup recovery failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+
+  /**
+   * Recover runs that were left in AWAITING_APPROVAL state by a previous
+   * process. Since we have no way to re-present the approval UI after a
+   * restart, we roll back their changes and mark them as INTERRUPTED.
+   * The workspace is cleaned up if it still exists.
+   */
+  private async recoverPendingApprovals(): Promise<void> {
+    const awaitingRuns = await this.receiptStore.listRuns(100, "AWAITING_APPROVAL");
+    if (awaitingRuns.length === 0) return;
+
+    console.log(`[coordinator] STARTUP RECOVERY: found ${awaitingRuns.length} orphaned AWAITING_APPROVAL run(s) — rolling back`);
+
+    for (const entry of awaitingRuns) {
+      const runId = entry.runId;
+      try {
+        // Try to load the full receipt to get workspace info
+        const receipt = await this.receiptStore.getRun(runId);
+        const workspacePath = (receipt as any)?.workspace?.workspacePath as string | undefined;
+
+        // Clean up workspace if it exists
+        if (workspacePath) {
+          try {
+            const { existsSync } = await import("node:fs");
+            if (existsSync(workspacePath)) {
+              const { rm } = await import("node:fs/promises");
+              await rm(workspacePath, { recursive: true, force: true });
+              console.log(`[coordinator] STARTUP RECOVERY: cleaned up workspace ${workspacePath} for run ${runId}`);
+            }
+          } catch (cleanupErr) {
+            console.warn(`[coordinator] STARTUP RECOVERY: workspace cleanup failed for ${runId}: ${cleanupErr}`);
+          }
+        }
+
+        // Mark the run as interrupted in the receipt store
+        await this.receiptStore.patchRun(runId, {
+          status: "INTERRUPTED",
+          taskSummary: "Interrupted — process restarted while awaiting approval",
+          completedAt: new Date().toISOString(),
+          appendErrors: ["Orphaned AWAITING_APPROVAL run recovered on startup — changes rolled back"],
+          appendCheckpoints: [{
+            at: new Date().toISOString(),
+            type: "failure_occurred",
+            status: "INTERRUPTED",
+            phase: "awaiting_approval",
+            summary: "Startup recovery: rolled back orphaned approval run",
+          }],
+        });
+        console.log(`[coordinator] STARTUP RECOVERY: run ${runId} marked as INTERRUPTED`);
+      } catch (err) {
+        console.error(`[coordinator] STARTUP RECOVERY: failed to recover run ${runId}: ${err}`);
+      }
+    }
+    console.log(`[coordinator] STARTUP RECOVERY: complete`);
   }
 
   // ─── Public API ────────────────────────────────────────────────────
@@ -3213,6 +3276,38 @@ export class Coordinator {
         alternatives: ["Manual revert required"],
         rationale: `No originalContent captured for: ${unrestorable.join(", ")}. Merge block reason: ${decision.primaryBlockReason}`,
       });
+    }
+
+    // Verify the repo is actually clean after rollback. Git restore can
+    // fail silently (permissions, locked files, race conditions) leaving
+    // the working tree in a dirty state that the user doesn't expect.
+    try {
+      const { stdout: statusOut } = await exec("git", ["status", "--porcelain"], { cwd: active.projectRoot });
+      const dirtyFiles = statusOut.trim().split("\n").filter(Boolean);
+      if (dirtyFiles.length > 0) {
+        console.error(
+          `[coordinator] ROLLBACK INCOMPLETE — ${dirtyFiles.length} file(s) still dirty after rollback:`,
+        );
+        for (const line of dirtyFiles.slice(0, 10)) {
+          console.error(`[coordinator]   ${line}`);
+        }
+        recordDecision(active.run, {
+          description: `Rollback verification FAILED — ${dirtyFiles.length} file(s) still dirty`,
+          madeBy: "coordinator",
+          taskId: null,
+          alternatives: ["Manual git restore required"],
+          rationale: `git status --porcelain showed: ${dirtyFiles.slice(0, 5).join(", ")}`,
+        });
+        void this.receiptStore.patchRun(active.run.id, {
+          status: "EXECUTION_ERROR",
+          appendErrors: [`Rollback incomplete — ${dirtyFiles.length} file(s) still dirty`],
+        });
+      } else {
+        console.log(`[coordinator] rollbackChanges: verified clean — no uncommitted changes`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[coordinator] rollbackChanges: git status check failed (non-fatal): ${msg}`);
     }
   }
 

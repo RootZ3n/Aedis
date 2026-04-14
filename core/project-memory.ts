@@ -12,7 +12,7 @@
  * yet" rather than an error so the rest of the pipeline can keep running.
  */
 
-import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 // ─── Public types ────────────────────────────────────────────────────
@@ -621,7 +621,11 @@ export async function saveMemory(
     schemaVersion: memory.schemaVersion,
   };
 
-  await writeFile(path, JSON.stringify(next, null, 2), "utf8");
+  // Atomic write: write to temp file then rename to prevent corruption
+  // from concurrent runs or crashes mid-write.
+  const tmpPath = `${path}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(next, null, 2), "utf8");
+  await rename(tmpPath, path);
 }
 
 /**
