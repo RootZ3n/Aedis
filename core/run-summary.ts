@@ -126,6 +126,8 @@ export interface RunSummary {
   readonly overconfidenceFlag: boolean;
   /** Human-readable list of positive trust signals for this run. */
   readonly trustExplanation: readonly string[];
+  /** Context gate inclusion log — why each file/context item was shown to the worker. */
+  readonly contextInclusionLog: readonly string[];
 }
 
 export interface RunSummaryInput {
@@ -173,6 +175,8 @@ export interface RunSummaryInput {
   readonly historicalReliabilityTier?: "reliable" | "risky" | "caution" | "unknown" | null;
   /** Calibrated thresholds from trust dashboard. */
   readonly calibratedThresholds?: import("./confidence-scoring.js").CalibratedThresholds;
+  /** Context gate inclusion log from the active run. */
+  readonly contextInclusionLog?: readonly string[];
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -370,6 +374,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
       receipt.evaluation?.aggregate?.overallPass === false
     ),
     trustExplanation,
+    contextInclusionLog: input.contextInclusionLog ?? [],
   };
 }
 

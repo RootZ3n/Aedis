@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:9cf5fe99-6321-4eb1-afb8-69771861dc83",
+  "space": "aedis/project/tmp-aedis-coordtest-u4rcvs",
+  "kind": "aedis-task",
+  "title": "in src/index.ts, add an export",
+  "summary": "multi-file · failed run · multi-file scope · no files touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"in src/index.ts, add an export\",\n  \"normalizedPrompt\": \"in src/index.ts, add an export\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"bfb4904d-1259-4570-81ff-70b743bf53d1\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"proceed\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"50c75b5f-3be9-4ead-85f9-1cad9ca2488d\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"f798355c-e44b-4cf1-830c-8312b4188cad\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"9e31022f-5411-4339-81a6-24dbe6ad1b9c\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"lintResults\": [],\n        \"typecheckResults\": [],\n        \"passed\": true,\n        \"summary\": \"all checks passed\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"4e1412e1-ca26-4ad1-9041-0ea7ed80b56a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:multi-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-14T20:13:22.497Z",
+  "updatedAt": "2026-04-14T20:13:22.500Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-coordtest-u4rCVS",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "9cf5fe99-6321-4eb1-afb8-69771861dc83",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "50dd8502-77d7-49d3-b300-44bfe8644746",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:9cf5fe99-6321-4eb1-afb8-69771861dc83",
+    "aedis-run:9cf5fe99-6321-4eb1-afb8-69771861dc83"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:9cf5fe99-6321-4eb1-afb8-69771861dc83"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:9cf5fe99-6321-4eb1-afb8-69771861dc83"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "multi-file",
+    "complexityTier": "medium",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

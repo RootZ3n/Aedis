@@ -1,0 +1,55 @@
+{
+  "id": "aedis-task:78d5e9a3-d1e4-40e3-a2a5-0bc9ccc0b836",
+  "space": "aedis/project/tmp-aedis-coordtest-ptzd0b",
+  "kind": "aedis-task",
+  "title": "in src/index.ts, add an export",
+  "summary": "multi-file · failed run · multi-file scope · 1 file(s) touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"in src/index.ts, add an export\",\n  \"normalizedPrompt\": \"in src/index.ts, add an export\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"b41266c3-ce00-4d40-8c71-52fbdc91bc2a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"proceed\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"cb9e3abc-aa19-4f9f-a88c-a7e2a6b2ddd7\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/index.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"export const APP = 'test';\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/index.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"97c3942e-7440-4a74-aa30-a8863e2d7b1f\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"ab45e341-c33b-4624-83b3-02fb1be66ef9\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"lintResults\": [],\n        \"typecheckResults\": [],\n        \"passed\": true,\n        \"summary\": \"all checks passed\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"50f61a85-bcf9-4221-8662-2d3447e0066d\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "ext:ts",
+    "module:src",
+    "scope:multi-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-14T20:13:22.555Z",
+  "updatedAt": "2026-04-14T20:13:22.556Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-coordtest-PTzd0B",
+  "filePaths": [
+    "src/index.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "78d5e9a3-d1e4-40e3-a2a5-0bc9ccc0b836",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "b201aba2-085e-4b29-9d0f-32ec515bc9b9",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:78d5e9a3-d1e4-40e3-a2a5-0bc9ccc0b836",
+    "aedis-run:78d5e9a3-d1e4-40e3-a2a5-0bc9ccc0b836"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:78d5e9a3-d1e4-40e3-a2a5-0bc9ccc0b836"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:78d5e9a3-d1e4-40e3-a2a5-0bc9ccc0b836"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "multi-file",
+    "complexityTier": "medium",
+    "verificationVerdict": "not-run",
+    "filesTouched": 1
+  }
+}

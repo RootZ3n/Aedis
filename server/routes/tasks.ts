@@ -1080,4 +1080,35 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
   );
+
+  /**
+   * POST /tasks/:id/promote — Promote workspace changes to the source repo.
+   * This is the final step: applies the workspace commit to the source
+   * repository. Only works for runs that have been committed in their
+   * workspace (status: READY_FOR_PROMOTION or VERIFIED_PASS).
+   */
+  fastify.post<{ Params: TaskParams; Body: { source_repo?: string } }>(
+    "/:id/promote",
+    async (request: FastifyRequest<{ Params: TaskParams; Body: { source_repo?: string } }>, reply: FastifyReply) => {
+      const { id } = request.params;
+      // Find the runId from the tracked task
+      const tracked = trackedRuns.get(id);
+      if (!tracked) {
+        reply.code(404).send({ error: "Not found", message: `No task "${id}"` });
+        return;
+      }
+      const result = await ctx().coordinator.promoteToSource(tracked.runId, request.body?.source_repo);
+      if (!result.ok) {
+        reply.code(400).send({ error: "Promotion failed", message: result.error });
+        return;
+      }
+      reply.send({
+        task_id: id,
+        run_id: tracked.runId,
+        status: "promoted",
+        commit_sha: result.commitSha,
+        message: "Changes promoted to source repository",
+      });
+    }
+  );
 };

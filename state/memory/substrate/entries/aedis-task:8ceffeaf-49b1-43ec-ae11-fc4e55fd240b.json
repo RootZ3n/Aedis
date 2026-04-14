@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:8ceffeaf-49b1-43ec-ae11-fc4e55fd240b",
+  "space": "aedis/project/tmp-aedis-capreg-int-iqgmyi",
+  "kind": "aedis-task",
+  "title": "in core/capability-registry.ts, build capability registry",
+  "summary": "small-linked · failed run · small-linked scope · no files touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"in core/capability-registry.ts, build capability registry\",\n  \"normalizedPrompt\": \"in core/capability-registry.ts, build capability registry\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"1c365cd2-5b0d-438c-b529-87029908831e\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"no-op\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"3f15087c-474e-45f0-b8ce-8e4f26781000\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"b7da63a9-074f-4a1c-88dc-362dcdd389e6\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"16db92c5-5f3c-4b75-a69a-318111516b65\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"a0b1bbda-9fcd-46d7-b824-48789f5812b5\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:small-linked",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-13T10:10:08.987Z",
+  "updatedAt": "2026-04-13T10:10:08.989Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-capreg-int-iQGmYi",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "8ceffeaf-49b1-43ec-ae11-fc4e55fd240b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "9568c03a-d52f-4aa4-adb6-626f82be0b5f",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:8ceffeaf-49b1-43ec-ae11-fc4e55fd240b",
+    "aedis-run:8ceffeaf-49b1-43ec-ae11-fc4e55fd240b"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:8ceffeaf-49b1-43ec-ae11-fc4e55fd240b"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:8ceffeaf-49b1-43ec-ae11-fc4e55fd240b"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "small-linked",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

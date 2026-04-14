@@ -227,6 +227,8 @@ export interface CoordinatorConfig {
   maxRunTimeoutSec: number;
   /** Maximum seconds per individual dispatch stage. Default: 180 */
   maxStageTimeoutSec: number;
+  /** Maximum USD cost per run. Null = no limit. Default: 1.00 */
+  maxRunCostUsd: number | null;
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -240,6 +242,7 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   maxGraphIterations: 50,
   maxRunTimeoutSec: 600,
   maxStageTimeoutSec: 180,
+  maxRunCostUsd: 1.00,
 };
 
 /**
@@ -2210,6 +2213,24 @@ export class Coordinator {
         break;
       }
       const elapsedSec = (Date.now() - graphStartTime) / 1000;
+      // Check per-run cost budget
+      const currentCost = active.run.totalCost?.estimatedCostUsd ?? 0;
+      if (this.config.maxRunCostUsd != null && currentCost > this.config.maxRunCostUsd) {
+        const msg = `execution.limits: run cost ($${currentCost.toFixed(2)}) exceeds budget ($${this.config.maxRunCostUsd})`;
+        console.warn(`[coordinator] ${msg}`);
+        active.cancelled = true;
+        failRun(active.run, msg);
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "EXECUTION_ERROR",
+          phase: active.run.phase,
+          summary: msg,
+          details: { limit: "maxRunCostUsd", value: this.config.maxRunCostUsd, actual: currentCost },
+        });
+        break;
+      }
+
       if (elapsedSec > this.config.maxRunTimeoutSec) {
         const msg = `execution.limits: run timeout (${this.config.maxRunTimeoutSec}s) exceeded at ${Math.round(elapsedSec)}s`;
         console.error(`[coordinator] ${msg}`);
@@ -3415,6 +3436,66 @@ export class Coordinator {
     }
   }
 
+  /**
+   * Promote workspace changes to the source repository.
+   * This is the final step in the promotion workflow.
+   * The source repo is NEVER mutated during execution.
+   */
+  async promoteToSource(runId: string, sourceRepoPath?: string): Promise<{ ok: boolean; commitSha?: string; error?: string }> {
+    const receipt = await this.receiptStore.getRun(runId);
+    if (!receipt) return { ok: false, error: "No receipt found for run " + runId };
+
+    const workspacePath = (receipt as any)?.workspace?.workspacePath as string | undefined;
+    const sourceRepo = sourceRepoPath ?? (receipt as any).sourceRepo ?? this.config.projectRoot;
+    const commitSha = (receipt as any).commitSha;
+
+    if (!workspacePath) return { ok: false, error: "Run has no workspace path in receipt" };
+    if (!commitSha) return { ok: false, error: "Run has no commit SHA — nothing to promote" };
+
+    const { existsSync } = await import("node:fs");
+    if (!existsSync(workspacePath)) return { ok: false, error: "Workspace not found: " + workspacePath };
+
+    try {
+      const { stdout: patch } = await exec("git", ["format-patch", "--stdout", commitSha + "^.." + commitSha], { cwd: workspacePath });
+      if (!patch.trim()) return { ok: false, error: "Empty patch — nothing to promote" };
+
+      // Apply patch to source via temp file (execFile can't pipe stdin)
+      const { writeFile: writeTmp, unlink: rmTmp } = await import("node:fs/promises");
+      const patchTmp = resolve(sourceRepo, ".aedis-promote-patch.tmp");
+      await writeTmp(patchTmp, patch, "utf-8");
+      try {
+        await exec("git", ["apply", patchTmp], { cwd: sourceRepo });
+      } catch {
+        await exec("git", ["apply", "--3way", patchTmp], { cwd: sourceRepo });
+      } finally {
+        await rmTmp(patchTmp).catch(() => {});
+      }
+
+      // Stage changed files and commit
+      const { stdout: diffOut } = await exec("git", ["diff", "--name-only", "HEAD"], { cwd: workspacePath });
+      const files = diffOut.trim().split("\n").filter(Boolean);
+      if (files.length > 0) {
+        await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
+      }
+
+      const msg = "promote: " + (receipt.taskSummary ?? "Aedis run " + runId) + "\n\nPromoted from workspace: " + workspacePath + "\nOriginal run: " + runId;
+      await exec("git", ["commit", "-m", msg], { cwd: sourceRepo });
+
+      const { stdout: sourceSha } = await exec("git", ["rev-parse", "HEAD"], { cwd: sourceRepo });
+      await this.receiptStore.patchRun(runId, {
+        status: "READY_FOR_PROMOTION",
+        taskSummary: "Promoted to source: " + sourceSha.trim().slice(0, 8),
+      });
+
+      console.log("[coordinator] PROMOTED run " + runId + " -> " + sourceSha.trim().slice(0, 8) + " in " + sourceRepo);
+      return { ok: true, commitSha: sourceSha.trim() };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[coordinator] PROMOTE FAILED for " + runId + ": " + msg);
+      return { ok: false, error: msg };
+    }
+  }
+
   // ─── Change Collection ─────────────────────────────────────────────
 
   private collectChanges(active: ActiveRun, result: WorkerResult): void {
@@ -3819,6 +3900,7 @@ export class Coordinator {
       strictMode: active.gatedContext.strictVerification === true || this.config.verificationConfig?.strictMode === true || shouldRecommendStrictMode(active.projectMemory, { prompt: active.normalizedInput, scopeType: active.scopeClassification?.type }),
       historicalReliabilityTier: active.historicalReliabilityTier,
       calibratedThresholds: this.computeCalibratedThresholds(active),
+      contextInclusionLog: active.gatedContext.inclusionLog ?? [],
     });
   }
 
