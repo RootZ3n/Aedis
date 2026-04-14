@@ -28,6 +28,8 @@ import { createChangeSet } from "./change-set.js";
 import { planChangeSet, type Plan } from "./multi-file-planner.js";
 import { estimateBlastRadius, type BlastRadiusEstimate } from "./blast-radius.js";
 import { runPreflight, type PreflightReport } from "./preflight.js";
+import { scanInput as velumScanInput, type VelumResult } from "./velum-input.js";
+import { classifyTask, type ImpactClassification } from "./impact-classifier.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -106,6 +108,40 @@ export interface DryRunPlan {
    * fails to produce any steps (e.g. empty charter) returns false.
    */
   readonly ok: boolean;
+  /**
+   * Preview of the Velum input guard decision for this prompt.
+   * Marked `estimated` because the runtime Velum scanner may see a
+   * slightly different prompt (after prompt normalization + gated
+   * memory notes). In practice the preview matches the runtime
+   * decision for block/allow/review on untrusted prompts.
+   */
+  readonly velumPreview: VelumPreview;
+  /**
+   * Preview of the impact classification and therefore whether
+   * runtime execution would require approval. Mirrors the
+   * governance gate the Coordinator applies in submit().
+   */
+  readonly approvalPreview: ApprovalPreview;
+}
+
+export interface VelumPreview {
+  readonly decision: VelumResult["decision"];
+  readonly reasons: readonly string[];
+  readonly flags: readonly string[];
+  /**
+   * True when Velum would stop execution before any worker runs.
+   * Lumen / CLI should refuse dispatch when this is true.
+   */
+  readonly wouldBlock: boolean;
+  readonly estimated: true;
+}
+
+export interface ApprovalPreview {
+  readonly impactLevel: ImpactClassification["level"];
+  readonly reasons: readonly string[];
+  /** True when impact=high OR scope governance forces approval. */
+  readonly approvalRequired: boolean;
+  readonly estimated: true;
 }
 
 export interface DryRunInput {
@@ -130,6 +166,18 @@ export interface DryRunInput {
 export function generateDryRun(input: DryRunInput): DryRunPlan {
   const raw = (input.input ?? "").trim();
   const charterGen = new CharterGenerator();
+
+  // Step 0: Velum preview — compute this unconditionally so the
+  // caller can see whether the runtime guard would block before
+  // any other planning state matters. Does not mutate anything.
+  const velumResult = velumScanInput(raw);
+  const velumPreview: VelumPreview = {
+    decision: velumResult.decision,
+    reasons: velumResult.reasons,
+    flags: velumResult.flags,
+    wouldBlock: velumResult.decision === "block",
+    estimated: true,
+  };
 
   // Step 1: charter analysis — cheap, deterministic. Runs even
   // on a likely-blocked request so the UI can show what Aedis
@@ -185,6 +233,7 @@ export function generateDryRun(input: DryRunInput): DryRunPlan {
       },
       rawTargets: analysis.targets,
       rawPrompt: raw,
+      velumPreview,
     });
   }
 
@@ -241,6 +290,17 @@ export function generateDryRun(input: DryRunInput): DryRunPlan {
     confidence,
   });
 
+  // Approval preview — impact classifier output + scope governance.
+  // Mirrors the Coordinator gate at runtime so callers can show
+  // "would require approval" before submission.
+  const impact = classifyTask(raw, charterTargets);
+  const approvalPreview: ApprovalPreview = {
+    impactLevel: impact.level,
+    reasons: impact.reasons,
+    approvalRequired: impact.level === "high" || scope.governance.approvalRequired,
+    estimated: true,
+  };
+
   return {
     preflight,
     steps,
@@ -252,8 +312,12 @@ export function generateDryRun(input: DryRunInput): DryRunPlan {
     confidence,
     headline,
     narrative,
-    blocked: preflight.blocked,
-    ok: !preflight.blocked && steps.length > 0,
+    // Velum is authoritative for blocking — if the preview says block,
+    // the plan is blocked regardless of preflight verdict.
+    blocked: preflight.blocked || velumPreview.wouldBlock,
+    ok: !preflight.blocked && !velumPreview.wouldBlock && steps.length > 0,
+    velumPreview,
+    approvalPreview,
   };
 }
 
@@ -551,6 +615,7 @@ function minimalBlockedPlan(input: {
   extraBlock: { code: string; message: string; suggestion?: string };
   rawTargets: readonly string[];
   rawPrompt: string;
+  velumPreview: VelumPreview;
 }): DryRunPlan {
   const preflightWithExtra: PreflightReport = {
     ok: false,
@@ -615,6 +680,13 @@ function minimalBlockedPlan(input: {
     narrative: `Aedis could not plan this request. ${input.extraBlock.message} ${input.extraBlock.suggestion ?? ""}`.trim(),
     blocked: true,
     ok: false,
+    velumPreview: input.velumPreview,
+    approvalPreview: {
+      impactLevel: "low",
+      reasons: ["preflight blocked — impact not evaluated"],
+      approvalRequired: false,
+      estimated: true,
+    },
   };
 }
 

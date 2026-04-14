@@ -58,7 +58,8 @@ export type AedisEventType =
   | "evaluation_complete"
   | "evaluation_failed"
   | "trust_updated"
-  | "trust_regression";
+  | "trust_regression"
+  | "wave_partial_failure";
 
 /**
  * @deprecated Use AedisEventType. Alias kept for downstream code that

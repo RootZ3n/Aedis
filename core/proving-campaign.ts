@@ -11,7 +11,7 @@
  * Campaign runs never auto-commit or perform destructive operations.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
 import {
   profileRepo,
@@ -23,6 +23,7 @@ import {
   type ProveReport,
 } from "./proving-harness.js";
 import { assessRepoReadiness } from "./repo-readiness.js";
+import { withRepoLock, writeJsonAtomicLocked } from "./file-lock.js";
 
 // ─── Repo Registry ──────────────────────────────────────────────────
 
@@ -160,7 +161,12 @@ export async function saveRegistry(storageRoot: string, registry: RepoRegistry):
     repos: registry.repos.slice(0, MAX_REPOS),
     updatedAt: new Date().toISOString(),
   };
-  await writeFile(registryPath(storageRoot), JSON.stringify(capped, null, 2), "utf8");
+  // Hold the per-repo advisory lock across the atomic write. Prevents
+  // two concurrent runs from racing each other's registry updates and
+  // losing one run's learning.
+  await withRepoLock(registryPath(storageRoot), () =>
+    writeJsonAtomicLocked(registryPath(storageRoot), capped),
+  );
 }
 
 function inferSize(profile: RepoProfile): RepoSize {
@@ -534,19 +540,22 @@ async function persistCampaignReport(
   const dir = campaignDir(storageRoot);
   await mkdir(dir, { recursive: true });
 
-  // Store one file per repo, with campaign history inside
   const repoFile = join(dir, `${report.repoId}.json`);
-  let history: CampaignReport[] = [];
-  try {
-    const raw = await readFile(repoFile, "utf8");
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) history = parsed;
-  } catch { /* first campaign for this repo */ }
+  // Read-modify-write must happen inside the lock so two runs
+  // submitting the same repo don't drop each other's history.
+  await withRepoLock(repoFile, async () => {
+    let history: CampaignReport[] = [];
+    try {
+      const raw = await readFile(repoFile, "utf8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) history = parsed;
+    } catch { /* first campaign for this repo */ }
 
-  history.unshift(report);
-  history = history.slice(0, MAX_CAMPAIGNS_PER_REPO);
+    history.unshift(report);
+    history = history.slice(0, MAX_CAMPAIGNS_PER_REPO);
 
-  await writeFile(repoFile, JSON.stringify(history, null, 2), "utf8");
+    await writeJsonAtomicLocked(repoFile, history);
+  });
 }
 
 export async function loadCampaignHistory(

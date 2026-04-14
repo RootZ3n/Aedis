@@ -19,7 +19,9 @@ test("calibrateThresholds — defaults with insufficient data", async () => {
   assert.equal(r.apply, 0.85, "should use default apply");
   assert.equal(r.review, 0.70, "should use default review");
   assert.equal(r.escalate, 0.50, "should use default escalate");
-  assert.equal(r.reason, "insufficient data for calibration");
+  assert.match(r.reason, /^insufficient data/);
+  assert.equal(r.state, "insufficient_data");
+  assert.equal(r.evaluatedRuns, 3);
 });
 
 test("calibrateThresholds — raises apply when overconfident", async () => {

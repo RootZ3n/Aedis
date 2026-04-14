@@ -181,9 +181,22 @@ export async function createServer(
 
   const eventBus = createEventBus();
   const receiptStore = new ReceiptStore(cfg.projectRoot);
-  await receiptStore.markIncompleteRunsCrashed(
+  const recovery = await receiptStore.markIncompleteRunsCrashed(
     `Server restarted on ${new Date().toISOString()} before the run reached a terminal state`,
   );
+  if (recovery.runsRecovered > 0) {
+    console.log(
+      `[server] STARTUP RECOVERY: ${recovery.runsRecovered} run(s) marked INTERRUPTED; ` +
+      `orphan workspaces=${recovery.orphanWorkspaces.length} ` +
+      `(removed=${recovery.orphanWorkspaces.filter((o) => o.removed).length})`,
+    );
+    for (const orphan of recovery.orphanWorkspaces) {
+      console.log(
+        `[server] STARTUP RECOVERY: workspace ${orphan.workspacePath} — ` +
+        (orphan.removed ? "cleaned" : `FAILED: ${orphan.error ?? "unknown"}`),
+      );
+    }
+  }
 
   const coordinator = new Coordinator(
     {

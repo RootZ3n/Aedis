@@ -141,7 +141,9 @@ import {
   type ExecutionGateDecision,
   type ExecutionReceipt,
 } from "./execution-gate.js";
-import { generateRunSummary, type RunSummary } from "./run-summary.js";
+import { generateRunSummary, type RunSummary, type TrustRegressionAlert } from "./run-summary.js";
+
+type TrustRegressionSnapshot = TrustRegressionAlert;
 import { calibrateThresholds } from "./confidence-scoring.js";
 import { buildRunSummaryPayload, persistentStatusForReceipt } from "./coordinator-audit.js";
 import { buildDispatchAssignment, workerCompleteEventType } from "./coordinator-dispatch.js";
@@ -229,6 +231,19 @@ export interface CoordinatorConfig {
   maxStageTimeoutSec: number;
   /** Maximum USD cost per run. Null = no limit. Default: 1.00 */
   maxRunCostUsd: number | null;
+  /**
+   * When true (default), the run is hard-aborted if the isolated
+   * workspace (worktree / clone / copy) cannot be created. The
+   * source repo is NEVER mutated in this mode — even as a last
+   * resort — and a receipt is persisted explaining why execution
+   * stopped.
+   *
+   * When false, the legacy fallback is re-enabled: if every workspace
+   * strategy fails, the Coordinator runs against the source repo
+   * directly. This is UNSAFE and must be explicitly opted into by
+   * setting `requireWorkspace: false` in the CoordinatorConfig.
+   */
+  requireWorkspace: boolean;
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -243,6 +258,10 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   maxRunTimeoutSec: 600,
   maxStageTimeoutSec: 180,
   maxRunCostUsd: 1.00,
+  // Default strict — source repo is never mutated when workspace
+  // creation fails. Operators must explicitly opt into the legacy
+  // unsafe fallback by setting requireWorkspace: false.
+  requireWorkspace: true,
 };
 
 /**
@@ -858,8 +877,14 @@ export class Coordinator {
     // Create a disposable workspace so all mutations happen outside
     // the source repo. The workspace path becomes the projectRoot for
     // all worker dispatches, git operations, and verification steps.
+    //
+    // SAFETY: when config.requireWorkspace is true (default), a failed
+    // workspace creation hard-aborts the run — the source repo is
+    // never touched. The legacy fallback-to-source-repo path only
+    // runs when requireWorkspace=false is set explicitly.
     let workspace: WorkspaceHandle | null = null;
     let workspaceProjectRoot = effectiveProjectRoot;
+    let workspaceCreationError: string | null = null;
     try {
       workspace = await createWorkspace(effectiveProjectRoot, run.id);
       workspaceProjectRoot = workspace.workspacePath;
@@ -868,12 +893,89 @@ export class Coordinator {
         `source=${workspace.sourceRepo} sha=${workspace.sourceCommitSha.slice(0, 8)}`,
       );
     } catch (err) {
-      console.error(
-        `[coordinator] workspace creation FAILED — falling back to source repo (UNSAFE): ` +
-        `${err instanceof Error ? err.message : String(err)}`,
-      );
-      // Fallback: use source repo directly (legacy behavior).
-      // This is logged as a warning — the run is less safe.
+      workspaceCreationError = err instanceof Error ? err.message : String(err);
+      if (this.config.requireWorkspace) {
+        console.error(
+          `[coordinator] workspace creation FAILED — requireWorkspace=true, aborting run ` +
+          `(source repo untouched): ${workspaceCreationError}`,
+        );
+      } else {
+        console.error(
+          `[coordinator] workspace creation FAILED — falling back to source repo (UNSAFE, ` +
+          `requireWorkspace=false): ${workspaceCreationError}`,
+        );
+      }
+    }
+
+    // Hard-abort path for requireWorkspace=true. We write a minimal
+    // failing receipt so the user sees the reason, then return before
+    // any worker/gate logic can touch the source repo.
+    if (!workspace && this.config.requireWorkspace) {
+      const abortReason =
+        `Workspace creation failed and requireWorkspace=true — run aborted ` +
+        `without mutating the source repo. Cause: ${workspaceCreationError ?? "unknown"}`;
+      failRun(run, abortReason);
+      await this.receiptStore.patchRun(run.id, {
+        intentId: intent.id,
+        prompt: input,
+        taskSummary: abortReason,
+        status: "EXECUTION_ERROR",
+        phase: run.phase,
+        completedAt: new Date().toISOString(),
+        appendErrors: [abortReason],
+        appendCheckpoints: [{
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "EXECUTION_ERROR",
+          phase: run.phase,
+          summary: "Workspace creation failed — run aborted before any repo mutation",
+          details: { cause: workspaceCreationError },
+        }],
+      });
+      this.emit({
+        type: "merge_blocked",
+        payload: { runId: run.id, blockers: [abortReason] },
+      });
+      this.emit({
+        type: "run_complete",
+        payload: {
+          runId: run.id,
+          verdict: "failed",
+          executionVerified: false,
+          executionReason: abortReason,
+          classification: null,
+        },
+      });
+      const durationMs = Date.now() - startTime;
+      return {
+        id: randomUUID(),
+        runId: run.id,
+        intentId: intent.id,
+        timestamp: new Date().toISOString(),
+        verdict: "failed",
+        summary: getRunSummary(run),
+        graphSummary: getGraphSummary(createTaskGraph(intent.id)),
+        verificationReceipt: null,
+        waveVerifications: [],
+        judgmentReport: null,
+        mergeDecision: null,
+        totalCost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        commitSha: null,
+        durationMs,
+        memorySuggestions: [],
+        executionVerified: false,
+        executionGateReason: abortReason,
+        executionEvidence: [],
+        executionReceipts: [],
+        humanSummary: null,
+        blastRadius,
+        evaluation: null,
+        patchArtifact: null,
+        workspaceCleanup: null,
+        sourceRepo: effectiveProjectRoot,
+        sourceCommitSha: null,
+        confidenceGate: null,
+      };
     }
 
     const active: ActiveRun = {
@@ -924,6 +1026,23 @@ export class Coordinator {
       startedAt: run.startedAt,
       phase: run.phase,
     });
+
+    // Persist the workspace reference on the receipt as soon as it
+    // exists so startup recovery can reconcile the worktree if this
+    // process crashes mid-run.
+    if (active.workspace) {
+      await this.receiptStore.patchRun(active.run.id, {
+        workspace: {
+          workspacePath: active.workspace.workspacePath,
+          sourceRepo: active.workspace.sourceRepo,
+          sourceCommitSha: active.workspace.sourceCommitSha,
+          method: active.workspace.method,
+          createdAt: active.workspace.createdAt,
+          worktreeBranch: active.workspace.worktreeBranch,
+          cleanedUp: false,
+        },
+      });
+    }
 
     // ── Velum Input Guard ──────────────────────────────────────────
     // Runs before the Builder touches anything. Block/review/warn/allow.
@@ -1640,9 +1759,16 @@ export class Coordinator {
       this.emit({ type: "trust_updated", payload: { runId: active.run.id, confidence: evaluatedReceipt.humanSummary?.confidence?.overall ?? 0, verdict: verdictAfterGate } });
 
       // Trust regression detection: check if recent runs show degrading
-      // trust signals. Fires a trust_regression event so the UI can
-      // alert the operator without them having to check the dashboard.
-      this.detectTrustRegression(active, evaluatedReceipt);
+      // trust signals. Fires a trust_regression event and attaches the
+      // alert snapshot to the receipt so UIs can render a durable
+      // banner even after reloads.
+      const regressionAlert = await this.detectTrustRegression(active, evaluatedReceipt);
+      if (regressionAlert) {
+        const alertedSummary = this.composeHumanSummary(active, evaluatedReceipt, undefined, regressionAlert);
+        evaluatedReceipt = { ...evaluatedReceipt, humanSummary: alertedSummary };
+        await this.persistFinalReceipt(active, evaluatedReceipt);
+        this.emit({ type: "run_receipt", payload: { runId: active.run.id, receiptId: evaluatedReceipt.id, receipt: evaluatedReceipt } });
+      }
 
       return evaluatedReceipt;
     } catch (err) {
@@ -1731,11 +1857,34 @@ export class Coordinator {
           void this.receiptStore.patchRun(run.id, {
             status: "CLEANUP_ERROR",
             appendErrors: [`Workspace cleanup failed: ${cleanup.error}`],
+            // Leave workspace.cleanedUp=false so startup recovery can
+            // retry the rm on next boot.
           });
         } else {
           console.log(
             `[coordinator] workspace cleaned up: method=${cleanup.method} (${cleanup.durationMs}ms)`,
           );
+          // Mark the persisted workspace ref as cleanedUp so startup
+          // recovery knows to skip this run's workspace. Awaited so
+          // the receipt is fully up to date before the finally block
+          // exits — tests and downstream consumers can rely on it.
+          try {
+            await this.receiptStore.patchRun(run.id, {
+              workspace: {
+                workspacePath: active.workspace.workspacePath,
+                sourceRepo: active.workspace.sourceRepo,
+                sourceCommitSha: active.workspace.sourceCommitSha,
+                method: active.workspace.method,
+                createdAt: active.workspace.createdAt,
+                worktreeBranch: active.workspace.worktreeBranch,
+                cleanedUp: true,
+              },
+            });
+          } catch (err) {
+            console.warn(
+              `[coordinator] patch cleanedUp=true failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         }
       } else if (isAwaitingApproval && active.workspace) {
         console.log(
@@ -2325,10 +2474,14 @@ export class Coordinator {
         })
       );
 
+      let waveSucceeded = 0;
+      let waveFailed = 0;
+      const waveFailureMessages: string[] = [];
       for (const { node, result } of results) {
         if (result.success) {
           markCompleted(graph, node.id);
           this.collectChanges(active, result);
+          waveSucceeded += 1;
           this.emit({
             type: workerCompleteEventType(node.workerType as WorkerType),
             payload: { runId: active.run.id, taskId: node.id, confidence: result.confidence },
@@ -2336,6 +2489,8 @@ export class Coordinator {
         } else {
           console.warn(`[coordinator] executeGraph: marking node ${node.id.slice(0, 6)} (${node.workerType}) as FAILED — issue: ${result.issues[0]?.message ?? "(no message)"}`);
           markFailed(graph, node.id);
+          waveFailed += 1;
+          waveFailureMessages.push(`${node.workerType}(${node.id.slice(0, 6)}): ${result.issues[0]?.message ?? "(no message)"}`);
           this.emit({
             type: "task_failed",
             payload: { runId: active.run.id, taskId: node.id, error: result.issues[0]?.message },
@@ -2349,6 +2504,41 @@ export class Coordinator {
             taskId: node.runTaskId,
           });
         }
+      }
+
+      // Partial-wave failure isolation: when a dispatch batch had a
+      // mix of completed and failed workers, emit an explicit partial-
+      // failure signal and persist a checkpoint so the receipt doesn't
+      // have to infer "something went wrong" from the task-failed
+      // stream alone. Sibling workers have already been collected
+      // via the per-node catch above — there is no mid-flight
+      // cancellation; this is purely observability.
+      if (waveFailed > 0 && waveSucceeded > 0 && results.length > 1) {
+        const summary = `wave partial failure: ${waveSucceeded} succeeded, ${waveFailed} failed (${phases.join(", ")})`;
+        console.warn(`[coordinator] ${summary}`);
+        this.emit({
+          type: "wave_partial_failure",
+          payload: {
+            runId: active.run.id,
+            succeeded: waveSucceeded,
+            failed: waveFailed,
+            workerTypes: phases,
+            failureMessages: waveFailureMessages.slice(0, 5),
+          },
+        });
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "worker_step",
+          status: "EXECUTING_IN_WORKSPACE",
+          phase: run.phase,
+          summary,
+          details: {
+            succeeded: waveSucceeded,
+            failed: waveFailed,
+            workerTypes: phases,
+            failureMessages: waveFailureMessages.slice(0, 5),
+          },
+        });
       }
 
       // GAP 4 — Confidence-based escalation: if a builder completed
@@ -3253,14 +3443,38 @@ export class Coordinator {
       console.error(
         `[coordinator] CLEANUP_ERROR (post-approval): ${active.workspace.workspacePath} — ${cleanup.error}`,
       );
-      void this.receiptStore.patchRun(active.run.id, {
-        status: "CLEANUP_ERROR",
-        appendErrors: [`Workspace cleanup failed after approval: ${cleanup.error}`],
-      });
+      // Leave workspace.cleanedUp=false on the receipt so startup
+      // recovery can retry the rm on next boot.
+      try {
+        await this.receiptStore.patchRun(active.run.id, {
+          status: "CLEANUP_ERROR",
+          appendErrors: [`Workspace cleanup failed after approval: ${cleanup.error}`],
+        });
+      } catch { /* best-effort */ }
     } else {
       console.log(
         `[coordinator] workspace cleaned up (post-approval): method=${cleanup.method} (${cleanup.durationMs}ms)`,
       );
+      // Mirror the submit-path behavior: mark the persisted workspace
+      // ref as cleanedUp so startup recovery knows this path is
+      // already gone and never attempts to remove it again.
+      try {
+        await this.receiptStore.patchRun(active.run.id, {
+          workspace: {
+            workspacePath: active.workspace.workspacePath,
+            sourceRepo: active.workspace.sourceRepo,
+            sourceCommitSha: active.workspace.sourceCommitSha,
+            method: active.workspace.method,
+            createdAt: active.workspace.createdAt,
+            worktreeBranch: active.workspace.worktreeBranch,
+            cleanedUp: true,
+          },
+        });
+      } catch (err) {
+        console.warn(
+          `[coordinator] patch post-approval cleanedUp=true failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 
@@ -3802,14 +4016,36 @@ export class Coordinator {
   }
 
   /**
-   * Detect trust regressions by checking recent receipt store entries
-   * for patterns of overconfidence, declining success, or shallow
-   * verification. Emits trust_regression event when signals are found.
+   * Alert policy:
+   *   - Inputs: last 10 receipt index entries; if fewer than 5 exist
+   *     the detector abstains (returns null).
+   *   - Signals (each independent):
+   *       1. overconfident-this-run: confidence ≥ 0.7 AND Crucibulum
+   *          evaluation score < 0.5 on the current run.
+   *       2. low-success-rate: success ratio < 0.4 across the last ≥8
+   *          runs (where "success" = VERIFIED_PASS /
+   *          READY_FOR_PROMOTION / COMPLETE).
+   *       3. streaking-failures: 3+ of the last 5 runs are
+   *          VERIFIED_FAIL or CRUCIBULUM_FAIL.
+   *   - Severity: "significant" if ≥2 signals fire, "mild" otherwise.
+   *   - Lifecycle:
+   *       - A snapshot is written to `active.trustRegressionAlert`
+   *         when signals fire, attached to the RunSummary/receipt,
+   *         and emitted as a WebSocket `trust_regression` event.
+   *       - The snapshot persists on the receipt — consumers can
+   *         rediscover the state after restart or late subscribe
+   *         without relying on a transient event.
+   *       - A run with no signals clears nothing; older alerts live
+   *         on their own receipts. The dashboard consumes receipts
+   *         over a sliding window, so "clearing" means newer receipts
+   *         no longer carry an alert.
+   *   - Never blocks a run; this is strictly observational.
+   *   - Detector failure is non-fatal.
    */
-  private async detectTrustRegression(active: ActiveRun, receipt: RunReceipt): Promise<void> {
+  private async detectTrustRegression(active: ActiveRun, receipt: RunReceipt): Promise<TrustRegressionSnapshot | null> {
     try {
       const recentRuns = await this.receiptStore.listRuns(10);
-      if (recentRuns.length < 5) return; // need enough data
+      if (recentRuns.length < 5) return null; // need enough data
 
       const signals: string[] = [];
       const confidence = receipt.humanSummary?.confidence?.overall ?? 0;
@@ -3817,12 +4053,10 @@ export class Coordinator {
         ? receipt.evaluation.aggregate.averageScore / 100
         : null;
 
-      // Check 1: current run is overconfident
       if (confidence >= 0.7 && evalScore != null && evalScore < 0.5) {
         signals.push("overconfident: confidence " + (confidence * 100).toFixed(0) + "% but evaluation " + (evalScore * 100).toFixed(0) + "%");
       }
 
-      // Check 2: recent success rate declining
       const recentVerdicts = recentRuns.slice(0, 10).map((r) => r.status);
       const recentSuccesses = recentVerdicts.filter((s) => s === "VERIFIED_PASS" || s === "READY_FOR_PROMOTION" || s === "COMPLETE").length;
       const successRate = recentSuccesses / recentVerdicts.length;
@@ -3830,7 +4064,6 @@ export class Coordinator {
         signals.push("low success rate: " + (successRate * 100).toFixed(0) + "% across last " + recentVerdicts.length + " runs");
       }
 
-      // Check 3: multiple verification failures in a row
       const recentFails = recentRuns.slice(0, 5).filter(
         (r) => r.status === "VERIFIED_FAIL" || r.status === "CRUCIBULUM_FAIL",
       ).length;
@@ -3838,21 +4071,31 @@ export class Coordinator {
         signals.push(recentFails + " verification failures in last 5 runs");
       }
 
-      if (signals.length > 0) {
-        this.emit({
-          type: "trust_regression",
-          payload: {
-            runId: active.run.id,
-            signals,
-            severity: signals.length >= 2 ? "significant" : "mild",
-            recommendation: "Review trust dashboard before approving more runs",
-          },
-        });
-        console.warn("[coordinator] TRUST REGRESSION: " + signals.join("; "));
-      }
+      if (signals.length === 0) return null;
+
+      const snapshot: TrustRegressionSnapshot = {
+        severity: signals.length >= 2 ? "significant" : "mild",
+        signals,
+        at: new Date().toISOString(),
+        firedOnThisRun: true,
+      };
+
+      this.emit({
+        type: "trust_regression",
+        payload: {
+          runId: active.run.id,
+          signals: snapshot.signals,
+          severity: snapshot.severity,
+          at: snapshot.at,
+          recommendation: "Review trust dashboard before approving more runs",
+        },
+      });
+      console.warn("[coordinator] TRUST REGRESSION (" + snapshot.severity + "): " + signals.join("; "));
+      return snapshot;
     } catch (err) {
       // Detection failure is non-fatal — never block a run for this
       console.debug("[coordinator] trust regression detection failed: " + (err instanceof Error ? err.message : String(err)));
+      return null;
     }
   }
 
@@ -3881,6 +4124,7 @@ export class Coordinator {
     active: ActiveRun,
     receipt: RunReceipt,
     averageWorkerConfidence: number = this.averageWorkerConfidence(active.workerResults),
+    trustRegressionAlert: TrustRegressionAlert | null = null,
   ): RunSummary {
     return generateRunSummary({
       receipt,
@@ -3901,6 +4145,7 @@ export class Coordinator {
       historicalReliabilityTier: active.historicalReliabilityTier,
       calibratedThresholds: this.computeCalibratedThresholds(active),
       contextInclusionLog: active.gatedContext.inclusionLog ?? [],
+      trustRegressionAlert,
     });
   }
 

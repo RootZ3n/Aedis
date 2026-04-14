@@ -128,6 +128,45 @@ export interface RunSummary {
   readonly trustExplanation: readonly string[];
   /** Context gate inclusion log — why each file/context item was shown to the worker. */
   readonly contextInclusionLog: readonly string[];
+  /**
+   * Calibration lifecycle state at the time this run was scored.
+   * Surfaced so users can distinguish "calibrated thresholds are active"
+   * from "still collecting data" — calibration only engages after ≥5
+   * evaluated runs AND at least one threshold diverges from defaults.
+   */
+  readonly calibrationState: "insufficient_data" | "warming" | "active";
+  /** Number of evaluated runs backing calibration at scoring time. */
+  readonly calibrationEvaluatedRuns: number;
+  /**
+   * True when verification produced no usable signal (no required
+   * hooks configured and nothing was actively validated). Runs in this
+   * state must not be treated as "pass" regardless of verdict.
+   */
+  readonly verificationNoSignal: boolean;
+  /**
+   * Trust-regression alert snapshot for this run. Populated only when
+   * the coordinator's detector fired on this or a recent run; null
+   * otherwise. Persisted on the receipt so UIs can render a durable
+   * banner rather than relying on a transient WebSocket event.
+   */
+  readonly trustRegressionAlert: TrustRegressionAlert | null;
+}
+
+/**
+ * Structured snapshot of the trust-regression alert lifecycle. The
+ * coordinator emits a `trust_regression` event whenever signals fire;
+ * this field carries the same snapshot on the receipt so late
+ * subscribers (and reload-from-history UI) see the same thing.
+ */
+export interface TrustRegressionAlert {
+  /** Severity tier — "mild" (one signal) or "significant" (two+). */
+  readonly severity: "mild" | "significant";
+  /** Individual signals that tripped. */
+  readonly signals: readonly string[];
+  /** When the alert fired. */
+  readonly at: string;
+  /** True when this run itself triggered the detector. */
+  readonly firedOnThisRun: boolean;
 }
 
 export interface RunSummaryInput {
@@ -177,6 +216,13 @@ export interface RunSummaryInput {
   readonly calibratedThresholds?: import("./confidence-scoring.js").CalibratedThresholds;
   /** Context gate inclusion log from the active run. */
   readonly contextInclusionLog?: readonly string[];
+  /**
+   * Trust-regression alert snapshot from the coordinator detector.
+   * Pass null when no alert is active. The coordinator passes this
+   * in so the receipt carries the same snapshot as the WebSocket
+   * event and survives page reloads / process restarts.
+   */
+  readonly trustRegressionAlert?: TrustRegressionAlert | null;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -270,6 +316,13 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
 
   const cost = resolveCost(receipt);
   const verification = receipt.verificationReceipt?.verdict ?? "not-run";
+
+  // "No verification signal" is a distinct state from pass/fail: the
+  // pipeline ran but produced no real evidence — no required checks
+  // were configured AND no file was actively validated. Without this
+  // distinction a bare repo without lint/typecheck/tests can look
+  // like a clean pass.
+  const verificationNoSignal = computeVerificationNoSignal(receipt.verificationReceipt ?? null);
   const requiredFiles = unique(input.requiredFiles ?? []);
   const touchedFiles = new Set(changedFiles.map((change) => change.path));
   const missingRequiredFiles = requiredFiles.filter((file) => !touchedFiles.has(file));
@@ -319,7 +372,8 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
   // result can be trusted (or why it shouldn't be).
   const trustExplanation: string[] = [];
   if (confidence.overall >= 0.85) trustExplanation.push("High overall confidence (" + Math.round(confidence.overall * 100) + "%)");
-  if (verification === "pass") trustExplanation.push("All verification checks passed");
+  if (verification === "pass" && !verificationNoSignal) trustExplanation.push("All verification checks passed");
+  if (verificationNoSignal) trustExplanation.push("NO VERIFICATION SIGNAL — no required checks or active validation ran; do not treat as a clean pass");
   if (vReceipt?.coverageRatio != null && vReceipt.coverageRatio >= 0.8) trustExplanation.push("Broad verification coverage (" + Math.round(vReceipt.coverageRatio * 100) + "%)");
   if (vReceipt?.validatedRatio != null && vReceipt.validatedRatio >= 0.6) trustExplanation.push("Deep validation (" + Math.round(vReceipt.validatedRatio * 100) + "% of files actively checked)");
   if (input.gitDiffConfirmationRatio != null && input.gitDiffConfirmationRatio >= 0.9) trustExplanation.push("Git diff fully confirms manifest");
@@ -375,6 +429,10 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     ),
     trustExplanation,
     contextInclusionLog: input.contextInclusionLog ?? [],
+    calibrationState: input.calibratedThresholds?.state ?? "insufficient_data",
+    calibrationEvaluatedRuns: input.calibratedThresholds?.evaluatedRuns ?? 0,
+    verificationNoSignal,
+    trustRegressionAlert: input.trustRegressionAlert ?? null,
   };
 }
 
@@ -505,6 +563,24 @@ function buildNarrative(input: {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * A verification receipt has "no signal" when:
+ *   - no required checks are configured, AND
+ *   - no file reached "validated" depth (active tool-based checks).
+ *
+ * In that state the run must not be labeled as a clean pass — the
+ * verification pipeline had nothing of substance to evaluate.
+ */
+function computeVerificationNoSignal(
+  vr: { checks?: readonly { executed: boolean; passed: boolean; required: boolean }[]; validatedRatio?: number | null } | null,
+): boolean {
+  if (!vr) return true;
+  const hasRequired = (vr.checks ?? []).some((c) => c.required);
+  const hasActiveValidation = typeof vr.validatedRatio === "number" && vr.validatedRatio > 0;
+  const anyCheckExecuted = (vr.checks ?? []).some((c) => c.executed);
+  return !hasRequired && !hasActiveValidation && !anyCheckExecuted;
+}
 
 function resolveChangesList(input: RunSummaryInput): FileChangeSummary[] {
   if (input.changes && input.changes.length > 0) {

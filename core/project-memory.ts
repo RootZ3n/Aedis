@@ -13,6 +13,7 @@
  */
 
 import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { withRepoLock } from "./file-lock.js";
 import { dirname, join, resolve } from "node:path";
 
 // ─── Public types ────────────────────────────────────────────────────
@@ -621,11 +622,15 @@ export async function saveMemory(
     schemaVersion: memory.schemaVersion,
   };
 
-  // Atomic write: write to temp file then rename to prevent corruption
-  // from concurrent runs or crashes mid-write.
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(next, null, 2), "utf8");
-  await rename(tmpPath, path);
+  // Atomic write under an advisory lock: the lock prevents two
+  // concurrent runs on the same repo from silently clobbering each
+  // other's updates; tmp+rename prevents torn writes if this
+  // process crashes mid-save.
+  await withRepoLock(path, async () => {
+    const tmpPath = `${path}.tmp.${process.pid}`;
+    await writeFile(tmpPath, JSON.stringify(next, null, 2), "utf8");
+    await rename(tmpPath, path);
+  });
 }
 
 /**
@@ -639,40 +644,51 @@ export async function recordTask(
   projectRoot: string,
   taskSummary: TaskSummary,
 ): Promise<ProjectMemory> {
-  const memory = await loadMemory(projectRoot);
+  const root = resolve(projectRoot);
+  const path = memoryPath(root);
+  // The read-modify-write must happen inside a single lock so two
+  // concurrent runs don't each load the same base, update it, and
+  // last-writer-wins one of them away. Both saveMemory and this
+  // function acquire the same `path` lock, which is re-entrant only
+  // if we release before re-acquiring — so we inline the write
+  // instead of calling saveMemory.
+  return withRepoLock(path, async () => {
+    const memory = await loadMemory(projectRoot);
 
-  const touched = Array.isArray(taskSummary.filesTouched)
-    ? normalizeTouchedFiles(taskSummary.filesTouched)
-    : [];
+    const touched = Array.isArray(taskSummary.filesTouched)
+      ? normalizeTouchedFiles(taskSummary.filesTouched)
+      : [];
 
-  // Most-recent-first dedupe: new files come first, then any existing
-  // entries that aren't already in the new set, capped at MAX_FILES.
-  const seen = new Set<string>();
-  const recentFiles: string[] = [];
-  for (const file of [...touched, ...memory.recentFiles]) {
-    if (seen.has(file)) continue;
-    seen.add(file);
-    recentFiles.push(file);
-    if (recentFiles.length >= MAX_FILES) break;
-  }
+    const seen = new Set<string>();
+    const recentFiles: string[] = [];
+    for (const file of [...touched, ...memory.recentFiles]) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      recentFiles.push(file);
+      if (recentFiles.length >= MAX_FILES) break;
+    }
 
-  const recentTasks = [taskSummary, ...memory.recentTasks].slice(0, MAX_TASKS);
-  const fileClusters = updateFileClusters(memory.fileClusters, touched, taskSummary.timestamp);
-  const taskPatterns = updateTaskPatterns(memory.taskPatterns ?? [], taskSummary, touched);
+    const recentTasks = [taskSummary, ...memory.recentTasks].slice(0, MAX_TASKS);
+    const fileClusters = updateFileClusters(memory.fileClusters, touched, taskSummary.timestamp);
+    const taskPatterns = updateTaskPatterns(memory.taskPatterns ?? [], taskSummary, touched);
 
-  const next: ProjectMemory = {
-    projectRoot: memory.projectRoot,
-    language: memory.language,
-    recentFiles,
-    recentTasks,
-    fileClusters,
-    taskPatterns,
-    updatedAt: new Date().toISOString(),
-    schemaVersion: memory.schemaVersion,
-  };
+    const next: ProjectMemory = {
+      projectRoot: memory.projectRoot,
+      language: memory.language,
+      recentFiles: recentFiles.slice(0, MAX_FILES),
+      recentTasks: recentTasks.slice(0, MAX_TASKS),
+      fileClusters: fileClusters.slice(0, MAX_CLUSTERS),
+      taskPatterns: taskPatterns.slice(0, MAX_PATTERNS),
+      updatedAt: new Date().toISOString(),
+      schemaVersion: memory.schemaVersion,
+    };
 
-  await saveMemory(projectRoot, next);
-  return next;
+    await mkdir(dirname(path), { recursive: true });
+    const tmpPath = `${path}.tmp.${process.pid}`;
+    await writeFile(tmpPath, JSON.stringify(next, null, 2), "utf8");
+    await rename(tmpPath, path);
+    return next;
+  });
 }
 
 /**

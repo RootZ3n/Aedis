@@ -158,6 +158,24 @@ export interface CalibratedThresholds {
   readonly review: number;
   readonly escalate: number;
   readonly reason: string;
+  /**
+   * Calibration lifecycle state, derived from evaluated-run count and
+   * whether the computed thresholds differ from the hardcoded defaults.
+   *
+   *   "insufficient_data" — fewer than 5 evaluated runs available; the
+   *     thresholds used are the hardcoded defaults, not calibrated.
+   *   "warming"           — enough data to produce thresholds, but they
+   *     have not diverged from defaults yet (history is within normal
+   *     range). Gate behavior is equivalent to uncalibrated.
+   *   "active"            — calibration has actually adjusted at least
+   *     one threshold based on observed overconfidence/underconfidence.
+   *
+   * Run receipts surface this so users don't assume "calibrated" is
+   * active when it is really still warming up.
+   */
+  readonly state: "insufficient_data" | "warming" | "active";
+  /** Number of evaluated runs backing the calibration. */
+  readonly evaluatedRuns: number;
 }
 
 /**
@@ -177,7 +195,14 @@ export function calibrateThresholds(
 ): CalibratedThresholds {
   // Need at least 5 evaluated runs for calibration to be meaningful
   if (totalEvaluatedRuns < 5) {
-    return { apply: T_APPLY, review: T_REVIEW, escalate: T_ESCALATE, reason: "insufficient data for calibration" };
+    return {
+      apply: T_APPLY,
+      review: T_REVIEW,
+      escalate: T_ESCALATE,
+      reason: "insufficient data for calibration (" + totalEvaluatedRuns + "/5 evaluated runs)",
+      state: "insufficient_data",
+      evaluatedRuns: totalEvaluatedRuns,
+    };
   }
 
   // Overconfidence penalty: raise apply threshold
@@ -193,11 +218,15 @@ export function calibrateThresholds(
   if (overconfPenalty > 0.01) reasons.push("overconfidence " + Math.round(overconfidenceRate * 100) + "%" + " -> apply " + apply.toFixed(2));
   if (underconfBonus > 0.01) reasons.push("underconfidence " + Math.round(underconfidenceRate * 100) + "%" + " -> review " + review.toFixed(2));
 
+  const divergedFromDefaults = overconfPenalty > 0.01 || underconfBonus > 0.01;
+
   return {
     apply,
     review,
     escalate,
     reason: reasons.length > 0 ? reasons.join("; ") : "within normal calibration range",
+    state: divergedFromDefaults ? "active" : "warming",
+    evaluatedRuns: totalEvaluatedRuns,
   };
 }
 // ─── Public API ──────────────────────────────────────────────────────

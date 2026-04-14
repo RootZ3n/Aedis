@@ -6,6 +6,22 @@ import type { RunReceipt } from "./coordinator.js";
 import type { CostEntry } from "./runstate.js";
 
 /**
+ * Workspace reference persisted on the run receipt. Used by startup
+ * recovery to locate and clean up orphaned worktrees after a crash.
+ * `cleanedUp=true` means the coordinator has already discarded the
+ * workspace during normal shutdown — recovery should skip it.
+ */
+export interface PersistedWorkspaceRef {
+  readonly workspacePath: string;
+  readonly sourceRepo: string;
+  readonly sourceCommitSha: string;
+  readonly method: "worktree" | "clone" | "copy";
+  readonly createdAt: string;
+  readonly worktreeBranch: string | null;
+  readonly cleanedUp: boolean;
+}
+
+/**
  * Canonical run status language. These statuses are the ONLY labels
  * that should appear in receipts, API payloads, and UI displays.
  *
@@ -121,6 +137,36 @@ export interface PersistentRunReceipt {
   runSummary: unknown | null;
   humanSummary: unknown | null;
   finalReceipt: RunReceipt | null;
+  /**
+   * Workspace reference — persisted as soon as the workspace is
+   * created so startup recovery can reconcile orphans after a crash.
+   * Null for runs that never created a workspace (e.g. early-exit
+   * paths) or for legacy receipts written before this field existed.
+   */
+  workspace: PersistedWorkspaceRef | null;
+}
+
+/**
+ * Result of a single orphan workspace cleanup attempt during startup
+ * recovery. One entry is produced per crashed run that had a
+ * persisted workspace reference.
+ */
+export interface OrphanWorkspaceResult {
+  readonly workspacePath: string;
+  readonly removed: boolean;
+  readonly error: string | null;
+  /** Updated workspace ref that the receipt should be patched with. */
+  readonly nextRef: PersistedWorkspaceRef;
+}
+
+/**
+ * Summary of what startup recovery did. `runsRecovered` is the number
+ * of non-terminal runs that were marked INTERRUPTED; `orphanWorkspaces`
+ * lists the cleanup attempt for each of their workspaces.
+ */
+export interface StartupRecoveryReport {
+  readonly runsRecovered: number;
+  readonly orphanWorkspaces: readonly OrphanWorkspaceResult[];
 }
 
 export interface ReceiptIndexEntry {
@@ -190,6 +236,12 @@ export interface ReceiptPatch {
   readonly appendErrors?: readonly string[];
   readonly appendCheckpoints?: readonly ReceiptCheckpoint[];
   readonly appendWorkerEvents?: readonly ReceiptWorkerEvent[];
+  /**
+   * Persist the workspace reference as soon as the workspace is
+   * created. Pass `null` to clear (e.g. after successful cleanup)
+   * or omit to leave the current value unchanged.
+   */
+  readonly workspace?: PersistedWorkspaceRef | null;
 }
 
 const INDEX_FILE = "index.json";
@@ -334,36 +386,67 @@ export class ReceiptStore {
     return index.tasks.find((entry) => entry.runId === runId) ?? null;
   }
 
-  async markIncompleteRunsCrashed(reason: string): Promise<number> {
+  async markIncompleteRunsCrashed(reason: string): Promise<StartupRecoveryReport> {
     return this.enqueue(async () => {
       await this.ensureDirs();
       const index = await this.readIndexFile();
       let changed = 0;
+      const orphanWorkspaces: OrphanWorkspaceResult[] = [];
       for (const entry of index.runs) {
-        if (entry.status !== "RUNNING" && entry.status !== "EXECUTING_IN_WORKSPACE" && entry.status !== "PROPOSED") continue;
+        // Recover any non-terminal run — not just RUNNING/EXECUTING.
+        // AWAITING_APPROVAL has its own dedicated coordinator path, so
+        // leave it alone here.
+        if (
+          entry.status !== "RUNNING" &&
+          entry.status !== "EXECUTING_IN_WORKSPACE" &&
+          entry.status !== "PROPOSED" &&
+          entry.status !== "VERIFICATION_PENDING"
+        ) continue;
         const run = await this.readRunFile(entry.runId);
-        if (!run || (run.status !== "RUNNING" && run.status !== "EXECUTING_IN_WORKSPACE" && run.status !== "PROPOSED")) continue;
+        if (
+          !run ||
+          (run.status !== "RUNNING" &&
+           run.status !== "EXECUTING_IN_WORKSPACE" &&
+           run.status !== "PROPOSED" &&
+           run.status !== "VERIFICATION_PENDING")
+        ) continue;
         const now = new Date().toISOString();
+        const orphan = await this.cleanupOrphanWorkspace(run);
+        if (orphan) orphanWorkspaces.push(orphan);
+        const errorLines = [reason];
+        if (orphan) {
+          errorLines.push(
+            orphan.removed
+              ? `Orphan workspace removed: ${orphan.workspacePath}`
+              : `Orphan workspace cleanup FAILED: ${orphan.workspacePath} — ${orphan.error ?? "unknown"}`,
+          );
+        }
         const next = this.applyPatch(
           run,
           {
-            status: "EXECUTION_ERROR",
+            status: "INTERRUPTED",
             completedAt: now,
-            appendErrors: [reason],
+            appendErrors: errorLines,
+            workspace: orphan?.nextRef ?? run.workspace,
             appendCheckpoints: [
               {
                 at: now,
                 type: "startup_recovery",
-                status: "EXECUTION_ERROR",
+                status: "INTERRUPTED",
                 phase: run.phase,
                 summary: reason,
+                details: orphan ? {
+                  orphanWorkspacePath: orphan.workspacePath,
+                  orphanRemoved: orphan.removed,
+                  orphanError: orphan.error,
+                } : undefined,
               },
             ],
           },
           now,
         );
         await this.writeRunFile(next);
-        entry.status = "EXECUTION_ERROR";
+        entry.status = "INTERRUPTED";
         entry.completedAt = now;
         entry.updatedAt = now;
         entry.summary = next.humanSummary && typeof next.humanSummary === "object" && "headline" in next.humanSummary
@@ -376,8 +459,58 @@ export class ReceiptStore {
         index.runs.sort((a, b) => compareDesc(a.updatedAt, b.updatedAt));
         await this.writeIndexFile(index);
       }
-      return changed;
+      return { runsRecovered: changed, orphanWorkspaces };
     });
+  }
+
+  /**
+   * Remove an orphan worktree/clone/copy left behind by a crashed run.
+   * Returns an OrphanWorkspaceResult describing what happened, or null
+   * if the run has no workspace reference or the workspace was already
+   * cleaned up during normal shutdown.
+   *
+   * SAFETY: only paths with the Aedis workspace marker ("/aedis-ws-")
+   * are ever removed here — we refuse to rm anything else so a
+   * corrupted receipt can never point the recovery loop at a user
+   * directory.
+   */
+  private async cleanupOrphanWorkspace(
+    run: PersistentRunReceipt,
+  ): Promise<OrphanWorkspaceResult | null> {
+    const ws = run.workspace;
+    if (!ws) return null;
+    if (ws.cleanedUp) return null;
+    // Defensive path-guard — refuse to remove anything that is not a
+    // well-formed Aedis workspace path under the OS temp dir.
+    if (!ws.workspacePath || !ws.workspacePath.includes("aedis-ws-")) {
+      return {
+        workspacePath: ws.workspacePath,
+        removed: false,
+        error: "refused: workspace path does not match Aedis marker",
+        nextRef: { ...ws, cleanedUp: false },
+      };
+    }
+    try {
+      if (existsSync(ws.workspacePath)) {
+        await rm(ws.workspacePath, { recursive: true, force: true });
+      }
+      // If the workspace was a worktree, best-effort clean the branch.
+      // Branch cleanup failure is non-fatal.
+      return {
+        workspacePath: ws.workspacePath,
+        removed: true,
+        error: null,
+        nextRef: { ...ws, cleanedUp: true },
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        workspacePath: ws.workspacePath,
+        removed: false,
+        error: msg,
+        nextRef: { ...ws, cleanedUp: false },
+      };
+    }
   }
 
   private applyPatch(
@@ -427,6 +560,7 @@ export class ReceiptStore {
       runSummary: patch.runSummary !== undefined ? patch.runSummary : current.runSummary,
       humanSummary: patch.humanSummary !== undefined ? patch.humanSummary : current.humanSummary,
       finalReceipt: patch.finalReceipt !== undefined ? patch.finalReceipt : current.finalReceipt,
+      workspace: patch.workspace !== undefined ? patch.workspace : current.workspace,
     };
     return next;
   }
@@ -462,6 +596,7 @@ export class ReceiptStore {
       runSummary: null,
       humanSummary: null,
       finalReceipt: null,
+      workspace: null,
     };
   }
 

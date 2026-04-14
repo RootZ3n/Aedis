@@ -663,6 +663,42 @@ export class VerificationPipeline {
       }
     }
 
+    // No-signal fail-closed: when the run produced file changes but
+    // zero active-validation stages executed AND no hooks were
+    // configured AND no required checks are set, the pipeline has
+    // literally nothing to say. A verdict of "pass" under those
+    // conditions would be misleading. Emit an explicit blocker so
+    // the MergeGate blocks and the trust explanation surfaces
+    // "no verification signal" clearly. Must run BEFORE aggregation
+    // below so the synthesized blocker counts toward the verdict.
+    const activeStagesRan = stages.some(
+      (s) => (s.stage === "lint" || s.stage === "typecheck" || s.stage === "custom-hook") && s.passed,
+    );
+    const anyCheckExecuted = checks.some((c) => c.executed);
+    if (
+      changes.length > 0 &&
+      !activeStagesRan &&
+      !anyCheckExecuted &&
+      this.config.requiredChecks.length === 0 &&
+      this.config.hooks.length === 0
+    ) {
+      stages.push({
+        stage: "custom-hook",
+        name: "No-signal guard",
+        passed: false,
+        score: 0,
+        issues: [{
+          stage: "custom-hook",
+          severity: "blocker",
+          message:
+            "No verification signal available — no lint/typecheck/tests/custom hooks configured for this repo. " +
+            "Configure required checks or opt in explicitly before treating the run as verified.",
+        }],
+        durationMs: 0,
+        details: "no-signal guard",
+      });
+    }
+
     // Aggregate
     const totalDurationMs = Date.now() - startTime;
     const allIssues = stages.flatMap((s) => s.issues);

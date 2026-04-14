@@ -102,12 +102,13 @@ test("ReceiptStore marks unfinished runs as crashed on startup", async () => {
       phase: "building",
     });
 
-    const changed = await store.markIncompleteRunsCrashed("server restarted before completion");
-    assert.equal(changed, 1);
+    const recovery = await store.markIncompleteRunsCrashed("server restarted before completion");
+    assert.equal(recovery.runsRecovered, 1);
+    assert.equal(recovery.orphanWorkspaces.length, 0);
 
     const receipt = await store.getRun("run-crash");
     assert.ok(receipt);
-    assert.equal(receipt.status, "CRASHED");
+    assert.equal(receipt.status, "INTERRUPTED");
     assert.ok(receipt.completedAt);
     assert.ok(receipt.errors.includes("server restarted before completion"));
     assert.equal(receipt.checkpoints.at(-1)?.type, "startup_recovery");
