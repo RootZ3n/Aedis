@@ -124,6 +124,8 @@ export interface RunSummary {
   readonly evaluationAlignmentStatus: "aligned" | "aedis-overconfident" | "aedis-underconfident" | null;
   /** True when Aedis confidence >= 0.7 and evaluation failed. */
   readonly overconfidenceFlag: boolean;
+  /** Human-readable list of positive trust signals for this run. */
+  readonly trustExplanation: readonly string[];
 }
 
 export interface RunSummaryInput {
@@ -169,6 +171,8 @@ export interface RunSummaryInput {
   readonly strictMode?: boolean;
   /** Historical reliability tier for the matched task archetype. */
   readonly historicalReliabilityTier?: "reliable" | "risky" | "caution" | "unknown" | null;
+  /** Calibrated thresholds from trust dashboard. */
+  readonly calibratedThresholds?: import("./confidence-scoring.js").CalibratedThresholds;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -242,6 +246,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     repoReadinessPenalty: repoReadiness.confidencePenalty,
     evaluation: receipt.evaluation,
     strictMode: input.strictMode,
+    calibratedThresholds: input.calibratedThresholds,
   });
 
   // Apply historical confidence dampening from pattern memory.
@@ -306,6 +311,23 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     receipt,
   });
 
+  // Build trust explanation — positive signals that explain WHY this
+  // result can be trusted (or why it shouldn't be).
+  const trustExplanation: string[] = [];
+  if (confidence.overall >= 0.85) trustExplanation.push("High overall confidence (" + Math.round(confidence.overall * 100) + "%)");
+  if (verification === "pass") trustExplanation.push("All verification checks passed");
+  if (vReceipt?.coverageRatio != null && vReceipt.coverageRatio >= 0.8) trustExplanation.push("Broad verification coverage (" + Math.round(vReceipt.coverageRatio * 100) + "%)");
+  if (vReceipt?.validatedRatio != null && vReceipt.validatedRatio >= 0.6) trustExplanation.push("Deep validation (" + Math.round(vReceipt.validatedRatio * 100) + "% of files actively checked)");
+  if (input.gitDiffConfirmationRatio != null && input.gitDiffConfirmationRatio >= 0.9) trustExplanation.push("Git diff fully confirms manifest");
+  if (input.strictMode) trustExplanation.push("Strict mode active — extra verification");
+  if (input.confidenceDampening != null && input.confidenceDampening < 1.0) trustExplanation.push("Historical dampening applied (" + Math.round(input.confidenceDampening * 100) + "%) — adjusted for past overconfidence");
+  if (input.historicalReliabilityTier === "reliable") trustExplanation.push("Task archetype historically reliable");
+  if (repoReadiness.level === "normal") trustExplanation.push("Repo in normal state — no readiness issues");
+  if (confidence.overall < 0.5) trustExplanation.push("LOW confidence — manual review strongly recommended");
+  if (verification === "fail") trustExplanation.push("VERIFICATION FAILED — do not trust without review");
+  if (receipt.evaluation?.disagreement?.direction === "aedis-overconfident") trustExplanation.push("Crucibulum disagrees — Aedis was overconfident");
+  if (receipt.evaluation?.aggregate?.overallPass === true) trustExplanation.push("External evaluation passed (Crucibulum)");
+
   return {
     classification: classificationResult.classification,
     classificationReason: classificationResult.reason,
@@ -347,6 +369,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
       confidence.overall >= 0.7 &&
       receipt.evaluation?.aggregate?.overallPass === false
     ),
+    trustExplanation,
   };
 }
 

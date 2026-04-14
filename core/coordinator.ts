@@ -142,6 +142,7 @@ import {
   type ExecutionReceipt,
 } from "./execution-gate.js";
 import { generateRunSummary, type RunSummary } from "./run-summary.js";
+import { calibrateThresholds } from "./confidence-scoring.js";
 import { buildRunSummaryPayload, persistentStatusForReceipt } from "./coordinator-audit.js";
 import { buildDispatchAssignment, workerCompleteEventType } from "./coordinator-dispatch.js";
 import { determineRunVerdict } from "./coordinator-lifecycle.js";
@@ -913,7 +914,7 @@ export class Coordinator {
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
     console.log(`[coordinator] changeSet created: ${charterTargets.length} file(s), scope=${active.scopeClassification?.type ?? "unknown"}`);
     await this.receiptStore.beginRun({
-      runId: run.id,
+      runId: active.run.id,
       intentId: intent.id,
       prompt: input,
       taskSummary: input,
@@ -937,7 +938,7 @@ export class Coordinator {
       const blockMsg = `Velum input guard blocked execution: ${velumInput.reasons.join("; ")}`;
       console.error(`[coordinator] ${blockMsg}`);
       failRun(run, blockMsg);
-      this.emit({ type: "merge_blocked", payload: { runId: run.id, blockers: [blockMsg] } });
+      this.emit({ type: "merge_blocked", payload: { runId: active.run.id, blockers: [blockMsg] } });
       return this.buildReceipt(active, null, null, null, Date.now() - startTime, null, null, "failed");
     }
     if (velumInput.decision === "review" && effectiveRequireApproval) {
@@ -1011,7 +1012,7 @@ export class Coordinator {
 
       this.emit({
         type: "task_graph_built",
-        payload: { runId: run.id, summary: summaryAfterBuild },
+        payload: { runId: active.run.id, summary: summaryAfterBuild },
       });
       await this.persistReceiptCheckpoint(active, {
         at: new Date().toISOString(),
@@ -1087,7 +1088,7 @@ export class Coordinator {
           const blockMsg = `Velum output guard blocked: ${velumOutput.reasons.join("; ")}`;
           console.error(`[coordinator] ${blockMsg}`);
           failRun(run, blockMsg);
-          this.emit({ type: "merge_blocked", payload: { runId: run.id, blockers: [blockMsg] } });
+          this.emit({ type: "merge_blocked", payload: { runId: active.run.id, blockers: [blockMsg] } });
           return this.buildReceipt(active, null, null, null, Date.now() - startTime, null, null, "failed");
         }
         if (velumOutput.decision === "review") {
@@ -1136,7 +1137,7 @@ export class Coordinator {
       // Phase 8: Post-Build IntegrationJudge
       if (!active.cancelled && !hasFailedNodes(active.graph)) {
         console.log(`[coordinator] PHASE 8: IntegrationJudge — entering`);
-        this.emit({ type: "integration_check", payload: { runId: run.id, phase: "post-build" } });
+        this.emit({ type: "integration_check", payload: { runId: active.run.id, phase: "post-build" } });
         judgmentReport = active.judge.judge(
           active.intent,
           run,
@@ -1159,7 +1160,7 @@ export class Coordinator {
         if (!judgmentReport.passed) {
           this.emit({
             type: "merge_blocked",
-            payload: { runId: run.id, blockers: judgmentReport.blockers },
+            payload: { runId: active.run.id, blockers: judgmentReport.blockers },
           });
         }
       } else {
@@ -1191,7 +1192,7 @@ export class Coordinator {
           // Synthesize a failing verification receipt from the preflight
           verificationReceipt = {
             id: randomUUID(),
-            runId: run.id,
+            runId: active.run.id,
             intentId: active.intent.id,
             timestamp: new Date().toISOString(),
             verdict: "fail",
@@ -1371,7 +1372,7 @@ export class Coordinator {
         this.emit({
           type: "merge_blocked",
           payload: {
-            runId: run.id,
+            runId: active.run.id,
             reason: mergeDecision.primaryBlockReason,
             summary: mergeDecision.summary,
             findings: mergeDecision.findings,
@@ -1399,7 +1400,7 @@ export class Coordinator {
         this.emit({
           type: "merge_approved",
           payload: {
-            runId: run.id,
+            runId: active.run.id,
             summary: mergeDecision.summary,
             advisory: mergeDecision.advisory,
             groups: groupFindingsBySource(mergeDecision.findings),
@@ -1429,7 +1430,7 @@ export class Coordinator {
       if (canCommit && finalRequireApproval) {
         console.log(`[coordinator] PHASE 10: APPROVAL REQUIRED — ${changeCount} change(s) ready. Pausing for external approval.`);
         advancePhase(run, "awaiting_approval");
-        this.emit({ type: "system_event", payload: { runId: run.id, event: "approval_required", changeCount } });
+        this.emit({ type: "system_event", payload: { runId: active.run.id, event: "approval_required", changeCount } });
         recordDecision(active.run, {
           description: `Commit paused — requireApproval=true. ${changeCount} files ready to commit.`,
           madeBy: "coordinator",
@@ -1457,7 +1458,7 @@ export class Coordinator {
         commitSha = await this.gitCommit(active);
         if (commitSha) {
           console.log(`[coordinator] PHASE 10 done — commit ${commitSha.slice(0, 8)} created`);
-          this.emit({ type: "commit_created", payload: { runId: run.id, sha: commitSha } });
+          this.emit({ type: "commit_created", payload: { runId: active.run.id, sha: commitSha } });
         } else {
           // Merge gate approved but commit failed — explicit commit_failed
           // terminal state. Roll back on-disk changes to leave the repo clean.
@@ -1502,7 +1503,7 @@ export class Coordinator {
       // override the verdict: a "success" from determineVerdict that
       // produces zero evidence is forced to "failed" here.
       const executionDecision = evaluateExecutionGate({
-        runId: run.id,
+        runId: active.run.id,
         projectRoot: active.projectRoot,
         workerResults: active.workerResults,
         changes: active.changes,
@@ -1598,9 +1599,9 @@ export class Coordinator {
       if (this.evaluator.shouldEvaluate(verdictAfterGate)) {
         try {
           console.log(`[coordinator] POST-RUN EVALUATION — triggering Crucibulum for run ${run.id}`);
-          this.emit({ type: "evaluation_started", payload: { runId: run.id } });
+          this.emit({ type: "evaluation_started", payload: { runId: active.run.id } });
           const evalInput: EvaluationInput = {
-            runId: run.id,
+            runId: active.run.id,
             verdict: verdictAfterGate,
             aedisConfidence: finalReceipt.humanSummary?.confidence?.overall ?? 0.5,
             scopeType: active.scopeClassification?.type ?? "unknown",
@@ -1622,18 +1623,23 @@ export class Coordinator {
           if (evaluation.disagreement?.escalate) {
             console.log(`[coordinator] EVALUATION DISAGREEMENT — ${evaluation.disagreement.summary}`);
           }
-          this.emit({ type: "evaluation_complete", payload: { runId: run.id, evaluation } });
+          this.emit({ type: "evaluation_complete", payload: { runId: active.run.id, evaluation } });
         } catch (evalErr) {
           console.log(`[coordinator] POST-RUN EVALUATION FAILED (non-fatal): ${evalErr}`);
-          this.emit({ type: "evaluation_failed", payload: { runId: run.id, error: String(evalErr) } });
+          this.emit({ type: "evaluation_failed", payload: { runId: active.run.id, error: String(evalErr) } });
         }
       }
 
       console.log(`[coordinator] ═══ submit() exit — verdict=${verdictAfterGate} duration=${Date.now() - startTime}ms`);
-      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason, classification: evaluatedReceipt.humanSummary?.classification ?? null } });
-      this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: evaluatedReceipt.id, receipt: evaluatedReceipt } });
+      this.emit({ type: "run_complete", payload: { runId: active.run.id, verdict: verdictAfterGate, executionVerified: executionDecision.executionVerified, executionReason: executionDecision.reason, classification: evaluatedReceipt.humanSummary?.classification ?? null } });
+      this.emit({ type: "run_receipt", payload: { runId: active.run.id, receiptId: evaluatedReceipt.id, receipt: evaluatedReceipt } });
       // Notify trust dashboard consumers that trust data has changed.
-      this.emit({ type: "trust_updated", payload: { runId: run.id, confidence: evaluatedReceipt.humanSummary?.confidence?.overall ?? 0, verdict: verdictAfterGate } });
+      this.emit({ type: "trust_updated", payload: { runId: active.run.id, confidence: evaluatedReceipt.humanSummary?.confidence?.overall ?? 0, verdict: verdictAfterGate } });
+
+      // Trust regression detection: check if recent runs show degrading
+      // trust signals. Fires a trust_regression event so the UI can
+      // alert the operator without them having to check the dashboard.
+      this.detectTrustRegression(active, evaluatedReceipt);
 
       return evaluatedReceipt;
     } catch (err) {
@@ -1660,7 +1666,7 @@ export class Coordinator {
       // file writes, etc.) so the receipt tells the truth about
       // what got done before the failure.
       const executionDecision = evaluateExecutionGate({
-        runId: run.id,
+        runId: active.run.id,
         projectRoot: active.projectRoot,
         workerResults: active.workerResults,
         changes: active.changes,
@@ -1700,9 +1706,9 @@ export class Coordinator {
       this.emitExecutionEvent(run.id, executionDecision);
       this.emitRunSummary(run.id, finalReceipt);
       console.log(`[coordinator] ═══ submit() exit (failed) — verdict=${receipt.verdict} duration=${Date.now() - startTime}ms`);
-      this.emit({ type: "run_complete", payload: { runId: run.id, verdict: "failed", executionVerified: false, executionReason: executionDecision.reason, error: errMessage, classification: finalReceipt.humanSummary?.classification ?? null } });
-      this.emit({ type: "run_receipt", payload: { runId: run.id, receiptId: finalReceipt.id, receipt: finalReceipt } });
-      this.emit({ type: "trust_updated", payload: { runId: run.id, confidence: 0, verdict: "failed" } });
+      this.emit({ type: "run_complete", payload: { runId: active.run.id, verdict: "failed", executionVerified: false, executionReason: executionDecision.reason, error: errMessage, classification: finalReceipt.humanSummary?.classification ?? null } });
+      this.emit({ type: "run_receipt", payload: { runId: active.run.id, receiptId: finalReceipt.id, receipt: finalReceipt } });
+      this.emit({ type: "trust_updated", payload: { runId: active.run.id, confidence: 0, verdict: "failed" } });
       return finalReceipt;
     } finally {
       // ── Workspace cleanup ───────────────────────────────────────
@@ -2304,14 +2310,14 @@ export class Coordinator {
           this.collectChanges(active, result);
           this.emit({
             type: workerCompleteEventType(node.workerType as WorkerType),
-            payload: { runId: run.id, taskId: node.id, confidence: result.confidence },
+            payload: { runId: active.run.id, taskId: node.id, confidence: result.confidence },
           });
         } else {
           console.warn(`[coordinator] executeGraph: marking node ${node.id.slice(0, 6)} (${node.workerType}) as FAILED — issue: ${result.issues[0]?.message ?? "(no message)"}`);
           markFailed(graph, node.id);
           this.emit({
             type: "task_failed",
-            payload: { runId: run.id, taskId: node.id, error: result.issues[0]?.message },
+            payload: { runId: active.run.id, taskId: node.id, error: result.issues[0]?.message },
           });
         }
 
@@ -2346,7 +2352,7 @@ export class Coordinator {
               model: "claude-sonnet-4-6",
               prompt: active.normalizedInput,
               systemPrompt: `You are a senior software engineer. The previous attempt had low confidence (${(result.confidence * 100).toFixed(0)}%). Review and improve the output.`,
-              runId: run.id,
+              runId: active.run.id,
             },
             active.runInvocationContext,
           );
@@ -2379,7 +2385,7 @@ export class Coordinator {
           this.emit({
             type: "critic_review",
             payload: {
-              runId: run.id,
+              runId: active.run.id,
               verdict: "request-changes",
               round: rehearsalRound,
               confidence: result.confidence,
@@ -2420,7 +2426,7 @@ export class Coordinator {
 
     this.emit({
       type: "task_started",
-      payload: { runId: run.id, taskId: node.id, workerType: node.workerType },
+      payload: { runId: active.run.id, taskId: node.id, workerType: node.workerType },
     });
     await this.persistReceiptWorkerEvent(active, {
       at: new Date().toISOString(),
@@ -2444,7 +2450,7 @@ export class Coordinator {
 
     this.emit({
       type: "worker_assigned",
-      payload: { runId: run.id, taskId: node.id, tier: routingDecision.tier, workerType: node.workerType },
+      payload: { runId: active.run.id, taskId: node.id, tier: routingDecision.tier, workerType: node.workerType },
     });
 
     const escalation = active.graph.escalationBoundaries.find((b) => b.nodeId === node.id);
@@ -2455,7 +2461,7 @@ export class Coordinator {
       if (currentIdx < minIdx) {
         this.emit({
           type: "escalation_triggered",
-          payload: { runId: run.id, taskId: node.id, from: routingDecision.tier, to: escalation.minimumTier },
+          payload: { runId: active.run.id, taskId: node.id, from: routingDecision.tier, to: escalation.minimumTier },
         });
       }
     }
@@ -2563,7 +2569,7 @@ export class Coordinator {
     const { run, intent, graph } = active;
 
     console.log(`[coordinator] runPreBuildCoherence: entering — ${intent.charter.deliverables.length} deliverables, ${graph.nodes.length} graph nodes`);
-    this.emit({ type: "coherence_check_started", payload: { runId: run.id, phase: "pre-build" } });
+    this.emit({ type: "coherence_check_started", payload: { runId: active.run.id, phase: "pre-build" } });
 
     const checks = [];
 
@@ -2604,11 +2610,11 @@ export class Coordinator {
 
     if (allPassed) {
       console.log(`[coordinator] runPreBuildCoherence: ALL ${checks.length} checks passed`);
-      this.emit({ type: "coherence_check_passed", payload: { runId: run.id, phase: "pre-build" } });
+      this.emit({ type: "coherence_check_passed", payload: { runId: active.run.id, phase: "pre-build" } });
     } else {
       const failedChecks = checks.filter((c) => !c.passed);
       console.error(`[coordinator] runPreBuildCoherence: ${failedChecks.length} of ${checks.length} checks FAILED — ${failedChecks.map((c) => c.message).join("; ")}`);
-      this.emit({ type: "coherence_check_failed", payload: { runId: run.id, phase: "pre-build", checks } });
+      this.emit({ type: "coherence_check_failed", payload: { runId: active.run.id, phase: "pre-build", checks } });
       throw new CoordinatorError(
         `Pre-build coherence failed: ${failedChecks.map((c) => c.message).join("; ")}`
       );
@@ -2655,7 +2661,7 @@ export class Coordinator {
       if (!passed) {
         this.emit({
           type: "coherence_check_failed",
-          payload: { runId: run.id, checkpoint: checkpoint.label },
+          payload: { runId: active.run.id, checkpoint: checkpoint.label },
         });
       }
     }
@@ -2685,9 +2691,20 @@ export class Coordinator {
       return false;
     }
 
-    // Use the structured RecoveryEngine to classify failures and choose strategies
-    const { RecoveryEngine } = await import("./recovery-engine.js");
-    const engine = new RecoveryEngine();
+    // Use the global RecoveryEngine singleton for circuit breaker persistence
+    const { getGlobalRecoveryEngine } = await import("./recovery-engine.js");
+    const engine = getGlobalRecoveryEngine();
+
+    // Check global circuit breaker before attempting recovery
+    if (engine.isCircuitTripped()) {
+      const budget = engine.getGlobalBudget();
+      console.warn(`[coordinator] attemptRecovery: GLOBAL CIRCUIT BREAKER TRIPPED — ${budget.tripReason}`);
+      this.emit({
+        type: "recovery_attempted",
+        payload: { runId: active.run.id, success: false, reason: "Global circuit breaker: " + (budget.tripReason ?? "tripped") },
+      });
+      return false;
+    }
     const costBudget = {
       currentTier: 0,
       maxTier: 2,
@@ -2702,6 +2719,7 @@ export class Coordinator {
     });
 
     let anyRecovered = false;
+    let recoveryCostUsd = 0;
     for (const node of failedNodes) {
       // Build failure signals from the node's result
       const result = active.workerResults.find(
@@ -2749,6 +2767,13 @@ export class Coordinator {
       );
       markReady(active.graph, node.id);
       anyRecovered = true;
+    }
+
+    // Record recovery attempt against global budget
+    engine.recordRecoveryAttempt(recoveryCostUsd);
+    const budget = engine.getGlobalBudget();
+    if (budget.tripped) {
+      console.warn(`[coordinator] CIRCUIT BREAKER TRIPPED after this recovery: ${budget.tripReason}`);
     }
 
     return anyRecovered;
@@ -3695,6 +3720,82 @@ export class Coordinator {
     return count > 0 ? total / count : 0;
   }
 
+  /**
+   * Detect trust regressions by checking recent receipt store entries
+   * for patterns of overconfidence, declining success, or shallow
+   * verification. Emits trust_regression event when signals are found.
+   */
+  private async detectTrustRegression(active: ActiveRun, receipt: RunReceipt): Promise<void> {
+    try {
+      const recentRuns = await this.receiptStore.listRuns(10);
+      if (recentRuns.length < 5) return; // need enough data
+
+      const signals: string[] = [];
+      const confidence = receipt.humanSummary?.confidence?.overall ?? 0;
+      const evalScore = receipt.evaluation?.aggregate?.averageScore != null
+        ? receipt.evaluation.aggregate.averageScore / 100
+        : null;
+
+      // Check 1: current run is overconfident
+      if (confidence >= 0.7 && evalScore != null && evalScore < 0.5) {
+        signals.push("overconfident: confidence " + (confidence * 100).toFixed(0) + "% but evaluation " + (evalScore * 100).toFixed(0) + "%");
+      }
+
+      // Check 2: recent success rate declining
+      const recentVerdicts = recentRuns.slice(0, 10).map((r) => r.status);
+      const recentSuccesses = recentVerdicts.filter((s) => s === "VERIFIED_PASS" || s === "READY_FOR_PROMOTION" || s === "COMPLETE").length;
+      const successRate = recentSuccesses / recentVerdicts.length;
+      if (recentVerdicts.length >= 8 && successRate < 0.4) {
+        signals.push("low success rate: " + (successRate * 100).toFixed(0) + "% across last " + recentVerdicts.length + " runs");
+      }
+
+      // Check 3: multiple verification failures in a row
+      const recentFails = recentRuns.slice(0, 5).filter(
+        (r) => r.status === "VERIFIED_FAIL" || r.status === "CRUCIBULUM_FAIL",
+      ).length;
+      if (recentFails >= 3) {
+        signals.push(recentFails + " verification failures in last 5 runs");
+      }
+
+      if (signals.length > 0) {
+        this.emit({
+          type: "trust_regression",
+          payload: {
+            runId: active.run.id,
+            signals,
+            severity: signals.length >= 2 ? "significant" : "mild",
+            recommendation: "Review trust dashboard before approving more runs",
+          },
+        });
+        console.warn("[coordinator] TRUST REGRESSION: " + signals.join("; "));
+      }
+    } catch (err) {
+      // Detection failure is non-fatal — never block a run for this
+      console.debug("[coordinator] trust regression detection failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }
+
+  /**
+   * Compute calibrated confidence thresholds from the project memory's
+   * historical trust data. Returns null when insufficient data.
+   */
+  private computeCalibratedThresholds(active: ActiveRun): import("./confidence-scoring.js").CalibratedThresholds | undefined {
+    const memory = active.projectMemory;
+    if (!memory || memory.taskPatterns.length === 0) return undefined;
+
+    // Weighted average overconfidence rate across all archetypes
+    let totalObserved = 0;
+    let weightedOverconf = 0;
+    for (const p of memory.taskPatterns) {
+      totalObserved += p.observedRuns;
+      weightedOverconf += p.overconfidenceRate * p.observedRuns;
+    }
+    const overconfidenceRate = totalObserved > 0 ? weightedOverconf / totalObserved : 0;
+    const evaluatedRuns = memory.recentTasks.filter((t) => t.evaluationScore != null).length;
+
+    return calibrateThresholds(overconfidenceRate, 0, evaluatedRuns);
+  }
+
   private composeHumanSummary(
     active: ActiveRun,
     receipt: RunReceipt,
@@ -3717,6 +3818,7 @@ export class Coordinator {
       confidenceDampening: active.confidenceDampening,
       strictMode: active.gatedContext.strictVerification === true || this.config.verificationConfig?.strictMode === true || shouldRecommendStrictMode(active.projectMemory, { prompt: active.normalizedInput, scopeType: active.scopeClassification?.type }),
       historicalReliabilityTier: active.historicalReliabilityTier,
+      calibratedThresholds: this.computeCalibratedThresholds(active),
     });
   }
 

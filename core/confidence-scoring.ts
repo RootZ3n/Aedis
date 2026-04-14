@@ -129,6 +129,8 @@ export interface ConfidenceInput {
   readonly evaluation?: EvaluationAttachment | null;
   /** Strict mode is enabled for this run. */
   readonly strictMode?: boolean;
+  /** Calibrated thresholds from trust dashboard. When provided, overrides fixed thresholds. */
+  readonly calibratedThresholds?: CalibratedThresholds;
 }
 
 // ─── Weights ─────────────────────────────────────────────────────────
@@ -145,6 +147,59 @@ const T_APPLY = 0.85;
 const T_REVIEW = 0.70;
 const T_ESCALATE = 0.50;
 
+/**
+ * Calibrated thresholds adjusted by historical trust data.
+ * When the trust dashboard detects systematic overconfidence,
+ * the apply threshold is raised and the review threshold is
+ * lowered so fewer runs auto-apply without human eyes.
+ */
+export interface CalibratedThresholds {
+  readonly apply: number;
+  readonly review: number;
+  readonly escalate: number;
+  readonly reason: string;
+}
+
+/**
+ * Compute calibrated thresholds from trust dashboard vitals.
+ * When overconfidence rate is high, we make the gate stricter:
+ * - apply threshold goes UP (harder to auto-apply)
+ * - review threshold goes DOWN (more runs land in review)
+ * - escalate threshold stays the same (low confidence is low confidence)
+ *
+ * Adjustment is proportional: at 30% overconfidence rate, apply
+ * moves from 0.85 -> 0.90. At 50%, it moves to 0.93.
+ */
+export function calibrateThresholds(
+  overconfidenceRate: number,
+  underconfidenceRate: number,
+  totalEvaluatedRuns: number,
+): CalibratedThresholds {
+  // Need at least 5 evaluated runs for calibration to be meaningful
+  if (totalEvaluatedRuns < 5) {
+    return { apply: T_APPLY, review: T_REVIEW, escalate: T_ESCALATE, reason: "insufficient data for calibration" };
+  }
+
+  // Overconfidence penalty: raise apply threshold
+  const overconfPenalty = Math.min(overconfidenceRate * 0.2, 0.10); // max +0.10
+  // Underconfidence penalty: lower review threshold (we're being too strict)
+  const underconfBonus = Math.min(underconfidenceRate * 0.15, 0.08); // max -0.08
+
+  const apply = clamp01(T_APPLY + overconfPenalty);
+  const review = clamp01(T_REVIEW - underconfBonus);
+  const escalate = T_ESCALATE; // stays fixed
+
+  const reasons: string[] = [];
+  if (overconfPenalty > 0.01) reasons.push("overconfidence " + Math.round(overconfidenceRate * 100) + "%" + " -> apply " + apply.toFixed(2));
+  if (underconfBonus > 0.01) reasons.push("underconfidence " + Math.round(underconfidenceRate * 100) + "%" + " -> review " + review.toFixed(2));
+
+  return {
+    apply,
+    review,
+    escalate,
+    reason: reasons.length > 0 ? reasons.join("; ") : "within normal calibration range",
+  };
+}
 // ─── Public API ──────────────────────────────────────────────────────
 
 export function scoreRunConfidence(input: ConfidenceInput): ConfidenceBreakdown {
@@ -182,7 +237,10 @@ export function scoreRunConfidence(input: ConfidenceInput): ConfidenceBreakdown 
     `overall = ${W_PLAN}·planning(${plan.toFixed(2)}) + ${W_EXEC}·execution(${exec.toFixed(2)}) + ${W_CRITIC}·critic(${critic.toFixed(2)}) + ${W_VERIFY}·verification(${verify.toFixed(2)}) + ${W_RISK}·risk(${risk.toFixed(2)}) = ${overall.toFixed(2)}`,
   );
 
-  const decision = decideFromConfidence(overall);
+  const decision = decideFromConfidence(overall, input.calibratedThresholds);
+  if (input.calibratedThresholds && input.calibratedThresholds.reason !== "insufficient data for calibration") {
+    basis.push("thresholds:calibrated(" + input.calibratedThresholds.reason + ")");
+  }
   const reason = explainDecision(decision, overall, penalties);
 
   return {
@@ -201,10 +259,13 @@ export function scoreRunConfidence(input: ConfidenceInput): ConfidenceBreakdown 
 
 // ─── Decision logic ──────────────────────────────────────────────────
 
-function decideFromConfidence(overall: number): ConfidenceDecision {
-  if (overall >= T_APPLY) return "apply";
-  if (overall >= T_REVIEW) return "review";
-  if (overall >= T_ESCALATE) return "escalate";
+function decideFromConfidence(overall: number, thresholds?: CalibratedThresholds): ConfidenceDecision {
+  const tApply = thresholds?.apply ?? T_APPLY;
+  const tReview = thresholds?.review ?? T_REVIEW;
+  const tEscalate = thresholds?.escalate ?? T_ESCALATE;
+  if (overall >= tApply) return "apply";
+  if (overall >= tReview) return "review";
+  if (overall >= tEscalate) return "escalate";
   return "reject";
 }
 

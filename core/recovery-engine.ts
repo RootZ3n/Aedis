@@ -73,6 +73,15 @@ export interface RecoveryContext {
   readonly patternMatches?: readonly string[];
 }
 
+// Module-level singleton for global circuit breaker state.
+// Persists across Coordinator instantiations within the same process.
+let _globalEngine: RecoveryEngine | null = null;
+
+export function getGlobalRecoveryEngine(): RecoveryEngine {
+  if (!_globalEngine) _globalEngine = new RecoveryEngine();
+  return _globalEngine;
+}
+
 const STRATEGY_ORDER: readonly RecoveryStrategyName[] = [
   "retry_clearer_contract",
   "narrow_scope",
@@ -86,9 +95,66 @@ const STRATEGY_ORDER: readonly RecoveryStrategyName[] = [
   "block_human_review",
 ];
 
+export interface GlobalRecoveryBudget {
+  /** Maximum total USD to spend on recovery across all strategies. */
+  readonly maxTotalUsd: number;
+  /** Maximum total recovery attempts across all strategies. */
+  readonly maxTotalAttempts: number;
+  /** Total USD spent on recovery so far. */
+  totalSpentUsd: number;
+  /** Total recovery attempts across all runs. */
+  totalAttempts: number;
+  /** Whether the circuit breaker has tripped. */
+  tripped: boolean;
+  /** Reason the circuit breaker tripped. */
+  tripReason: string | null;
+}
+
 export class RecoveryEngine {
   private readonly receipts: RecoveryReceipt[] = [];
   private readonly escalationHistory = new Map<string, RecoveryStrategyName[]>();
+  private readonly globalBudget: GlobalRecoveryBudget = {
+    maxTotalUsd: 2.00, // $2 total recovery budget across all runs
+    maxTotalAttempts: 20, // max 20 recovery attempts before circuit breaker trips
+    totalSpentUsd: 0,
+    totalAttempts: 0,
+    tripped: false,
+    tripReason: null,
+  };
+
+  /**
+   * Check if the global circuit breaker has tripped. When tripped,
+   * no more recovery attempts are allowed — all tasks go straight
+   * to human review.
+   */
+  isCircuitTripped(): boolean {
+    return this.globalBudget.tripped;
+  }
+
+  /**
+   * Get the current global recovery budget state.
+   */
+  getGlobalBudget(): GlobalRecoveryBudget {
+    return { ...this.globalBudget };
+  }
+
+  /**
+   * Record a recovery attempt against the global budget. Called by
+   * the coordinator after each recovery strategy is executed.
+   */
+  recordRecoveryAttempt(costUsd: number): void {
+    this.globalBudget.totalAttempts++;
+    this.globalBudget.totalSpentUsd += costUsd;
+
+    if (this.globalBudget.totalAttempts >= this.globalBudget.maxTotalAttempts) {
+      this.globalBudget.tripped = true;
+      this.globalBudget.tripReason = "Global recovery attempt limit reached (" + this.globalBudget.maxTotalAttempts + ")";
+    }
+    if (this.globalBudget.totalSpentUsd >= this.globalBudget.maxTotalUsd) {
+      this.globalBudget.tripped = true;
+      this.globalBudget.tripReason = "Global recovery cost limit reached ($" + this.globalBudget.totalSpentUsd.toFixed(2) + ")";
+    }
+  }
 
   analyzeFailure(result: RecoveryResult): FailureType {
     const signals = (result.failureSignals ?? []).map((signal) => signal.toLowerCase());
