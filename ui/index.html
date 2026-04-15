@@ -2510,7 +2510,7 @@ body .app::before{
         const data = await res.json().catch(() => ({ models: payload }));
         state.modelConfig = mergeModelConfig(data.models || payload);
         window.localStorage.setItem(STORAGE_KEYS.modelConfig, JSON.stringify(state.modelConfig));
-        setConfigStatus('Saved. Applies on next run.', false);
+        setConfigStatus('Saved. Will be used on next run (verified).', false);
       } catch (err) {
         state.modelConfig = mergeModelConfig(payload);
         window.localStorage.setItem(STORAGE_KEYS.modelConfig, JSON.stringify(state.modelConfig));

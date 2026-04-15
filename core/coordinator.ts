@@ -193,6 +193,7 @@ import {
   WorkerRegistry,
 } from "../workers/base.js";
 import type { EventBus, AedisEvent } from "../server/websocket.js";
+import { loadModelConfig as loadModelConfigFromDisk } from "../server/routes/config.js";
 
 const exec = promisify(execFile);
 
@@ -1040,6 +1041,48 @@ export class Coordinator {
           createdAt: active.workspace.createdAt,
           worktreeBranch: active.workspace.worktreeBranch,
           cleanedUp: false,
+        },
+      });
+    }
+
+    // ── Worker Model Resolution Receipt ─────────────────────────────
+    // Resolve the exact models Builder and Critic will dispatch with,
+    // reading from the SAME source the workers read from (the source
+    // repo's .aedis/model-config.json). Emit a run_started checkpoint
+    // so the receipt shows which models were selected and whether they
+    // came from the user's saved config or the hardcoded defaults. If
+    // the UI shows model X but this checkpoint shows default Y, the
+    // save->execute pipeline is broken — the dogfood receipt is the
+    // ground truth.
+    {
+      const configPath = resolve(active.sourceRepo, ".aedis", "model-config.json");
+      const configSource: "user-config" | "fallback" = existsSync(configPath)
+        ? "user-config"
+        : "fallback";
+      const resolved = loadModelConfigFromDisk(active.sourceRepo);
+      const workerModels = {
+        builder: `${resolved.builder.provider}/${resolved.builder.model}`,
+        critic: `${resolved.critic.provider}/${resolved.critic.model}`,
+        scout: `${resolved.scout.provider}/${resolved.scout.model}`,
+        verifier: `${resolved.verifier.provider}/${resolved.verifier.model}`,
+        integrator: `${resolved.integrator.provider}/${resolved.integrator.model}`,
+        escalation: `${resolved.escalation.provider}/${resolved.escalation.model}`,
+        coordinator: `${resolved.coordinator.provider}/${resolved.coordinator.model}`,
+      };
+      console.log(
+        `[coordinator] worker models resolved (source=${configSource}, path=${configPath}): ` +
+        `builder=${workerModels.builder} critic=${workerModels.critic}`,
+      );
+      await this.persistReceiptCheckpoint(active, {
+        at: new Date().toISOString(),
+        type: "run_started",
+        status: "EXECUTING_IN_WORKSPACE",
+        phase: run.phase,
+        summary: `worker models resolved (source=${configSource})`,
+        details: {
+          workerModels,
+          source: configSource,
+          configPath,
         },
       });
     }
@@ -2692,6 +2735,7 @@ export class Coordinator {
       changes: active.changes,
       workerResults: active.workerResults,
       projectRoot: active.projectRoot,
+      sourceRepo: active.sourceRepo,
       recentContext,
       buildAssignment: (decision, task, intent, context, upstreamResults) =>
         this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),

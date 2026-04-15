@@ -184,10 +184,19 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /config/models — Update model assignments.
    * Accepts a partial or full ModelConfig. Missing roles keep their current values.
    */
-  fastify.post<{ Body: Partial<ModelConfig> }>(
+  fastify.post<{ Body: Partial<ModelConfig> | { models: Partial<ModelConfig> } }>(
     "/models",
-    async (request: FastifyRequest<{ Body: Partial<ModelConfig> }>, reply: FastifyReply) => {
-      const { valid, errors } = validateModelConfig(request.body);
+    async (request, reply: FastifyReply) => {
+      // Accept both shapes: the UI posts `{ models: {...} }`, early
+      // CLI callers posted the flat ModelConfig directly. Unwrap once
+      // here so downstream merge/validate logic only sees the role map.
+      const raw = request.body as any;
+      const assignments: Record<string, unknown> =
+        raw && typeof raw === "object" && raw.models && typeof raw.models === "object"
+          ? raw.models
+          : (raw ?? {});
+
+      const { valid, errors } = validateModelConfig(assignments);
 
       if (!valid) {
         reply.code(400).send({
@@ -203,8 +212,8 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
       // Merge incoming assignments with current config
       const updated: ModelConfig = { ...current };
       for (const role of VALID_ROLES) {
-        if (role in (request.body as any)) {
-          (updated as any)[role] = (request.body as any)[role];
+        if (role in assignments) {
+          (updated as any)[role] = (assignments as any)[role];
         }
       }
 
@@ -222,7 +231,7 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
 
       reply.send({
         models: updated,
-        updated_roles: VALID_ROLES.filter((role) => role in (request.body as any)),
+        updated_roles: VALID_ROLES.filter((role) => role in assignments),
         message: "Model configuration saved. Changes take effect on next run.",
         warnings: errors.filter((e) => e.includes("ignored")),
       });

@@ -115,7 +115,8 @@ export class CriticWorker extends AbstractWorker {
     // Resolve effective projectRoot from the assignment first; the
     // constructor-time field is the fallback for tests/standalone use.
     const projectRoot = assignment.projectRoot ?? this.projectRoot;
-    const { model } = this.getActiveModelConfig(projectRoot);
+    const configRoot = assignment.sourceRepo ?? projectRoot;
+    const { model } = this.getActiveModelConfig(configRoot);
     return {
       model,
       inputTokens: Math.ceil((assignment.task.description.length + JSON.stringify(assignment.upstreamResults).length) / 4),
@@ -133,13 +134,17 @@ export class CriticWorker extends AbstractWorker {
     // back to this.projectRoot (constructor-time, the API server's cwd) when
     // no override is provided — the test/standalone-harness path.
     const projectRoot = assignment.projectRoot ?? this.projectRoot;
+    // Model assignments live at the SOURCE repo's .aedis/model-config.json,
+    // which is gitignored and therefore absent from the workspace worktree.
+    // Prefer sourceRepo when the Coordinator supplied it.
+    const configRoot = assignment.sourceRepo ?? projectRoot;
 
     try {
       if (!builderResult || builderResult.output.kind !== "builder") {
         throw new Error("Critic requires a successful BuilderResult upstream");
       }
 
-      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(projectRoot);
+      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(configRoot);
       const builderOutput = builderResult.output as BuilderOutput & { contract?: TaskContract };
       const changes = builderOutput.changes;
       const contract = builderOutput.contract ?? null;
@@ -269,7 +274,7 @@ export class CriticWorker extends AbstractWorker {
           error: error instanceof Error ? error.message : String(error),
         },
       });
-      const { model } = this.getActiveModelConfig(projectRoot);
+      const { model } = this.getActiveModelConfig(configRoot);
       return this.failure(
         assignment,
         error instanceof Error ? error.message : String(error),

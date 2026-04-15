@@ -198,13 +198,14 @@ export class BuilderWorker extends AbstractWorker {
   async estimateCost(assignment: WorkerAssignment): Promise<CostEntry> {
     // Resolve effective projectRoot from assignment first.
     const projectRoot = assignment.projectRoot ?? this.projectRoot;
+    const configRoot = assignment.sourceRepo ?? projectRoot;
     const contextChars = assignment.context.layers.reduce(
       (sum, layer) => sum + layer.files.reduce((inner, file) => inner + file.content.length, 0),
       0,
     );
     const inputTokens = Math.ceil((contextChars + assignment.task.description.length * 2) / 4);
     const outputTokens = Math.min(assignment.tokenBudget, 1800);
-    const { model } = this.getActiveModelConfig(projectRoot);
+    const { model } = this.getActiveModelConfig(configRoot);
     return {
       model,
       inputTokens,
@@ -225,13 +226,19 @@ export class BuilderWorker extends AbstractWorker {
     // outside the try block so the catch handler can use it too without
     // re-resolving.
     const projectRoot = assignment.projectRoot ?? this.projectRoot;
+    // Model assignments are persisted in .aedis/model-config.json at
+    // the SOURCE repo. The disposable workspace worktree does not carry
+    // that file (it's gitignored). Read from sourceRepo when the
+    // Coordinator provided it; fall back to projectRoot for standalone
+    // harnesses that don't distinguish the two.
+    const configRoot = assignment.sourceRepo ?? projectRoot;
 
     try {
       if (!this.canHandle(assignment)) {
         throw new Error("Builder requires an exact single-file contract scope");
       }
 
-      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(projectRoot);
+      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(configRoot);
       const contract = this.buildContract(assignment);
       const targetPath = this.resolveTarget(contract.file, projectRoot);
       const relativePath = this.toRelative(targetPath, projectRoot);
@@ -452,7 +459,7 @@ export class BuilderWorker extends AbstractWorker {
           error: error instanceof Error ? error.message : String(error),
         },
       });
-      const { model } = this.getActiveModelConfig(projectRoot);
+      const { model } = this.getActiveModelConfig(configRoot);
       return this.failure(
         assignment,
         error instanceof Error ? error.message : String(error),

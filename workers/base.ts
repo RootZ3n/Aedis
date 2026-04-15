@@ -120,6 +120,14 @@ export interface WorkerAssignment {
    *     this field; workers fall back to their constructor-time projectRoot.
    */
   readonly projectRoot?: string;
+  /**
+   * Absolute path to the SOURCE repo (not the disposable workspace).
+   * Attached by Coordinator.dispatchNode so workers can read persistent,
+   * gitignored state that the workspace worktree doesn't carry — most
+   * importantly `.aedis/model-config.json`. When absent, helpers fall
+   * back to `projectRoot`.
+   */
+  readonly sourceRepo?: string;
   /** Prompt-gated recent project memory, attached for Scout context. */
   readonly recentContext?: GatedContext;
 }

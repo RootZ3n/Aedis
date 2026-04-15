@@ -16,6 +16,7 @@ export function buildDispatchAssignment(input: {
   changes: readonly unknown[];
   workerResults: readonly WorkerResult[];
   projectRoot: string;
+  sourceRepo: string;
   recentContext: GatedContext | undefined;
   buildAssignment: (
     decision: RoutingDecision,
@@ -39,6 +40,7 @@ export function buildDispatchAssignment(input: {
     changes: [...input.changes] as WorkerAssignment["changes"],
     workerResults: [...input.workerResults],
     projectRoot: input.projectRoot,
+    sourceRepo: input.sourceRepo,
     recentContext: input.recentContext,
   };
 }
