@@ -1079,6 +1079,15 @@ body .app::before{
         <div id="config-status" class="settings-note">Loading model config...</div>
       </section>
 
+      <!-- Manage Models -->
+      <section class="panel settings-panel">
+        <div class="settings-row">
+          <div class="label">Manage Models</div>
+          <span class="tiny">add/remove per provider · curated manually</span>
+        </div>
+        <div id="manage-models" class="settings-grid" style="gap:4px"></div>
+      </section>
+
     </div>
   </div>
 
@@ -1153,7 +1162,26 @@ body .app::before{
       verifier: 'teal',
       integrator: 'pink',
     };
-    const MODEL_OPTIONS = {
+    // ROLE_PROVIDERS declares which providers may serve each role. This
+    // is a UX judgment (e.g. Scout is always local, Builder shouldn't run
+    // on the tiny qwen) and stays in the UI. The set of MODELS within
+    // each provider comes from the server's provider registry, fetched
+    // via /config/providers on load — and editable from the Manage
+    // Models panel.
+    const ROLE_PROVIDERS = {
+      scout:       ['local'],
+      verifier:    ['local'],
+      builder:     ['modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'anthropic', 'portum'],
+      critic:      ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'portum'],
+      integrator:  ['modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'anthropic', 'portum'],
+      escalation:  ['anthropic', 'openai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'portum'],
+      coordinator: ['openrouter', 'glm-5.1-openrouter', 'glm-5.1-direct', 'anthropic', 'openai', 'portum'],
+    };
+
+    // Seeded fallback — used if /config/providers is unreachable at
+    // load. Once the real registry fetch lands, rebuildModelOptions()
+    // overwrites this with the server truth.
+    let MODEL_OPTIONS = {
       scout: [{ model: 'local', provider: 'local', label: 'local' }],
       builder: [
         { model: 'qwen3.6-plus', provider: 'modelstudio', label: 'qwen3.6-plus' },
@@ -1216,6 +1244,7 @@ body .app::before{
       history: [],
       active: createEmptyRun(),
       historyError: '',
+      providerRegistry: null,
       modelConfig: { ...DEFAULT_MODEL_CONFIG },
       repoPath: '.',
       submitting: false,
@@ -2470,6 +2499,104 @@ body .app::before{
       }
     }
 
+    // Rebuild MODEL_OPTIONS from the server's provider registry. Labels
+    // disambiguate when the same model name appears on multiple
+    // providers for the same role (e.g. qwen3.6-plus on modelstudio AND
+    // portum). Unknown providers in ROLE_PROVIDERS[role] are silently
+    // skipped.
+    function rebuildModelOptions(registry) {
+      const next = {};
+      for (const role of CONFIG_ROLE_ORDER) {
+        const allowed = ROLE_PROVIDERS[role] || [];
+        const raw = [];
+        for (const provider of allowed) {
+          const entry = registry[provider];
+          if (!entry) continue;
+          for (const model of entry.models) raw.push({ provider, model });
+        }
+        const counts = raw.reduce((acc, o) => {
+          acc[o.model] = (acc[o.model] || 0) + 1;
+          return acc;
+        }, {});
+        next[role] = raw.map((o) => ({
+          model: o.model,
+          provider: o.provider,
+          label: counts[o.model] > 1
+            ? `${o.model} [${registry[o.provider]?.label || o.provider}]`
+            : o.model,
+        }));
+      }
+      MODEL_OPTIONS = next;
+    }
+
+    async function loadProviderRegistry() {
+      try {
+        const res = await fetch(`${API_BASE}/config/providers`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        state.providerRegistry = data.providers || {};
+        rebuildModelOptions(state.providerRegistry);
+      } catch (err) {
+        // Keep the seeded MODEL_OPTIONS fallback so the UI still renders.
+        console.warn('[aedis] /config/providers unreachable, using seeded defaults:', err.message);
+        state.providerRegistry = null;
+      }
+      renderManagePanel();
+    }
+
+    async function addProviderModel(provider, model) {
+      const trimmed = String(model || '').trim();
+      if (!trimmed) return;
+      const res = await fetch(`${API_BASE}/config/providers/${encodeURIComponent(provider)}/models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: trimmed }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setConfigStatus(`Add failed: ${body.error || res.status}`, true);
+        return;
+      }
+      await loadProviderRegistry();
+      renderSettings();
+      setConfigStatus(`Added ${provider}/${trimmed}.`, false);
+    }
+
+    async function removeProviderModel(provider, model) {
+      const res = await fetch(
+        `${API_BASE}/config/providers/${encodeURIComponent(provider)}/models/${encodeURIComponent(model)}`,
+        { method: 'DELETE' },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setConfigStatus(`Remove failed: ${body.error || res.status}`, true);
+        return;
+      }
+      await loadProviderRegistry();
+      renderSettings();
+      setConfigStatus(`Removed ${provider}/${model}.`, false);
+    }
+
+    async function pingOpenRouter() {
+      const label = document.getElementById('openrouter-status');
+      if (label) label.textContent = 'pinging...';
+      try {
+        const res = await fetch(`${API_BASE}/config/providers/openrouter/health`);
+        const health = await res.json();
+        if (!label) return;
+        const extra = health.creditRemaining !== undefined
+          ? ` · $${health.creditRemaining.toFixed(2)} left`
+          : '';
+        label.textContent = (health.ok ? '✓ ' : '✗ ') + health.reason + extra;
+        label.style.color = health.ok ? '#4df5c8' : '#ff5d6c';
+      } catch (err) {
+        if (label) {
+          label.textContent = '✗ ping failed: ' + err.message;
+          label.style.color = '#ff5d6c';
+        }
+      }
+    }
+
     async function loadModelConfig() {
       const cached = window.localStorage.getItem(STORAGE_KEYS.modelConfig);
       if (cached) {
@@ -2969,6 +3096,61 @@ body .app::before{
       return `${text.slice(0, length - 1)}…`;
     }
 
+    function renderManagePanel() {
+      const host = document.getElementById('manage-models');
+      if (!host) return;
+      const registry = state.providerRegistry;
+      if (!registry) {
+        host.innerHTML = '<div class="tiny">Provider registry unavailable — using local defaults. Edits disabled.</div>';
+        return;
+      }
+      // Fixed order so the block is stable across renders; OpenRouter
+      // gets its own connection row above its model list.
+      const order = ['anthropic', 'openai', 'openrouter', 'modelstudio', 'zai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'ollama', 'portum', 'local'];
+      const parts = order.filter((p) => registry[p]).map((provider) => {
+        const entry = registry[provider];
+        const keyStatus = entry.apiKeyEnv
+          ? (entry.apiKeyPresent
+              ? `<span class="tiny" style="color:#4df5c8">● key set</span>`
+              : `<span class="tiny" style="color:#ff5d6c">● key missing (${esc(entry.apiKeyEnv)})</span>`)
+          : `<span class="tiny">no key required</span>`;
+        const openrouterExtras = provider === 'openrouter'
+          ? `<div class="settings-row" style="gap:8px;align-items:center">
+               <button class="button" type="button" onclick="pingOpenRouter()" style="font-size:11px;padding:2px 8px">Test connection</button>
+               <span id="openrouter-status" class="tiny">(click to ping /auth/key)</span>
+             </div>`
+          : '';
+        const modelList = entry.models.map((m) => `
+          <div class="settings-row" style="gap:6px;align-items:center;padding:2px 0">
+            <code style="flex:1;font-size:12px">${esc(m)}</code>
+            <button class="button" type="button" title="Remove"
+              onclick="removeProviderModel('${esc(provider)}', '${esc(m)}')"
+              style="font-size:11px;padding:0 6px">×</button>
+          </div>
+        `).join('');
+        return `
+          <details class="settings-item" style="padding:6px 8px">
+            <summary class="role-name" style="cursor:pointer">
+              ${esc(entry.label)} <span class="tiny">(${entry.models.length})</span> ${keyStatus}
+            </summary>
+            <div style="margin-top:6px">
+              ${openrouterExtras}
+              ${modelList || '<div class="tiny">(no models registered)</div>'}
+              <div class="settings-row" style="gap:6px;margin-top:6px">
+                <input type="text" placeholder="model id (e.g. x-ai/grok-2)"
+                  id="add-model-${esc(provider)}"
+                  class="config-select" style="flex:1" />
+                <button class="button" type="button"
+                  onclick="(function(){const i=document.getElementById('add-model-${esc(provider)}');addProviderModel('${esc(provider)}', i.value).then(()=>{i.value='';});})()"
+                  style="font-size:11px;padding:2px 8px">Add</button>
+              </div>
+            </div>
+          </details>
+        `;
+      });
+      host.innerHTML = parts.join('');
+    }
+
     function renderSettings() {
       const grid = document.getElementById('settings-grid');
       grid.innerHTML = CONFIG_ROLE_ORDER.map((role) => {
@@ -3022,6 +3204,9 @@ body .app::before{
     }
 
     window.selectRun = selectRun;
+    window.addProviderModel = addProviderModel;
+    window.removeProviderModel = removeProviderModel;
+    window.pingOpenRouter = pingOpenRouter;
     document.getElementById('loqui-form').addEventListener('submit', submitLoqui);
     document.getElementById('config-save').addEventListener('click', saveModelConfig);
     document.getElementById('repo-input').addEventListener('change', persistRepoPath);
@@ -3033,7 +3218,13 @@ body .app::before{
     render();
     connect();
     void loadPersistedRuns();
-    loadModelConfig();
+    // Fetch provider registry first so dropdowns reflect server truth,
+    // then pull the saved worker-model assignments.
+    (async () => {
+      await loadProviderRegistry();
+      renderSettings();
+      await loadModelConfig();
+    })();
   </script>
 </body>
 </html>

@@ -41,6 +41,7 @@ import { runRoutes } from "./routes/runs.js";
 import { workerRoutes } from "./routes/workers.js";
 import { healthRoutes } from "./routes/health.js";
 import { configRoutes } from "./routes/config.js";
+import { providerRoutes } from "./routes/providers.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { loquiRoutes } from "./routes/loqui.js";
 import { trustRoutes } from "./routes/trust.js";
@@ -278,6 +279,7 @@ export async function createServer(
   await server.register(workerRoutes, { prefix: "/workers" });
   await server.register(healthRoutes);
   await server.register(configRoutes, { prefix: "/config" });
+  await server.register(providerRoutes, { prefix: "/config/providers" });
   // Metrics + External API Layer v1 — read-only external surface.
   await server.register(metricsRoutes, { prefix: "/metrics" });
   await server.register(loquiRoutes, { prefix: "/loqui" });
