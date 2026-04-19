@@ -426,9 +426,16 @@ export class BuilderWorker extends AbstractWorker {
       this.eventBus?.emit({
         type: "builder_complete",
         payload: {
+          runId: this.extractRunId(assignment),
           taskId,
           workerType: this.type,
           file: relativePath,
+          // Transparency rule: surface the actual +/- diff live so the UI
+          // can render it as the Builder finishes each file, rather than
+          // hiding the change until the end-of-run patch artifact.
+          diff,
+          path: relativePath,
+          operation: "modify",
           model: response.usedModel,
           provider: response.usedProvider,
           costUsd: cost.estimatedCostUsd,
@@ -583,12 +590,20 @@ export class BuilderWorker extends AbstractWorker {
   ): BuiltPrompt {
     let fixedParts: string[];
 
+    // CRITICAL: the charter-generated deliverable description is usually
+    // just "Modify <file>" — it does NOT contain the user's actual ask.
+    // Without including intent.userRequest the Builder is asked to modify
+    // a file with no instruction on WHAT to change, and the model fills
+    // the gap by hallucinating a plausible edit (e.g. deleting an array
+    // element to "clean up"). Surface the original request first.
+    const userRequest = assignment.intent?.userRequest?.trim() || "";
     if (sectionInfo) {
       fixedParts = [
         `You are the Builder worker on model ${model}.`,
         "You must obey the contract exactly.",
         `Target file: ${contract.file}`,
-        `Goal: ${contract.goal}`,
+        userRequest ? `User request (this is what you must actually do): ${userRequest}` : "",
+        `Deliverable: ${contract.goal}`,
         `Constraints: ${contract.constraints.join(" | ") || "none"}`,
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
@@ -628,12 +643,13 @@ export class BuilderWorker extends AbstractWorker {
         `You are the Builder worker on model ${model}.`,
         "You must obey the contract exactly.",
         `Target file: ${contract.file}`,
-        `Goal: ${contract.goal}`,
+        userRequest ? `User request (this is what you must actually do): ${userRequest}` : "",
+        `Deliverable: ${contract.goal}`,
         `Constraints: ${contract.constraints.join(" | ") || "none"}`,
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
         "Return ONLY the full final file content for the target file. No markdown fences. No explanations.",
-        "You MUST make the change described in the Goal. Do not return the file unchanged — if you do, the task fails and costs are wasted.",
+        "You MUST make exactly the change the User request describes. Do not invent or remove unrelated content. If the request is to add a comment, add a comment — do not also delete, rename, or reformat anything else.",
         "Current file:",
         promptContent,
       ];

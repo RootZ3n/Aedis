@@ -2451,6 +2451,32 @@ body .app::before{
         appendReceipt(run, receipt);
       }
 
+      // Live diff: accumulate each Builder's per-file diff as the run
+      // progresses so the Diff panel lights up BEFORE the final receipt
+      // arrives. Uses the same panel render path as the end-of-run
+      // patchArtifact; just prepends the live hunks.
+      if (type === 'builder_complete' && typeof payload.diff === 'string' && payload.diff.trim()) {
+        const filePath = String(payload.file || payload.path || '');
+        // Avoid double-append if the same file comes through twice (rehearsal
+        // loop, partial retry). Keep the latest diff per file.
+        const existing = run.patchDiff || '';
+        const marker = filePath ? `diff --git a/${filePath} ` : null;
+        let next = existing;
+        if (marker && existing.includes(marker)) {
+          // Replace the existing hunk for this file in-place.
+          const startIdx = existing.indexOf(marker);
+          const afterStart = existing.indexOf('\ndiff --git ', startIdx + marker.length);
+          const nextFileIdx = afterStart === -1 ? existing.length : afterStart + 1;
+          next = existing.slice(0, startIdx) + payload.diff.replace(/\n*$/, '\n') + existing.slice(nextFileIdx);
+        } else {
+          next = existing ? existing.replace(/\n*$/, '\n') + payload.diff : payload.diff;
+        }
+        run.patchDiff = next;
+        if (filePath && !(run.patchFiles || []).includes(filePath)) {
+          run.patchFiles = [...(run.patchFiles || []), filePath];
+        }
+      }
+
       if (type === 'run_started' || type === 'start' || type === 'run') run.status = 'running';
       else if (type === 'run_cancelled') {
         run.status = payload.status || payload.verdict || 'cancelled';
@@ -2973,14 +2999,14 @@ body .app::before{
       }
       panel.style.display = 'grid';
 
-      // Small-diff default-open, large-diff default-collapsed so the
-      // panel doesn't dominate the page on refactors. User can flip it
-      // with the toggle button. We store the last-seen run id so that
-      // switching runs re-applies the default instead of carrying over.
+      // Default-open — Zen's transparency rule: watch the code as it
+      // changes, don't hide it. We only re-apply the default when the
+      // viewed run changes (panel.dataset.runId tracks the last id
+      // rendered); the user's explicit toggle persists during that run.
       const lineCount = diff.split('\n').length;
       const lastRenderedId = panel.dataset.runId || '';
       if (lastRenderedId !== String(run.id || '')) {
-        body.classList.toggle('collapsed', lineCount > 80);
+        body.classList.remove('collapsed');
         panel.dataset.runId = String(run.id || '');
       }
       toggle.textContent = body.classList.contains('collapsed') ? 'SHOW' : 'HIDE';
