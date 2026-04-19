@@ -1091,17 +1091,9 @@ body .app::before{
         <div id="lumen-log" class="lumen-box"></div>
       </section>
 
-      <!-- Trust Summary -->
-      <section class="panel trust-summary-panel" id="trust-summary-panel" style="display:none;">
-        <div class="loqui-row">
-          <div class="label">Trust Summary</div>
-          <span id="trust-summary-chip" class="tiny">&mdash;</span>
-        </div>
-        <div id="trust-summary-body" class="trust-summary-body"></div>
-      </section>
-
-      <!-- Diff Viewer — transparency rule: every code-changing run shows
-           its actual +/- lines before you trust the verdict. -->
+      <!-- Diff Viewer — transparency rule: sits directly below the Lumen
+           live log so the operator can watch +/- lines land in real time
+           as each Builder completes. -->
       <section class="panel diff-panel" id="diff-panel" style="display:none;">
         <div class="diff-panel-head">
           <div class="loqui-row" style="gap:10px">
@@ -1111,6 +1103,15 @@ body .app::before{
           <button id="diff-panel-toggle" class="diff-panel-toggle" type="button">HIDE</button>
         </div>
         <div id="diff-panel-body" class="diff-panel-body"></div>
+      </section>
+
+      <!-- Trust Summary -->
+      <section class="panel trust-summary-panel" id="trust-summary-panel" style="display:none;">
+        <div class="loqui-row">
+          <div class="label">Trust Summary</div>
+          <span id="trust-summary-chip" class="tiny">&mdash;</span>
+        </div>
+        <div id="trust-summary-body" class="trust-summary-body"></div>
       </section>
 
       <!-- Run History — dense run strips -->
@@ -2449,6 +2450,27 @@ body .app::before{
       if (type === 'worker_complete' && payload.payload && payload.payload.cost) {
         const receipt = normalizeReceipt(payload.payload);
         appendReceipt(run, receipt);
+      }
+
+      // Per-worker completion events populate the Receipt Feed. No event
+      // with type `worker_complete` is actually emitted — workers fire
+      // scout_complete / builder_complete / critic_review / verifier_check /
+      // integration_check each with their own payload shape. Normalize all
+      // of them through normalizeReceipt (which is field-shape-tolerant)
+      // and drop any with zero cost + zero tokens so we don't fill the
+      // feed with empty scout/verifier entries.
+      const WORKER_COMPLETION_TYPES = new Set([
+        'scout_complete',
+        'builder_complete',
+        'critic_review',
+        'verifier_check',
+        'integration_check',
+      ]);
+      if (WORKER_COMPLETION_TYPES.has(type)) {
+        const receipt = normalizeReceipt(payload);
+        if (receipt && (Number(receipt.costUsd) > 0 || Number(receipt.totalTokens) > 0 || receipt.worker !== 'system')) {
+          appendReceipt(run, receipt);
+        }
       }
 
       // Live diff: accumulate each Builder's per-file diff as the run
