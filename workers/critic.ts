@@ -395,10 +395,20 @@ export class CriticWorker extends AbstractWorker {
 
   private runHeuristicChecks(changes: readonly FileChange[], contract: TaskContract | null, assignment: WorkerAssignment): Issue[] {
     const issues: Issue[] = [];
-    const allowedFiles = new Set(assignment.task.targetFiles);
+    // Normalize both sides of the scope check so mixed absolute/relative
+    // shapes don't fire a false "Scope drift". The Coordinator canonicalizes
+    // upstream but a defensive normalization here stops any future regression
+    // from reaching a user-visible block.
+    const stripSource = (p: string): string => {
+      const src = assignment.sourceRepo;
+      if (src && p.startsWith(src)) return p.slice(src.length).replace(/^[\\/]+/, "");
+      return p;
+    };
+    const allowedFiles = new Set(assignment.task.targetFiles.map(stripSource));
 
     for (const change of changes) {
-      if (!allowedFiles.has(change.path)) {
+      const normalized = stripSource(change.path);
+      if (!allowedFiles.has(normalized) && !allowedFiles.has(change.path)) {
         issues.push({ severity: "critical", message: `Scope drift: ${change.path} is outside contract scope`, file: change.path });
       }
       if (change.diff?.includes("TODO") || change.content?.includes("TODO")) {

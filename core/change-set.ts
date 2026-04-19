@@ -67,14 +67,26 @@ export interface ChangeSet {
   readonly coherenceVerdict: CoherenceVerdict;
 }
 
-function normalizeFiles(files: readonly string[]): string[] {
-  return Array.from(
-    new Set(
-      files
-        .map((file) => file.trim())
-        .filter((file) => file.length > 0),
-    ),
-  );
+function normalizeFiles(
+  files: readonly string[],
+  sourceRepo?: string,
+): string[] {
+  // Deduplicate absolute+relative duplicates. If a file appears as both
+  // /mnt/ai/squidley-v2/... (absolute) and apps/... (worktree-relative),
+  // resolve both to worktree-relative canonical form before deduplicating.
+  const canonical = files.map((f) => {
+    const trimmed = f.trim();
+    if (!trimmed) return "";
+    // Resolve absolute source-repo paths to worktree-relative.
+    // This handles paths like /mnt/ai/squidley-v2/apps/api/src/routes/index.ts
+    // that need to be expressed as apps/api/src/routes/index.ts for downstream
+    // components (Builder, IntegrationJudge) that resolve relative to projectRoot.
+    if (sourceRepo && trimmed.startsWith(sourceRepo)) {
+      return trimmed.slice(sourceRepo.length).replace(/^[\\/]+/, "");
+    }
+    return trimmed;
+  });
+  return Array.from(new Set(canonical.filter((f) => f.length > 0)));
 }
 
 // ─── Sensitive File Detection ────────────────────────────────────────
@@ -288,8 +300,9 @@ export function createChangeSet(
   intent: IntentObject,
   files: readonly string[],
   importGraph?: ImportGraph | null,
+  sourceRepo?: string,
 ): ChangeSet {
-  const normalizedFiles = normalizeFiles(files);
+  const normalizedFiles = normalizeFiles(files, sourceRepo);
 
   // Use real import data when available, fall back to heuristic
   const dependencyMap = importGraph

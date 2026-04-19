@@ -133,7 +133,7 @@ async function submitBuildTask(
     console.log(`[tasks] decomposition needed — ${(gateResult.plan as any).waves?.length ?? 0} wave(s)`);
     return {
       kind: "needs_decomposition",
-      taskId,
+      taskId: gateResult.taskId,
       plan: gateResult.plan,
       message: gateResult.message,
     };

@@ -183,12 +183,27 @@ export async function generatePatch(
   const generatedAt = new Date().toISOString();
 
   try {
-    // Get the diff of all changes in the workspace
-    const { stdout: diff } = await exec(
-      "git",
-      ["diff", "HEAD"],
-      { cwd: handle.workspacePath, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
-    );
+    // Get the diff — prefer commit diff if available, else working tree diff
+    let diff = "";
+    try {
+      const { stdout: commitSha } = await exec("git", ["rev-parse", "HEAD"], { cwd: handle.workspacePath, timeout: 5_000 });
+      const head = commitSha.trim();
+      if (head !== handle.sourceCommitSha) {
+        // We committed — get the diff from the source commit to HEAD
+        const { stdout: patchDiff } = await exec(
+          "git", ["diff", handle.sourceCommitSha + "..HEAD"],
+          { cwd: handle.workspacePath, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
+        );
+        diff = patchDiff;
+      }
+    } catch { /* no commit yet, fall through */ }
+    if (!diff) {
+      const { stdout: workingDiff } = await exec(
+        "git", ["diff", "HEAD"],
+        { cwd: handle.workspacePath, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
+      );
+      diff = workingDiff;
+    }
 
     // Also include untracked files
     const { stdout: untrackedDiff } = await exec(

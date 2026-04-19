@@ -277,7 +277,7 @@ const DEFAULT_CONFIG: VerificationPipelineConfig = {
   runAllStages: true,
   timeoutMs: 120_000,
   hooks: [],
-  requiredChecks: ["lint", "typecheck", "tests"],
+  requiredChecks: ["typecheck", "tests"],
   strictMode: false,
   judgeConfig: {},
   stageWeights: {

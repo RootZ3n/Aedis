@@ -163,6 +163,18 @@ export class ScoutWorker extends AbstractWorker {
     // bypass the assignment-based wiring. Threaded through every helper
     // method below so all path operations honor the per-task root.
     const projectRoot = assignment.projectRoot ?? this.projectRoot;
+    // If files come in as absolute paths from the source repo (e.g. /mnt/ai/squidley-v2/...)
+    // but we're operating on a worktree at projectRoot, map them to worktree-relative.
+    // The worktree mirrors the source repo's relative structure, so the same file exists at
+    // projectRoot + "/apps/api/src/routes/index.ts" even though the absolute path points elsewhere.
+    const sourceRepo = assignment.sourceRepo;
+    const mapToWorktree = (absPath: string): string => {
+      if (sourceRepo && absPath.startsWith(sourceRepo)) {
+        const rel = absPath.slice(sourceRepo.length).replace(/^[\\/]+/, ""); // strip leading / or \
+        return resolve(projectRoot, rel);
+      }
+      return absPath;
+    };
 
     try {
       const baseTargetFiles = assignment.task.targetFiles.length > 0
@@ -175,11 +187,15 @@ export class ScoutWorker extends AbstractWorker {
         (path) => !path.startsWith(".aedis/") && !path.endsWith(".json")
       );
       console.log(`[scout] recentContext: ${recentFiles.length} relevant files`);
-      const targetFiles = Array.from(new Set([
+      const allRawFiles = [
         ...recentFiles,
         ...clusterFiles,
         ...baseTargetFiles,
-      ])).filter((p) => !p.endsWith(".test.ts") && !p.endsWith(".spec.ts"));
+      ];
+      const targetFiles = Array.from(new Set(allRawFiles)
+        .values())
+        .filter((p) => !p.endsWith(".test.ts") && !p.endsWith(".spec.ts"));
+      const mappedTargetFiles = targetFiles.map(mapToWorktree);
 
       const reads: ScoutFileRead[] = [];
       const summaries: FileSymbolSummary[] = [];
@@ -187,7 +203,7 @@ export class ScoutWorker extends AbstractWorker {
       const dependencies: DependencyEdge[] = [];
       const patterns: CodePattern[] = [];
 
-      for (const file of targetFiles.slice(0, 8)) {
+      for (const file of mappedTargetFiles.slice(0, 8)) {
         let fileRead: ScoutFileRead;
         try {
           fileRead = await this.readFile(file, projectRoot);
@@ -228,7 +244,7 @@ export class ScoutWorker extends AbstractWorker {
       }
 
       const grepPattern = this.buildTaskPattern(assignment.task.description);
-      const directorySeed = this.inferDirectorySeed(targetFiles);
+      const directorySeed = this.inferDirectorySeed(mappedTargetFiles);
       const [directoryListing, grepMatches, gitStatus, gitDiff] = await Promise.all([
         directorySeed ? this.listDir(directorySeed, projectRoot) : Promise.resolve<DirectoryListingEntry | null>(null),
         grepPattern ? this.grepFiles(grepPattern, directorySeed ?? ".", projectRoot) : Promise.resolve<GrepMatch[]>([]),
@@ -352,7 +368,12 @@ export class ScoutWorker extends AbstractWorker {
     const matches: GrepMatch[] = [];
 
     const visit = async (current: string): Promise<void> => {
-      const info = await stat(current);
+      let info;
+      try {
+        info = await stat(current);
+      } catch {
+        return; // skip missing paths silently
+      }
       if (info.isDirectory()) {
         if (this.ignoreDirs.has(current.split(sep).pop() ?? "")) return;
         const entries = await readdir(current, { withFileTypes: true });
@@ -565,7 +586,12 @@ export class ScoutWorker extends AbstractWorker {
    * per-task root rather than this.projectRoot.
    */
   private async walkDirectory(dirPath: string, projectRoot: string): Promise<DirectoryListingEntry> {
-    const info = await stat(dirPath);
+    let info;
+    try {
+      info = await stat(dirPath);
+    } catch {
+      return { path: this.toRelative(dirPath, projectRoot), type: "directory", children: [] };
+    }
     if (!info.isDirectory()) {
       return { path: this.toRelative(dirPath, projectRoot), type: "file" };
     }

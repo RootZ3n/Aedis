@@ -105,7 +105,10 @@ export function classifyScope(prompt: string, files: readonly string[]): ScopeCl
     };
   }
 
-  if (fileCount <= 1 && dependencyCount <= 1 && matchedKeywords.length === 0) {
+  // Single target file (possibly with auto-added test) — trivial scope
+  const realTargets = normalizedFiles.filter(f => !f.endsWith(".test.ts") && !f.endsWith(".spec.ts"));
+  const realDependencyCount = estimateDependencyCount(realTargets);
+  if (realTargets.length <= 1 && realDependencyCount <= 3 && matchedKeywords.length === 0) {
     return {
       type: "single-file",
       blastRadius,

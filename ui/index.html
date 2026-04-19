@@ -424,7 +424,9 @@ body .app::before{
   font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--ink-soft);text-transform:uppercase;
 }
 
-.ab-core{display:grid;gap:10px;justify-items:center;align-content:center;min-width:0}
+/* .ab-core is now an empty spacer — its middle grid cell reserves
+   space so Squidley's artwork remains centred and unobstructed. */
+.ab-core{min-width:0}
 .ab-telemetry{display:grid;gap:8px;grid-auto-rows:min-content;min-width:200px;justify-items:end}
 
 /* ─── Chip ──────────────────────────────────────────────────────── */
@@ -446,7 +448,7 @@ body .app::before{
 .status-strip{
   position:relative;
   display:grid;
-  grid-template-columns:auto auto 1fr auto auto;
+  grid-template-columns:auto auto minmax(0,1fr) auto auto;
   align-items:center;
   gap:18px;
   padding:14px 22px;
@@ -461,6 +463,25 @@ body .app::before{
     0 18px 50px rgba(0,0,0,.55);
   overflow:hidden;
   backdrop-filter:blur(2px);
+}
+/* Run meta (ID / Started / Done) inlined into the strip —
+   replaces the block that used to live in .ab-core. */
+.ss-meta{
+  display:flex;align-items:center;gap:18px;
+  min-width:0;overflow:hidden;
+  font-family:var(--mono);
+}
+.ss-meta-item{
+  display:inline-flex;align-items:baseline;gap:8px;
+  min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.ss-meta-item .label{
+  font-family:var(--mono);font-size:9px;font-weight:500;
+  letter-spacing:.26em;text-transform:uppercase;color:var(--ink-soft);
+}
+.ss-meta-item .tiny{
+  font-family:var(--mono);font-size:11px;color:var(--ink-cold);
+  overflow:hidden;text-overflow:ellipsis;
 }
 .status-strip::before{
   content:"";position:absolute;top:4px;left:4px;bottom:4px;
@@ -932,6 +953,12 @@ body .app::before{
   .worker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .vitals{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+@media (max-width:1100px){
+  /* On mid-width viewports, hide the in-strip meta row to keep the
+     pill from wrapping. The strip still shows Last Run + status
+     word + progress; full meta reappears at wider breakpoints. */
+  .ss-meta{display:none}
+}
 @media (max-width:760px){
   .app{padding:12px}
   .ab-title{font-size:28px}
@@ -968,37 +995,33 @@ body .app::before{
           </div>
         </div>
 
-        <div class="ab-core">
-          <h2 id="run-word" class="run-word idle" style="font-family:var(--mono);font-size:clamp(48px,7vw,80px);line-height:.82;font-weight:500;letter-spacing:-.04em;margin:0;text-shadow:0 0 34px rgba(251,146,60,.28)">IDLE</h2>
-          <div class="tiny-row" style="gap:12px">
-            <span class="label">Run ID</span>
-            <span id="run-id" class="tiny">none</span>
-          </div>
-          <div class="tiny-row" style="gap:12px">
-            <span class="label">Started</span>
-            <span id="run-started" class="tiny">not started</span>
-          </div>
-          <div class="tiny-row" style="gap:12px">
-            <span class="label">Done</span>
-            <span id="run-completed" class="tiny">in progress</span>
-          </div>
-        </div>
+        <!-- Centre column intentionally empty: the artwork (Squidley)
+             lives behind this grid cell and must not be covered by
+             foreground content. All run status + metadata moved to
+             the Last-Run strip directly below. -->
+        <div class="ab-core" aria-hidden="true"></div>
 
         <div class="ab-telemetry">
           <input id="repo-input" class="field" type="text" placeholder="." autocomplete="off" />
         </div>
       </section>
 
-      <!-- STATUS STRIP -->
+      <!-- LAST-RUN STRIP (formerly SYS strip) — holds the run
+           outcome plus Run ID / Started / Done details that used
+           to sit in the hero's centre column. -->
       <div id="status-strip" class="status-strip idle">
         <div class="ss-left">
           <div class="ss-dot"></div>
-          <div class="ss-label">SYS</div>
+          <div class="ss-label">Last Run</div>
         </div>
         <div id="ss-word" class="ss-mid">IDLE</div>
+        <div class="ss-meta">
+          <div class="ss-meta-item"><span class="label">ID</span><span id="run-id" class="tiny">none</span></div>
+          <div class="ss-meta-item"><span class="label">Started</span><span id="run-started" class="tiny">not started</span></div>
+          <div class="ss-meta-item"><span class="label">Done</span><span id="run-completed" class="tiny">in progress</span></div>
+        </div>
         <div class="ss-bar"><div id="ss-fill" class="ss-fill" style="width:0%"></div></div>
         <div id="ss-score" class="ss-score">0%</div>
-        <div style="width:1px"></div>
       </div>
 
       <!-- VITALS — 3 metric glyphs -->
@@ -2281,7 +2304,19 @@ body .app::before{
       }
     }
 
-    function ingestEvent(payload) {
+    function ingestEvent(rawPayload) {
+      // WebSocket wire format from server/websocket.ts is
+      //   { type, payload, timestamp, seq }
+      // but this readers here were written against a flattened shape where
+      // event-specific fields (runId, workerType, prompt, verdict, ...) live
+      // at the top level. The mismatch meant worker_assigned arrived with
+      // runId/workerType hidden inside .payload, so setActiveWorker() ran
+      // with workerType='' and the worker grid stayed stuck on IDLE/waiting.
+      // Hoist the nested payload fields to the top level while preserving
+      // .payload for the handful of sites that already drill into it.
+      const payload = (rawPayload && rawPayload.payload && typeof rawPayload.payload === 'object' && !Array.isArray(rawPayload.payload))
+        ? { ...rawPayload.payload, ...rawPayload }
+        : rawPayload;
       const type = normalizeType(payload);
       const runId = guessRunId(payload);
       const run = ensureRun(runId);
@@ -2727,12 +2762,9 @@ body .app::before{
     function renderHeader() {
       const run = state.active;
       const status = normalizeRunStatus(run.status);
-      const runWord = document.getElementById('run-word');
-      runWord.className = `run-word ${status}`;
-      runWord.textContent = status.toUpperCase();
-      // Color the run-word for new hero layout
-      const rwColors = {idle:'var(--orange)',running:'var(--amber)',complete:'var(--teal)',failed:'var(--red)',partial:'var(--orange)',queued:'var(--muted)',cancelled:'var(--gray)'};
-      runWord.style.color = rwColors[status] || 'var(--orange)';
+      // Run outcome + metadata live on the Last-Run strip below the
+      // banner. The class/word/fill/score writes below own the
+      // visual state — the hero no longer carries a status word.
       document.getElementById('cost-display').textContent = `$${Number(run.totalCostUsd || 0).toFixed(4)}`;
       document.getElementById('receipt-count').textContent = String(run.receiptCount || run.receipts.length || 0);
       document.getElementById('run-id').textContent = run.id || 'none';

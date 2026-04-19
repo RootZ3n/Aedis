@@ -298,13 +298,14 @@ function detectAmbiguity(input: string): boolean {
 export type TaskSubmissionResult =
   | { kind: "executing"; receipt: Promise<RunReceipt> }
   | { kind: "needs_clarification"; question: string }
-  | { kind: "needs_decomposition"; plan: Plan; message: string };
+  | { kind: "needs_decomposition"; taskId: string; plan: Plan; message: string };
 
 /**
  * Pending decomposition plan awaiting user approval. Stored in
  * Coordinator.pendingPlans so POST /tasks/:id/approve can resume.
  */
 interface PendingPlan {
+  taskId: string;
   submission: TaskSubmission;
   plan: Plan;
   scopeClassification: ScopeClassification;
@@ -589,6 +590,22 @@ export class Coordinator {
     const charterTargets = Array.from(
       new Set(charter.deliverables.flatMap((d) => [...d.targetFiles])),
     );
+
+    // GAP 1.5 — Extracted-target gate
+    // If the charter couldn't pull a single file/path out of the prompt,
+    // the pipeline will otherwise dispatch a placeholder deliverable with
+    // zero targetFiles, PHASE-1-drop it, and then crash the coherence
+    // gate with "No task node covers this deliverable" — an error that
+    // looks like an internal bug to the user. Surface a clarification
+    // request here so they know the actual problem is the prompt.
+    if (charterTargets.length === 0) {
+      console.log(`[coordinator] charter produced no targets — asking for clarification: "${input}"`);
+      return {
+        kind: "needs_clarification",
+        question: "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.",
+      };
+    }
+
     const scopeClassification = classifyScope(normalizedInput, charterTargets);
 
     if (scopeClassification.recommendDecompose) {
@@ -606,7 +623,7 @@ export class Coordinator {
         constraints,
         exclusions: submission.exclusions,
       });
-      const baseChangeSet = createChangeSet(intent, charterTargets);
+      const baseChangeSet = createChangeSet(intent, charterTargets, undefined, effectiveProjectRoot);
       const invariants = await extractInvariants(charterTargets, effectiveProjectRoot);
       const changeSet: ChangeSet = Object.freeze({
         ...baseChangeSet,
@@ -616,6 +633,7 @@ export class Coordinator {
       const taskId = `plan_${randomUUID().slice(0, 8)}`;
 
       this.pendingPlans.set(taskId, {
+        taskId,
         submission,
         plan,
         scopeClassification,
@@ -624,6 +642,7 @@ export class Coordinator {
 
       return {
         kind: "needs_decomposition",
+        taskId,
         plan,
         message: `This task is large (blast radius ${scopeClassification.blastRadius}, ${plan.waves.length} wave(s)). Here's how I'd break it down. Reply 'approve' to proceed or refine the plan.`,
       };
@@ -808,7 +827,7 @@ export class Coordinator {
     // wants the immutable intent + the same deduped charter target list we
     // used for the scope classifier above, so file inclusion / dependency
     // relationships / coherence verdict line up with what was just classified.
-    const baseChangeSet = createChangeSet(intent, charterTargets);
+    const baseChangeSet = createChangeSet(intent, charterTargets, undefined, effectiveProjectRoot);
     const invariants = await extractInvariants(charterTargets, effectiveProjectRoot);
     const changeSet: ChangeSet = Object.freeze({
       ...baseChangeSet,
@@ -1688,7 +1707,7 @@ export class Coordinator {
       // ── Patch artifact generation ─────────────────────────────────
       // On success/partial, generate a promotion-ready patch from the
       // workspace. On failure, still try to capture the diff for debugging.
-      if (active.workspace && active.changes.length > 0) {
+      if (active.workspace) {
         try {
           active.patchArtifact = await generatePatch(active.workspace);
           console.log(
@@ -2102,8 +2121,14 @@ export class Coordinator {
     for (const target of analysis.targets) {
       const trimmed = target.trim();
       if (!trimmed) continue;
+      // Register both the raw form (possibly absolute) and the canonical
+      // worktree-relative form so isExplicit() matches regardless of which
+      // shape a downstream caller passes.
       explicitlyMentioned.add(trimmed);
       explicitlyMentioned.add(trimmed.replace(/^.*\//, ""));
+      if (active.sourceRepo && trimmed.startsWith(active.sourceRepo)) {
+        explicitlyMentioned.add(trimmed.slice(active.sourceRepo.length).replace(/^[\\/]+/, ""));
+      }
     }
     const isExplicit = (file: string): boolean =>
       explicitlyMentioned.has(file) || explicitlyMentioned.has(file.replace(/^.*\//, ""));
@@ -2113,6 +2138,24 @@ export class Coordinator {
     let didFilter = false;
 
     console.log(`[coordinator] prepareDeliverablesForGraph: ${totalBefore} deliverable(s) before filter (projectRoot=${active.projectRoot})`);
+
+    // ── PHASE 0 — Canonicalize absolute source-repo paths to worktree-relative ──
+    // The charter's regex extractor captures absolute paths verbatim from the
+    // user prompt (e.g. /mnt/ai/squidley-v2/apps/api/src/routes/index.ts).
+    // Every downstream worker resolves target files relative to the
+    // per-task projectRoot (the isolated workspace), so absolute paths
+    // from the source repo cause set-membership mismatches (Critic reports
+    // "Scope drift" because Builder's change.path is relative). Strip the
+    // sourceRepo prefix here so all phases below operate on a consistent
+    // relative shape.
+    const canonicalizePath = (f: string): string => {
+      const trimmed = f.trim();
+      if (!trimmed) return "";
+      if (active.sourceRepo && trimmed.startsWith(active.sourceRepo)) {
+        return trimmed.slice(active.sourceRepo.length).replace(/^[\\/]+/, "");
+      }
+      return trimmed;
+    };
 
     // ── PHASE 1 — Upstream empty guard ──────────────────────────────────
     const guarded: Deliverable[] = [];
@@ -2124,7 +2167,10 @@ export class Coordinator {
         didFilter = true;
         continue;
       }
-      guarded.push(d);
+      guarded.push({
+        ...d,
+        targetFiles: d.targetFiles.map(canonicalizePath).filter((f) => f.length > 0),
+      });
     }
 
     // ── PHASE 2 — Test/non-existent filter ──────────────────────────────
@@ -2195,15 +2241,24 @@ export class Coordinator {
       for (const f of d.targetFiles) {
         // Resolve against active.projectRoot (the per-task effective root)
         // so dedup honors the per-task projectRoot rather than the
-        // Coordinator's boot-time default.
-        const abs = resolve(active.projectRoot, f);
+        // Coordinator's boot-time default. Also normalize absolute source-repo
+        // paths (e.g. /mnt/ai/squidley-v2/...) to worktree-relative so they
+        // deduplicate correctly against relative forms of the same file.
+        // We push the canonical (relative) form downstream so workers all
+        // operate on the same path shape — otherwise the Critic's
+        // allowedFiles set (absolute) won't match Builder's change.path (relative)
+        // and it fires "Scope drift" on the user's own explicit target.
+        const canonical = active.sourceRepo && f.startsWith(active.sourceRepo)
+          ? f.slice(active.sourceRepo.length).replace(/^[\\/]+/, "")
+          : f;
+        const abs = resolve(active.projectRoot, canonical);
         if (seenPaths.has(abs)) {
           decisions.push(`  dedupe ${f} (already covered by earlier deliverable as ${abs})`);
           didFilter = true;
           continue;
         }
         seenPaths.add(abs);
-        uniqueFiles.push(f);
+        uniqueFiles.push(canonical);
       }
 
       if (uniqueFiles.length === 0) {
@@ -2828,9 +2883,31 @@ export class Coordinator {
 
     const checks = [];
 
+    // Path-shape normalization: intent.charter.deliverables carries paths as
+    // emitted by the charter extractor (may be absolute), while graph.nodes
+    // carry canonicalized (worktree-relative) paths produced by
+    // prepareDeliverablesForGraph. Strip the sourceRepo prefix before the
+    // includes() check so the comparison is apples-to-apples.
+    const canonicalize = (f: string): string => {
+      if (active.sourceRepo && f.startsWith(active.sourceRepo)) {
+        return f.slice(active.sourceRepo.length).replace(/^[\\/]+/, "");
+      }
+      return f;
+    };
+
     for (const deliverable of intent.charter.deliverables) {
+      // Placeholder deliverables (no targetFiles) were already dropped by
+      // prepareDeliverablesForGraph and cannot possibly be "covered" by a
+      // graph node. Skip them here rather than fail the coherence gate —
+      // the extracted-target gate in submitWithGates already rejects runs
+      // with zero real targets.
+      if (deliverable.targetFiles.length === 0) {
+        console.log(`[coordinator] runPreBuildCoherence: skipping placeholder deliverable "${deliverable.description}" (no target files)`);
+        continue;
+      }
+      const canonicalDeliverableFiles = deliverable.targetFiles.map(canonicalize);
       const hasNode = graph.nodes.some((n) =>
-        n.targetFiles.some((f) => deliverable.targetFiles.includes(f))
+        n.targetFiles.some((f) => canonicalDeliverableFiles.includes(canonicalize(f)))
       );
       checks.push({
         name: `Deliverable coverage: ${deliverable.description}`,
@@ -3703,21 +3780,59 @@ export class Coordinator {
     const receipt = await this.receiptStore.getRun(runId);
     if (!receipt) return { ok: false, error: "No receipt found for run " + runId };
 
-    const workspacePath = (receipt as any)?.workspace?.workspacePath as string | undefined;
+    const finalReceipt = (receipt as any).finalReceipt;
+    const patchArtifact = finalReceipt?.patchArtifact as { diff?: string; changedFiles?: string[]; commitSha?: string | null } | undefined;
     const sourceRepo = sourceRepoPath ?? (receipt as any).sourceRepo ?? this.config.projectRoot;
-    const commitSha = (receipt as any).commitSha;
 
-    if (!workspacePath) return { ok: false, error: "Run has no workspace path in receipt" };
-    if (!commitSha) return { ok: false, error: "Run has no commit SHA — nothing to promote" };
+    // Try patch artifact first (survives workspace cleanup)
+    if (patchArtifact?.diff && patchArtifact.diff.trim()) {
+      try {
+        const { writeFile: writeTmp, unlink: rmTmp } = await import("node:fs/promises");
+        const patchTmp = resolve(sourceRepo, ".aedis-promote-patch.tmp");
+        await writeTmp(patchTmp, patchArtifact.diff, "utf-8");
+        try {
+          await exec("git", ["apply", patchTmp], { cwd: sourceRepo });
+        } catch {
+          await exec("git", ["apply", "--3way", patchTmp], { cwd: sourceRepo });
+        } finally {
+          await rmTmp(patchTmp).catch(() => {});
+        }
+
+        const files = patchArtifact.changedFiles ?? [];
+        if (files.length > 0) {
+          await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
+        } else {
+          await exec("git", ["add", "-A"], { cwd: sourceRepo });
+        }
+
+        const msg = "aedis: " + (receipt.taskSummary ?? "Aedis run " + runId) + "\n\nPromoted from patch artifact. Run: " + runId;
+        await exec("git", ["commit", "-m", msg], { cwd: sourceRepo });
+        const { stdout: sourceSha } = await exec("git", ["rev-parse", "HEAD"], { cwd: sourceRepo });
+        await this.receiptStore.patchRun(runId, { status: "PROMOTED", taskSummary: "Promoted to source: " + sourceSha.trim().slice(0, 8) });
+        console.log("[coordinator] PROMOTED run " + runId + " -> " + sourceSha.trim().slice(0, 8) + " via patch artifact");
+        return { ok: true, commitSha: sourceSha.trim() };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[coordinator] PROMOTE (patch) FAILED for " + runId + ": " + msg);
+        return { ok: false, error: "Patch apply failed: " + msg };
+      }
+    }
+
+    // Fallback: workspace-based promotion (if workspace still exists)
+    const workspacePath = (receipt as any)?.workspace?.workspacePath as string | undefined
+      ?? (receipt as any)?.finalReceipt?.workspace?.workspacePath as string | undefined;
+    const commitSha = patchArtifact?.commitSha ?? (receipt as any).commitSha ?? finalReceipt?.commitSha ?? null;
+
+    if (!workspacePath) return { ok: false, error: "No patch artifact and no workspace path in receipt" };
+    if (!commitSha) return { ok: false, error: "No commit SHA — nothing to promote" };
 
     const { existsSync } = await import("node:fs");
-    if (!existsSync(workspacePath)) return { ok: false, error: "Workspace not found: " + workspacePath };
+    if (!existsSync(workspacePath)) return { ok: false, error: "Workspace not found: " + workspacePath + " and no patch artifact saved" };
 
     try {
       const { stdout: patch } = await exec("git", ["format-patch", "--stdout", commitSha + "^.." + commitSha], { cwd: workspacePath });
       if (!patch.trim()) return { ok: false, error: "Empty patch — nothing to promote" };
 
-      // Apply patch to source via temp file (execFile can't pipe stdin)
       const { writeFile: writeTmp, unlink: rmTmp } = await import("node:fs/promises");
       const patchTmp = resolve(sourceRepo, ".aedis-promote-patch.tmp");
       await writeTmp(patchTmp, patch, "utf-8");
@@ -3729,14 +3844,13 @@ export class Coordinator {
         await rmTmp(patchTmp).catch(() => {});
       }
 
-      // Stage changed files and commit
       const { stdout: diffOut } = await exec("git", ["diff", "--name-only", "HEAD"], { cwd: workspacePath });
       const files = diffOut.trim().split("\n").filter(Boolean);
       if (files.length > 0) {
         await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
       }
 
-      const msg = "promote: " + (receipt.taskSummary ?? "Aedis run " + runId) + "\n\nPromoted from workspace: " + workspacePath + "\nOriginal run: " + runId;
+      const msg = "aedis: " + (receipt.taskSummary ?? "Aedis run " + runId) + "\n\nPromoted from workspace: " + workspacePath + "\nOriginal run: " + runId;
       await exec("git", ["commit", "-m", msg], { cwd: sourceRepo });
 
       const { stdout: sourceSha } = await exec("git", ["rev-parse", "HEAD"], { cwd: sourceRepo });

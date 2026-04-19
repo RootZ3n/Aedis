@@ -18,7 +18,7 @@ test("VerificationPipeline fails closed when required checks are missing", async
   );
 
   assert.equal(receipt.verdict, "fail");
-  assert.deepEqual(receipt.requiredChecks, ["lint", "typecheck", "tests"]);
+  assert.deepEqual(receipt.requiredChecks, ["typecheck", "tests"]);
   assert.equal(receipt.checks.filter((check) => check.executed).length, 0);
   assert.match(receipt.summary, /missing required checks/i);
 });

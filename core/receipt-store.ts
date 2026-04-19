@@ -61,6 +61,7 @@ export type PersistentRunStatus =
   | "INTERRUPTED"
   | "AWAITING_APPROVAL"
   | "REJECTED"
+  | "PROMOTED"
   // Legacy aliases — still accepted for reading old receipts.
   // New code should never WRITE these.
   | "RUNNING"

@@ -73,7 +73,7 @@ const DEFAULT_REGISTRY: ProviderRegistry = {
     local:                 { label: "Local (mock)",           models: ["local"] },
     ollama:                { label: "Ollama",                 models: ["qwen3.5:9b", "qwen3.5:4b"] },
     modelstudio:           { label: "ModelStudio",            apiKeyEnv: "MODELSTUDIO_API_KEY", models: ["qwen3.6-plus", "glm-4"] },
-    openrouter:            { label: "OpenRouter",             apiKeyEnv: "OPENROUTER_API_KEY",  models: ["xiaomi/mimo-v2-pro"] },
+    openrouter:            { label: "OpenRouter",             apiKeyEnv: "OPENROUTER_API_KEY",  models: ["xiaomi/mimo-v2-pro", "qwen/qwen3.6-plus"] },
     anthropic:             { label: "Anthropic",              apiKeyEnv: "ANTHROPIC_API_KEY",   models: ["claude-sonnet-4-6", "claude-opus-4-6"] },
     openai:                { label: "OpenAI",                 apiKeyEnv: "OPENAI_API_KEY",      models: ["gpt-5.4", "gpt-4o"] },
     minimax:               { label: "MiniMax",                apiKeyEnv: "MINIMAX_API_KEY",     models: ["minimax-coding"] },

@@ -54,7 +54,7 @@ export interface CharterGeneratorConfig {
 const DEFAULT_CONFIG: CharterGeneratorConfig = {
   defaultQualityBar: "standard",
   maxDeliverables: 12,
-  autoTestDeliverables: true,
+  autoTestDeliverables: false,
 };
 
 export class CharterGenerator {

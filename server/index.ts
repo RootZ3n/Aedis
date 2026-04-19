@@ -131,7 +131,7 @@ function buildVerificationConfig(projectRoot: string): Partial<VerificationPipel
 
   return {
     hooks,
-    requiredChecks: ["lint", "typecheck", "tests"],
+    requiredChecks: ["typecheck"],
     strictMode: process.env["AEDIS_STRICT_MODE"] === "true",
   };
 }

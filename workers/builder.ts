@@ -240,7 +240,11 @@ export class BuilderWorker extends AbstractWorker {
 
       const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(configRoot);
       const contract = this.buildContract(assignment);
-      const targetPath = this.resolveTarget(contract.file, projectRoot);
+      // Normalize absolute source-repo paths to worktree-relative before resolveTarget.
+      const normalizedFile = assignment.sourceRepo && contract.file.startsWith(assignment.sourceRepo)
+        ? resolve(projectRoot, contract.file.slice(assignment.sourceRepo.length).replace(/^[\\/]+/, ""))
+        : contract.file;
+      const targetPath = this.resolveTarget(normalizedFile, projectRoot);
       const relativePath = this.toRelative(targetPath, projectRoot);
 
       // ALWAYS read the full file. In section-edit mode we use a windowed
@@ -944,6 +948,13 @@ export class BuilderWorker extends AbstractWorker {
    * so per-task overrides via assignment.projectRoot work correctly.
    */
   private resolveTarget(file: string, projectRoot: string): string {
+    // If file is an absolute path from the source repo (e.g. /mnt/ai/squidley-v2/...),
+    // map it to the corresponding worktree path before boundary checking.
+    const sourceRepo = (this as unknown as { projectRoot?: string }).projectRoot;
+    if (sourceRepo && file.startsWith(sourceRepo)) {
+      const rel = file.slice(sourceRepo.length).replace(/^[\\/]+/, "");
+      file = resolve(projectRoot, rel);
+    }
     const abs = resolve(projectRoot, file);
     const normalizedRoot = projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`;
     if (abs !== projectRoot && !abs.startsWith(normalizedRoot)) {

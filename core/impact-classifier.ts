@@ -64,8 +64,16 @@ export function classifyTask(task: string, files: string[]): ImpactClassificatio
     }
   }
 
-  if (reasons.length > 0) {
+  // HIGH only if BOTH task and file patterns match — a route file touched
+  // by a benign task (e.g. add a comment) should not require approval.
+  const taskHigh = reasons.some(r => r.startsWith("task "));
+  const fileHigh = reasons.some(r => r.startsWith("file "));
+  if (taskHigh && fileHigh) {
     return { level: "high", reasons };
+  }
+  // Single high signal (file OR task) → medium, not high
+  if (reasons.length > 0) {
+    return { level: "medium", reasons };
   }
 
   // MEDIUM: multiple files
