@@ -151,7 +151,20 @@ export class CharterGenerator {
     if (/\b(fix|bug|broken|crash|error|issue)\b/.test(lower)) return "bugfix";
     if (/\b(refactor|clean|restructure|reorganize|extract)\b/.test(lower)) return "refactor";
     if (/\b(scaffold|create|init|bootstrap|setup|new repo)\b/.test(lower)) return "scaffold";
-    if (/\b(test|spec|coverage)\b/.test(lower)) return "test";
+    // Test category requires the user to actually be ASKING to write tests.
+    // The old regex matched any occurrence of "test" — so "add // SMOKE TEST
+    // comment at the top of X" was misclassified as a test-authoring task
+    // and the Builder got a "Add test coverage for: ..." charter, which
+    // produced bogus commit messages and the wrong edit. Require either an
+    // imperative (add/write/create/implement + test), or a test-file noun
+    // compound (test coverage / unit tests / spec file), or "spec for X".
+    if (
+      /\b(add|write|create|implement|generate|author|cover\s+with)\s+(a\s+|an\s+|new\s+|more\s+|unit\s+|integration\s+)?tests?\b/.test(lower) ||
+      /\btests?\s+(coverage|suite|file|case|harness|for\s+\w+)\b/.test(lower) ||
+      /\b(unit|integration|e2e|end-to-end)\s+tests?\b/.test(lower) ||
+      /\bspec\s+(file|for)\b/.test(lower) ||
+      /\btest\s+coverage\b/.test(lower)
+    ) return "test";
     if (/\b(config|env|setting|toggle)\b/.test(lower)) return "config";
     if (/\b(doc|readme|explain|document)\b/.test(lower)) return "docs";
     if (/\b(investigate|explore|understand|audit|check)\b/.test(lower)) return "investigation";
