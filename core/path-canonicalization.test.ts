@@ -64,7 +64,8 @@ test("submitWithGates: no extractable target → needs_clarification (not cohere
   const dir = mkdtempSync(join(tmpdir(), "aedis-extract-"));
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "t" }), "utf-8");
   try {
-    const coord = new Coordinator({ projectRoot: dir } as any);
+    const CoordinatorAny = Coordinator as any;
+    const coord = new CoordinatorAny({ projectRoot: dir });
     const result = await coord.submitWithGates({
       input: "test to Aedis using test-aedis fixture at /tmp/test-aedis",
       projectRoot: dir,

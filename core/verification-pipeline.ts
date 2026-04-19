@@ -881,12 +881,23 @@ export class VerificationPipeline {
         }
       }
 
-      // If the stage passed with no file-specific issues, it
-      // implicitly verified all files in scope (e.g. diff-check
-      // validates every change, typecheck covers the whole project)
-      if (stage.passed && stage.issues.length === 0) {
-        for (const file of changedFiles) {
-          coverageMap.get(file)!.add(stage.stage);
+      // If the stage passed, it implicitly verified all files in scope
+      // (e.g. diff-check validates every change, typecheck covers the
+      // whole project). Baseline-ignored warnings or advisory issues
+      // about OTHER files must not deny coverage for the files the
+      // Builder actually touched — otherwise a stray warning in an
+      // unrelated test file blocks strict-mode validation and the
+      // run fails verdict despite all required checks passing.
+      if (stage.passed) {
+        const hasErrorOnChangedFile = stage.issues.some(
+          (i) =>
+            (i.severity === "error" || i.severity === "blocker") &&
+            i.file && coverageMap.has(i.file),
+        );
+        if (!hasErrorOnChangedFile) {
+          for (const file of changedFiles) {
+            coverageMap.get(file)!.add(stage.stage);
+          }
         }
       }
     }
