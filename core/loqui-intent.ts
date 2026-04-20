@@ -257,6 +257,47 @@ export function classifyLoquiIntent(
           `Do you want me to actually build this, or would you rather I ${safe === "plan" ? "show you the plan" : safe === "dry_run" ? "dry-run it" : "answer first"}?`,
       };
     }
+
+    // Specificity gate: a build intent MUST name a concrete target
+    // (file path with extension, camelCase / PascalCase / snake_case
+    // identifier, or a specific noun the charter extractor can pick
+    // up). Prompts like "build this", "first test of what you can do",
+    // "try something", "show me what you can build" are meta-language,
+    // not specs — routing them into execution lets the Builder invent
+    // arbitrary changes. Force clarification in that case.
+    const hasFilePath = /[\w-]+\/[\w.\-/]+|\b[\w.\-]+\.(ts|tsx|js|jsx|py|rs|go|md|json|ya?ml|html|css)\b/.test(lower);
+    const hasIdentifier =
+      /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b/.test(raw) ||       // camelCase
+      /\b[A-Z][a-zA-Z0-9]{2,}\b/.test(raw) ||                      // PascalCase
+      /\b[a-z]+_[a-z]+\b/.test(raw);                                // snake_case
+    // Meta-language markers that strongly suggest the user is
+    // exploring, not specifying. If any of these fire AND there's no
+    // file/identifier anchor, the build spec is too thin to execute.
+    const META_MARKERS = [
+      /\bbuild this\b/,
+      /\bfirst test\b/,
+      /\btest of what\b/,
+      /\bshow me what you can\b/,
+      /\btry something\b/,
+      /\btry anything\b/,
+      /\bdo whatever\b/,
+      /\bsurprise me\b/,
+      /\banything you (can|want|like)\b/,
+      /\bwhat can you (do|build|make)\b/,
+    ];
+    const hasMetaMarker = META_MARKERS.some((r) => r.test(lower));
+    if (!hasFilePath && !hasIdentifier && hasMetaMarker) {
+      signals.push("clarify:build-no-concrete-target");
+      return {
+        intent: "question",
+        confidence: 0.3,
+        signals,
+        reason: "Build intent lacks a concrete target (no file/identifier named)",
+        needsClarification: true,
+        clarification:
+          "That reads as exploratory — I need a concrete target before I'll build anything. Name a file (e.g. `core/foo.ts`) or describe the change you want (e.g. \"add input validation to estimateTokens\").",
+      };
+    }
   }
 
   // Normal pick.

@@ -194,3 +194,34 @@ test("router: signals are always populated so the UI can render audit info", () 
   assert.ok(r.signals.length > 0);
   assert.ok(r.signals.some((s) => s.startsWith("build:")));
 });
+
+test("intent: meta-language build with no target → clarify, not build", () => {
+  // Real-world report: "build this. first test of what you can do" won
+  // the build rule (imperative-build verb) but had no file/identifier,
+  // so the Builder invented a test case in a random test file. The
+  // specificity gate must force clarification for exploratory prompts.
+  const cases = [
+    "build this. first test of what you can do",
+    "build this",
+    "try something",
+    "do whatever you think makes sense",
+    "surprise me with a build",
+  ];
+  for (const input of cases) {
+    const r = routeLoquiInput({ input });
+    assert.notEqual(r.action, "build", `meta-language must not route to build: ${input}`);
+  }
+});
+
+test("intent: concrete build target with a file path → still routes to build", () => {
+  // Keep the happy path working — specificity gate must not regress
+  // clear-target prompts that name a file.
+  const cases = [
+    "add a JSDoc comment at the top of utils/tokens.ts",
+    "fix the auth bug in apps/api/src/auth.ts",
+  ];
+  for (const input of cases) {
+    const r = routeLoquiInput({ input });
+    assert.equal(r.action, "build", `concrete build must still route to build: ${input}`);
+  }
+});
