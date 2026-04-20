@@ -287,7 +287,7 @@ function detectAmbiguity(input: string): boolean {
   // Check for file path patterns (contains / or . with extension)
   const hasFilePath = /[A-Za-z0-9_-]+\/[A-Za-z0-9._/-]+/.test(trimmed) ||
     /[A-Za-z0-9_-]+\.[tj]sx?$/.test(trimmed) ||
-    /[A-Za-z0-9_-]+\.(?:py|rs|go|java|rb|css|html|json|yaml|yml|toml|md)/.test(trimmed);
+    /[A-Za-z0-9_-]+\.(?:py|pyi|rs|go|java|kt|swift|c|cc|cpp|h|hpp|cs|rb|php|scala|lua|sh|bash|gd|tscn|tres|gdshader|vue|svelte|css|scss|sass|less|html|json|yaml|yml|toml|md)/.test(trimmed);
   if (hasFilePath) return false;
 
   // Check for function/class name patterns (camelCase, PascalCase, snake_case identifiers)

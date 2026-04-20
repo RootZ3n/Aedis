@@ -90,9 +90,37 @@ function defaultTrustProfile(): TrustProfile {
 /**
  * Build a WorkerRegistry with all 5 worker types registered.
  */
+/**
+ * Detect the primary language/stack of a project so the verifier can
+ * pick the right hooks. Returns an ordered list of detected stacks —
+ * a repo with both package.json AND pyproject.toml (rare but real)
+ * gets both. Godot projects are detected via project.godot.
+ */
+function detectProjectStacks(projectRoot: string): ReadonlyArray<"typescript" | "python" | "godot" | "rust" | "go" | "unknown"> {
+  const stacks: Array<"typescript" | "python" | "godot" | "rust" | "go" | "unknown"> = [];
+  if (existsSync(join(projectRoot, "tsconfig.json")) || existsSync(join(projectRoot, "package.json"))) {
+    stacks.push("typescript");
+  }
+  if (
+    existsSync(join(projectRoot, "pyproject.toml")) ||
+    existsSync(join(projectRoot, "requirements.txt")) ||
+    existsSync(join(projectRoot, "setup.py")) ||
+    existsSync(join(projectRoot, "Pipfile"))
+  ) {
+    stacks.push("python");
+  }
+  if (existsSync(join(projectRoot, "project.godot"))) stacks.push("godot");
+  if (existsSync(join(projectRoot, "Cargo.toml"))) stacks.push("rust");
+  if (existsSync(join(projectRoot, "go.mod"))) stacks.push("go");
+  if (stacks.length === 0) stacks.push("unknown");
+  return stacks;
+}
+
 function buildVerificationConfig(projectRoot: string): Partial<VerificationPipelineConfig> {
   const hooks: ToolHook[] = [];
   let scripts: Record<string, string> = {};
+  const stacks = detectProjectStacks(projectRoot);
+  console.log(`[server] project stacks detected at ${projectRoot}: ${stacks.join(", ")}`);
 
   const packageJsonPath = join(projectRoot, "package.json");
   if (existsSync(packageJsonPath)) {
@@ -129,11 +157,70 @@ function buildVerificationConfig(projectRoot: string): Partial<VerificationPipel
     }));
   }
 
+  // Language-agnostic hooks. The verifier runs every registered hook
+  // against the ACTIVE workspace at dispatch time (cwd is per-run, not
+  // per-boot). We can't know at boot whether a given run will target a
+  // Python repo or a Godot repo — so we register the hooks
+  // unconditionally, guarded by their own "are there files to check?"
+  // logic, and let them no-op on repos that don't match.
+  //
+  // Python: syntax-check every .py file with python3 -m py_compile. On
+  // a TS repo with no .py files, `xargs -r` makes the command a no-op
+  // and exits 0. On a Python repo it catches import typos / unmatched
+  // parens / unterminated strings. Only registered if python3 is on
+  // PATH.
+  if (hasExecutableOnPath("python3")) {
+    hooks.push(createCustomHook({
+      name: "Python Syntax",
+      command: "sh",
+      args: ["-c", "find . -type f -name '*.py' -not -path './.venv/*' -not -path './venv/*' -not -path './__pycache__/*' -not -path './node_modules/*' -not -path './.git/*' 2>/dev/null | head -500 | xargs -r python3 -m py_compile"],
+      kind: "typecheck",
+    }));
+  }
+
+  // Godot: headless --check-only validates scripts + scenes. The
+  // `--check-only` flag exits 0 on success, nonzero if any script
+  // fails to parse. Only registered if the godot binary is on PATH
+  // AND this run's cwd has a project.godot — the sh wrapper short-
+  // circuits on non-Godot repos.
+  if (hasExecutableOnPath("godot")) {
+    hooks.push(createCustomHook({
+      name: "Godot Check",
+      command: "sh",
+      args: ["-c", "[ -f project.godot ] || exit 0; godot --headless --quit --check-only"],
+      kind: "typecheck",
+    }));
+  }
+
+  // Required checks: whichever typecheck-class hooks we managed to
+  // register. An empty list means the verifier won't fail closed on
+  // "missing required checks" — for an unknown-stack repo, the diff /
+  // contract / cross-file stages still run and still gate.
+  const requiredChecks = hooks.some((h) => h.kind === "typecheck")
+    ? ["typecheck"] as const
+    : [] as const;
+
   return {
     hooks,
-    requiredChecks: ["typecheck"],
+    requiredChecks: [...requiredChecks],
     strictMode: process.env["AEDIS_STRICT_MODE"] === "true",
   };
+}
+
+/**
+ * Cheap which(1): returns true if the command resolves on PATH. Used
+ * so we don't register hooks that would blow up with ENOENT.
+ */
+function hasExecutableOnPath(cmd: string): boolean {
+  try {
+    const paths = (process.env["PATH"] ?? "").split(":").filter(Boolean);
+    for (const p of paths) {
+      if (existsSync(join(p, cmd))) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function buildDefaultRegistry(projectRoot: string, verificationConfig: Partial<VerificationPipelineConfig>): WorkerRegistry {

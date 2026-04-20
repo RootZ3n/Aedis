@@ -172,8 +172,23 @@ export class CharterGenerator {
   }
 
   private extractTargets(request: string): string[] {
-    const filePatterns = request.match(/[\w\-./]+\.(ts|tsx|js|jsx|json|md|yaml|yml)/g);
-    const dirPatterns = request.match(/(?:src|lib|core|modules|apps|workers|router)\/[\w\-./]*/g);
+    // Supported file extensions — widen beyond TS/JS so the charter can
+    // pick up targets in Python projects, Godot games, and the other
+    // repos Zen actually drives Aedis on. Keep the list explicit so a
+    // stray word like "at the end" doesn't accidentally match.
+    // Extensions ordered LONGEST-FIRST within each family so alternation
+    // doesn't prematurely match a prefix (e.g. "home.tsx" must match .tsx
+    // not .ts; "scenes/main.tscn" must match .tscn; "config.json" must
+    // match .json not .js). \b at the end prevents runaway matches into
+    // words that happen to start with a letter.
+    const filePatterns = request.match(
+      /[\w\-./]+\.(?:gdshader|svelte|scala|swift|tscn|tres|yaml|json|toml|html|scss|sass|less|pyi|mjs|cjs|tsx|jsx|cpp|hpp|php|bash|vue|sh|ts|js|md|yml|py|rs|go|cs|rb|gd|cc|lua|c|h|kt|java)\b/g,
+    );
+    // Directory/module patterns — include common non-TS layouts too
+    // (`scripts/`, `scenes/`, `hymn_sources/`, etc.).
+    const dirPatterns = request.match(
+      /(?:src|lib|core|modules|apps|workers|router|scripts|scenes|assets|utils|handlers|routes|services|models|views|templates|tests?|spec)\/[\w\-./]*/g,
+    );
     return [...new Set([...(filePatterns ?? []), ...(dirPatterns ?? [])])];
   }
 
