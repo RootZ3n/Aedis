@@ -214,6 +214,14 @@ export interface CoordinatorConfig {
    * This implements the DOCTRINE requirement: "user approves final apply".
    */
   requireApproval: boolean;
+  /**
+   * Auto-promote a workspace commit to the source repo when the run
+   * finishes with a clean VERIFIED_SUCCESS classification. Off by default
+   * — operators opt in once they trust the pipeline. Does nothing for
+   * PARTIAL_SUCCESS / FAILED / AWAITING_APPROVAL; those still require
+   * the explicit promote endpoint.
+   */
+  autoPromoteOnSuccess: boolean;
   /** Git branch to work on (created if needed) */
   workBranch: string;
   /** Maximum seconds for external commands (git, npm test, etc). Default: 120 */
@@ -253,6 +261,7 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   maxRecoveryAttempts: 2,
   autoCommit: true,
   requireApproval: false,
+  autoPromoteOnSuccess: false,
   workBranch: "aedis/run",
   externalCommandTimeoutSec: 120,
   maxGraphIterations: 50,
@@ -1830,6 +1839,33 @@ export class Coordinator {
         evaluatedReceipt = { ...evaluatedReceipt, humanSummary: alertedSummary };
         await this.persistFinalReceipt(active, evaluatedReceipt);
         this.emit({ type: "run_receipt", payload: { runId: active.run.id, receiptId: evaluatedReceipt.id, receipt: evaluatedReceipt } });
+      }
+
+      // Auto-promote on VERIFIED_SUCCESS when operator has opted in.
+      // Only fires for the cleanest classification and only when a
+      // regression alert didn't downgrade us. Promotion failures are
+      // logged as warnings — they don't retroactively flip the run's
+      // classification (the workspace commit still exists and can be
+      // promoted manually via the promote endpoint).
+      const classification = evaluatedReceipt.humanSummary?.classification ?? null;
+      const sourceRepo = active.workspace?.sourceRepo ?? active.sourceRepo ?? null;
+      if (
+        this.config.autoPromoteOnSuccess &&
+        classification === "VERIFIED_SUCCESS" &&
+        !regressionAlert &&
+        sourceRepo
+      ) {
+        console.log(`[coordinator] autoPromoteOnSuccess=true + VERIFIED_SUCCESS → promoting run ${active.run.id} to ${sourceRepo}`);
+        try {
+          const promoteResult = await this.promoteToSource(active.run.id, sourceRepo);
+          if (promoteResult.ok) {
+            console.log(`[coordinator] auto-promoted run ${active.run.id} → ${promoteResult.commitSha}`);
+          } else {
+            console.warn(`[coordinator] auto-promote failed (workspace commit still valid, promote manually): ${promoteResult.error}`);
+          }
+        } catch (err) {
+          console.warn(`[coordinator] auto-promote threw (workspace commit still valid): ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       return evaluatedReceipt;
@@ -3778,7 +3814,41 @@ export class Coordinator {
         return null;
       }
 
-      const message = `aedis: ${active.intent.charter.objective}\n\nRun: ${active.run.id}\nIntent: ${active.intent.id} v${active.intent.version}`;
+      // Build a concise commit subject. The charter objective embeds the
+      // entire user prompt verbatim ("Configure: Add a one-line JSDoc
+      // comment /** token-count helpers */ at the very top of
+      // utils/tokens.ts"), which produces 100+ char subject lines that
+      // git tools and PRs truncate badly. Prefer a compact
+      // "<verb> N file(s): <sample path>" line, fall back to a trimmed
+      // objective. Full prompt lives in the body.
+      const uniqueFiles = Array.from(new Set(active.changes.map((c) => c.path).filter(Boolean)));
+      const dominantOp = active.changes.length > 0
+        ? (active.changes.find((c) => c.operation === "create") ? "create"
+          : active.changes.find((c) => c.operation === "delete") ? "delete"
+          : "modify")
+        : "update";
+      const SUBJECT_MAX = 60;
+      let subject: string;
+      if (uniqueFiles.length === 1) {
+        subject = `${dominantOp} ${uniqueFiles[0]}`;
+      } else if (uniqueFiles.length > 1) {
+        const first = uniqueFiles[0];
+        subject = `${dominantOp} ${uniqueFiles.length} files (${first}…)`;
+      } else {
+        const obj = active.intent.charter.objective;
+        const idx = obj.indexOf(":");
+        subject = idx >= 0 ? obj.slice(idx + 1).trim() : obj;
+      }
+      if (subject.length > SUBJECT_MAX) subject = subject.slice(0, SUBJECT_MAX - 1) + "…";
+      const userReq = (active.intent.userRequest ?? "").trim();
+      const bodyLines = [
+        `aedis: ${subject}`,
+        "",
+        userReq ? `Request: ${userReq}` : null,
+        `Run: ${active.run.id}`,
+        `Intent: ${active.intent.id} v${active.intent.version}`,
+      ].filter((l): l is string => l !== null);
+      const message = bodyLines.join("\n");
 
       // All git commands run with cwd=active.projectRoot so they target
       // the per-task effective root rather than the API server's cwd.
@@ -3842,7 +3912,22 @@ export class Coordinator {
           await exec("git", ["add", "-A"], { cwd: sourceRepo });
         }
 
-        const msg = "aedis: " + (receipt.taskSummary ?? "Aedis run " + runId) + "\n\nPromoted from patch artifact. Run: " + runId;
+        const SUBJECT_MAX = 60;
+        const changedCount = (patchArtifact.changedFiles ?? []).length;
+        const firstFile = (patchArtifact.changedFiles ?? [])[0];
+        let subject: string;
+        if (changedCount === 1 && firstFile) subject = `modify ${firstFile}`;
+        else if (changedCount > 1 && firstFile) subject = `modify ${changedCount} files (${firstFile}…)`;
+        else subject = (receipt.prompt ?? receipt.taskSummary ?? "update").slice(0, SUBJECT_MAX);
+        if (subject.length > SUBJECT_MAX) subject = subject.slice(0, SUBJECT_MAX - 1) + "…";
+        const userReq = (receipt.prompt ?? "").trim();
+        const msgLines = [
+          `aedis: ${subject}`,
+          "",
+          userReq ? `Request: ${userReq}` : null,
+          `Run: ${runId}`,
+        ].filter((l): l is string => l !== null);
+        const msg = msgLines.join("\n");
         await exec("git", ["commit", "-m", msg], { cwd: sourceRepo });
         const { stdout: sourceSha } = await exec("git", ["rev-parse", "HEAD"], { cwd: sourceRepo });
         await this.receiptStore.patchRun(runId, { status: "PROMOTED", taskSummary: "Promoted to source: " + sourceSha.trim().slice(0, 8) });

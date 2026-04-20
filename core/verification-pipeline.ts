@@ -636,15 +636,19 @@ export class VerificationPipeline {
         );
       }
       // Pre-existing failures: downgrade any blockers from test hooks
-      // that match baseline failures to warnings (not our fault)
+      // that match baseline failures to INFO (not warnings) so they
+      // don't push the verdict from PASS to PASS-WITH-WARNINGS. A
+      // baseline-ignored failure is, by definition, not our fault and
+      // shouldn't degrade the user-facing verdict — we surface it in
+      // the summary line instead.
       for (const stage of stages) {
         if (stage.stage !== "custom-hook") continue;
         const downgraded = stage.issues.map((issue) => {
           if (
-            (issue.severity === "blocker" || issue.severity === "error") &&
+            (issue.severity === "blocker" || issue.severity === "error" || issue.severity === "warning") &&
             baseline.failingTestNames.includes(issue.message)
           ) {
-            return { ...issue, severity: "warning" as const };
+            return { ...issue, severity: "info" as const };
           }
           return issue;
         });
@@ -1036,9 +1040,23 @@ export class VerificationPipeline {
     const start = Date.now();
     const issues: VerificationIssue[] = [];
 
+    // Workers that legitimately run locally with no token spend (scout,
+    // verifier, integrator) should never trip the "zero cost" warning —
+    // that check was intended to catch a Builder/Critic that silently
+    // produced nothing, not to flag expected-zero-cost infra workers.
+    const ZERO_COST_BY_DESIGN = new Set(["scout", "verifier", "integrator"]);
+    // Workers that legitimately don't modify files (scout reads, critic
+    // reviews, verifier inspects) should never trip the "no touched files"
+    // warning. Only Builder and Integrator are contractually required to
+    // touch files.
+    const MUST_TOUCH_FILES = new Set(["builder", "integrator"]);
+
     for (const result of workerResults) {
-      // Every result must report cost
-      if (result.cost.inputTokens === 0 && result.cost.outputTokens === 0) {
+      if (
+        result.cost.inputTokens === 0 &&
+        result.cost.outputTokens === 0 &&
+        !ZERO_COST_BY_DESIGN.has(result.workerType)
+      ) {
         issues.push({
           stage: "contract-check",
           severity: "warning",
@@ -1079,8 +1097,11 @@ export class VerificationPipeline {
         }
       }
 
-      // All workers must report touched files
-      if (result.success && result.touchedFiles.length === 0) {
+      if (
+        result.success &&
+        result.touchedFiles.length === 0 &&
+        MUST_TOUCH_FILES.has(result.workerType)
+      ) {
         issues.push({
           stage: "contract-check",
           severity: "warning",

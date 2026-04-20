@@ -199,6 +199,20 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
                 : persisted.taskSummary,
               narrative: typeof humanSummary?.narrative === "string" ? humanSummary.narrative : "",
               verification: typeof humanSummary?.verification === "string" ? humanSummary.verification : "not-run",
+              // Surface the actual checks that ran (typecheck/tests/lint etc.)
+              // so the Trust Summary panel stops showing "no checks recorded"
+              // on every run. Pulled from humanSummary when available, else
+              // directly from the persisted verification receipt.
+              verificationChecks: ((humanSummary as { verificationChecks?: readonly unknown[] })?.verificationChecks
+                ?? (persisted as { verificationReceipt?: { checks?: readonly unknown[] } }).verificationReceipt?.checks
+                ?? []) as readonly unknown[],
+              // Failure explanation is only attached to human summaries on
+              // non-success classifications (run-summary.ts guards this),
+              // but we forward it verbatim when present so the UI can show
+              // a real root cause — and omit it otherwise so the panel
+              // doesn't paint "(unknown) gate failed silently" on runs
+              // that actually succeeded.
+              failureExplanation: (humanSummary as { failureExplanation?: unknown })?.failureExplanation ?? null,
             },
             confidence: persisted.confidence,
             errors: persisted.errors.map((message) => ({ source: "persistent-receipt", message })),

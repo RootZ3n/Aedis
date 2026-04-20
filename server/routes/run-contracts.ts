@@ -26,6 +26,8 @@ export interface RunDetailResponse {
     readonly headline: string;
     readonly narrative: string;
     readonly verification: string;
+    readonly verificationChecks?: readonly unknown[];
+    readonly failureExplanation?: unknown;
   };
   readonly confidence: unknown;
   readonly errors: readonly { source: string; message: string; suggestedFix?: string }[];

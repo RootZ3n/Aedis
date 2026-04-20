@@ -199,10 +199,21 @@ export async function createServer(
     }
   }
 
+  // Auto-promote is opt-in via env (AEDIS_AUTO_PROMOTE=true). When set,
+  // a run that finishes with a clean VERIFIED_SUCCESS classification
+  // has its workspace commit automatically applied to the source repo
+  // as a real commit. Without it, runs land in the workspace only and
+  // require an explicit POST /tasks/:id/promote.
+  const autoPromoteOnSuccess = process.env["AEDIS_AUTO_PROMOTE"] === "true";
+  if (autoPromoteOnSuccess) {
+    console.log("[server] AEDIS_AUTO_PROMOTE=true — clean runs will auto-promote to source repo");
+  }
+
   const coordinator = new Coordinator(
     {
       projectRoot: cfg.projectRoot,
       verificationConfig,
+      autoPromoteOnSuccess,
       ...cfg.coordinatorConfig,
     },
     profile,

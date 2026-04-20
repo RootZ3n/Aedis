@@ -1487,19 +1487,29 @@ body .app::before{
           }
         }
         if (data.summary && data.summary.headline) {
+          // Prefer the backend's curated failureExplanation (absent on
+          // successful runs). Only fall back to mining data.errors[0]
+          // when the run actually failed — otherwise a pass-with-warnings
+          // run would paint "(unknown) gate failed silently" on a clean
+          // commit, which is the opposite of trust-building.
+          const cls = String(data.summary.classification || '').toUpperCase();
+          const isFailureCls = cls === 'FAILED' || cls === 'NO_OP' || cls === 'ABORTED' || cls === 'EXECUTION_ERROR';
+          const backendFailure = data.summary.failureExplanation;
+          const mined = Array.isArray(data.errors) && data.errors[0] && isFailureCls
+            ? { stage: data.errors[0].source || 'persistent-receipt', rootCause: data.errors[0].message || '', suggestedFix: data.errors[0].suggestedFix || '' }
+            : null;
           run.runSummary = {
             classification: data.summary.classification || run.verdict || '',
             headline: data.summary.headline,
             narrative: data.summary.narrative || '',
             verification: data.summary.verification || 'not-run',
+            verificationChecks: Array.isArray(data.summary.verificationChecks) ? data.summary.verificationChecks : [],
             blastRadius: data.blastRadius || null,
             confidence: data.confidence || { overall: 0, planning: 0, execution: 0, verification: 0 },
             cost: { displayUsd: `$${Number(data.totalCostUsd || 0).toFixed(2)}` },
             whatChanged: Array.isArray(data.filesChanged) ? data.filesChanged : [],
             filesTouchedCount: Array.isArray(data.filesChanged) ? data.filesChanged.length : 0,
-            failureExplanation: Array.isArray(data.errors) && data.errors[0]
-              ? { stage: data.errors[0].source || 'persistent-receipt', rootCause: data.errors[0].message || '', suggestedFix: data.errors[0].suggestedFix || '' }
-              : null,
+            failureExplanation: backendFailure || mined,
           };
         }
         render();
