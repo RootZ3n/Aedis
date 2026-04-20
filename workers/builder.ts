@@ -1,6 +1,10 @@
 // Builder worker module
 import { readFile, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 import type { RunState, CostEntry } from "../core/runstate.js";
 import { recordDecision, recordFileTouch } from "../core/runstate.js";
@@ -180,6 +184,27 @@ function looksLikeConversationalProse(content: string, filePath: string): boolea
   if (/^###?\s+`[\w./-]+\.[a-z]+`/im.test(head)) return true;
 
   return false;
+}
+
+/**
+ * Compute the real (LCS-based) unified diff for a single file in a git
+ * workspace by calling `git diff HEAD -- <path>`. Returns an empty string
+ * if the file is untracked (new file), in which case callers should fall
+ * back to the synthetic diff. Throws if `git` is unreachable.
+ */
+async function computeGitDiff(projectRoot: string, filePath: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["diff", "HEAD", "--", filePath],
+      { cwd: projectRoot, timeout: 10_000, maxBuffer: 10 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch {
+    // File is likely new (no HEAD entry) or outside git. Return empty so
+    // the caller falls back to synthetic.
+    return "";
+  }
 }
 
 // ─── Internal types for prompt assembly ──────────────────────────────
@@ -454,10 +479,20 @@ export class BuilderWorker extends AbstractWorker {
       this.logFileTouch(taskId, relativePath, "modify");
       this.noteDecision(taskId, `Applied builder patch to ${relativePath}`, `Contract goal: ${contract.goal}`);
 
+      // Replace the synthetic line-by-line diff with git's real LCS-based
+      // diff. buildUnifiedDiff() below is a positional comparator — it
+      // doesn't know about insertions, so inserting a line at the top
+      // makes every subsequent line appear as a removal + re-add. git
+      // diff understands insertions and produces the minimal hunk.
+      // Fall back to the synthetic diff if git isn't available (shouldn't
+      // happen in a workspace, but be safe).
+      const realDiff = await computeGitDiff(projectRoot, relativePath).catch(() => diff);
+      const finalDiff = realDiff && realDiff.trim() ? realDiff : diff;
+
       const changes: FileChange[] = [{
         path: relativePath,
         operation: "modify",
-        diff,
+        diff: finalDiff,
         originalContent: fullContent,
         content: updatedContent,
       }];
@@ -724,7 +759,13 @@ export class BuilderWorker extends AbstractWorker {
         `Constraints: ${contract.constraints.join(" | ") || "none"}`,
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
-        "Return ONLY the full final file content for the target file. No markdown fences. No explanations.",
+        "Return ONLY the full final file content for the target file. No markdown fences. No explanations. No prose. No review.",
+        "MINIMUM-CHANGE DISCIPLINE:",
+        "  1. Identify the smallest possible edit that satisfies the User request.",
+        "  2. Keep every unrelated line BYTE-FOR-BYTE identical — same indentation, same trailing whitespace, same line endings, same quote style.",
+        "  3. Do NOT reformat, re-wrap, reorder imports, reshuffle exports, change tabs↔spaces, or 'clean up' anything the request did not explicitly ask for.",
+        "  4. If the request is to add a line/comment, your output should differ from the input by EXACTLY that line and no other.",
+        "  5. If your edit would produce a diff larger than the request implies, STOP and return the original file unchanged.",
         "You MUST make exactly the change the User request describes. Do not invent or remove unrelated content. If the request is to add a comment, add a comment — do not also delete, rename, or reformat anything else.",
         "Current file:",
         promptContent,
