@@ -2210,6 +2210,12 @@ body .app::before{
             whatChanged: Array.isArray(payload.whatChanged) ? payload.whatChanged : [],
             filesTouchedCount: Number(payload.filesTouchedCount || 0),
             verification: String(payload.verification || 'not-run'),
+            // Thread verificationChecks through so the Trust Summary's
+            // "Checks: typecheck:pass · tests:fail" line populates from
+            // the live event path too. Without this, the panel fell
+            // back to "no checks recorded" even when the narrative
+            // above it already listed the checks that ran.
+            verificationChecks: Array.isArray(payload.verificationChecks) ? payload.verificationChecks : [],
             confidence: payload.confidence || { overall: 0, planning: 0, execution: 0, verification: 0, basis: [] },
             cost: payload.cost || { displayUsd: '$0.00', inputTokens: 0, outputTokens: 0 },
             blastRadius: payload.blastRadius || run.blastRadius,
