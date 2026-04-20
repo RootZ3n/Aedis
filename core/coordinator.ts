@@ -2580,9 +2580,46 @@ export class Coordinator {
           markCompleted(graph, node.id);
           this.collectChanges(active, result);
           waveSucceeded += 1;
+          // Enrich the completion event for Builder nodes with the actual
+          // FileChange array so the UI can stream the +/- diff live.
+          // Workers are constructed without an eventBus in server/index.ts,
+          // so their internal this.eventBus?.emit calls silently drop —
+          // this generic event is the one the UI actually receives.
+          const builderPayload: Record<string, unknown> = {};
+          if (node.workerType === "builder" && result.output.kind === "builder") {
+            const changes = result.output.changes ?? [];
+            const first = changes[0];
+            if (first) {
+              builderPayload.file = first.path;
+              builderPayload.path = first.path;
+              builderPayload.operation = first.operation;
+            }
+            // Concatenate every file's unified diff so a multi-file
+            // Builder (rare, but possible on a single deliverable) can
+            // stream all hunks in one event. The UI keys by
+            // "diff --git a/<path>" so duplicates replace rather than
+            // double-append.
+            const combined = changes
+              .map((c) => (typeof c.diff === "string" ? c.diff : ""))
+              .filter((s) => s.trim().length > 0)
+              .join("\n");
+            if (combined.trim()) {
+              builderPayload.diff = combined;
+            }
+            builderPayload.changes = changes.map((c) => ({
+              path: c.path,
+              operation: c.operation,
+              diff: c.diff ?? "",
+            }));
+          }
           this.emit({
             type: workerCompleteEventType(node.workerType as WorkerType),
-            payload: { runId: active.run.id, taskId: node.id, confidence: result.confidence },
+            payload: {
+              runId: active.run.id,
+              taskId: node.id,
+              confidence: result.confidence,
+              ...builderPayload,
+            },
           });
         } else {
           console.warn(`[coordinator] executeGraph: marking node ${node.id.slice(0, 6)} (${node.workerType}) as FAILED — issue: ${result.issues[0]?.message ?? "(no message)"}`);
