@@ -122,6 +122,66 @@ const CONTEXT_OVERHEAD_CHARS = 64;
 const SECTION_LENGTH_RETAIN_FLOOR = 0.95;
 const SECTION_BRACE_DELTA_TOLERANCE = 2;
 
+// Code-file extensions we care about for prose-detection. Markdown
+// and plain-text files legitimately contain prose, so we skip them.
+const CODE_FILE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|rb|kt|swift|c|cc|cpp|cs|php|scala|hs|clj|lua|sh|bash|zsh|fish|toml|yaml|yml|json)$/i;
+
+/**
+ * Heuristic: does this look like a model that ignored "return the file
+ * content" and emitted conversational analysis / markdown review instead?
+ *
+ * Fires when ALL of these are true:
+ *   - target file is a code file (by extension)
+ *   - content starts with (or early-contains) common prose markers:
+ *       "I've reviewed" / "I have reviewed" / "Here's" / "Here is"
+ *       / "Sure, here" / markdown headers / "Let me"
+ *   - OR content is dominated by markdown bold/headers with no braces
+ *
+ * Tuned to be conservative — false positives are worse than
+ * false negatives here because this throws and reverts the run.
+ */
+function looksLikeConversationalProse(content: string, filePath: string): boolean {
+  if (!CODE_FILE_EXTENSIONS.test(filePath)) return false;
+  const trimmed = content.trimStart();
+  if (trimmed.length === 0) return false;
+
+  // Look at just the first ~800 chars — conversational openers live at
+  // the top. Avoids false-positive on a code file that happens to have
+  // a long multi-line string somewhere deep.
+  const head = trimmed.slice(0, 800);
+
+  const PROSE_STARTERS = [
+    /^I['’]ve\s+reviewed\b/i,
+    /^I\s+have\s+reviewed\b/i,
+    /^Here'?s\s+(a|the|what|an)\b/i,
+    /^Here\s+is\s+(a|the|what|an)\b/i,
+    /^Sure,?\s*here/i,
+    /^Let me\b/i,
+    /^Looking\s+at\b/i,
+    /^Based\s+on\b/i,
+    /^After\s+reviewing\b/i,
+    /^To\s+(answer|address|summarize)\b/i,
+  ];
+  if (PROSE_STARTERS.some((re) => re.test(head))) return true;
+
+  // Markdown header at the top of a code file — almost always prose.
+  // Permits `# Title` only inside actual string literals or comments —
+  // but those are easy: they come AFTER code lines, not first.
+  if (/^#{1,3}\s+\S/.test(trimmed)) return true;
+
+  // Overwhelming markdown: bold **...** > 3 times in the first 800 chars
+  // AND fewer than 2 braces — almost certainly not TypeScript / JS.
+  const boldCount = (head.match(/\*\*[^*]+\*\*/g) ?? []).length;
+  const braceCount = (head.match(/[{}]/g) ?? []).length;
+  if (boldCount >= 3 && braceCount < 2) return true;
+
+  // Backticked-filename headers like "### squidley-voice.ts" appear
+  // when the model is explaining files rather than editing one.
+  if (/^###?\s+`[\w./-]+\.[a-z]+`/im.test(head)) return true;
+
+  return false;
+}
+
 // ─── Internal types for prompt assembly ──────────────────────────────
 
 interface BuiltPrompt {
@@ -373,6 +433,20 @@ export class BuilderWorker extends AbstractWorker {
       // Final safety gate: never write raw diff text to a source file
       if (DiffApplier.looksLikeRawDiff(updatedContent)) {
         throw new Error(`SAFETY: Refusing to write raw diff text to ${relativePath}`);
+      }
+
+      // Prose-output safety gate: catch local / small models that ignore
+      // the "return ONLY the full final file content" instruction and
+      // emit conversational analysis + markdown instead of code. Seen in
+      // real runs — qwen3.6:35b returned "I've reviewed the two
+      // configuration files you shared. Here's a concise summary..."
+      // which then got committed as TypeScript. Only applies to code
+      // files (.ts, .tsx, .js, .jsx, .py, .rs, .go, .java, .rb).
+      if (looksLikeConversationalProse(updatedContent, relativePath)) {
+        throw new Error(
+          `SAFETY: Builder output looks like conversational prose / markdown, not code for ${relativePath}. ` +
+          `First 200 chars: ${updatedContent.slice(0, 200).replace(/\s+/g, " ")}`,
+        );
       }
 
       // Apply the change

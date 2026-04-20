@@ -1220,20 +1220,22 @@ body .app::before{
       verifier: 'teal',
       integrator: 'pink',
     };
-    // ROLE_PROVIDERS declares which providers may serve each role. This
-    // is a UX judgment (e.g. Scout is always local, Builder shouldn't run
-    // on the tiny qwen) and stays in the UI. The set of MODELS within
-    // each provider comes from the server's provider registry, fetched
-    // via /config/providers on load — and editable from the Manage
-    // Models panel.
+    // ROLE_PROVIDERS declares which providers may serve each role. Scout
+    // and Verifier stay local — they're zero-cost-by-design infra workers.
+    // Every other role accepts `ollama` now (big local qwen3.6:35b is
+    // plenty capable for Builder / Integrator / Coordinator on small repos
+    // — "tiny qwen only" was an outdated v1 assumption). Picking a small
+    // local model for Builder can still produce garbage; that's the
+    // operator's call, and the Builder's content-safety gates catch the
+    // worst of it.
     const ROLE_PROVIDERS = {
       scout:       ['local'],
       verifier:    ['local'],
-      builder:     ['modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'anthropic', 'portum'],
+      builder:     ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'anthropic', 'portum'],
       critic:      ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'portum'],
-      integrator:  ['modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'anthropic', 'portum'],
-      escalation:  ['anthropic', 'openai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'portum'],
-      coordinator: ['openrouter', 'glm-5.1-openrouter', 'glm-5.1-direct', 'anthropic', 'openai', 'portum'],
+      integrator:  ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'anthropic', 'portum'],
+      escalation:  ['ollama', 'anthropic', 'openai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'portum', 'minimax'],
+      coordinator: ['ollama', 'openrouter', 'glm-5.1-openrouter', 'glm-5.1-direct', 'anthropic', 'openai', 'portum'],
     };
 
     // Seeded fallback — used if /config/providers is unreachable at
