@@ -104,8 +104,11 @@ export class CriticWorker extends AbstractWorker {
     // for itself by catching issues before they reach Verify or Apply.
     // The local Ollama fallback exists so a transient Anthropic outage
     // cannot stall the entire pipeline. See DOCTRINE.md "Model Assignments".
-    this.defaultModel = config.defaultModel ?? "claude-sonnet-4-6";
-    this.defaultProvider = config.defaultProvider ?? "anthropic";
+    // Defaults to local ollama — Aedis is meant to be cheap; any need for
+    // Anthropic must come through explicit per-repo config, not a silent
+    // backstop that blows up the cost budget.
+    this.defaultModel = config.defaultModel ?? "qwen3.5:9b";
+    this.defaultProvider = config.defaultProvider ?? "ollama";
     this.fallbackModel = config.fallbackModel === null
       ? null
       : (config.fallbackModel ?? DEFAULT_FALLBACK);

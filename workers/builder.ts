@@ -70,12 +70,14 @@ export interface BuilderWorkerConfig {
   readonly fallbackModel?: { provider: Provider; model: string } | null;
 }
 
-// Default fallback chain target — Anthropic Claude Sonnet 4.6 as the
-// quality backstop when ModelStudio (the Builder primary) is unreachable
-// or rate-limited. Sonnet is also the Critic's primary model.
+// Default fallback chain target — MiniMax M2.7 as the cheap-and-fast
+// backstop. The whole point of Aedis is sub-cent builds, so we must
+// never silently fall back to Anthropic unless the operator explicitly
+// opts in at the per-repo model config. MiniMax has an OpenAI-compatible
+// API and Zen has credits.
 const DEFAULT_FALLBACK: { provider: Provider; model: string } = {
-  provider: "anthropic",
-  model: "claude-sonnet-4-6",
+  provider: "minimax",
+  model: "MiniMax-M2.7",
 };
 
 // Maximum number of run contexts to keep in memory. Each entry is tiny
