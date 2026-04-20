@@ -1093,12 +1093,13 @@ body .app::before{
 
       <!-- Diff Viewer — transparency rule: sits directly below the Lumen
            live log so the operator can watch +/- lines land in real time
-           as each Builder completes. -->
-      <section class="panel diff-panel" id="diff-panel" style="display:none;">
+           as each Builder completes. Always visible; empty state when
+           no diff yet. Collapsible via the HIDE/SHOW toggle. -->
+      <section class="panel diff-panel" id="diff-panel">
         <div class="diff-panel-head">
           <div class="loqui-row" style="gap:10px">
             <div class="label">Proposed Diff</div>
-            <span id="diff-panel-files" class="diff-panel-files">&mdash;</span>
+            <span id="diff-panel-files" class="diff-panel-files">waiting for Builder</span>
           </div>
           <button id="diff-panel-toggle" class="diff-panel-toggle" type="button">HIDE</button>
         </div>
@@ -1979,7 +1980,12 @@ body .app::before{
     }
 
     function guessRunId(payload) {
-      return payload.runId || payload.run_id || payload.taskId || payload.task_id || payload.id || state.currentRunId || null;
+      // taskId / task_id / id refer to a node or a charter plan, NOT a run —
+      // using them here spawned phantom "runs" in state keyed by task id,
+      // and the receipts / workerEvents for the active run silently never
+      // landed. Fall back to state.currentRunId when no runId is present,
+      // since the UI only tracks one active run at a time.
+      return payload.runId || payload.run_id || state.currentRunId || null;
     }
 
     // ─── Lumen translation ───────────────────────────────────────
@@ -3013,19 +3019,15 @@ body .app::before{
       if (!panel || !body) return;
       const run = state.active;
       const diff = String(run.patchDiff || '');
-      // Hide the panel entirely when there's no diff to show — e.g. runs
-      // that failed before any code changes landed, or ask-only Loqui turns.
-      if (!diff.trim()) {
-        panel.style.display = 'none';
-        return;
-      }
+
+      // Always show the panel. Zen's transparency rule: the panel sits
+      // below Lumen so the operator can watch lines land as each Builder
+      // finishes. Empty state = "waiting for Builder" with a manual
+      // collapse for small screens. Never hide silently.
       panel.style.display = 'grid';
 
-      // Default-open — Zen's transparency rule: watch the code as it
-      // changes, don't hide it. We only re-apply the default when the
-      // viewed run changes (panel.dataset.runId tracks the last id
-      // rendered); the user's explicit toggle persists during that run.
-      const lineCount = diff.split('\n').length;
+      // Default-open per run. Re-apply only when switching runs so the
+      // user's explicit HIDE persists within a given run.
       const lastRenderedId = panel.dataset.runId || '';
       if (lastRenderedId !== String(run.id || '')) {
         body.classList.remove('collapsed');
@@ -3033,7 +3035,14 @@ body .app::before{
       }
       toggle.textContent = body.classList.contains('collapsed') ? 'SHOW' : 'HIDE';
 
+      if (!diff.trim()) {
+        filesEl.textContent = 'waiting for Builder';
+        body.innerHTML = '<div class="diff-empty">No changes yet — the Builder has not returned a diff for this run.</div>';
+        return;
+      }
+
       const files = Array.isArray(run.patchFiles) ? run.patchFiles : [];
+      const lineCount = diff.split('\n').length;
       filesEl.textContent = files.length > 0
         ? files.join(', ')
         : `${lineCount} line${lineCount === 1 ? '' : 's'}`;

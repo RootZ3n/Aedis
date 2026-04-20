@@ -164,6 +164,9 @@ export class IntegratorWorker extends AbstractWorker {
       this.eventBus?.emit({
         type: "integration_check",
         payload: {
+          runId: (assignment.intent as { runId?: string; id?: string })?.runId
+            ?? (assignment.intent as { runId?: string; id?: string })?.id
+            ?? assignment.task.id,
           taskId: assignment.task.id,
           workerType: this.type,
           status,

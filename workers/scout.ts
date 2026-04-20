@@ -290,6 +290,13 @@ export class ScoutWorker extends AbstractWorker {
       this.eventBus?.emit({
         type: "scout_complete",
         payload: {
+          // Mirror the runId extraction used by builder.ts / critic.ts so
+          // UI handlers associate this event with the active run rather
+          // than the task node (ensureRun(taskId) would otherwise spawn
+          // a phantom run and drop every downstream receipt).
+          runId: (assignment.intent as { runId?: string; id?: string })?.runId
+            ?? (assignment.intent as { runId?: string; id?: string })?.id
+            ?? assignment.task.id,
           taskId: assignment.task.id,
           workerType: this.type,
           touchedFiles: touchedFiles.map((file) => file.path),

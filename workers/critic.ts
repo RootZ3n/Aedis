@@ -236,6 +236,7 @@ export class CriticWorker extends AbstractWorker {
       this.eventBus?.emit({
         type: "critic_review",
         payload: {
+          runId: this.extractRunId(assignment),
           taskId: assignment.task.id,
           workerType: this.type,
           // Reflect the provider that ACTUALLY succeeded, not the primary,

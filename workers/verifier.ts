@@ -168,6 +168,9 @@ export class VerifierWorker extends AbstractWorker {
       this.eventBus?.emit({
         type: "verifier_check",
         payload: {
+          runId: (assignment.intent as { runId?: string; id?: string })?.runId
+            ?? (assignment.intent as { runId?: string; id?: string })?.id
+            ?? assignment.task.id,
           taskId: assignment.task.id,
           workerType: this.type,
           verdict: receipt.verdict,
