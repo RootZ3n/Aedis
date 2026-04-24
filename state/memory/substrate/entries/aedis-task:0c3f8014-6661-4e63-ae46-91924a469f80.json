@@ -1,0 +1,55 @@
+{
+  "id": "aedis-task:0c3f8014-6661-4e63-ae46-91924a469f80",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-task",
+  "title": "Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.",
+  "summary": "small-linked · All fallback providers failed (1 chain entries attempted, 0 skipped via blacklist, plus portum last-resort): openrouter/qwen/qwen3.6-plus (network): Network error calling https://openrouter.ai/api/v1/chat/completions: fetch failed | portum/qwen3.6-plus (network):…",
+  "raw": "{\n  \"rawInput\": \"Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.\",\n  \"normalizedPrompt\": \"Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"0887e5f7-0e30-4155-afd8-18aebe18b833\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [\n          {\n            \"name\": \"class-based-module\",\n            \"description\": \"Class-oriented module pattern in src/utils.ts\",\n            \"examples\": [\n              \"src/utils.ts\"\n            ]\n          },\n          {\n            \"name\": \"function-cluster\",\n            \"description\": \"Function-heavy implementation in src/utils.ts\",\n            \"examples\": [\n              \"src/utils.ts\"\n            ]\n          }\n        ],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": [\n            \"Require focused verification on touched files and nearby cluster peers\"\n          ]\n        },\n        \"suggestedApproach\": \"Start with src/utils.ts, ./test/utils.test.ts. Watch exports add, subtract, divide, isEven. Risk is low; follow existing patterns.\",\n        \"inspections\": {\n          \"reads\": [\n            {\n              \"path\": \"src/utils.ts\",\n              \"content\": \"// Simple utils module for stress testing\\nexport function add(a: number, b: number): number {\\n  return a + b;\\n}\\n\\nexport function subtract(a: number, b: number): number {\\n  return a - b;\\n}\\n\\nexport function divide(a: number, b: number): number {\\n  if (b === 0) throw new Error(\\\"Division by zero\\\");\\n  return a / b;\\n}\\n\\nexport function isEven(n: number): boolean {\\n  return n % 2 === 0;\\n}\\n\\nexport function fibonacci(n: number): number {\\n  if (n <= 1) return n;\\n  return fibonacci(n - 1) + fibonacci(n - 2);\\n}\\n\\nexport function capitalize(str: string): string {\\n  return str.charAt(0).toUpperCase() + str.slice(1);\\n}\\n\\nexport function validateEmail(email: string): boolean {\\n  return email.includes(\\\"@\\\");\\n}\\n\\nexport class Stack<T> {\\n  private items: T[] = [];\\n  \\n  push(item: T): void {\\n    this.items.push(item);\\n  }\\n  \\n  pop(): T | undefined {\\n    return this.items.pop();\\n  }\\n  \\n  peek(): T | undefined {\\n    return this.items[this.items.length - 1];\\n  }\\n  \\n  get size(): number {\\n    return this.items.length;\\n  }\\n}\\n\\nexport async function fetchData(url: string): Promise<string> {\\n  return `data from ${url}`;\\n}\\n\",\n              \"lineCount\": 55\n            }\n          ],\n          \"summaries\": [\n            {\n              \"imports\": [],\n              \"exports\": [\n                \"add\",\n                \"subtract\",\n                \"divide\",\n                \"isEven\",\n                \"fibonacci\",\n                \"capitalize\",\n                \"validateEmail\",\n                \"Stack\",\n                \"fetchData\"\n              ],\n              \"functions\": [\n                \"add\",\n                \"subtract\",\n                \"divide\",\n                \"isEven\",\n                \"fibonacci\",\n                \"capitalize\",\n                \"validateEmail\",\n                \"fetchData\"\n              ],\n              \"classes\": [\n                \"Stack\"\n              ],\n              \"patterns\": [\n                \"exports\",\n                \"class-based\"\n              ],\n              \"summary\": \"9 exports; 8 functions; 1 classes; patterns exports, class-based\"\n            }\n          ],\n          \"directoryListing\": {\n            \"path\": \"src\",\n            \"type\": \"directory\",\n            \"children\": [\n              {\n                \"path\": \"src/utils.ts\",\n                \"type\": \"file\"\n              }\n            ]\n          },\n          \"grepMatches\": [],\n          \"gitStatus\": null,\n          \"gitDiff\": null,\n          \"complexity\": [\n            {\n              \"path\": \"src/utils.ts\",\n              \"lineCount\": 55,\n              \"functionCount\": 8,\n              \"classCount\": 1,\n              \"maxNestingDepth\": 2,\n              \"dependencyCount\": 0,\n              \"score\": 55,\n              \"bucket\": \"medium\"\n            }\n          ]\n        }\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.75,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/utils.ts\",\n          \"operation\": \"read\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 4\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"ff4a5ac1-21cb-47a2-a9d8-7a2d6c8c6695\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": true\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"All fallback providers failed (1 chain entries attempted, 0 skipped via blacklist, plus portum last-resort): openrouter/qwen/qwen3.6-plus (network): Network error calling https://openrouter.ai/api/v1/chat/completions: fetch failed | portum/qwen3.6-plus (network): Network error calling http://localhost:18797/v1/chat/completions: fetch failed\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"qwen/qwen3.6-plus\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 41\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"c54c9281-41a9-4eca-8804-6840021b2b62\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": true\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"All fallback providers failed (1 chain entries attempted, 0 skipped via blacklist, plus portum last-resort): openrouter/qwen/qwen3.6-plus (network): Network error calling https://openrouter.ai/api/v1/chat/completions: fetch failed | portum/qwen3.6-plus (network): Network error calling http://localhost:18797/v1/chat/completions: fetch failed\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"qwen/qwen3.6-plus\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 42\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "ext:ts",
+    "module:src",
+    "scope:small-linked",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T11:00:37.937Z",
+  "updatedAt": "2026-04-22T11:00:37.940Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "0c3f8014-6661-4e63-ae46-91924a469f80",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "d53b825d-6d83-4022-afdb-bd36561a4148",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:0c3f8014-6661-4e63-ae46-91924a469f80",
+    "aedis-run:0c3f8014-6661-4e63-ae46-91924a469f80"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:0c3f8014-6661-4e63-ae46-91924a469f80"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:0c3f8014-6661-4e63-ae46-91924a469f80"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "small-linked",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 1
+  }
+}

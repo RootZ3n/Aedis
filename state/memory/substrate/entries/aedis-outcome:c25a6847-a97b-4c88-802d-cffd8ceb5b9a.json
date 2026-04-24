@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:c25a6847-a97b-4c88-802d-cffd8ceb5b9a",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/capability-registry.ts, build capability registry",
+  "summary": "Missing deliverables: Modify core/capability-registry.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/capability-registry.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"core/capability-registry.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/capability-registry.ts)\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"prompt requested a change but no files were modified — cannot satisfy intent\",\n        \"files\": []\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/capability-registry.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"core/capability-registry.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/capability-registry.ts)\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"prompt requested a change but no files were modified — cannot satisfy intent\",\n        \"files\": []\n      }\n    ],\n    \"primaryBlockReason\": \"Missing deliverables: Modify core/capability-registry.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 1 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-23T00:06:20.734Z",
+  "updatedAt": "2026-04-23T00:06:20.739Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-capreg-int-JJKI64",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c25a6847-a97b-4c88-802d-cffd8ceb5b9a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3090cb2c-1c90-456b-bf93-891e334de6e2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:c25a6847-a97b-4c88-802d-cffd8ceb5b9a",
+    "aedis-task:c25a6847-a97b-4c88-802d-cffd8ceb5b9a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c25a6847-a97b-4c88-802d-cffd8ceb5b9a"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c25a6847-a97b-4c88-802d-cffd8ceb5b9a"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Missing deliverables: Modify core/capability-registry.ts"
+  }
+}

@@ -1,0 +1,313 @@
+{
+  "version": 1,
+  "runId": "0f87336f-cc9e-42e3-846f-286e6ea03ca6",
+  "intentId": "ea07fbe5-e251-4bf9-a1b4-b16ca7ac7440",
+  "createdAt": "2026-04-12T18:27:44.279Z",
+  "updatedAt": "2026-04-12T18:27:44.294Z",
+  "startedAt": "2026-04-12T18:27:44.279Z",
+  "completedAt": "2026-04-12T18:27:44.286Z",
+  "prompt": "fix submitBuildTask",
+  "taskSummary": "Aedis failed to complete the task. Confidence: 29%.",
+  "status": "FAILED",
+  "phase": "failed",
+  "finalClassification": "FAILED",
+  "totalCost": {
+    "model": "",
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0
+  },
+  "confidence": {
+    "overall": 0.29250000000000004,
+    "planning": 0.9,
+    "execution": 0,
+    "verification": 0.25
+  },
+  "workerEvents": [],
+  "checkpoints": [
+    {
+      "at": "2026-04-12T18:27:44.279Z",
+      "type": "run_started",
+      "status": "RUNNING",
+      "phase": "charter",
+      "summary": "fix submitBuildTask"
+    },
+    {
+      "at": "2026-04-12T18:27:44.280Z",
+      "type": "planner_finished",
+      "status": "RUNNING",
+      "phase": "planning",
+      "summary": "Planner built 5 task node(s)",
+      "details": {
+        "graphSummary": {
+          "totalNodes": 5,
+          "planned": 4,
+          "ready": 1,
+          "dispatched": 0,
+          "completed": 0,
+          "failed": 0,
+          "skipped": 0,
+          "blocked": 0,
+          "edgeCount": 4,
+          "mergeGroupCount": 0,
+          "checkpointCount": 1,
+          "escalationCount": 0
+        }
+      }
+    },
+    {
+      "at": "2026-04-12T18:27:44.286Z",
+      "type": "run_completed",
+      "status": "FAILED",
+      "phase": "failed",
+      "summary": "Aedis failed to complete the task. Confidence: 29%."
+    }
+  ],
+  "filesTouched": [],
+  "changesSummary": [],
+  "verificationResults": {
+    "final": null,
+    "waves": []
+  },
+  "errors": [
+    "Pre-build coherence failed: No task node covers this deliverable"
+  ],
+  "graphSummary": {
+    "totalNodes": 5,
+    "planned": 4,
+    "ready": 1,
+    "dispatched": 0,
+    "completed": 0,
+    "failed": 0,
+    "skipped": 0,
+    "blocked": 0,
+    "edgeCount": 4,
+    "mergeGroupCount": 0,
+    "checkpointCount": 1,
+    "escalationCount": 0
+  },
+  "runSummary": {
+    "runId": "0f87336f-cc9e-42e3-846f-286e6ea03ca6",
+    "intentId": "ea07fbe5-e251-4bf9-a1b4-b16ca7ac7440",
+    "phase": "failed",
+    "taskCounts": {
+      "total": 0,
+      "pending": 0,
+      "active": 0,
+      "completed": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "totalCost": {
+      "model": "",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "estimatedCostUsd": 0
+    },
+    "filesModified": 0,
+    "assumptions": 0,
+    "decisions": 1,
+    "issues": {
+      "info": 0,
+      "warning": 0,
+      "error": 0,
+      "critical": 0
+    },
+    "duration": 7
+  },
+  "humanSummary": {
+    "classification": "FAILED",
+    "classificationReason": "Run raised an error before producing verifiable work",
+    "classificationReasonCode": "gate-errored",
+    "headline": "Aedis failed to complete the task. Confidence: 29%.",
+    "narrative": "Aedis failed the task. Run raised an error before producing verifiable work. Root cause (unknown stage): A runtime error was raised during the run: Pre-build coherence failed: No task node covers this deliverable Suggested next step: Check the worker logs for the full stack trace. If the error is transient (network, rate limit), retry the run. If the error names a specific file or path, fix or create it before retrying. Projected blast radius was low. Cost: $0.0000. Confidence: 29%.",
+    "whatWasAttempted": "fix submitBuildTask",
+    "whatChanged": [],
+    "filesTouchedCount": 0,
+    "verification": "not-run",
+    "verificationChecks": [],
+    "blastRadius": {
+      "level": "low",
+      "scopeType": "single-file",
+      "estimatedFiles": 1,
+      "rawScore": 0,
+      "recommendDecompose": false,
+      "rationale": "~1 file(s) · contained within one file (level=low, raw=0)",
+      "signals": [
+        "scope:single-file"
+      ]
+    },
+    "confidence": {
+      "overall": 0.29250000000000004,
+      "planning": 0.9,
+      "execution": 0,
+      "verification": 0.25,
+      "basis": [
+        "planning:single-file → +0.40 (bounded scope)",
+        "execution:gate not verified → 0.00",
+        "verification:not run → 0.25 (no positive signal)",
+        "overall = 0.2·plan(0.90) + 0.35·exec(0.00) + 0.45·verify(0.25)"
+      ]
+    },
+    "cost": {
+      "model": "unknown",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "estimatedCostUsd": 0,
+      "displayUsd": "$0.0000"
+    },
+    "failureExplanation": {
+      "code": "runtime-error",
+      "stage": "unknown",
+      "rootCause": "A runtime error was raised during the run: Pre-build coherence failed: No task node covers this deliverable",
+      "suggestedFix": "Check the worker logs for the full stack trace. If the error is transient (network, rate limit), retry the run. If the error names a specific file or path, fix or create it before retrying.",
+      "evidence": [
+        "verdict:failed",
+        "gate:Execution errored: Pre-build coherence failed: No task node covers this deliver…"
+      ]
+    },
+    "factors": [
+      "verdict:failed",
+      "executionVerified:false",
+      "gate:errored"
+    ]
+  },
+  "finalReceipt": {
+    "id": "03ec2fab-8218-4a0b-93e8-1d8a42f9d3cf",
+    "runId": "0f87336f-cc9e-42e3-846f-286e6ea03ca6",
+    "intentId": "ea07fbe5-e251-4bf9-a1b4-b16ca7ac7440",
+    "timestamp": "2026-04-12T18:27:44.286Z",
+    "verdict": "failed",
+    "summary": {
+      "runId": "0f87336f-cc9e-42e3-846f-286e6ea03ca6",
+      "intentId": "ea07fbe5-e251-4bf9-a1b4-b16ca7ac7440",
+      "phase": "failed",
+      "taskCounts": {
+        "total": 0,
+        "pending": 0,
+        "active": 0,
+        "completed": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "totalCost": {
+        "model": "",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "estimatedCostUsd": 0
+      },
+      "filesModified": 0,
+      "assumptions": 0,
+      "decisions": 1,
+      "issues": {
+        "info": 0,
+        "warning": 0,
+        "error": 0,
+        "critical": 0
+      },
+      "duration": 7
+    },
+    "graphSummary": {
+      "totalNodes": 5,
+      "planned": 4,
+      "ready": 1,
+      "dispatched": 0,
+      "completed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "blocked": 0,
+      "edgeCount": 4,
+      "mergeGroupCount": 0,
+      "checkpointCount": 1,
+      "escalationCount": 0
+    },
+    "verificationReceipt": null,
+    "waveVerifications": [],
+    "judgmentReport": null,
+    "mergeDecision": null,
+    "totalCost": {
+      "model": "",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "estimatedCostUsd": 0
+    },
+    "commitSha": null,
+    "durationMs": 20037,
+    "executionVerified": false,
+    "executionGateReason": "Execution errored: Pre-build coherence failed: No task node covers this deliverable",
+    "executionEvidence": [],
+    "executionReceipts": [],
+    "humanSummary": {
+      "classification": "FAILED",
+      "classificationReason": "Run raised an error before producing verifiable work",
+      "classificationReasonCode": "gate-errored",
+      "headline": "Aedis failed to complete the task. Confidence: 29%.",
+      "narrative": "Aedis failed the task. Run raised an error before producing verifiable work. Root cause (unknown stage): A runtime error was raised during the run: Pre-build coherence failed: No task node covers this deliverable Suggested next step: Check the worker logs for the full stack trace. If the error is transient (network, rate limit), retry the run. If the error names a specific file or path, fix or create it before retrying. Projected blast radius was low. Cost: $0.0000. Confidence: 29%.",
+      "whatWasAttempted": "fix submitBuildTask",
+      "whatChanged": [],
+      "filesTouchedCount": 0,
+      "verification": "not-run",
+      "verificationChecks": [],
+      "blastRadius": {
+        "level": "low",
+        "scopeType": "single-file",
+        "estimatedFiles": 1,
+        "rawScore": 0,
+        "recommendDecompose": false,
+        "rationale": "~1 file(s) · contained within one file (level=low, raw=0)",
+        "signals": [
+          "scope:single-file"
+        ]
+      },
+      "confidence": {
+        "overall": 0.29250000000000004,
+        "planning": 0.9,
+        "execution": 0,
+        "verification": 0.25,
+        "basis": [
+          "planning:single-file → +0.40 (bounded scope)",
+          "execution:gate not verified → 0.00",
+          "verification:not run → 0.25 (no positive signal)",
+          "overall = 0.2·plan(0.90) + 0.35·exec(0.00) + 0.45·verify(0.25)"
+        ]
+      },
+      "cost": {
+        "model": "unknown",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "estimatedCostUsd": 0,
+        "displayUsd": "$0.0000"
+      },
+      "failureExplanation": {
+        "code": "runtime-error",
+        "stage": "unknown",
+        "rootCause": "A runtime error was raised during the run: Pre-build coherence failed: No task node covers this deliverable",
+        "suggestedFix": "Check the worker logs for the full stack trace. If the error is transient (network, rate limit), retry the run. If the error names a specific file or path, fix or create it before retrying.",
+        "evidence": [
+          "verdict:failed",
+          "gate:Execution errored: Pre-build coherence failed: No task node covers this deliver…"
+        ]
+      },
+      "factors": [
+        "verdict:failed",
+        "executionVerified:false",
+        "gate:errored"
+      ]
+    },
+    "blastRadius": {
+      "level": "low",
+      "scopeType": "single-file",
+      "estimatedFiles": 1,
+      "rawScore": 0,
+      "recommendDecompose": false,
+      "rationale": "~1 file(s) · contained within one file (level=low, raw=0)",
+      "signals": [
+        "scope:single-file"
+      ]
+    },
+    "escalation": null,
+    "memorySuggestions": [
+      "Re-run the task with tighter scope around the failing files before attempting broader changes."
+    ]
+  }
+}

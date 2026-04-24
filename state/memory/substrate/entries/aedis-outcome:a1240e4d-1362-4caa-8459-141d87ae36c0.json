@@ -1,0 +1,63 @@
+{
+  "id": "aedis-outcome:a1240e4d-1362-4caa-8459-141d87ae36c0",
+  "space": "aedis/success",
+  "kind": "aedis-success",
+  "title": "Successful run for Add a one-line JSDoc comment /** encoding helpers */ at the very top of utils/hashing.ts",
+  "summary": "Successful approach stayed inside the requested scope.",
+  "raw": "{\n  \"issues\": [\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"utils/hashing.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"utils/hashing.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 2 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "module:utils",
+    "success-pattern",
+    "verification:pass"
+  ],
+  "createdAt": "2026-04-20T02:06:48.104Z",
+  "updatedAt": "2026-04-20T02:06:48.110Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/crucible",
+  "filePaths": [
+    "utils/hashing.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "a1240e4d-1362-4caa-8459-141d87ae36c0",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "aacab700-d92b-48fe-af26-768f00ddb7e7",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "faf2624d0495f47b4c755a46edc1c5bb4d437e35",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "94fc499e-af6a-441f-9567-e428de50dcc6",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:a1240e4d-1362-4caa-8459-141d87ae36c0",
+    "aedis-task:a1240e4d-1362-4caa-8459-141d87ae36c0"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:a1240e4d-1362-4caa-8459-141d87ae36c0"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:a1240e4d-1362-4caa-8459-141d87ae36c0"
+    }
+  ],
+  "confidence": 0.85,
+  "metadata": {
+    "verdict": "success",
+    "verificationVerdict": "pass",
+    "primaryBlockReason": ""
+  }
+}

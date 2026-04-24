@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:03729ee5-e2de-485b-bf1a-c420ca282186",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 03729ee5-e2de-485b-bf1a-c420ca282186",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: One or more task nodes failed and were not recovered.",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T01:31:58.476Z",
+  "updatedAt": "2026-04-22T01:31:58.478Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "03729ee5-e2de-485b-bf1a-c420ca282186",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "dab4e01a-c0f0-4757-9777-0be485823a19",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:03729ee5-e2de-485b-bf1a-c420ca282186",
+    "aedis-run:03729ee5-e2de-485b-bf1a-c420ca282186",
+    "aedis-task:03729ee5-e2de-485b-bf1a-c420ca282186"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:03729ee5-e2de-485b-bf1a-c420ca282186"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:03729ee5-e2de-485b-bf1a-c420ca282186"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 2
+  }
+}

@@ -195,7 +195,7 @@ export interface TaskRunMapping {
   prompt: string;
   submittedAt: string;
   completedAt: string | null;
-  status: "queued" | "running" | "complete" | "failed" | "cancelled";
+  status: "queued" | "running" | "complete" | "partial" | "failed" | "cancelled";
   error: string | null;
 }
 

@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:2201867b-6b53-4000-ac39-3c297f9776dd",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 2201867b-6b53-4000-ac39-3c297f9776dd",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: One or more task nodes failed and were not recovered. Inspect repair-pass fallout: ./test/utils.test.ts: named import \"validateEmail\" missing from src/…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T15:16:54.089Z",
+  "updatedAt": "2026-04-22T15:16:54.090Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/email.ts",
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "2201867b-6b53-4000-ac39-3c297f9776dd",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "4ba3b712-367c-4535-a725-01fe1e47a3ee",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:2201867b-6b53-4000-ac39-3c297f9776dd",
+    "aedis-run:2201867b-6b53-4000-ac39-3c297f9776dd",
+    "aedis-task:2201867b-6b53-4000-ac39-3c297f9776dd"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:2201867b-6b53-4000-ac39-3c297f9776dd"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:2201867b-6b53-4000-ac39-3c297f9776dd"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 4
+  }
+}

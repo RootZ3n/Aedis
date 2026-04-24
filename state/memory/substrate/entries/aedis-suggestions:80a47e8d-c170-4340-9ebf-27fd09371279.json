@@ -1,0 +1,55 @@
+{
+  "id": "aedis-suggestions:80a47e8d-c170-4340-9ebf-27fd09371279",
+  "space": "aedis/project/mnt-ai-aedis",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 80a47e8d-c170-4340-9ebf-27fd09371279",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: One or more task nodes failed and were not recovered. Check nearby cluster files next: core/aedis-memory.test.ts, core/change-set.ts, core/charter.ts",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-24T15:24:52.577Z",
+  "updatedAt": "2026-04-24T15:24:52.587Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "workers/base.ts",
+    "workers/builder.ts",
+    "workers/critic.ts",
+    "workers/integrator.ts",
+    "workers/scout.ts",
+    "workers/verifier.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "80a47e8d-c170-4340-9ebf-27fd09371279",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "ff2a2230-414d-494b-b8a3-ad3d753ca102",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:80a47e8d-c170-4340-9ebf-27fd09371279",
+    "aedis-run:80a47e8d-c170-4340-9ebf-27fd09371279",
+    "aedis-task:80a47e8d-c170-4340-9ebf-27fd09371279"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:80a47e8d-c170-4340-9ebf-27fd09371279"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:80a47e8d-c170-4340-9ebf-27fd09371279"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

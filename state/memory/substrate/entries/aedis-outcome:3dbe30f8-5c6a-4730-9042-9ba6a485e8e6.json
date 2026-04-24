@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:3dbe30f8-5c6a-4730-9042-9ba6a485e8e6",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Extract the email validation logic into a new file src/email.ts with an exported isValidEmail function. Update src/utils",
+  "summary": "One or more task nodes failed and were not recovered. Repair-pass issues: ./test/utils.test.ts: named import \"validateEmail\" missing from src/utils.ts",
+  "raw": "{\n  \"issues\": [\n    \"Model returned no effective file changes\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"./test/utils.test.ts: named import \\\"validateEmail\\\" missing from src/utils.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"./test/utils.test.ts: named import \\\"validateEmail\\\" missing from src/utils.ts\"\n      }\n    ],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 1 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 1,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"./test/utils.test.ts: named import \\\"validateEmail\\\" missing from src/utils.ts\"\n    ]\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T03:51:33.467Z",
+  "updatedAt": "2026-04-22T03:51:33.469Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "3dbe30f8-5c6a-4730-9042-9ba6a485e8e6",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "434cdb7a-9ad0-4266-954b-1d10dd8659e5",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:3dbe30f8-5c6a-4730-9042-9ba6a485e8e6",
+    "aedis-task:3dbe30f8-5c6a-4730-9042-9ba6a485e8e6"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:3dbe30f8-5c6a-4730-9042-9ba6a485e8e6"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:3dbe30f8-5c6a-4730-9042-9ba6a485e8e6"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

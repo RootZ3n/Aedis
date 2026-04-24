@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:735de936-c4bf-43c9-826e-15382cc7997b",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/capability-registry.ts, build capability registry",
+  "summary": "Missing deliverables: Modify core/capability-registry.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/capability-registry.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"core/capability-registry.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/capability-registry.ts)\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/capability-registry.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"core/capability-registry.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/capability-registry.ts)\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"Missing deliverables: Modify core/capability-registry.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-19T15:45:46.301Z",
+  "updatedAt": "2026-04-19T15:45:46.305Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-capreg-int-UlHMQX",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "735de936-c4bf-43c9-826e-15382cc7997b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "ca0b74e4-9528-4090-b887-9f923485d6b4",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:735de936-c4bf-43c9-826e-15382cc7997b",
+    "aedis-task:735de936-c4bf-43c9-826e-15382cc7997b"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:735de936-c4bf-43c9-826e-15382cc7997b"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:735de936-c4bf-43c9-826e-15382cc7997b"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Missing deliverables: Modify core/capability-registry.ts"
+  }
+}

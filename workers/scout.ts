@@ -8,6 +8,7 @@ import { recordDecision, recordFileTouch } from "../core/runstate.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
+  validateWorkerAssignment,
   type CodePattern,
   type DependencyEdge,
   type RiskAssessment,
@@ -16,6 +17,12 @@ import {
   type WorkerAssignment,
   type WorkerResult,
 } from "./base.js";
+
+import { execFileWithRetry } from "../core/retry-utils.js";
+import {
+  scanForInjection,
+  type GuardFinding,
+} from "../core/adversarial-guard.js";
 
 const exec = promisify(execFile);
 const DEFAULT_IGNORE = new Set(["node_modules", ".git", "dist", "coverage", ".next"]);
@@ -93,6 +100,15 @@ export interface ScoutInspectionBundle {
   readonly gitStatus: GitStatusSummary | null;
   readonly gitDiff: GitDiffSummary | null;
   readonly complexity: readonly ComplexityEstimate[];
+  /**
+   * Phase 8 — prompt-injection findings from scout-harvested file
+   * contents. When populated, every entry in `reads` has had its
+   * `content` field replaced with the neutralized variant so the
+   * hostile directive no longer reads as an instruction to the
+   * builder. The raw matches are preserved here so diagnostics and
+   * receipts can surface what was found and where.
+   */
+  readonly injectionFindings?: readonly GuardFinding[];
 }
 
 export interface ScoutResult extends WorkerResult {
@@ -154,6 +170,12 @@ export class ScoutWorker extends AbstractWorker {
   }
 
   async execute(assignment: WorkerAssignment): Promise<ScoutResult> {
+    // FAIL-FAST: reject malformed assignments before doing any I/O or work.
+    // This catches bad upstream data at the worker boundary rather than
+    // letting it manifest as a confusing TypeError deep in the logic.
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    validateWorkerAssignment(assignment, this.type);
+
     const startedAt = Date.now();
     const touchedFiles: TouchedFile[] = [];
 
@@ -202,6 +224,7 @@ export class ScoutWorker extends AbstractWorker {
       const complexity: ComplexityEstimate[] = [];
       const dependencies: DependencyEdge[] = [];
       const patterns: CodePattern[] = [];
+      const injectionFindings: GuardFinding[] = [];
 
       for (const file of mappedTargetFiles.slice(0, 8)) {
         let fileRead: ScoutFileRead;
@@ -216,8 +239,30 @@ export class ScoutWorker extends AbstractWorker {
             console.warn(`[scout] skipping missing file: ${file}`);
             continue;
           }
+          // EISDIR means the path is a directory, not a file — skip it rather than
+          // crashing. This can happen when the Charter phase generates a target path
+          // that resolves to a directory (e.g. "core/src/" instead of "packages/core/src/").
+          if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "EISDIR") {
+            console.warn(`[scout] skipping directory passed as file: ${file}`);
+            continue;
+          }
           throw err;
         }
+
+        // Phase 8 — scan and neutralize prompt-injection patterns in
+        // the file before it flows downstream into the builder prompt.
+        // We log each finding but never refuse the read: the model
+        // still needs this file's structure; we just strip the
+        // directive shape so the model is less likely to obey it.
+        const scan = scanForInjection(fileRead.content, { source: fileRead.path });
+        if (scan.findings.length > 0) {
+          injectionFindings.push(...scan.findings);
+          fileRead = { ...fileRead, content: scan.sanitized };
+          console.warn(
+            `[scout] injection findings in ${fileRead.path}: ${scan.findings.map((f) => f.code).join(", ")}`,
+          );
+        }
+
         reads.push(fileRead);
         touchedFiles.push({ path: fileRead.path, operation: "read" });
         this.logFileTouch(assignment.task.id, fileRead.path, "read");
@@ -245,12 +290,26 @@ export class ScoutWorker extends AbstractWorker {
 
       const grepPattern = this.buildTaskPattern(assignment.task.description);
       const directorySeed = this.inferDirectorySeed(mappedTargetFiles);
-      const [directoryListing, grepMatches, gitStatus, gitDiff] = await Promise.all([
+      const [directoryListing, rawGrepMatches, gitStatus, gitDiff] = await Promise.all([
         directorySeed ? this.listDir(directorySeed, projectRoot) : Promise.resolve<DirectoryListingEntry | null>(null),
         grepPattern ? this.grepFiles(grepPattern, directorySeed ?? ".", projectRoot) : Promise.resolve<GrepMatch[]>([]),
         this.gitStatus(projectRoot).catch(() => null),
         this.gitDiff(projectRoot).catch(() => null),
       ]);
+
+      // Phase 8.5 — grep snippets are raw file fragments just like
+      // fileRead.content, so they must pass through the same
+      // injection scanner before they flow into the builder prompt.
+      // Before this pass, grep could smuggle neutralization-bypassing
+      // directives past the scanner that Phase 8 installed on file
+      // reads. Findings accumulate into the same injectionFindings
+      // bucket the coordinator already aggregates.
+      const grepMatches: GrepMatch[] = rawGrepMatches.map((m) => {
+        const scan = scanForInjection(m.snippet, { source: `${m.path}:${m.line}` });
+        if (scan.findings.length === 0) return m;
+        injectionFindings.push(...scan.findings);
+        return { ...m, snippet: scan.sanitized };
+      });
 
       if (directoryListing) {
         this.noteDecision(assignment.task.id, `Scout mapped ${directorySeed} (in ${projectRoot})`, "Provides local structure for downstream workers");
@@ -273,6 +332,7 @@ export class ScoutWorker extends AbstractWorker {
           gitStatus,
           gitDiff,
           complexity,
+          injectionFindings,
         },
       };
 
@@ -336,7 +396,19 @@ export class ScoutWorker extends AbstractWorker {
    */
   async readFile(path: string, projectRoot: string): Promise<ScoutFileRead> {
     const safePath = this.resolvePath(path, projectRoot);
-    const content = await readFile(safePath, "utf8");
+    let content: string;
+    try {
+      content = await readFile(safePath, "utf8");
+    } catch (err) {
+      // Guard against directory paths that slipped through target extraction.
+      // readRelevantSourceFiles guards its loop, but readFile can be called
+      // directly with a path derived from other logic (e.g., imports array).
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "EISDIR") {
+        console.warn(`[scout] readFile: path is a directory, skipping: ${path}`);
+        return { path: this.toRelative(safePath, projectRoot), content: "", lineCount: 0 };
+      }
+      throw err;
+    }
     return {
       path: this.toRelative(safePath, projectRoot),
       content,
@@ -369,10 +441,24 @@ export class ScoutWorker extends AbstractWorker {
    * Grep for a pattern within projectRoot, starting from `dir` (relative
    * to projectRoot). Honors the configured ignoreDirs.
    */
+  /**
+   * Grep for a pattern within projectRoot, starting from `dir` (relative
+   * to projectRoot). Honors the configured ignoreDirs.
+   *
+   * IMPORTANT: this is a file DISCOVERY step, not authoritative inclusion.
+   * Raw grep matches include node_modules, dist, and config files that
+   * may match on noise. All results should be re-scored through
+   * relevance-scorer.ts before final context selection.
+   */
   async grepFiles(pattern: string, dir: string, projectRoot: string): Promise<GrepMatch[]> {
     const baseDir = this.resolvePath(dir, projectRoot);
     const regex = new RegExp(pattern, "i");
     const matches: GrepMatch[] = [];
+    const MAX_MATCHES = 100;
+    const ALWAYS_EXCLUDED = new Set([
+      "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+      "tsconfig.json", "jest.config", "vitest.config", "tsconfig",
+    ]);
 
     const visit = async (current: string): Promise<void> => {
       let info;
@@ -382,7 +468,8 @@ export class ScoutWorker extends AbstractWorker {
         return; // skip missing paths silently
       }
       if (info.isDirectory()) {
-        if (this.ignoreDirs.has(current.split(sep).pop() ?? "")) return;
+        const dirName = current.split(sep).pop() ?? "";
+        if (this.ignoreDirs.has(dirName)) return;
         const entries = await readdir(current, { withFileTypes: true });
         for (const entry of entries) {
           await visit(resolve(current, entry.name));
@@ -391,12 +478,26 @@ export class ScoutWorker extends AbstractWorker {
       }
 
       const rel = this.toRelative(current, projectRoot);
+      // Always skip node_modules, dist, coverage at the path level
+      const normalizedRel = rel.replace(/\\/g, "/").toLowerCase();
+      if (
+        normalizedRel.includes("node_modules") ||
+        normalizedRel.includes("/dist/") ||
+        normalizedRel.includes("/coverage/") ||
+        normalizedRel.includes("/.next/")
+      ) {
+        return;
+      }
+      // Skip always-excluded bulk files
+      const baseName = rel.split("/").pop() ?? "";
+      if (ALWAYS_EXCLUDED.has(baseName)) return;
+
       const content = await readFile(current, "utf8").catch(() => "");
       if (!content) return;
       for (const [index, line] of content.split(/\r?\n/).entries()) {
         if (regex.test(line)) {
           matches.push({ path: rel, line: index + 1, snippet: line.trim().slice(0, 240) });
-          if (matches.length >= 100) return;
+          if (matches.length >= MAX_MATCHES) return;
         }
       }
     };
@@ -412,7 +513,13 @@ export class ScoutWorker extends AbstractWorker {
    * — there was never a separate repo root. The new name reflects that.
    */
   async gitStatus(projectRoot: string): Promise<GitStatusSummary> {
-    const { stdout } = await exec("git", ["-C", projectRoot, "status", "--short", "--branch"], { maxBuffer: 1024 * 1024 });
+    // Retry on transient network/filesystem errors (ETIMEDOUT, ENETUNREACH, etc.)
+    // so a single git hiccup doesn't fail the whole Scout run.
+    const { stdout } = await execFileWithRetry(
+      "git",
+      ["-C", projectRoot, "status", "--short", "--branch"],
+      { maxBuffer: 1024 * 1024 },
+    );
     const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
     const branch = lines[0]?.startsWith("## ") ? lines[0].replace(/^##\s+/, "") : null;
     const staged: string[] = [];
@@ -454,7 +561,8 @@ export class ScoutWorker extends AbstractWorker {
       const absFile = this.resolvePath(file, projectRoot);
       args.push("--", this.toRelative(absFile, projectRoot));
     }
-    const { stdout } = await exec("git", args, { maxBuffer: 1024 * 1024 });
+    // Retry on transient errors so a single git hiccup doesn't fail the whole Scout run.
+    const { stdout } = await execFileWithRetry("git", args, { maxBuffer: 1024 * 1024 });
     const files = stdout
       .trim()
       .split(/\r?\n/)
@@ -617,12 +725,20 @@ export class ScoutWorker extends AbstractWorker {
     return { path: this.toRelative(dirPath, projectRoot), type: "directory", children };
   }
 
+  /**
+   * Extract grep search terms from a task description.
+   * Replaces the naive single-word approach with multi-keyword extraction.
+   * Returns the first 2 significant words joined by space to reduce
+   * false positives from single-token grep.
+   */
   private buildTaskPattern(description: string): string | null {
     const words = description
       .split(/\s+/)
       .map((word) => word.replace(/[^a-zA-Z0-9_-]/g, ""))
       .filter((word) => word.length >= 4);
-    return words[0] ?? null;
+    const significant = words.slice(0, 2);
+    if (significant.length === 0) return null;
+    return significant.join(" ");
   }
 
   private inferDirectorySeed(files: readonly string[]): string | null {
@@ -767,7 +883,8 @@ export interface SectionExtraction {
     | "function-keyword-match"
     | "longest-function-fallback"
     | "middle-of-file-fallback"
-    | "top-of-file-keyword";
+    | "top-of-file-keyword"
+    | "bottom-of-file-keyword";
   readonly keywordsUsed: readonly string[];
 }
 
@@ -782,7 +899,9 @@ export const SECTION_MAX_LINES = 150;
 export const SECTION_PADDING_LINES = 100;
 
 export const TOP_OF_FILE_LINE_COUNT = 50;
-const TOP_OF_FILE_PATTERN = /\b(?:top of (?:the )?file|(?:at|to) the top|file header|beginning of (?:the )?file)\b/i;
+export const BOTTOM_OF_FILE_LINE_COUNT = 80;
+const TOP_OF_FILE_PATTERN = /(?:top of (?:the )?file|(?:at|to) the top|file header|beginning of (?:the )?file)\b/i;
+const BOTTOM_OF_FILE_PATTERN = /\b(?:bottom of (?:the )?file|(?:at|to) the bottom|end of (?:the )?file|(?:at|to) the end|append to (?:the )?bottom|append to (?:the )?end)\b/i;
 
 const SECTION_STOP_WORDS = new Set([
   "the", "a", "an", "to", "in", "on", "at", "of", "for", "with", "and", "or",
@@ -837,6 +956,23 @@ export function extractRelevantSection(
       funcStart: 1,
       funcEnd: endLineOneIdx,
       extractionMethod: "top-of-file-keyword",
+      keywordsUsed: extractTaskKeywords(taskDescription),
+    };
+  }
+
+  // ─── STEP 0b: BOTTOM-OF-FILE PRE-CHECK ─────────────────────────────
+  if (BOTTOM_OF_FILE_PATTERN.test(taskDescription)) {
+    const startLineZeroIdx = Math.max(0, totalLines - BOTTOM_OF_FILE_LINE_COUNT);
+    const sectionLines = lines.slice(startLineZeroIdx);
+    return {
+      section: sectionLines.join("\n"),
+      startLine: startLineZeroIdx + 1,
+      endLine: totalLines,
+      totalLines,
+      matchedFunction: "file-tail",
+      funcStart: startLineZeroIdx + 1,
+      funcEnd: totalLines,
+      extractionMethod: "bottom-of-file-keyword",
       keywordsUsed: extractTaskKeywords(taskDescription),
     };
   }

@@ -25,6 +25,10 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 
+// AEDIS_TMPDIR lets the operator override where workspaces are created.
+// Default is the system temp dir, but large repos can fill small /tmp partitions.
+const WORKSPACE_ROOT = process.env.AEDIS_TMPDIR ?? tmpdir();
+
 const exec = promisify(execFile);
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -321,7 +325,7 @@ async function tryWorktree(
       timeout: 5_000,
     });
 
-    const workspacePath = join(tmpdir(), `aedis-ws-${runId.slice(0, 8)}-${Date.now()}`);
+    const workspacePath = join(WORKSPACE_ROOT, `aedis-ws-${runId.slice(0, 8)}-${Date.now()}`);
     const branchName = `aedis/workspace/${runId.slice(0, 8)}`;
 
     // Create a detached worktree from HEAD
@@ -366,7 +370,7 @@ async function tryClone(
   createdAt: string,
 ): Promise<WorkspaceHandle | null> {
   try {
-    const workspacePath = join(tmpdir(), `aedis-ws-${runId.slice(0, 8)}-${Date.now()}`);
+    const workspacePath = join(WORKSPACE_ROOT, `aedis-ws-${runId.slice(0, 8)}-${Date.now()}`);
 
     await exec(
       "git",
@@ -399,7 +403,7 @@ async function copyWorkspace(
   sourceCommitSha: string,
   createdAt: string,
 ): Promise<WorkspaceHandle> {
-  const workspacePath = await mkdtemp(join(tmpdir(), `aedis-ws-${runId.slice(0, 8)}-`));
+  const workspacePath = await mkdtemp(join(WORKSPACE_ROOT, `aedis-ws-${runId.slice(0, 8)}-`));
 
   // Use cp -a for a faithful copy
   await exec("cp", ["-a", `${sourceRepo}/.`, workspacePath], {

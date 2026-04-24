@@ -1,0 +1,63 @@
+{
+  "id": "aedis-outcome:16767442-2007-47d6-888c-5bff5c9ae3f5",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/project-memory.ts, Build and test a simple TypeScript project with vitest. Project is at /tmp/test-aedis. Run th",
+  "summary": "lint hook not configured — required verification cannot run FAIL — 5/6 stages passed, confidence 83%, 1 blockers, checks typecheck:pass, tests:fail, missing required checks: lint, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 8fcdd087-c49c-4bb8-b54e-2dfabb1b0c23) reported no touched files\",\n    \"lint hook not configured — required verification cannot run\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task add5b87e-fe0f-4ba6-baab-a40a3e0a7754) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 8fcdd087-c49c-4bb8-b54e-2dfabb1b0c23) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task a25b77c5-fc69-4be8-b15f-f29d21ccaff7) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 55f6277d-ab8e-4123-b8db-87acb9b08d62) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"core/project-memory.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — required verification cannot run\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task add5b87e-fe0f-4ba6-baab-a40a3e0a7754) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 8fcdd087-c49c-4bb8-b54e-2dfabb1b0c23) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task a25b77c5-fc69-4be8-b15f-f29d21ccaff7) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 55f6277d-ab8e-4123-b8db-87acb9b08d62) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"core/project-memory.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"lint hook not configured — required verification cannot run\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 6 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-18T14:55:06.420Z",
+  "updatedAt": "2026-04-18T14:55:06.434Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "core/change-set.ts",
+    "core/charter.ts",
+    "core/context-gate.ts",
+    "core/project-memory.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "16767442-2007-47d6-888c-5bff5c9ae3f5",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "a06d339c-e583-4616-91f9-89810db2d5fc",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "435b601c-34c6-4c03-ac20-623467fdaf23",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:16767442-2007-47d6-888c-5bff5c9ae3f5",
+    "aedis-task:16767442-2007-47d6-888c-5bff5c9ae3f5"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:16767442-2007-47d6-888c-5bff5c9ae3f5"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:16767442-2007-47d6-888c-5bff5c9ae3f5"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "primaryBlockReason": "lint hook not configured — required verification cannot run"
+  }
+}

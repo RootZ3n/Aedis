@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:c33a846b-a8f3-4efd-a877-88b4d53db26a",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in modify widget in core",
+  "summary": "Files changed outside deliverables: core/widget.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Files changed outside deliverables: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/widget.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:undeclared-changes\",\n        \"message\": \"1 file(s) changed on disk but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Files changed outside deliverables: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/widget.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:undeclared-changes\",\n        \"message\": \"1 file(s) changed on disk but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"Files changed outside deliverables: core/widget.ts\",\n    \"summary\": \"MERGE BLOCKED — 4 critical, 0 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-20T00:52:28.204Z",
+  "updatedAt": "2026-04-20T00:52:28.206Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-coord-int-LaBAyC",
+  "filePaths": [
+    "core/widget.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c33a846b-a8f3-4efd-a877-88b4d53db26a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "2ea71570-27fe-4711-a3a7-f76675ccb10e",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:c33a846b-a8f3-4efd-a877-88b4d53db26a",
+    "aedis-task:c33a846b-a8f3-4efd-a877-88b4d53db26a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c33a846b-a8f3-4efd-a877-88b4d53db26a"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c33a846b-a8f3-4efd-a877-88b4d53db26a"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Files changed outside deliverables: core/widget.ts"
+  }
+}

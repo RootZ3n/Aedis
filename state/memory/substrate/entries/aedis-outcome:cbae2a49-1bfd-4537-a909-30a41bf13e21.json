@@ -1,0 +1,59 @@
+{
+  "id": "aedis-outcome:cbae2a49-1bfd-4537-a909-30a41bf13e21",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in src/email.ts, Fix validateEmail to return false (not true) when the email string has no @ character.",
+  "summary": "1 manifest file(s) expected to change but unchanged on disk: src/email.ts PASS-WITH-WARNINGS — 7/7 stages passed, confidence 96%, 0 blockers, checks typecheck:pass, tests:fail, typecheck:pass, typecheck:pass, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.82 (keywords: src, email, validateemail, return)\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder touched 1 file(s); none were identified by scout\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s); none match any scout target\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder touched 1 file(s); none were identified by scout\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s); none match any scout target\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"1 manifest file(s) expected to change but unchanged on disk: src/email.ts\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"bugfix-target-not-modified\",\n        \"message\": \"bugfix_target_not_modified — user request looks like a bugfix but no files were modified on disk. A bugfix must modify at least one non-test source file.\",\n        \"files\": []\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"1 manifest file(s) expected to change but unchanged on disk: src/email.ts\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"bugfix-target-not-modified\",\n        \"message\": \"bugfix_target_not_modified — user request looks like a bugfix but no files were modified on disk. A bugfix must modify at least one non-test source file.\",\n        \"files\": []\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder touched 1 file(s); none were identified by scout\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s); none match any scout target\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder touched 1 file(s); none were identified by scout\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s); none match any scout target\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"src/email.ts\"\n        ]\n      }\n    ],\n    \"primaryBlockReason\": \"1 manifest file(s) expected to change but unchanged on disk: src/email.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 5 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-22T17:15:22.598Z",
+  "updatedAt": "2026-04-22T17:15:22.603Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/email.ts",
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "cbae2a49-1bfd-4537-a909-30a41bf13e21",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "0811acd8-77a6-4343-bc8f-4929143b72d9",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "76327b2b-b3ca-4105-b20e-fdee7a134e21",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:cbae2a49-1bfd-4537-a909-30a41bf13e21",
+    "aedis-task:cbae2a49-1bfd-4537-a909-30a41bf13e21"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:cbae2a49-1bfd-4537-a909-30a41bf13e21"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:cbae2a49-1bfd-4537-a909-30a41bf13e21"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": "1 manifest file(s) expected to change but unchanged on disk: src/email.ts"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "id": "aedis-outcome:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Append `export const AEDIS_END_TO_END_TEST2 = true` to the bottom of workers/base.ts",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"All fallback providers failed (1 chain entries attempted, 0 skipped via blacklist, plus portum last-resort): ollama/qwen3.5:9b (timeout): Request to http://localhost:11434/api/chat timed out after 300000ms | portum/qwen3.6-plus (network): Network error calling http://localhost:18797/v1/chat/completions: fetch failed\",\n    \"All fallback providers failed (0 chain entries attempted, 1 skipped via blacklist, plus portum last-resort): portum/qwen3.6-plus (network): Network error calling http://localhost:18797/v1/chat/completions: fetch failed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 1 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "module:workers",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-24T15:35:07.945Z",
+  "updatedAt": "2026-04-24T15:35:07.956Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "workers/base.ts",
+    "workers/builder.ts",
+    "workers/critic.ts",
+    "workers/integrator.ts",
+    "workers/scout.ts",
+    "workers/verifier.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "634ca0a5-edbe-4ad9-a9a3-250e59bcbae9",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "7a64c796-7d99-4ae2-bf87-b116c6d6809d",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9",
+    "aedis-task:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

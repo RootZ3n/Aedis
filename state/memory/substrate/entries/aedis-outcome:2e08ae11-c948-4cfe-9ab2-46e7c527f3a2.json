@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:2e08ae11-c948-4cfe-9ab2-46e7c527f3a2",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a modulo function to src/utils.ts that returns the remainder of integer division.",
+  "summary": "1 file(s) changed but not declared in manifest: test/utils.test.ts",
+  "raw": "{\n  \"issues\": [\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T11:12:34.263Z",
+  "updatedAt": "2026-04-22T11:12:34.265Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "2e08ae11-c948-4cfe-9ab2-46e7c527f3a2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "1246a47b-c9ae-41f3-b71c-735762214ca4",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:2e08ae11-c948-4cfe-9ab2-46e7c527f3a2",
+    "aedis-task:2e08ae11-c948-4cfe-9ab2-46e7c527f3a2"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:2e08ae11-c948-4cfe-9ab2-46e7c527f3a2"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:2e08ae11-c948-4cfe-9ab2-46e7c527f3a2"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "1 file(s) changed but not declared in manifest: test/utils.test.ts"
+  }
+}

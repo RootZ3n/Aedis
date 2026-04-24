@@ -20,6 +20,7 @@
  */
 
 import type { ImpactLevel } from "./impact-classifier.js";
+import type { GuardFinding } from "./adversarial-guard.js";
 
 export type ConfidenceLevel = "high" | "medium" | "low";
 
@@ -28,15 +29,44 @@ export interface ConfidenceInput {
   readonly integrationPassed: boolean;
   readonly criticIterations: number;
   readonly impactLevel: ImpactLevel;
+  /**
+   * Phase 8 — adversarial-guard findings collected across the run
+   * (scout injection scans, execution-gate content-identity, judge
+   * consensus / intent-satisfaction). Null/empty when no signals
+   * fired. The gate treats them as downward pressure on confidence,
+   * never upward.
+   */
+  readonly adversarialFindings?: readonly GuardFinding[];
 }
 
 export interface ConfidenceResult {
   readonly level: ConfidenceLevel;
   readonly reasons: string[];
+  /** Phase 8 — true when any `escalate`-severity finding fired. */
+  readonly escalationRecommended?: boolean;
 }
 
 export function scoreConfidence(input: ConfidenceInput): ConfidenceResult {
   const reasons: string[] = [];
+  const findings = input.adversarialFindings ?? [];
+  const hasEscalate = findings.some((f) => f.severity === "escalate");
+  const hasDowngrade = findings.some((f) => f.severity === "downgrade");
+  const hasWarn = findings.some((f) => f.severity === "warn");
+
+  // Phase 8 — content-identity, execution-unverified, or an attempted
+  // instruction override all force LOW. These are the strongest
+  // signals that the run did not produce real, intended work.
+  if (hasDowngrade || hasEscalate) {
+    const codes = [...new Set(findings
+      .filter((f) => f.severity === "downgrade" || f.severity === "escalate")
+      .map((f) => f.code))];
+    reasons.push(`adversarial signals: ${codes.join(", ")}`);
+    return {
+      level: "low",
+      reasons,
+      escalationRecommended: hasEscalate,
+    };
+  }
 
   // Tests failed → LOW regardless
   if (!input.testsPassed) {
@@ -59,6 +89,18 @@ export function scoreConfidence(input: ConfidenceInput): ConfidenceResult {
   // HIGH impact with any retries → MEDIUM at best
   if (input.impactLevel === "high" && input.criticIterations > 0) {
     reasons.push(`high impact with ${input.criticIterations} critic iteration(s)`);
+    return { level: "medium", reasons };
+  }
+
+  // Phase 8 — any warn-severity adversarial finding caps confidence at MEDIUM
+  // even if everything else is green. Warns are softer signals (partial
+  // consensus, weak intent match) that we surface without LOW-ing the run.
+  if (hasWarn) {
+    reasons.push(`adversarial warnings present: ${findings
+      .filter((f) => f.severity === "warn")
+      .slice(0, 2)
+      .map((f) => f.code)
+      .join(", ")}`);
     return { level: "medium", reasons };
   }
 

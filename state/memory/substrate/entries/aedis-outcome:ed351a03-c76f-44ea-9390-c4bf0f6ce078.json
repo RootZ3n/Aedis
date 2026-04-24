@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:ed351a03-c76f-44ea-9390-c4bf0f6ce078",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/capability-registry.ts, build capability registry",
+  "summary": "\"core/capability-registry.ts\" modified without original content or diff — cannot rollback",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/capability-registry.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: core/capability-registry.ts, core/capability-registry.test.ts\",\n        \"files\": [\n          \"core/capability-registry.ts\",\n          \"core/capability-registry.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/capability-registry.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/capability-registry.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: core/capability-registry.ts, core/capability-registry.test.ts\",\n        \"files\": [\n          \"core/capability-registry.ts\",\n          \"core/capability-registry.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"\\\"core/capability-registry.ts\\\" modified without original content or diff — cannot rollback\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-18T14:54:17.834Z",
+  "updatedAt": "2026-04-18T14:54:17.841Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-capreg-int-GHamFO",
+  "filePaths": [
+    "core/capability-registry.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "ed351a03-c76f-44ea-9390-c4bf0f6ce078",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "ed1b4e56-c875-46ae-bcea-c71ea4327ebb",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:ed351a03-c76f-44ea-9390-c4bf0f6ce078",
+    "aedis-task:ed351a03-c76f-44ea-9390-c4bf0f6ce078"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:ed351a03-c76f-44ea-9390-c4bf0f6ce078"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:ed351a03-c76f-44ea-9390-c4bf0f6ce078"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "\"core/capability-registry.ts\" modified without original content or diff — cannot rollback"
+  }
+}

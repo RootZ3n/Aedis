@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:c0c165e6-0fda-435d-9aa9-6a115acaf469",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add an isPalindrome function to src/utils.ts that returns true if a string reads the same forwards and backwards.",
+  "summary": "1 file(s) changed but not declared in manifest: test/utils.test.ts",
+  "raw": "{\n  \"issues\": [\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-21T23:49:34.815Z",
+  "updatedAt": "2026-04-21T23:49:34.817Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c0c165e6-0fda-435d-9aa9-6a115acaf469",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3b58181e-171c-4c0b-93c0-876af9397e0f",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:c0c165e6-0fda-435d-9aa9-6a115acaf469",
+    "aedis-task:c0c165e6-0fda-435d-9aa9-6a115acaf469"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c0c165e6-0fda-435d-9aa9-6a115acaf469"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c0c165e6-0fda-435d-9aa9-6a115acaf469"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "1 file(s) changed but not declared in manifest: test/utils.test.ts"
+  }
+}

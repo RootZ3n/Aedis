@@ -1,0 +1,65 @@
+{
+  "id": "aedis-suggestions:7770e0db-7175-47b9-859f-19fd980022d7",
+  "space": "aedis/project/mnt-ai-aedis",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 7770e0db-7175-47b9-859f-19fd980022d7",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Validate workers/base.ts, workers/builder.ts, workers/critic.ts with focused verification before the next attempt. Check nearby cluster files next: core/aedis-memory.test.ts, core/chan…",
+  "tags": [
+    "suggestions",
+    "verdict:partial"
+  ],
+  "createdAt": "2026-04-24T16:16:57.567Z",
+  "updatedAt": "2026-04-24T16:16:57.578Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "workers/base.ts",
+    "workers/builder.ts",
+    "workers/critic.ts",
+    "workers/integrator.ts",
+    "workers/scout.ts",
+    "workers/verifier.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "7770e0db-7175-47b9-859f-19fd980022d7",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "72b20567-ede6-4785-9641-d8e378f3e708",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "999d9ea16bf327d5f9c3217a6be01cadbde53fe0",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "68863845-319b-4142-a677-804dd1ee1b97",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:7770e0db-7175-47b9-859f-19fd980022d7",
+    "aedis-run:7770e0db-7175-47b9-859f-19fd980022d7",
+    "aedis-task:7770e0db-7175-47b9-859f-19fd980022d7"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:7770e0db-7175-47b9-859f-19fd980022d7"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:7770e0db-7175-47b9-859f-19fd980022d7"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

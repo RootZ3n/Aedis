@@ -1,0 +1,65 @@
+{
+  "id": "aedis-outcome:4bab9a3e-d544-46fa-83d1-156429823c89",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in In file apps/api/src/routes/index.ts, add a one-line comment at the very top: // Route modules — single registration poi",
+  "summary": "Verification failed: FAIL — 5/5 stages passed, confidence 94%, 0 blockers, checks typecheck:pass, tests:fail, active validation 0%, strict mode: 1 file(s) only checked; validation depth 0%, baseline: 1 pre-existing failure(s) ignored FAIL — 5/5 stages passed, confidence 94%, 0 b…",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 7c09d9fb-0218-426a-82b4-b70180004b96) reported no touched files\",\n    \"[pre-existing] Type '\\\"PROMOTED\\\"' is not assignable to type 'PersistentRunStatus | undefined'.\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 30091e3e-58ff-42ee-bfea-ac669bfa1810) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 7c09d9fb-0218-426a-82b4-b70180004b96) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task a7b1a63f-83be-4f84-94c5-10d54a7b1c59) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 1b7037a8-f6d3-4588-bb39-a3aef900a1d0) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] Type '\\\"PROMOTED\\\"' is not assignable to type 'PersistentRunStatus | undefined'.\",\n        \"files\": [\n          \"core/coordinator.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:fail\",\n        \"message\": \"Verification failed: FAIL — 5/5 stages passed, confidence 94%, 0 blockers, checks typecheck:pass, tests:fail, active validation 0%, strict mode: 1 file(s) only checked; validation depth 0%, baseline: 1 pre-existing failure(s) ignored\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:fail\",\n        \"message\": \"Verification failed: FAIL — 5/5 stages passed, confidence 94%, 0 blockers, checks typecheck:pass, tests:fail, active validation 0%, strict mode: 1 file(s) only checked; validation depth 0%, baseline: 1 pre-existing failure(s) ignored\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 30091e3e-58ff-42ee-bfea-ac669bfa1810) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 7c09d9fb-0218-426a-82b4-b70180004b96) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task a7b1a63f-83be-4f84-94c5-10d54a7b1c59) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task 1b7037a8-f6d3-4588-bb39-a3aef900a1d0) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] Type '\\\"PROMOTED\\\"' is not assignable to type 'PersistentRunStatus | undefined'.\",\n        \"files\": [\n          \"core/coordinator.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"Verification failed: FAIL — 5/5 stages passed, confidence 94%, 0 blockers, checks typecheck:pass, tests:fail, active validation 0%, strict mode: 1 file(s) only checked; validation depth 0%, baseline: 1 pre-existing failure(s) ignored\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 6 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:apps",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-19T17:57:01.926Z",
+  "updatedAt": "2026-04-19T17:57:02.000Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/routes/chat.ts",
+    "apps/api/src/routes/index.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "4bab9a3e-d544-46fa-83d1-156429823c89",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "8593217b-640d-49d5-82d7-9d849dbf75e3",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "024c011b-3195-4965-ad33-25a25a609211",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:4bab9a3e-d544-46fa-83d1-156429823c89",
+    "aedis-task:4bab9a3e-d544-46fa-83d1-156429823c89"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:4bab9a3e-d544-46fa-83d1-156429823c89"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:4bab9a3e-d544-46fa-83d1-156429823c89"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "primaryBlockReason": "Verification failed: FAIL — 5/5 stages passed, confidence 94%, 0 blockers, checks typecheck:pass, tests:fail, active validation 0%, strict mode: 1 file(s) only checked; validation depth 0%, baseline: 1 pre-existing failure(s) ignored"
+  }
+}

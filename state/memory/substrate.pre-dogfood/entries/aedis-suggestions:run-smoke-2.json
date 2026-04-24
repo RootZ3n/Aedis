@@ -1,0 +1,58 @@
+{
+  "id": "aedis-suggestions:run-smoke-2",
+  "space": "aedis/project/tmp-aedis-smoke-repo",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for run-smoke-2",
+  "summary": "Check nearby cluster files next: core/context-gate.ts",
+  "tags": [
+    "suggestions",
+    "verdict:success"
+  ],
+  "createdAt": "2026-04-12T00:50:20.503Z",
+  "updatedAt": "2026-04-12T00:50:20.504Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-smoke-repo",
+  "filePaths": [
+    "core/coordinator.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "run-smoke-2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "intent-smoke-2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "abc123",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "v-2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:run-smoke-2",
+    "aedis-run:run-smoke-2",
+    "aedis-task:run-smoke-2"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:run-smoke-2"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:run-smoke-2"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 1
+  }
+}

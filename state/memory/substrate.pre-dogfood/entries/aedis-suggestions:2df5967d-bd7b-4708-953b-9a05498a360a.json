@@ -1,0 +1,54 @@
+{
+  "id": "aedis-suggestions:2df5967d-bd7b-4708-953b-9a05498a360a",
+  "space": "aedis/project/mnt-ai-aedis",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 2df5967d-bd7b-4708-953b-9a05498a360a",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker int…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-12T18:28:34.376Z",
+  "updatedAt": "2026-04-12T18:28:34.383Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "server/index.ts",
+    "server/middleware/auth.ts",
+    "server/routes/config.ts",
+    "server/routes/health.ts",
+    "server/routes/loqui.ts",
+    "server/routes/metrics.ts",
+    "server/routes/tasks.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "2df5967d-bd7b-4708-953b-9a05498a360a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "d55fba2e-6c46-464f-b654-90d2888e3616",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:2df5967d-bd7b-4708-953b-9a05498a360a",
+    "aedis-run:2df5967d-bd7b-4708-953b-9a05498a360a",
+    "aedis-task:2df5967d-bd7b-4708-953b-9a05498a360a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:2df5967d-bd7b-4708-953b-9a05498a360a"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:2df5967d-bd7b-4708-953b-9a05498a360a"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 4
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "id": "aedis-outcome:0749736a-a8f8-4ed4-a0e3-c9beca04929e",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/aedis-memory.ts, Execute a simple echo task: run the command `echo \"Squidley test $(date)\"` and return the outpu",
+  "summary": "1 file(s) changed but not declared in manifest: core/aedis-memory.test.ts",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 7c3e7bb2-b55f-426b-a0b7-bb3ea6c0606e) reported no touched files\",\n    \"lint hook not configured — required verification cannot run\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/aedis-memory.test.ts\",\n        \"files\": [\n          \"core/aedis-memory.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:undeclared-changes\",\n        \"message\": \"1 file(s) changed on disk but not declared in manifest: core/aedis-memory.test.ts\",\n        \"files\": [\n          \"core/aedis-memory.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/aedis-memory.test.ts\",\n        \"files\": [\n          \"core/aedis-memory.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:undeclared-changes\",\n        \"message\": \"1 file(s) changed on disk but not declared in manifest: core/aedis-memory.test.ts\",\n        \"files\": [\n          \"core/aedis-memory.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"1 file(s) changed but not declared in manifest: core/aedis-memory.test.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "module:server",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-18T15:11:27.478Z",
+  "updatedAt": "2026-04-18T15:11:27.489Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.test.ts",
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "core/change-set.ts",
+    "core/charter.ts",
+    "core/confidence-scoring.ts",
+    "core/context-gate.ts",
+    "core/model-invoker.ts",
+    "server/routes/tasks.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "0749736a-a8f8-4ed4-a0e3-c9beca04929e",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "55d7de09-9962-475d-a20e-d9d043b4e7b5",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:0749736a-a8f8-4ed4-a0e3-c9beca04929e",
+    "aedis-task:0749736a-a8f8-4ed4-a0e3-c9beca04929e"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:0749736a-a8f8-4ed4-a0e3-c9beca04929e"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:0749736a-a8f8-4ed4-a0e3-c9beca04929e"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "1 file(s) changed but not declared in manifest: core/aedis-memory.test.ts"
+  }
+}

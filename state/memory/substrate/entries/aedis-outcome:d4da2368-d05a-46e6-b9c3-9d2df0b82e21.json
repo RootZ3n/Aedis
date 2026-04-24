@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:d4da2368-d05a-46e6-b9c3-9d2df0b82e21",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in modify widget in core",
+  "summary": "Files changed outside deliverables: core/widget.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Files changed outside deliverables: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/widget.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.73 (keywords: modify, widget, core)\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:undeclared-changes\",\n        \"message\": \"1 file(s) changed on disk but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Files changed outside deliverables: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/widget.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:undeclared-changes\",\n        \"message\": \"1 file(s) changed on disk but not declared in manifest: core/widget.ts\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.73 (keywords: modify, widget, core)\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      }\n    ],\n    \"primaryBlockReason\": \"Files changed outside deliverables: core/widget.ts\",\n    \"summary\": \"MERGE BLOCKED — 4 critical, 2 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T14:36:58.572Z",
+  "updatedAt": "2026-04-22T14:36:58.573Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-coord-int-XDOlqJ",
+  "filePaths": [
+    "core/widget.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d4da2368-d05a-46e6-b9c3-9d2df0b82e21",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "682d28bc-45d2-46a4-9b83-1846eadf49d5",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:d4da2368-d05a-46e6-b9c3-9d2df0b82e21",
+    "aedis-task:d4da2368-d05a-46e6-b9c3-9d2df0b82e21"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d4da2368-d05a-46e6-b9c3-9d2df0b82e21"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:d4da2368-d05a-46e6-b9c3-9d2df0b82e21"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Files changed outside deliverables: core/widget.ts"
+  }
+}

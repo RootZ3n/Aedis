@@ -1,0 +1,73 @@
+{
+  "id": "aedis-file:0749736a-a8f8-4ed4-a0e3-c9beca04929e:core-confidence-scoring.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "core/confidence-scoring.ts",
+  "summary": "failed after modify in core/confidence-scoring.ts",
+  "raw": "{\n  \"file\": \"core/confidence-scoring.ts\",\n  \"peers\": [\n    \"core/project-memory.ts\",\n    \"server/index.ts\",\n    \"server/middleware/auth.ts\",\n    \"server/routes/config.ts\"\n  ],\n  \"scopeType\": \"single-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:core",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-18T15:11:27.478Z",
+  "updatedAt": "2026-04-18T15:11:27.489Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/confidence-scoring.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "0749736a-a8f8-4ed4-a0e3-c9beca04929e",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "55d7de09-9962-475d-a20e-d9d043b4e7b5",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:0749736a-a8f8-4ed4-a0e3-c9beca04929e",
+    "aedis-run:0749736a-a8f8-4ed4-a0e3-c9beca04929e",
+    "aedis-task:0749736a-a8f8-4ed4-a0e3-c9beca04929e"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:0749736a-a8f8-4ed4-a0e3-c9beca04929e"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:0749736a-a8f8-4ed4-a0e3-c9beca04929e"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-project-memory.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:server-index.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:server-middleware-auth.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:server-routes-config.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "single-file",
+    "clusterPeers": [
+      "core/project-memory.ts",
+      "server/index.ts",
+      "server/middleware/auth.ts",
+      "server/routes/config.ts"
+    ]
+  }
+}

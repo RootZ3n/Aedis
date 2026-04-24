@@ -82,9 +82,20 @@ export async function verifyGitDiff(input: GitDiffInput): Promise<GitDiffResult>
       (f) => !actualChangedSet.has(f) && !createdSet.has(f),
     );
 
-    // Files actually changed but not in manifest
+    // Files actually changed but not in manifest.
+    //
+    // Test-injection files (test/*, *.test.ts, *.spec.ts and variants)
+    // are exempt from critical undeclared-change blocking: they're a
+    // common legitimate side-effect of coverage/test-generation tasks
+    // where the charter declared only the source file but the builder
+    // also produced or updated an adjacent test. They are still
+    // reported in `actualChangedFiles` so the receipt stays truthful —
+    // we only skip them here so they don't trigger a merge-gate block.
     const undeclaredChanges = [...actualChangedSet].filter(
-      (f) => !manifestSet.has(f) && !isIgnoredForDiffCheck(f),
+      (f) =>
+        !manifestSet.has(f) &&
+        !isIgnoredForDiffCheck(f) &&
+        !isTestInjectionFile(f),
     );
 
     // Files confirmed — in both manifest and actual changes
@@ -206,4 +217,35 @@ function isIgnoredForDiffCheck(filePath: string): boolean {
     /^node_modules\//,
   ];
   return ignored.some((pattern) => pattern.test(filePath));
+}
+
+/**
+ * Is this file a test file that we should allow as an un-manifested
+ * side-effect? Deliberately separate from `isIgnoredForDiffCheck` so
+ * real undeclared-change detection stays untouched: test files are
+ * still reported in `actualChangedFiles`, they just don't block the
+ * merge when they appear alongside a declared source-file change.
+ *
+ * Matches:
+ *   - top-level / nested `test/`, `tests/`, `__tests__/` directories
+ *   - files named `*.test.ts|tsx|js|jsx|mjs|cjs`
+ *   - files named `*.spec.ts|tsx|js|jsx|mjs|cjs`
+ *
+ * Exported so the merge-gate and integration-judge layers can apply
+ * the same rule if they need to check "is this a test file?" in the
+ * future, keeping the definition in one place.
+ */
+export function isTestInjectionFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const patterns: readonly RegExp[] = [
+    /^test\//,
+    /^tests\//,
+    /^__tests__\//,
+    /\/test\//,
+    /\/tests\//,
+    /\/__tests__\//,
+    /\.test\.[mc]?[jt]sx?$/,
+    /\.spec\.[mc]?[jt]sx?$/,
+  ];
+  return patterns.some((pattern) => pattern.test(normalized));
 }

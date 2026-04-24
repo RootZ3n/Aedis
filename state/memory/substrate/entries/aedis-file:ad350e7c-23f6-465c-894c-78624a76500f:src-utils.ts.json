@@ -1,0 +1,58 @@
+{
+  "id": "aedis-file:ad350e7c-23f6-465c-894c-78624a76500f:src-utils.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "src/utils.ts",
+  "summary": "failed after repo work in src/utils.ts",
+  "raw": "{\n  \"file\": \"src/utils.ts\",\n  \"peers\": [\n    \"test/utils.test.ts\"\n  ],\n  \"scopeType\": \"small-linked\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:src",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T11:06:32.410Z",
+  "updatedAt": "2026-04-22T11:06:32.412Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "ad350e7c-23f6-465c-894c-78624a76500f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "150f11e3-f13e-428e-b9ef-c5eb545fa6b5",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:ad350e7c-23f6-465c-894c-78624a76500f",
+    "aedis-run:ad350e7c-23f6-465c-894c-78624a76500f",
+    "aedis-task:ad350e7c-23f6-465c-894c-78624a76500f"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:ad350e7c-23f6-465c-894c-78624a76500f"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:ad350e7c-23f6-465c-894c-78624a76500f"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:test-utils.test.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "small-linked",
+    "clusterPeers": [
+      "test/utils.test.ts"
+    ]
+  }
+}

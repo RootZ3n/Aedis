@@ -62,11 +62,14 @@ export interface ContextAssemblerConfig {
   sourceExtensions: string[];
   /** Directories to ignore */
   ignoreDirs: string[];
+  /** Maximum characters per file — prevents a single large file from consuming the entire context budget */
+  maxFileChars: number;
 }
 
 const DEFAULT_CONFIG: Omit<ContextAssemblerConfig, "projectRoot"> = {
   tokenBudget: 32_000,
   charsPerToken: 4,
+  maxFileChars: 3_500,
   sourceExtensions: [".ts", ".tsx", ".js", ".jsx", ".json"],
   ignoreDirs: ["node_modules", ".git", "dist", ".next", "coverage"],
 };
@@ -331,9 +334,14 @@ export class ContextAssembler {
       if (used >= budget) break;
       const content = await this.safeReadFile(filePath);
       if (content) {
-        const tokens = this.estimateTokens(content);
+        // Truncate large files before checking budget so they don't
+        // consume the budget in full when they could still contribute.
+        const truncated = content.length > this.config.maxFileChars
+          ? content.slice(0, this.config.maxFileChars) + "\n// ... [truncated]"
+          : content;
+        const tokens = this.estimateTokens(truncated);
         if (used + tokens <= budget) {
-          files.push({ path: filePath, content, relevance, tokenEstimate: tokens });
+          files.push({ path: filePath, content: truncated, relevance, tokenEstimate: tokens });
           used += tokens;
         }
       }

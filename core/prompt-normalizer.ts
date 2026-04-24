@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { access } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type { GatedContext } from "./context-gate.js";
@@ -17,7 +17,7 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 function extractPathCandidates(raw: string): string[] {
-  const matches = raw.match(/([A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+/g) ?? [];
+  const matches = raw.match(/(?:\/)?(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+/g) ?? [];
   return Array.from(new Set(matches.map(match => match.trim())));
 }
 
@@ -26,7 +26,8 @@ async function promptContainsExistingPath(raw: string, projectRoot: string): Pro
   const candidates = extractPathCandidates(raw);
 
   for (const candidate of candidates) {
-    if (await fileExists(join(root, candidate))) {
+    const absoluteCandidate = isAbsolute(candidate) ? resolve(candidate) : resolve(root, candidate);
+    if (await fileExists(absoluteCandidate)) {
       return true;
     }
   }
@@ -103,6 +104,13 @@ export async function normalizePrompt(
   projectRoot: string,
 ): Promise<string> {
   try {
+    // If the user already named an absolute path, preserve the prompt
+    // verbatim so downstream gates can validate that exact path instead
+    // of having relevance-ranked memory inject an unrelated file.
+    if (extractPathCandidates(raw).some((candidate) => isAbsolute(candidate))) {
+      return raw;
+    }
+
     if (await promptContainsExistingPath(raw, projectRoot)) {
       return raw;
     }

@@ -1,0 +1,71 @@
+{
+  "id": "aedis-outcome:aaeb261b-39a0-4ddd-8768-3da629ae1751",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Append `export const AEDIS_PROMOTE_TEST = true` to the bottom of workers/base.ts",
+  "summary": "PASS-WITH-WARNINGS — 7/7 stages passed, confidence 95%, 0 blockers, checks typecheck:pass, tests:fail, typecheck:pass, typecheck:pass, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"SAFETY: Builder output removed 22 existing export(s) (AbstractWorker, BaseWorker, BuildDecision, BuilderOutput, CodePattern, CoherenceCheckResult, ConflictResolution, CriticOutput…) from workers/base.ts. Original had 23 export(s); updated has 1. Refusing the patch — detected unrelated-symbol corruption; the user request did not authorize removing these symbols.\",\n    \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task dffc1356-d6f8-4e35-8e85-8ad0b7d8a463) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task f60f382b-0615-4910-8fa2-6bf44562a3fc) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"workers/base.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task dffc1356-d6f8-4e35-8e85-8ad0b7d8a463) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task f60f382b-0615-4910-8fa2-6bf44562a3fc) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"workers/base.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 4 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "module:workers",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-24T13:53:18.182Z",
+  "updatedAt": "2026-04-24T13:53:18.193Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "workers/base.ts",
+    "workers/builder.ts",
+    "workers/critic.ts",
+    "workers/integrator.ts",
+    "workers/scout.ts",
+    "workers/verifier.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "aaeb261b-39a0-4ddd-8768-3da629ae1751",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "a0f9e58b-e5f9-4015-a349-bf7c64d0c441",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "39ea85d90a6db9c57876420e65bfe6d633801c77",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "84548d0b-f7f1-441f-a1cb-f7e900e69906",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:aaeb261b-39a0-4ddd-8768-3da629ae1751",
+    "aedis-task:aaeb261b-39a0-4ddd-8768-3da629ae1751"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:aaeb261b-39a0-4ddd-8768-3da629ae1751"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:aaeb261b-39a0-4ddd-8768-3da629ae1751"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

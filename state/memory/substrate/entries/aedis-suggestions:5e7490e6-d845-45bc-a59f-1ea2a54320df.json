@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:5e7490e6-d845-45bc-a59f-1ea2a54320df",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 5e7490e6-d845-45bc-a59f-1ea2a54320df",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: \"test/utils.test.ts\" references \"validateEmail\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"Stack\" removed from \"src/utils.ts\"",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-21T23:36:07.689Z",
+  "updatedAt": "2026-04-21T23:36:07.692Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "5e7490e6-d845-45bc-a59f-1ea2a54320df",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "f42ca7f8-96d9-46c4-9553-63f2b4e565c4",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:5e7490e6-d845-45bc-a59f-1ea2a54320df",
+    "aedis-run:5e7490e6-d845-45bc-a59f-1ea2a54320df",
+    "aedis-task:5e7490e6-d845-45bc-a59f-1ea2a54320df"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:5e7490e6-d845-45bc-a59f-1ea2a54320df"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:5e7490e6-d845-45bc-a59f-1ea2a54320df"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 2
+  }
+}

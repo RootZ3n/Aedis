@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:6c98385f-bfaa-4dfd-a436-4cbfea8ca05d",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a reverseString function to src/utils.ts.",
+  "summary": "1 file(s) changed but not declared in manifest: test/utils.test.ts",
+  "raw": "{\n  \"issues\": [\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T04:04:05.626Z",
+  "updatedAt": "2026-04-22T04:04:05.629Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "6c98385f-bfaa-4dfd-a436-4cbfea8ca05d",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "1c8f077c-8c9a-406a-80ef-70c603f8a569",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:6c98385f-bfaa-4dfd-a436-4cbfea8ca05d",
+    "aedis-task:6c98385f-bfaa-4dfd-a436-4cbfea8ca05d"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:6c98385f-bfaa-4dfd-a436-4cbfea8ca05d"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:6c98385f-bfaa-4dfd-a436-4cbfea8ca05d"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "1 file(s) changed but not declared in manifest: test/utils.test.ts"
+  }
+}

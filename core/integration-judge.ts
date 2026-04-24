@@ -31,6 +31,11 @@ import type { IntentObject, Deliverable } from "./intent.js";
 import type { RunState, AcceptedAssumption } from "./runstate.js";
 import type { FileChange, BuilderOutput, WorkerResult } from "../workers/base.js";
 import type { ChangeSet, FileInclusion } from "./change-set.js";
+import { isBugfixLikePrompt } from "./scope-classifier.js";
+import {
+  checkCrossWorkerConsensus,
+  checkIntentSatisfaction,
+} from "./adversarial-guard.js";
 
 // ─── Judgment Types ──────────────────────────────────────────────────
 
@@ -72,7 +77,8 @@ export type JudgmentCategory =
   | "intent-alignment"
   | "scope-boundary"
   | "rollback-safety"
-  | "cross-file-coherence";
+  | "cross-file-coherence"
+  | "adversarial-guard";
 
 export interface JudgmentIssue {
   readonly category: JudgmentCategory;
@@ -173,6 +179,10 @@ const ADDED_EXPORT_REGEX = /^\+\s*export\s+(?:async\s+)?(?:function|const|class|
 const NAMED_EXPORT_REGEX = /export\s*\{\s*([^}]+)\}/g;
 const NAMED_IMPORT_REGEX = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]/g;
 
+function isTestLikePath(path: string): boolean {
+  return /(^|\/)(__tests__|test|tests)(\/|$)|\.(test|spec)\.[^.\/]+$/i.test(path.replace(/\\/g, "/"));
+}
+
 // ─── Integration Judge ───────────────────────────────────────────────
 
 export class IntegrationJudge {
@@ -208,6 +218,13 @@ export class IntegrationJudge {
     checks.push(this.checkScopeBoundary(intent, runState, changes));
     checks.push(this.checkRollbackSafety(changes));
     checks.push(this.checkCrossFileCoherence(changes));
+
+    // Phase 8 — adversarial guard checks. Non-blocking by design:
+    // they emit warnings + lower the coherence score when triggered
+    // so downstream gates (confidence-gate, merge-gate) can react,
+    // but they never force `passed: false` on their own.
+    checks.push(this.checkAdversarialConsensus(changes, workerResults));
+    checks.push(this.checkAdversarialIntent(intent, changes, workerResults));
 
     // Manifest completeness — only runs when a ChangeSet is provided
     if (changeSet) {
@@ -315,7 +332,8 @@ export class IntegrationJudge {
       for (const [exportFile, { removed }] of exportChanges) {
         if (exportFile === change.path) continue;
         for (const name of removed) {
-          if (content.includes(name) && !exportChanges.get(change.path)?.added.includes(name)) {
+          const wholeWord = new RegExp(`\\b${escapeRegExp(name)}\\b`);
+          if (wholeWord.test(content) && !exportChanges.get(change.path)?.added.includes(name)) {
             issues.push(`"${change.path}" references "${name}" removed from "${exportFile}"`);
             affectedFiles.push(change.path, exportFile);
           }
@@ -550,6 +568,7 @@ export class IntegrationJudge {
     );
     const extraFiles = changes
       .filter((c) => !deliverableFiles.has(normalize(c.path)))
+      .filter((c) => !(isBugfixLikePrompt(intent.userRequest) && isTestLikePath(c.path)))
       .filter((c) => !this.isIgnored(c.path))
       .map((c) => c.path);
 
@@ -1045,6 +1064,7 @@ export class IntegrationJudge {
       "scope-boundary": 0.8,
       "rollback-safety": 1.0,
       "cross-file-coherence": 1.4,
+      "adversarial-guard": 1.1,
     };
 
     let weightedSum = 0;
@@ -1057,6 +1077,127 @@ export class IntegrationJudge {
     }
 
     return totalWeight > 0 ? weightedSum / totalWeight : 1;
+  }
+
+  /**
+   * Phase 8: cross-worker consensus. Builder-touched files that the
+   * scout never identified as targets are suspicious — the builder may
+   * be acting on model-invented context rather than scout-gathered
+   * evidence. Warning-only; does not block.
+   */
+  private checkAdversarialConsensus(
+    changes: readonly FileChange[],
+    workerResults: readonly WorkerResult[],
+  ): JudgmentCheck {
+    const scoutResult = workerResults.find((r) => r.workerType === "scout");
+    const scoutOutput = scoutResult?.output as unknown as
+      | { inspections?: { reads?: readonly { path: string }[] } }
+      | undefined;
+    const scoutTargets =
+      scoutOutput?.inspections?.reads?.map((r) => r.path) ?? [];
+    const builderFiles = changes
+      .filter((c) => c.operation !== "delete")
+      .map((c) => c.path);
+
+    if (builderFiles.length === 0) {
+      // Builder produced no changes — the execution gate handles that
+      // as its own no-op; consensus has nothing to evaluate.
+      return {
+        name: "Adversarial Consensus",
+        category: "adversarial-guard",
+        passed: true,
+        score: 1,
+        details: "skipped — builder produced no changes",
+        affectedFiles: [],
+      };
+    }
+
+    // Phase 8.5 — scout read zero files but the builder changed files.
+    // This is NOT "nothing to evaluate" — it's positive evidence that
+    // the builder acted on zero scout corroboration. Treat it the same
+    // as "builder touched files scout never mentioned": downgrade.
+    // (Previously returned score=1, silently whitewashing runs where
+    // scout was skipped or failed.)
+    if (scoutTargets.length === 0) {
+      return {
+        name: "Adversarial Consensus",
+        category: "adversarial-guard",
+        passed: true,
+        score: 0.3,
+        details: `builder changed ${builderFiles.length} file(s) but scout read none — no corroboration for the changes`,
+        affectedFiles: [...builderFiles],
+      };
+    }
+
+    const verifierFiles = (
+      workerResults.find((r) => r.workerType === "verifier")
+        ?.touchedFiles ?? []
+    ).map((f) => f.path);
+
+    const result = checkCrossWorkerConsensus({
+      scoutTargets,
+      builderFiles,
+      verifierFiles,
+    });
+    const severe = result.findings.some((f) => f.severity === "downgrade");
+    const details =
+      result.findings.length === 0
+        ? `Scout↔Builder agreement ${(result.score * 100).toFixed(0)}%`
+        : result.findings.map((f) => f.message).join("; ");
+    return {
+      name: "Adversarial Consensus",
+      category: "adversarial-guard",
+      // Non-blocking: always passed=true so the judge surfaces this
+      // as a warning + coherence penalty rather than a blocker.
+      passed: true,
+      score: severe ? 0.3 : result.score,
+      details,
+      affectedFiles: [...result.builderFilesUnvouched],
+    };
+  }
+
+  /**
+   * Phase 8: intent-satisfaction on the verbatim user request. Catches
+   * runs that compile and pass tests but whose diffs have no lexical
+   * relationship to what the user asked for. Warning-only.
+   */
+  private checkAdversarialIntent(
+    intent: IntentObject,
+    changes: readonly FileChange[],
+    workerResults: readonly WorkerResult[],
+  ): JudgmentCheck {
+    const builderFiles = changes
+      .filter((c) => c.operation !== "delete")
+      .map((c) => c.path);
+    const diffText = changes
+      .map((c) => c.diff ?? c.content ?? "")
+      .join("\n");
+    const scoutResult = workerResults.find((r) => r.workerType === "scout");
+    const scoutTargets =
+      (scoutResult?.output as unknown as
+        | { inspections?: { reads?: readonly { path: string }[] } }
+        | undefined
+      )?.inspections?.reads?.map((r) => r.path) ?? [];
+
+    const result = checkIntentSatisfaction({
+      prompt: intent.userRequest,
+      filesChanged: builderFiles,
+      diffText,
+      scoutTargets,
+    });
+    const severe = result.findings.some((f) => f.severity === "downgrade");
+    const details =
+      result.findings.length === 0
+        ? `intent-satisfaction score ${result.score.toFixed(2)} (keywords: ${result.keywords.slice(0, 4).join(", ")})`
+        : result.findings.map((f) => f.message).join("; ");
+    return {
+      name: "Adversarial Intent",
+      category: "adversarial-guard",
+      passed: true,
+      score: severe ? 0.3 : Math.max(0.5, result.score),
+      details,
+      affectedFiles: builderFiles,
+    };
   }
 
   private extractBlockers(checks: readonly JudgmentCheck[]): JudgmentIssue[] {

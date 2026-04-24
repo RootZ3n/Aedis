@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:14fd284e-8b40-4915-b022-d5d5ba4a5370",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add an isPalindrome function to src/utils.ts that returns true if a string reads the same forwards and backwards.",
+  "summary": "Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker integrator: Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope",
+  "raw": "{\n  \"issues\": [\n    \"Scope drift: test/utils.test.ts is outside contract scope\",\n    \"Worker critic: Scope drift: test/utils.test.ts is outside contract scope\",\n    \"Type check passed\",\n    \"Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker integrator: Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker integrator: Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker integrator: Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T04:00:36.781Z",
+  "updatedAt": "2026-04-22T04:00:36.782Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "14fd284e-8b40-4915-b022-d5d5ba4a5370",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "5576800f-f2f7-4551-9ffd-87dba74b9ed0",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:14fd284e-8b40-4915-b022-d5d5ba4a5370",
+    "aedis-task:14fd284e-8b40-4915-b022-d5d5ba4a5370"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:14fd284e-8b40-4915-b022-d5d5ba4a5370"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:14fd284e-8b40-4915-b022-d5d5ba4a5370"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker integrator: Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope"
+  }
+}

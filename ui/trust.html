@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aedis — Trust Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --abyss-0:#00030a;--abyss-1:#02061a;--abyss-2:#040d26;--abyss-3:#07173a;
+  --abyss-line:rgba(120,210,255,.14);--abyss-edge:rgba(160,220,255,.22);
+  --orange:#fb923c;--orange-hot:#ffb366;--orange-dim:rgba(251,146,60,.58);
+  --teal:#4df5c8;--teal-hot:#7bffdd;--teal-dim:rgba(77,245,200,.58);
+  --cyan:#6fd9ff;--cyan-hot:#a0e9ff;--violet:#b196ff;
+  --red:#ff5577;--amber:#ffcf6b;--good:#4df5c8;--gray:rgba(255,255,255,.55);
+  --ink:var(--orange);--ink-soft:rgba(251,146,60,.72);
+  --body:'Space Grotesk',sans-serif;--mono:'DM Mono',monospace;
+  --shadow-panel:0 24px 80px rgba(0,0,0,.72),0 0 0 1px rgba(20,40,80,.6);
+}
+html,body{
+  min-height:100%;
+  background:radial-gradient(ellipse 70% 55% at 50% 42%,transparent 24%,rgba(0,0,4,.82) 100%),radial-gradient(circle at 8% 12%,rgba(111,217,255,.16),transparent 34%),radial-gradient(circle at 92% 8%,rgba(77,245,200,.14),transparent 36%),linear-gradient(180deg,#020617 0%,#01030d 46%,#020818 100%);
+  color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased;
+}
+a{color:var(--cyan);text-decoration:none}a:hover{color:var(--teal)}
+.nav{background:rgba(4,10,24,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--abyss-line);padding:12px 24px;display:flex;gap:24px;align-items:center;position:sticky;top:0;z-index:100}
+.nav a{color:var(--ink-soft);font-size:14px;transition:color 200ms}
+.nav a:hover,.nav a.active{color:var(--orange)}
+.nav .brand{font-weight:700;font-size:18px;color:var(--orange);margin-right:auto}
+.panel{background:rgba(4,10,24,.72);border:1px solid rgba(20,40,80,.6);border-radius:16px;padding:20px 24px;box-shadow:var(--shadow-panel);margin:20px auto;max-width:1100px}
+.page-title{font-size:22px;font-weight:700;color:var(--orange);margin-bottom:4px}
+.page-sub{font-size:13px;color:var(--ink-soft);margin-bottom:20px}
+.vitals-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+.vital{border-radius:14px;background:rgba(111,217,255,.04);border:1px solid rgba(120,200,255,.08);padding:16px 18px}
+.vital .label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim)}
+.vital .value{font-family:var(--mono);font-size:28px;color:var(--teal);margin-top:6px;line-height:1}
+.vital .value.warn{color:var(--amber)}
+.vital .value.bad{color:var(--red)}
+.vital .sub{font-size:12px;color:var(--ink-soft);margin-top:4px}
+.conf-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.conf-chip{border-radius:8px;padding:6px 12px;background:rgba(111,217,255,.05);border:1px solid rgba(120,200,255,.1);font-family:var(--mono);font-size:12px}
+.conf-chip .l{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-dim);display:block}
+.conf-chip .v{color:var(--teal);font-size:14px}
+.section{margin-top:20px}
+.section-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--abyss-line)}
+.history-list{display:grid;gap:8px}
+.hist-card{
+  border-radius:10px;padding:12px 14px;
+  background:rgba(4,10,24,.5);
+  border:1px solid rgba(120,200,255,.06);
+  display:flex;gap:12px;align-items:flex-start;
+}
+.hist-badge{
+  font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:6px;
+  text-transform:uppercase;letter-spacing:.06em;flex-shrink:0;
+}
+.hist-badge.success{background:rgba(77,245,200,.14);color:var(--teal);border:1px solid rgba(77,245,200,.38)}
+.hist-badge.failed{background:rgba(255,85,119,.14);color:var(--red);border:1px solid rgba(255,85,119,.38)}
+.hist-badge.partial{background:rgba(251,191,36,.14);color:var(--amber);border:1px solid rgba(251,191,36,.38)}
+.hist-info{flex:1;min-width:0}
+.hist-prompt{font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-meta{font-family:var(--mono);font-size:11px;color:var(--ink-dim);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+.hist-chip{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:4px}
+.chip-teal{background:rgba(77,245,200,.1);color:var(--teal)}
+.chip-amber{background:rgba(251,191,36,.1);color:var(--amber)}
+.chip-violet{background:rgba(177,150,255,.1);color:var(--violet)}
+.empty{text-align:center;padding:40px;color:var(--ink-dim);font-family:var(--mono)}
+.error{color:var(--red);padding:20px}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="brand">Aedis</a>
+  <a href="/">Loqui</a>
+  <a href="/ui/cost.html">Cost</a>
+  <a href="/ui/sessions.html">Sessions</a>
+  <a href="/ui/receipt.html">Receipts</a>
+  <a href="/ui/trust.html" class="active">Trust</a>
+</nav>
+
+<main class="panel" style="margin-top:12px">
+  <h1 class="page-title">Trust Dashboard</h1>
+  <p class="page-sub">Execution quality and success rate across runs. Data sourced from persisted receipts.</p>
+
+  <div id="vitals-grid" class="vitals-grid">
+    <div class="empty">Loading...</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Confidence Breakdown</div>
+    <div id="conf-section" class="conf-row"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Recent Run Trust History</div>
+    <div id="history-list" class="history-list"></div>
+  </div>
+</main>
+
+<script>
+const API = "http://localhost:18796";
+
+function badge(cls) {
+  if (!cls) return `<span class="hist-badge">${cls}</span>`;
+  const c = String(cls).toLowerCase();
+  if (c.includes("success") && !c.includes("partial")) return `<span class="hist-badge success">${cls}</span>`;
+  if (c.includes("fail") || c.includes("error")) return `<span class="hist-badge failed">${cls}</span>`;
+  if (c.includes("partial")) return `<span class="hist-badge partial">${cls}</span>`;
+  return `<span class="hist-badge">${cls}</span>`;
+}
+
+function confChip(label, value) {
+  return `<div class="conf-chip"><span class="l">${label}</span><span class="v">${((value ?? 0)*100).toFixed(0)}%</span></div>`;
+}
+
+function renderDashboard(data) {
+  if (!data) return;
+
+  // Vitals
+  const v = data.vitals ?? {};
+  const rate = ((v.successRate ?? 0) * 100).toFixed(1);
+  const rateClass = (v.successRate ?? 0) < 0.5 ? "bad" : (v.successRate ?? 0) < 0.7 ? "warn" : "teal";
+  const vitalsHtml = `
+    <div class="vital">
+      <div class="label">Success Rate</div>
+      <div class="value ${rateClass}">${rate}%</div>
+      <div class="sub">${v.successfulRuns ?? 0} / ${v.totalRuns ?? 0} runs</div>
+    </div>
+    <div class="vital">
+      <div class="label">Avg Confidence</div>
+      <div class="value">${((v.avgConfidence ?? 0)*100).toFixed(0)}%</div>
+      <div class="sub">across ${v.totalRuns ?? 0} runs</div>
+    </div>
+    <div class="vital">
+      <div class="label">Avg Cost / Run</div>
+      <div class="value">$${(v.avgCostPerRunUsd ?? 0).toFixed(4)}</div>
+      <div class="sub">total: $${(v.totalCostUsd ?? 0).toFixed(4)}</div>
+    </div>
+    <div class="vital">
+      <div class="label">Crashed Runs</div>
+      <div class="value ${(v.crashedRuns ?? 0) > 0 ? "bad" : ""}">${v.crashedRuns ?? 0}</div>
+      <div class="sub">of ${v.totalRuns ?? 0} total</div>
+    </div>
+  `;
+  document.getElementById("vitals-grid").innerHTML = vitalsHtml;
+
+  // Confidence breakdown
+  const conf = v.confidenceBreakdown ?? {};
+  const confHtml = [
+    confChip("Overall", conf.overall),
+    confChip("Planning", conf.planning),
+    confChip("Execution", conf.execution),
+    confChip("Verification", conf.verification),
+  ].join("");
+  document.getElementById("conf-section").innerHTML = confHtml || '<div class="empty">No confidence data.</div>';
+
+  // History
+  const entries = data.trustHistory ?? [];
+  if (!entries.length) {
+    document.getElementById("history-list").innerHTML = '<div class="empty">No run history yet.</div>';
+    return;
+  }
+  const histHtml = entries.slice(0, 20).map(e => `
+    <div class="hist-card">
+      ${badge(e.classification)}
+      <div class="hist-info">
+        <div class="hist-prompt">${e.headline ?? e.prompt ?? "—"}</div>
+        <div class="hist-meta">
+          ${e.confidence != null ? `<span class="hist-chip chip-teal">conf: ${(e.confidence*100).toFixed(0)}%</span>` : ""}
+          ${e.filesTouched != null ? `<span class="hist-chip chip-violet">files: ${e.filesTouched}</span>` : ""}
+          ${e.costUsd != null ? `<span class="hist-chip chip-amber">$${Number(e.costUsd).toFixed(4)}</span>` : ""}
+          ${e.timestamp ? `<span>${new Date(e.timestamp).toLocaleString()}</span>` : ""}
+        </div>
+      </div>
+    </div>
+  `).join("");
+  document.getElementById("history-list").innerHTML = histHtml;
+}
+
+async function load() {
+  try {
+    const res = await fetch(`${API}/trust/dashboard?limit=50`);
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data = await res.json();
+    renderDashboard(data);
+  } catch(err) {
+    document.getElementById("vitals-grid").innerHTML = `<div class="error">Failed to load trust dashboard: ${err.message}</div>`;
+  }
+}
+
+load();
+</script>
+</body>
+</html>

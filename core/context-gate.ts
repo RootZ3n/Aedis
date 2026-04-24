@@ -2,6 +2,15 @@ import type { ProjectMemory } from "./project-memory.js";
 import type { ChangeSet } from "./change-set.js";
 import type { PlanWave } from "./multi-file-planner.js";
 import type { Invariant } from "./invariant-extractor.js";
+import {
+  extractKeywords,
+  scoreFile,
+  rankAndSelect,
+  DEFAULT_CONFIG,
+  type ScoredFile,
+  type ScoreInput,
+  type ScoreBreakdown,
+} from "./relevance-scorer.js";
 
 export interface GatedContext {
   relevantFiles: string[];
@@ -43,7 +52,6 @@ export interface WaveInvariantRef {
   readonly description: string;
 }
 
-const MAX_RELEVANT_FILES = 10;
 const MAX_RECENT_TASKS = 3;
 const MAX_WAVE_INVARIANTS = 12;
 const MAX_WAVE_SIBLINGS = 6;
@@ -58,17 +66,29 @@ export function gateContext(memory: ProjectMemory, prompt: string): GatedContext
   const words = extractPromptWords(prompt);
 
   const recentFiles = memory.recentFiles ?? [];
-  const relevantFiles = words.length === 0
-    ? []
-    : recentFiles
-        .filter(path => {
-          const normalizedPath = path.toLowerCase();
-          return words.some(word => normalizedPath.includes(word));
-        })
-        .sort()
-        .slice(0, MAX_RELEVANT_FILES);
-
   const recentTasks = memory.recentTasks ?? [];
+
+  if (words.length === 0) {
+    return {
+      relevantFiles: [],
+      recentTaskSummaries: recentTasks.slice(0, MAX_RECENT_TASKS).map(task => (task.resultSummary ?? task.prompt).slice(0, 120)),
+      language: memory.language ?? "unknown",
+    };
+  }
+
+  // Use the multi-signal scorer for relevance-ranked file selection.
+  // This replaces the naive `path.includes(word)` filter with weighted
+  // scoring: filename token matches (30pts each), phrase matches (50pts),
+  // minimum score threshold (10pts), and exclusion rules.
+  const scoredFiles = rankAndSelect(
+    recentFiles.map(path => ({ path })),
+    words,
+    { minScore: 10, filenameTokenWeight: 30, phraseMatchWeight: 50, excludePatterns: DEFAULT_CONFIG.excludePatterns },
+    { maxTokens: 3_500 }, // ~10 files at ~350 tokens each
+  );
+
+  const relevantFiles = scoredFiles.map(sf => sf.path);
+
   const recentTaskSummaries = recentTasks
     .slice(0, MAX_RECENT_TASKS)
     .map(task => (task.resultSummary ?? task.prompt).slice(0, 120));
@@ -78,6 +98,74 @@ export function gateContext(memory: ProjectMemory, prompt: string): GatedContext
     recentTaskSummaries,
     language: memory.language ?? "unknown",
   };
+}
+
+/**
+ * Smart context gate — returns scored files with full breakdown for audit.
+ * Use this when you need to inspect or log why each file was selected.
+ */
+export function gateContextWithScores(
+  memory: ProjectMemory,
+  prompt: string,
+): GatedContext & { _debugScores?: readonly ScoredFile[] } {
+  const words = extractPromptWords(prompt);
+  const recentFiles = memory.recentFiles ?? [];
+  const recentTasks = memory.recentTasks ?? [];
+
+  if (words.length === 0) {
+    return {
+      relevantFiles: [],
+      recentTaskSummaries: recentTasks.slice(0, MAX_RECENT_TASKS).map(task => (task.resultSummary ?? task.prompt).slice(0, 120)),
+      language: memory.language ?? "unknown",
+    };
+  }
+
+  const cfg = {
+    minScore: 10,
+    filenameTokenWeight: 30,
+    phraseMatchWeight: 50,
+    excludePatterns: DEFAULT_CONFIG.excludePatterns,
+  };
+
+  // _debugScores: ALL scored files (no budget limit, include excluded) for inspectability.
+  // rankAndSelect doesn't return excluded files even with allowBelowThreshold (exclusion
+  // is a hard filter separate from threshold), so we call scoreFile directly.
+  const allScored = recentFiles.map(path => ({ path })).map(({ path }) =>
+    scoreFile({ path }, words, cfg),
+  );
+  // Sort by descending score so highest-relevance files appear first in _debugScores
+  allScored.sort((a, b) => b.score - a.score);
+
+  // relevantFiles: budget-limited selection (respects minScore + token budget)
+  const budgetLimited = rankAndSelect(
+    recentFiles.map(path => ({ path })),
+    words,
+    cfg,
+    { maxTokens: 3_500 },
+  );
+
+  return {
+    relevantFiles: budgetLimited.map(sf => sf.path),
+    recentTaskSummaries: recentTasks.slice(0, MAX_RECENT_TASKS).map(task => (task.resultSummary ?? task.prompt).slice(0, 120)),
+    language: memory.language ?? "unknown",
+    _debugScores: allScored,
+  };
+}
+
+/**
+ * Extract keywords from a prompt for the scorer.
+ * Tokens ≥ 3 chars, lowercased, deduplicated.
+ */
+export function extractPromptWords(prompt: string): string[] {
+  return Array.from(
+    new Set(
+      prompt
+        .toLowerCase()
+        .split(/\s+/)
+        .flatMap(word => word.split(/[^a-z0-9]/))
+        .filter(word => word.length >= 3),
+    ),
+  );
 }
 
 export interface WaveContextInputs {
@@ -140,31 +228,48 @@ export function gateContextForWave(inputs: WaveContextInputs): GatedContext {
   const targetSet = new Set(targetFiles);
   const siblingCandidates = wave.files.filter((f) => !targetSet.has(f));
 
-  const rankedSiblings = siblingCandidates
+  // Score siblings using the multi-signal scorer.
+  // Structural bonus: shared invariant with a target file adds bonus points.
+  const scoredSiblings = siblingCandidates
     .map((file) => {
-      const normalized = file.toLowerCase();
-      const promptMatch = words.some((w) => normalized.includes(w));
       const sharesInvariant = waveInvariants.some((inv) =>
         changeSet.invariants.some(
           (i) => i.name === inv.name && i.files.includes(file),
         ),
       );
-      return { file, promptMatch, sharesInvariant };
+      const structuralBonus = sharesInvariant ? 20 : 0;
+      return { file, sharesInvariant, structuralBonus };
     })
-    .filter((entry) => entry.promptMatch || entry.sharesInvariant)
+    .map(({ file, sharesInvariant, structuralBonus }) => {
+      const scored = scoreFile(
+        { path: file },
+        words,
+        { minScore: 5, filenameTokenWeight: 30, phraseMatchWeight: 50, maxStructuralScore: 20, excludePatterns: DEFAULT_CONFIG.excludePatterns },
+      );
+      // Add invariant bonus on top of the base score
+      const finalScore = scored.score + structuralBonus;
+      return {
+        file,
+        sharesInvariant,
+        finalScore,
+        baseScore: scored.score,
+      };
+    })
+    .filter((entry) => entry.finalScore >= 5)
+    .sort((a, b) => b.finalScore - a.finalScore)
     .slice(0, MAX_WAVE_SIBLINGS);
 
-  for (const entry of rankedSiblings) {
+  for (const entry of scoredSiblings) {
     const reasons: string[] = [];
-    if (entry.promptMatch) reasons.push("prompt word match");
+    if (entry.baseScore > 0) reasons.push("prompt match");
     if (entry.sharesInvariant) reasons.push("shared invariant");
-    log.push(`sibling: ${entry.file} — ${reasons.join(", ")}`);
+    log.push(`sibling: ${entry.file} — ${reasons.join(", ")} (score=${entry.finalScore})`);
   }
 
   return {
     ...base,
     waveInvariants,
-    waveSiblings: rankedSiblings.map((entry) => entry.file),
+    waveSiblings: scoredSiblings.map((entry) => entry.file),
     inclusionLog: log,
   };
 }
@@ -232,17 +337,7 @@ export function mergeGatedContext(base: GatedContext, overlay?: Partial<GatedCon
   };
 }
 
-function extractPromptWords(prompt: string): string[] {
-  return Array.from(
-    new Set(
-      prompt
-        .toLowerCase()
-        .split(/\s+/)
-        .map(word => word.replace(/[^a-z0-9_-]/g, ""))
-        .filter(word => word.length >= 4)
-    )
-  );
-}
+
 
 function uniqueStrings(values: readonly string[]): string[] {
   return Array.from(new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0)));

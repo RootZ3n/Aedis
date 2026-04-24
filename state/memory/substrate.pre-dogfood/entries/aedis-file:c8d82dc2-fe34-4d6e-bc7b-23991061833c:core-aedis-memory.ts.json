@@ -1,0 +1,73 @@
+{
+  "id": "aedis-file:c8d82dc2-fe34-4d6e-bc7b-23991061833c:core-aedis-memory.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "core/aedis-memory.ts",
+  "summary": "failed after modify in core/aedis-memory.ts",
+  "raw": "{\n  \"file\": \"core/aedis-memory.ts\",\n  \"peers\": [\n    \"core/aedis-memory.test.ts\",\n    \"core/context-assembler.ts\",\n    \"core/context-gate.ts\",\n    \"core/coordinator-audit.ts\"\n  ],\n  \"scopeType\": \"multi-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:core",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-12T18:28:31.083Z",
+  "updatedAt": "2026-04-12T18:28:31.092Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c8d82dc2-fe34-4d6e-bc7b-23991061833c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3eb7e15c-bc00-44a4-a73e-1f7a8fdf0d55",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:c8d82dc2-fe34-4d6e-bc7b-23991061833c",
+    "aedis-run:c8d82dc2-fe34-4d6e-bc7b-23991061833c",
+    "aedis-task:c8d82dc2-fe34-4d6e-bc7b-23991061833c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c8d82dc2-fe34-4d6e-bc7b-23991061833c"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c8d82dc2-fe34-4d6e-bc7b-23991061833c"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-aedis-memory.test.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-context-assembler.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-context-gate.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-coordinator-audit.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "multi-file",
+    "clusterPeers": [
+      "core/aedis-memory.test.ts",
+      "core/context-assembler.ts",
+      "core/context-gate.ts",
+      "core/coordinator-audit.ts"
+    ]
+  }
+}

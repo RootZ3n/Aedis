@@ -1,0 +1,65 @@
+{
+  "id": "aedis-suggestions:d14ce097-38b9-4046-9053-0cc6671382d9",
+  "space": "aedis/project/mnt-ai-squidley-v2",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for d14ce097-38b9-4046-9053-0cc6671382d9",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Validate apps/api/src/config/public-mode.ts, apps/api/src/config/advisor-policy.ts, apps/api/src/config/model-registry.ts with focused verification before the next attempt. Check nearb…",
+  "tags": [
+    "suggestions",
+    "verdict:partial"
+  ],
+  "createdAt": "2026-04-19T22:46:49.352Z",
+  "updatedAt": "2026-04-19T22:46:49.434Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/config/public-mode.ts",
+    "apps/api/src/routes/chat.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d14ce097-38b9-4046-9053-0cc6671382d9",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "da0bef1f-ca6c-4f2e-931d-d4c5fbc03814",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "79b2574f1c4a6082c1bb19f8103272d02d48443a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "8c19b415-70c0-456e-8d84-70748a7cca2a",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:d14ce097-38b9-4046-9053-0cc6671382d9",
+    "aedis-run:d14ce097-38b9-4046-9053-0cc6671382d9",
+    "aedis-task:d14ce097-38b9-4046-9053-0cc6671382d9"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d14ce097-38b9-4046-9053-0cc6671382d9"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:d14ce097-38b9-4046-9053-0cc6671382d9"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

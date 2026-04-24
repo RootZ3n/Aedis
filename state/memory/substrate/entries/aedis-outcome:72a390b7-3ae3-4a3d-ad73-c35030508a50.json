@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:72a390b7-3ae3-4a3d-ad73-c35030508a50",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in src/utils.ts, Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacc",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"Model returned no effective file changes\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 0 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T14:53:58.256Z",
+  "updatedAt": "2026-04-22T14:53:58.262Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "72a390b7-3ae3-4a3d-ad73-c35030508a50",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "f100f4e7-a44b-452f-809f-637f466eb58b",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:72a390b7-3ae3-4a3d-ad73-c35030508a50",
+    "aedis-task:72a390b7-3ae3-4a3d-ad73-c35030508a50"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:72a390b7-3ae3-4a3d-ad73-c35030508a50"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:72a390b7-3ae3-4a3d-ad73-c35030508a50"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

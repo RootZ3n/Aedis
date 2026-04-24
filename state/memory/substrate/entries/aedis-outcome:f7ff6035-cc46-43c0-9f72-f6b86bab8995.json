@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a multiply function to src/utils.ts that takes two numbers and returns their product.",
+  "summary": "1 file(s) changed but not declared in manifest: test/utils.test.ts",
+  "raw": "{\n  \"issues\": [\n    \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.73 (keywords: multiply, src, utils, takes)\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"Scout↔Builder agreement 50%\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.73 (keywords: multiply, src, utils, takes)\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"Scout↔Builder agreement 50%\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.73 (keywords: multiply, src, utils, takes)\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"primaryBlockReason\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 2 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T17:26:47.586Z",
+  "updatedAt": "2026-04-22T17:26:47.588Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3e8126e2-5ed4-4d22-92aa-4aa2854a5e6e",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+    "aedis-task:f7ff6035-cc46-43c0-9f72-f6b86bab8995"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:f7ff6035-cc46-43c0-9f72-f6b86bab8995"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:f7ff6035-cc46-43c0-9f72-f6b86bab8995"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "1 file(s) changed but not declared in manifest: test/utils.test.ts"
+  }
+}

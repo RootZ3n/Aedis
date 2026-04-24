@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:d9d9d3a5-9b39-4cb6-810e-4816495e0208",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a modulo function to src/utils.ts that returns the remainder of integer division.",
+  "summary": "\"test/utils.test.ts\" references \"isEven\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"capitalize\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"validateEmail\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"Stack\" removed from \"src/…",
+  "raw": "{\n  \"issues\": [\n    \"Scope drift: test/utils.test.ts is outside contract scope\",\n    \"\\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n    \"Worker critic: Scope drift: test/utils.test.ts is outside contract scope\",\n    \"import/export alignment 100%; Partial migration \\\"isEven\\\" → \\\"modulo\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n    \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.83 (keywords: modulo, src, utils, returns)\",\n    \"Type check passed\",\n    \"Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:type-alignment\",\n        \"message\": \"\\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker integrator: Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:cross-file-coherence\",\n        \"message\": \"import/export alignment 100%; Partial migration \\\"isEven\\\" → \\\"modulo\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"Scout↔Builder agreement 50%\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.83 (keywords: modulo, src, utils, returns)\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:type-alignment\",\n        \"message\": \"\\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker integrator: Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside contract scope\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:cross-file-coherence\",\n        \"message\": \"import/export alignment 100%; Partial migration \\\"isEven\\\" → \\\"modulo\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"Scout↔Builder agreement 50%\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.83 (keywords: modulo, src, utils, returns)\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      }\n    ],\n    \"primaryBlockReason\": \"\\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n    \"summary\": \"MERGE BLOCKED — 5 critical, 2 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T17:32:49.732Z",
+  "updatedAt": "2026-04-22T17:32:49.734Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d9d9d3a5-9b39-4cb6-810e-4816495e0208",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "98603c68-924f-469b-a5c4-7cf133e5501c",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:d9d9d3a5-9b39-4cb6-810e-4816495e0208",
+    "aedis-task:d9d9d3a5-9b39-4cb6-810e-4816495e0208"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d9d9d3a5-9b39-4cb6-810e-4816495e0208"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:d9d9d3a5-9b39-4cb6-810e-4816495e0208"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "\"test/utils.test.ts\" references \"isEven\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"capitalize\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"validateEmail\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"Stack\" removed from \"src/utils.ts\""
+  }
+}

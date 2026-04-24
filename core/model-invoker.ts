@@ -224,7 +224,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         break;
       case "minimax":
         result = await invokeOpenAICompatible(
-          process.env.MINIMAX_BASE_URL ?? "https://api.minimax.chat/v1",
+          process.env.MINIMAX_BASE_URL ?? "https://api.minimax.io/v1",
           requireEnv("MINIMAX_API_KEY"),
           model, prompt, systemPrompt, maxTokens,
         );

@@ -1,3 +1,4 @@
+// MIMOTESTV3
 /**
  * BaseWorker — Contract schema and interface for all Aedis workers.
  *
@@ -424,5 +425,188 @@ export class WorkerRegistry {
 
   hasWorker(type: WorkerType): boolean {
     return (this.workers.get(type)?.length ?? 0) > 0;
+  }
+}
+
+// ─── Assignment Validation ───────────────────────────────────────────
+
+/**
+ * Validation error with field context for debugging.
+ */
+export class AssignmentValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly field: string,
+    public readonly value: unknown,
+  ) {
+    super(message);
+    this.name = "AssignmentValidationError";
+  }
+}
+
+/**
+ * Validate a WorkerAssignment before worker.execute() is called.
+ * Throws AssignmentValidationError on any malformed field —
+ * workers must NOT accept bad input and continue silently.
+ *
+ * This is the FAIL-FAST gate: catch bad data at the boundary
+ * rather than letting it propagate as a confusing TypeError deep
+ * in worker logic.
+ */
+export function validateWorkerAssignment(assignment: unknown, workerType: WorkerType): asserts assignment is WorkerAssignment {
+  if (!isObject(assignment)) {
+    throw new AssignmentValidationError(
+      `${workerType}: assignment must be a plain object, got ${typeof assignment}`,
+      "assignment",
+      assignment,
+    );
+  }
+
+  const a = assignment as Record<string, unknown>;
+
+  // task — required object with targetFiles array
+  if (!isObject(a.task)) {
+    throw new AssignmentValidationError(`${workerType}: assignment.task must be an object`, "task", a.task);
+  }
+  const task = a.task as Record<string, unknown>;
+  if (!Array.isArray(task.targetFiles)) {
+    throw new AssignmentValidationError(
+      `${workerType}: assignment.task.targetFiles must be an array, got ${typeof task.targetFiles}`,
+      "task.targetFiles",
+      task.targetFiles,
+    );
+  }
+  for (const tf of task.targetFiles) {
+    if (typeof tf !== "string") {
+      throw new AssignmentValidationError(
+        `${workerType}: assignment.task.targetFiles must contain strings, got ${typeof tf}`,
+        "task.targetFiles[]",
+        tf,
+      );
+    }
+  }
+  if (typeof task.id !== "string") {
+    throw new AssignmentValidationError(`${workerType}: assignment.task.id must be a string`, "task.id", task.id);
+  }
+
+  // intent — required object
+  if (!isObject(a.intent)) {
+    throw new AssignmentValidationError(`${workerType}: assignment.intent must be an object`, "intent", a.intent);
+  }
+
+  // context — required object
+  if (!isObject(a.context)) {
+    throw new AssignmentValidationError(`${workerType}: assignment.context must be an object`, "context", a.context);
+  }
+  const ctx = a.context as Record<string, unknown>;
+  if (!Array.isArray(ctx.layers)) {
+    throw new AssignmentValidationError(
+      `${workerType}: assignment.context.layers must be an array`,
+      "context.layers",
+      ctx.layers,
+    );
+  }
+
+  // upstreamResults — readonly array, each item must have success + output.kind
+  if (!Array.isArray(a.upstreamResults)) {
+    throw new AssignmentValidationError(
+      `${workerType}: assignment.upstreamResults must be an array`,
+      "upstreamResults",
+      a.upstreamResults,
+    );
+  }
+  for (const ur of a.upstreamResults as unknown[]) {
+    if (!isObject(ur)) {
+      throw new AssignmentValidationError(
+        `${workerType}: assignment.upstreamResults must contain objects`,
+        "upstreamResults[]",
+        ur,
+      );
+    }
+    const urObj = ur as Record<string, unknown>;
+    if (typeof urObj.success !== "boolean") {
+      throw new AssignmentValidationError(
+        `${workerType}: upstreamResults[].success must be boolean`,
+        "upstreamResults[].success",
+        urObj.success,
+      );
+    }
+    if (!isObject(urObj.output)) {
+      throw new AssignmentValidationError(
+        `${workerType}: upstreamResults[].output must be an object`,
+        "upstreamResults[].output",
+        urObj.output,
+      );
+    }
+    const out = urObj.output as Record<string, unknown>;
+    if (typeof out.kind !== "string") {
+      throw new AssignmentValidationError(
+        `${workerType}: upstreamResults[].output.kind must be string`,
+        "upstreamResults[].output.kind",
+        out.kind,
+      );
+    }
+  }
+
+  // tokenBudget — must be positive number
+  if (typeof a.tokenBudget !== "number" || !Number.isFinite(a.tokenBudget) || a.tokenBudget <= 0) {
+    throw new AssignmentValidationError(
+      `${workerType}: assignment.tokenBudget must be a positive number`,
+      "tokenBudget",
+      a.tokenBudget,
+    );
+  }
+
+  // tier — must be known WorkerTier
+  const validTiers = ["fast", "standard", "premium"] as const;
+  if (!validTiers.includes(a.tier as typeof validTiers[number])) {
+    throw new AssignmentValidationError(
+      `${workerType}: assignment.tier must be one of ${validTiers.join(", ")}`,
+      "tier",
+      a.tier,
+    );
+  }
+}
+
+function isObject(val: unknown): val is Record<string, unknown> {
+  return typeof val === "object" && val !== null && !Array.isArray(val);
+}
+
+/**
+ * Validate a FileChange before using it in downstream processing.
+ * Throws AssignmentValidationError on malformed change objects.
+ */
+export function validateFileChange(change: unknown, index: number): asserts change is FileChange {
+  if (!isObject(change)) {
+    throw new AssignmentValidationError(`FileChange[${index}]: must be an object`, `changes[${index}]`, change);
+  }
+  const c = change as Record<string, unknown>;
+  if (typeof c.path !== "string" || (c.path as string).length === 0) {
+    throw new AssignmentValidationError(
+      `FileChange[${index}]: path must be a non-empty string`,
+      `changes[${index}].path`,
+      c.path,
+    );
+  }
+  const validOps = ["create", "modify", "delete"] as const;
+  if (!validOps.includes(c.operation as typeof validOps[number])) {
+    throw new AssignmentValidationError(
+      `FileChange[${index}]: operation must be one of ${validOps.join(", ")}`,
+      `changes[${index}].operation`,
+      c.operation,
+    );
+  }
+}
+
+/**
+ * Validate a FileChange array (used by Verifier and dispatch).
+ * Throws on the first malformed entry.
+ */
+export function validateFileChangeArray(changes: unknown, fieldName = "changes"): asserts changes is readonly FileChange[] {
+  if (!Array.isArray(changes)) {
+    throw new AssignmentValidationError(`${fieldName}: must be an array`, fieldName, changes);
+  }
+  for (let i = 0; i < changes.length; i++) {
+    validateFileChange(changes[i], i);
   }
 }

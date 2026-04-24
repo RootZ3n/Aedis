@@ -1,0 +1,70 @@
+{
+  "id": "aedis-outcome:453a2056-f7ed-49fc-a7ff-494ddc7a5a75",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a one-line JSDoc comment /** public-mode config */ at the very top of apps/api/src/config/public-mode.ts",
+  "summary": "PASS-WITH-WARNINGS — 5/5 stages passed, confidence 94%, 0 blockers, checks typecheck:pass, tests:fail, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 141c9908-a8ac-4e5b-ac90-790ee83c7532) reported no touched files\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 549638d4-0699-40a3-b1b9-d48bd63c66fc) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 141c9908-a8ac-4e5b-ac90-790ee83c7532) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task 44d1db7f-6f75-4499-9217-0f8b5c70267b) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task e9bcb8e6-cac3-4631-9bfe-a6e5e74e5a0a) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"apps/api/src/config/public-mode.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task 549638d4-0699-40a3-b1b9-d48bd63c66fc) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 141c9908-a8ac-4e5b-ac90-790ee83c7532) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task 44d1db7f-6f75-4499-9217-0f8b5c70267b) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task e9bcb8e6-cac3-4631-9bfe-a6e5e74e5a0a) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"apps/api/src/config/public-mode.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 6 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:apps",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-19T23:39:10.930Z",
+  "updatedAt": "2026-04-19T23:39:11.005Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/config/public-mode.ts",
+    "apps/api/src/routes/chat.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "453a2056-f7ed-49fc-a7ff-494ddc7a5a75",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "82543dcc-2921-493d-aef1-8de88442806e",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "12773fd3990c79bc8fd05cfc9bd6463cc4825e7d",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "3192c8dd-c77d-4113-84dc-eebd40822e57",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:453a2056-f7ed-49fc-a7ff-494ddc7a5a75",
+    "aedis-task:453a2056-f7ed-49fc-a7ff-494ddc7a5a75"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:453a2056-f7ed-49fc-a7ff-494ddc7a5a75"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:453a2056-f7ed-49fc-a7ff-494ddc7a5a75"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

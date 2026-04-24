@@ -1,0 +1,73 @@
+{
+  "id": "aedis-file:ff81b547-13a9-4cae-99ce-528013214ae8:workers-integrator.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "workers/integrator.ts",
+  "summary": "failed after modify in workers/integrator.ts",
+  "raw": "{\n  \"file\": \"workers/integrator.ts\",\n  \"peers\": [\n    \"core/aedis-memory.test.ts\",\n    \"core/change-set.ts\",\n    \"core/charter.ts\",\n    \"core/confidence-scoring.ts\"\n  ],\n  \"scopeType\": \"single-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:workers",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-24T16:03:51.902Z",
+  "updatedAt": "2026-04-24T16:03:51.911Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "workers/integrator.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "ff81b547-13a9-4cae-99ce-528013214ae8",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "b25843f2-e6f0-4b56-837f-7e32ba8122b4",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:ff81b547-13a9-4cae-99ce-528013214ae8",
+    "aedis-run:ff81b547-13a9-4cae-99ce-528013214ae8",
+    "aedis-task:ff81b547-13a9-4cae-99ce-528013214ae8"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:ff81b547-13a9-4cae-99ce-528013214ae8"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:ff81b547-13a9-4cae-99ce-528013214ae8"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-aedis-memory.test.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-change-set.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-charter.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-confidence-scoring.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "single-file",
+    "clusterPeers": [
+      "core/aedis-memory.test.ts",
+      "core/change-set.ts",
+      "core/charter.ts",
+      "core/confidence-scoring.ts"
+    ]
+  }
+}

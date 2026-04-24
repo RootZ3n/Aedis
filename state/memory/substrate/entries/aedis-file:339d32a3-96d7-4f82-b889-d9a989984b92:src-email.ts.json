@@ -1,0 +1,58 @@
+{
+  "id": "aedis-file:339d32a3-96d7-4f82-b889-d9a989984b92:src-email.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "src/email.ts",
+  "summary": "failed after modify in src/email.ts",
+  "raw": "{\n  \"file\": \"src/email.ts\",\n  \"peers\": [\n    \"test/utils.test.ts\"\n  ],\n  \"scopeType\": \"small-linked\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:src",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T17:23:43.917Z",
+  "updatedAt": "2026-04-22T17:23:43.920Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/email.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "339d32a3-96d7-4f82-b889-d9a989984b92",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "948fa1cf-2748-4e14-b23d-a36003de8751",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:339d32a3-96d7-4f82-b889-d9a989984b92",
+    "aedis-run:339d32a3-96d7-4f82-b889-d9a989984b92",
+    "aedis-task:339d32a3-96d7-4f82-b889-d9a989984b92"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:339d32a3-96d7-4f82-b889-d9a989984b92"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:339d32a3-96d7-4f82-b889-d9a989984b92"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:test-utils.test.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "small-linked",
+    "clusterPeers": [
+      "test/utils.test.ts"
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "id": "aedis-file:fd0b9a64-d273-4ff1-96bf-77ca964581c0:core-context-gate.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "core/context-gate.ts",
+  "summary": "success after modify in core/context-gate.ts",
+  "raw": "{\n  \"file\": \"core/context-gate.ts\",\n  \"peers\": [\n    \"core/project-memory.ts\",\n    \"server/index.ts\",\n    \"server/middleware/auth.ts\",\n    \"server/routes/config.ts\"\n  ],\n  \"scopeType\": \"single-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:core",
+    "verdict:success"
+  ],
+  "createdAt": "2026-04-20T01:04:07.423Z",
+  "updatedAt": "2026-04-20T01:04:07.439Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/context-gate.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "fd0b9a64-d273-4ff1-96bf-77ca964581c0",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "e6ee27cf-5053-412b-a916-b017fd26d26f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "d86e0925c6c465819b260019f72a86085cd04357",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "d3f9bb06-3e85-4672-b48a-2cde2cdcfe01",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:fd0b9a64-d273-4ff1-96bf-77ca964581c0",
+    "aedis-run:fd0b9a64-d273-4ff1-96bf-77ca964581c0",
+    "aedis-task:fd0b9a64-d273-4ff1-96bf-77ca964581c0"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:fd0b9a64-d273-4ff1-96bf-77ca964581c0"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:fd0b9a64-d273-4ff1-96bf-77ca964581c0"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-project-memory.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:server-index.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:server-middleware-auth.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:server-routes-config.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "single-file",
+    "clusterPeers": [
+      "core/project-memory.ts",
+      "server/index.ts",
+      "server/middleware/auth.ts",
+      "server/routes/config.ts"
+    ]
+  }
+}

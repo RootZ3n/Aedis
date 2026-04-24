@@ -8,6 +8,7 @@ import { classifyScope } from "./scope-classifier.js";
 import { createChangeSet } from "./change-set.js";
 import { createIntent } from "./intent.js";
 import { Coordinator } from "./coordinator.js";
+import { normalizePrompt } from "./prompt-normalizer.js";
 
 // These tests lock in the fix for "Scope drift" false-positives that blocked
 // every build against a source repo with an absolute path in the prompt
@@ -78,4 +79,38 @@ test("submitWithGates: no extractable target → needs_clarification (not cohere
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("submitWithGates: missing emitter path → needs_clarification instead of running into NO_OP", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-missing-target-"));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "t" }), "utf-8");
+  try {
+    const CoordinatorAny = Coordinator as any;
+    const coord = new CoordinatorAny({ projectRoot: dir });
+    const result = await coord.submitWithGates({
+      input: "Run Jest tests for /mnt/ai/squidley-v2/core/events/emitters/emitter.ts. Report pass/fail and any error output.",
+      projectRoot: dir,
+    } as any);
+    assert.equal(result.kind, "needs_clarification",
+      `expected needs_clarification, got ${result.kind}`);
+    if (result.kind === "needs_clarification") {
+      assert.match(result.question, /does not exist|check the path|correct file/i);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("normalizePrompt: absolute-path prompt is preserved verbatim even when the path is wrong", async () => {
+  const raw = "Run Jest tests for /mnt/ai/squidley-v2/core/events/emitters/emitter.ts. Report pass/fail and any error output.";
+  const out = await normalizePrompt(
+    raw,
+    {
+      relevantFiles: ["core/contracts/default-contracts.ts"],
+      recentTaskSummaries: [],
+      language: "typescript",
+    },
+    "/mnt/ai/squidley-v2",
+  );
+  assert.equal(out, raw);
 });

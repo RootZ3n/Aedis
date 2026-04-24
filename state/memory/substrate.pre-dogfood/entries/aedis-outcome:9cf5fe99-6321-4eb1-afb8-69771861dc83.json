@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:9cf5fe99-6321-4eb1-afb8-69771861dc83",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in src/index.ts, add an export",
+  "summary": "Missing deliverables: Modify src/index.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify src/index.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"src/index.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/index.ts)\",\n        \"files\": [\n          \"src/index.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify src/index.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"src/index.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/index.ts)\",\n        \"files\": [\n          \"src/index.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"Missing deliverables: Modify src/index.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-14T20:13:22.497Z",
+  "updatedAt": "2026-04-14T20:13:22.500Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-coordtest-u4rCVS",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "9cf5fe99-6321-4eb1-afb8-69771861dc83",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "50dd8502-77d7-49d3-b300-44bfe8644746",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:9cf5fe99-6321-4eb1-afb8-69771861dc83",
+    "aedis-task:9cf5fe99-6321-4eb1-afb8-69771861dc83"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:9cf5fe99-6321-4eb1-afb8-69771861dc83"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:9cf5fe99-6321-4eb1-afb8-69771861dc83"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Missing deliverables: Modify src/index.ts"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "id": "aedis-file:dce68ca8-3359-47bf-8771-e067231df12a:apps-api-src-config-prompt-versions.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "apps/api/src/config/prompt-versions.ts",
+  "summary": "failed after modify in apps/api/src/config/prompt-versions.ts",
+  "raw": "{\n  \"file\": \"apps/api/src/config/prompt-versions.ts\",\n  \"peers\": [\n    \"apps/api/src/lib/personality-loader.ts\",\n    \"apps/api/src/lib/system-awareness-tools.ts\",\n    \"apps/api/src/routes/index.ts\",\n    \"apps/api/src/config/python-policy.ts\"\n  ],\n  \"scopeType\": \"single-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:apps",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-19T22:23:27.329Z",
+  "updatedAt": "2026-04-19T22:23:27.404Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/prompt-versions.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "dce68ca8-3359-47bf-8771-e067231df12a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "f9001d08-3b61-4bf6-be29-52e3be886a92",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "6993dd48-8100-44da-bb0f-2ba685a0cf77",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:dce68ca8-3359-47bf-8771-e067231df12a",
+    "aedis-run:dce68ca8-3359-47bf-8771-e067231df12a",
+    "aedis-task:dce68ca8-3359-47bf-8771-e067231df12a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:dce68ca8-3359-47bf-8771-e067231df12a"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:dce68ca8-3359-47bf-8771-e067231df12a"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:apps-api-src-lib-personality-loader.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:apps-api-src-lib-system-awareness-tools.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:apps-api-src-routes-index.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:apps-api-src-config-python-policy.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "single-file",
+    "clusterPeers": [
+      "apps/api/src/lib/personality-loader.ts",
+      "apps/api/src/lib/system-awareness-tools.ts",
+      "apps/api/src/routes/index.ts",
+      "apps/api/src/config/python-policy.ts"
+    ]
+  }
+}

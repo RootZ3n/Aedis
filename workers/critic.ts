@@ -11,6 +11,7 @@ import { loadModelConfig } from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
+  validateWorkerAssignment,
   type BuilderOutput,
   type CriticOutput,
   type FileChange,
@@ -129,6 +130,11 @@ export class CriticWorker extends AbstractWorker {
   }
 
   async execute(assignment: WorkerAssignment): Promise<CriticResult> {
+    // FAIL-FAST: reject malformed assignments at the worker boundary.
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    validateWorkerAssignment(assignment, this.type);
+
+
     const startedAt = Date.now();
     const builderResult = assignment.upstreamResults.find((r) => r.workerType === "builder" && r.success);
 

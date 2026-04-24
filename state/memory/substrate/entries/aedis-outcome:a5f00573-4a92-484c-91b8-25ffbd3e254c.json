@@ -1,0 +1,65 @@
+{
+  "id": "aedis-outcome:a5f00573-4a92-484c-91b8-25ffbd3e254c",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in In file apps/api/src/routes/index.ts, add a one-line comment at the very top: // Route modules — single registration poi",
+  "summary": "lint hook not configured — required verification cannot run FAIL — 5/6 stages passed, confidence 83%, 1 blockers, checks typecheck:pass, tests:fail, missing required checks: lint, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"Worker \\\"critic\\\" (task 08d5d510-78e8-4a37-a72a-af8eacc827fd) reported no touched files\",\n    \"lint hook not configured — required verification cannot run\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task c818a382-3db0-487b-8fb0-d9fc25062183) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 08d5d510-78e8-4a37-a72a-af8eacc827fd) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task 4e9b408c-f42b-4107-84c4-ff23936dc8d6) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task cb338e4e-8abc-4430-80cf-602520178dfe) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"apps/api/src/routes/index.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:lint\",\n        \"message\": \"lint hook not configured — required verification cannot run\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"scout\\\" (task c818a382-3db0-487b-8fb0-d9fc25062183) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 08d5d510-78e8-4a37-a72a-af8eacc827fd) reported no touched files\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"verifier\\\" (task 4e9b408c-f42b-4107-84c4-ff23936dc8d6) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"integrator\\\" (task cb338e4e-8abc-4430-80cf-602520178dfe) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"apps/api/src/routes/index.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"lint hook not configured — required verification cannot run\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 6 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:apps",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-19T16:49:11.130Z",
+  "updatedAt": "2026-04-19T16:49:11.208Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/routes/chat.ts",
+    "apps/api/src/routes/index.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "a5f00573-4a92-484c-91b8-25ffbd3e254c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "ba7997f2-b4eb-411a-aa78-168204c3e716",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "59f274d4-bd65-4fe7-b6cf-c0b8832e61d2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:a5f00573-4a92-484c-91b8-25ffbd3e254c",
+    "aedis-task:a5f00573-4a92-484c-91b8-25ffbd3e254c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:a5f00573-4a92-484c-91b8-25ffbd3e254c"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:a5f00573-4a92-484c-91b8-25ffbd3e254c"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "primaryBlockReason": "lint hook not configured — required verification cannot run"
+  }
+}

@@ -5,6 +5,7 @@ import type { AssembledContext } from "./context-assembler.js";
 import type { RoutingDecision } from "../router/trust-router.js";
 import type { WorkerAssignment, WorkerResult, WorkerType } from "../workers/base.js";
 import type { AedisEvent } from "../server/websocket.js";
+import { validateFileChangeArray } from "../workers/base.js";
 
 export function buildDispatchAssignment(input: {
   decision: RoutingDecision;
@@ -34,10 +35,19 @@ export function buildDispatchAssignment(input: {
     input.upstreamResults,
   );
 
+  // Validate changes at dispatch time so bad data fails fast
+  // rather than silently reaching Verifier or other downstream
+  // workers as a falsy unknown[] cast.
+  let validatedChanges: WorkerAssignment["changes"] | undefined = undefined;
+  if (input.changes !== undefined && input.changes !== null) {
+    validateFileChangeArray(input.changes, "dispatchAssignment.changes");
+    validatedChanges = input.changes as WorkerAssignment["changes"];
+  }
+
   return {
     ...baseAssignment,
     runState: input.runState,
-    changes: [...input.changes] as WorkerAssignment["changes"],
+    changes: validatedChanges,
     workerResults: [...input.workerResults],
     projectRoot: input.projectRoot,
     sourceRepo: input.sourceRepo,

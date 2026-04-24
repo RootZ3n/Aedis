@@ -1,0 +1,83 @@
+{
+  "id": "aedis-file:aaeb261b-39a0-4ddd-8768-3da629ae1751:workers-scout.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "workers/scout.ts",
+  "summary": "partial after modify in workers/scout.ts",
+  "raw": "{\n  \"file\": \"workers/scout.ts\",\n  \"peers\": [\n    \"core/aedis-memory.test.ts\",\n    \"core/change-set.ts\",\n    \"core/charter.ts\",\n    \"core/confidence-scoring.ts\"\n  ],\n  \"scopeType\": \"single-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:workers",
+    "verdict:partial"
+  ],
+  "createdAt": "2026-04-24T13:53:18.182Z",
+  "updatedAt": "2026-04-24T13:53:18.194Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "workers/scout.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "aaeb261b-39a0-4ddd-8768-3da629ae1751",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "a0f9e58b-e5f9-4015-a349-bf7c64d0c441",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "39ea85d90a6db9c57876420e65bfe6d633801c77",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "84548d0b-f7f1-441f-a1cb-f7e900e69906",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:aaeb261b-39a0-4ddd-8768-3da629ae1751",
+    "aedis-run:aaeb261b-39a0-4ddd-8768-3da629ae1751",
+    "aedis-task:aaeb261b-39a0-4ddd-8768-3da629ae1751"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:aaeb261b-39a0-4ddd-8768-3da629ae1751"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:aaeb261b-39a0-4ddd-8768-3da629ae1751"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-aedis-memory.test.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-change-set.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-charter.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-confidence-scoring.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "single-file",
+    "clusterPeers": [
+      "core/aedis-memory.test.ts",
+      "core/change-set.ts",
+      "core/charter.ts",
+      "core/confidence-scoring.ts"
+    ]
+  }
+}

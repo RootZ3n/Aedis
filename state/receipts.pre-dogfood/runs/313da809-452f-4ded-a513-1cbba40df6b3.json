@@ -1,0 +1,678 @@
+{
+  "version": 1,
+  "runId": "313da809-452f-4ded-a513-1cbba40df6b3",
+  "intentId": "97689f2c-dea3-4eba-b124-1c44597e8331",
+  "createdAt": "2026-04-12T18:35:03.996Z",
+  "updatedAt": "2026-04-12T18:35:04.137Z",
+  "startedAt": "2026-04-12T18:35:03.996Z",
+  "completedAt": "2026-04-12T18:35:04.089Z",
+  "prompt": "in apps/api/src/lib/system-knowledge.ts, add a JSDoc comment above the initCapabilityCache function",
+  "taskSummary": "Aedis did not change any files. Confidence: 25%.",
+  "status": "FAILED",
+  "phase": "failed",
+  "finalClassification": "NO_OP",
+  "totalCost": {
+    "model": "qwen3.6-plus",
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0
+  },
+  "confidence": {
+    "overall": 0.2525,
+    "planning": 0.7,
+    "execution": 0,
+    "verification": 0.25
+  },
+  "workerEvents": [
+    {
+      "at": "2026-04-12T18:35:03.998Z",
+      "workerType": "scout",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "status": "started",
+      "summary": "Scout: gather context and assess risk",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/lib/system-knowledge.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T18:35:04.079Z",
+      "workerType": "scout",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "status": "completed",
+      "summary": "scout completed",
+      "confidence": 0.92,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/config/advisor-policy.ts",
+        "apps/api/src/config/model-registry.ts",
+        "apps/api/src/config/model-roles.ts",
+        "apps/api/src/config/peers.ts",
+        "apps/api/src/config/personality-judge.ts",
+        "apps/api/src/config/prompt-versions.ts",
+        "apps/api/src/lib/personality-loader.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T18:35:04.080Z",
+      "workerType": "builder",
+      "taskId": "e2c4ef08-f726-408a-aeef-55781ebe5925",
+      "status": "started",
+      "summary": "Build: Modify apps/api/src/lib/system-knowledge.ts",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/lib/system-knowledge.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T18:35:04.083Z",
+      "workerType": "builder",
+      "taskId": "e2c4ef08-f726-408a-aeef-55781ebe5925",
+      "status": "failed",
+      "summary": "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+      "confidence": 0,
+      "costUsd": 0,
+      "filesTouched": [],
+      "issues": [
+        "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'"
+      ]
+    },
+    {
+      "at": "2026-04-12T18:35:04.083Z",
+      "workerType": "builder",
+      "taskId": "f1e9d85e-d944-45f0-931d-6a3759ef6cd0",
+      "status": "started",
+      "summary": "Build: Modify apps/api/src/lib/system-knowledge.ts",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/lib/system-knowledge.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T18:35:04.085Z",
+      "workerType": "builder",
+      "taskId": "f1e9d85e-d944-45f0-931d-6a3759ef6cd0",
+      "status": "failed",
+      "summary": "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+      "confidence": 0,
+      "costUsd": 0,
+      "filesTouched": [],
+      "issues": [
+        "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'"
+      ]
+    },
+    {
+      "at": "2026-04-12T18:35:04.086Z",
+      "workerType": "builder",
+      "taskId": "358fff75-4196-47fc-b250-4fba5bcd1608",
+      "status": "started",
+      "summary": "Build: Modify apps/api/src/lib/system-knowledge.ts",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/lib/system-knowledge.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T18:35:04.088Z",
+      "workerType": "builder",
+      "taskId": "358fff75-4196-47fc-b250-4fba5bcd1608",
+      "status": "failed",
+      "summary": "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+      "confidence": 0,
+      "costUsd": 0,
+      "filesTouched": [],
+      "issues": [
+        "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'"
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "at": "2026-04-12T18:35:03.996Z",
+      "type": "run_started",
+      "status": "RUNNING",
+      "phase": "charter",
+      "summary": "in apps/api/src/lib/system-knowledge.ts, add a JSDoc comment above the initCapabilityCache function"
+    },
+    {
+      "at": "2026-04-12T18:35:03.997Z",
+      "type": "planner_finished",
+      "status": "RUNNING",
+      "phase": "planning",
+      "summary": "Planner built 5 task node(s)",
+      "details": {
+        "graphSummary": {
+          "totalNodes": 5,
+          "planned": 4,
+          "ready": 1,
+          "dispatched": 0,
+          "completed": 0,
+          "failed": 0,
+          "skipped": 0,
+          "blocked": 0,
+          "edgeCount": 4,
+          "mergeGroupCount": 0,
+          "checkpointCount": 1,
+          "escalationCount": 1
+        }
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:03.998Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "scouting",
+      "summary": "Scout: gather context and assess risk",
+      "details": {
+        "workerType": "scout",
+        "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.079Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "scouting",
+      "summary": "scout completed",
+      "details": {
+        "workerType": "scout",
+        "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.080Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "Build: Modify apps/api/src/lib/system-knowledge.ts",
+      "details": {
+        "workerType": "builder",
+        "taskId": "e2c4ef08-f726-408a-aeef-55781ebe5925",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.083Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+      "details": {
+        "workerType": "builder",
+        "taskId": "e2c4ef08-f726-408a-aeef-55781ebe5925",
+        "status": "failed"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.083Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "Build: Modify apps/api/src/lib/system-knowledge.ts",
+      "details": {
+        "workerType": "builder",
+        "taskId": "f1e9d85e-d944-45f0-931d-6a3759ef6cd0",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.085Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+      "details": {
+        "workerType": "builder",
+        "taskId": "f1e9d85e-d944-45f0-931d-6a3759ef6cd0",
+        "status": "failed"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.086Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "Build: Modify apps/api/src/lib/system-knowledge.ts",
+      "details": {
+        "workerType": "builder",
+        "taskId": "358fff75-4196-47fc-b250-4fba5bcd1608",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.088Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+      "details": {
+        "workerType": "builder",
+        "taskId": "358fff75-4196-47fc-b250-4fba5bcd1608",
+        "status": "failed"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.088Z",
+      "type": "failure_occurred",
+      "status": "FAILED",
+      "phase": "building",
+      "summary": "One or more task nodes failed and were not recovered.",
+      "details": {
+        "summary": "MERGE BLOCKED — 2 critical, 0 advisory"
+      }
+    },
+    {
+      "at": "2026-04-12T18:35:04.089Z",
+      "type": "run_completed",
+      "status": "FAILED",
+      "phase": "failed",
+      "summary": "Aedis did not change any files. Confidence: 25%."
+    }
+  ],
+  "filesTouched": [
+    {
+      "path": "apps/api/src/config/advisor-policy.ts",
+      "operation": "read",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "timestamp": "2026-04-12T18:35:04.079Z"
+    },
+    {
+      "path": "apps/api/src/config/model-registry.ts",
+      "operation": "read",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "timestamp": "2026-04-12T18:35:04.079Z"
+    },
+    {
+      "path": "apps/api/src/config/model-roles.ts",
+      "operation": "read",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "timestamp": "2026-04-12T18:35:04.079Z"
+    },
+    {
+      "path": "apps/api/src/config/peers.ts",
+      "operation": "read",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "timestamp": "2026-04-12T18:35:04.079Z"
+    },
+    {
+      "path": "apps/api/src/config/personality-judge.ts",
+      "operation": "read",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "timestamp": "2026-04-12T18:35:04.079Z"
+    },
+    {
+      "path": "apps/api/src/config/prompt-versions.ts",
+      "operation": "read",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "timestamp": "2026-04-12T18:35:04.079Z"
+    },
+    {
+      "path": "apps/api/src/lib/personality-loader.ts",
+      "operation": "read",
+      "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+      "timestamp": "2026-04-12T18:35:04.079Z"
+    }
+  ],
+  "changesSummary": [],
+  "verificationResults": {
+    "final": null,
+    "waves": []
+  },
+  "errors": [
+    "One or more task nodes failed and were not recovered.",
+    "No-op execution detected: no files were created, modified, or deleted, no commit was produced, and no read-only output was returned"
+  ],
+  "graphSummary": {
+    "totalNodes": 5,
+    "planned": 3,
+    "ready": 0,
+    "dispatched": 0,
+    "completed": 1,
+    "failed": 1,
+    "skipped": 0,
+    "blocked": 0,
+    "edgeCount": 4,
+    "mergeGroupCount": 0,
+    "checkpointCount": 1,
+    "escalationCount": 3
+  },
+  "runSummary": {
+    "runId": "313da809-452f-4ded-a513-1cbba40df6b3",
+    "intentId": "02540546-6ed8-4876-8e06-5d797f97c797",
+    "phase": "failed",
+    "taskCounts": {
+      "total": 4,
+      "pending": 0,
+      "active": 0,
+      "completed": 1,
+      "failed": 3,
+      "skipped": 0
+    },
+    "totalCost": {
+      "model": "qwen3.6-plus",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "estimatedCostUsd": 0
+    },
+    "filesModified": 7,
+    "assumptions": 0,
+    "decisions": 4,
+    "issues": {
+      "info": 0,
+      "warning": 0,
+      "error": 3,
+      "critical": 0
+    },
+    "duration": 93
+  },
+  "humanSummary": {
+    "classification": "NO_OP",
+    "classificationReason": "No files were created, modified, or deleted and no commit was produced",
+    "classificationReasonCode": "gate-no-op",
+    "headline": "Aedis did not change any files. Confidence: 25%.",
+    "narrative": "Aedis finished without producing any real changes. No files were created, modified, or deleted and no commit was produced. Most likely cause: Every worker reported success but no files were created, modified, or deleted. The builder returned changes that never actually landed on disk, or the plan had no builder work to do. Suggested next step: Inspect the builder's raw output in the receipt to see what it returned. If the builder claimed changes that didn't land, the target files may be read-only, outside the project root, or excluded by your filesystem. Consider narrowing the scope or naming specific files explicitly. Blast radius was projected as low. Cost: $0.0000. Confidence: 25%.",
+    "whatWasAttempted": "in apps/api/src/lib/system-knowledge.ts, add a JSDoc comment above the initCapabilityCache function",
+    "whatChanged": [],
+    "filesTouchedCount": 0,
+    "verification": "not-run",
+    "verificationChecks": [],
+    "blastRadius": {
+      "level": "low",
+      "scopeType": "multi-file",
+      "estimatedFiles": 3,
+      "rawScore": 3,
+      "recommendDecompose": false,
+      "rationale": "~3 file(s) · spans multiple files (level=low, raw=3)",
+      "signals": [
+        "scope:multi-file"
+      ]
+    },
+    "confidence": {
+      "overall": 0.2525,
+      "planning": 0.7,
+      "execution": 0,
+      "verification": 0.25,
+      "basis": [
+        "planning:multi-file → +0.20 (coordinated scope)",
+        "execution:gate not verified → 0.00",
+        "verification:not run → 0.25 (no positive signal)",
+        "overall = 0.2·plan(0.70) + 0.35·exec(0.00) + 0.45·verify(0.25)"
+      ]
+    },
+    "cost": {
+      "model": "qwen3.6-plus",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "estimatedCostUsd": 0,
+      "displayUsd": "$0.0000"
+    },
+    "failureExplanation": {
+      "code": "no-op",
+      "stage": "execution-gate",
+      "rootCause": "Every worker reported success but no files were created, modified, or deleted. The builder returned changes that never actually landed on disk, or the plan had no builder work to do.",
+      "suggestedFix": "Inspect the builder's raw output in the receipt to see what it returned. If the builder claimed changes that didn't land, the target files may be read-only, outside the project root, or excluded by your filesystem. Consider narrowing the scope or naming specific files explicitly.",
+      "evidence": [
+        "verdict:failed",
+        "gate:No-op execution detected: no files were created, modified, or deleted, no commi…",
+        "merge:One or more task nodes failed and were not recovered.",
+        "failedNodes:1"
+      ]
+    },
+    "factors": [
+      "verdict:failed",
+      "executionVerified:false",
+      "merge:block",
+      "gate:no_op"
+    ]
+  },
+  "finalReceipt": {
+    "id": "9c8b9a1a-cc88-4401-acd9-398eca63147c",
+    "runId": "313da809-452f-4ded-a513-1cbba40df6b3",
+    "intentId": "97689f2c-dea3-4eba-b124-1c44597e8331",
+    "timestamp": "2026-04-12T18:35:04.089Z",
+    "verdict": "failed",
+    "summary": {
+      "runId": "313da809-452f-4ded-a513-1cbba40df6b3",
+      "intentId": "02540546-6ed8-4876-8e06-5d797f97c797",
+      "phase": "failed",
+      "taskCounts": {
+        "total": 4,
+        "pending": 0,
+        "active": 0,
+        "completed": 1,
+        "failed": 3,
+        "skipped": 0
+      },
+      "totalCost": {
+        "model": "qwen3.6-plus",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "estimatedCostUsd": 0
+      },
+      "filesModified": 7,
+      "assumptions": 0,
+      "decisions": 4,
+      "issues": {
+        "info": 0,
+        "warning": 0,
+        "error": 3,
+        "critical": 0
+      },
+      "duration": 93
+    },
+    "graphSummary": {
+      "totalNodes": 5,
+      "planned": 3,
+      "ready": 0,
+      "dispatched": 0,
+      "completed": 1,
+      "failed": 1,
+      "skipped": 0,
+      "blocked": 0,
+      "edgeCount": 4,
+      "mergeGroupCount": 0,
+      "checkpointCount": 1,
+      "escalationCount": 3
+    },
+    "verificationReceipt": null,
+    "waveVerifications": [],
+    "judgmentReport": null,
+    "mergeDecision": {
+      "action": "block",
+      "findings": [
+        {
+          "source": "coordinator",
+          "severity": "critical",
+          "code": "coordinator:failed-nodes",
+          "message": "One or more task nodes failed and were not recovered."
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "critical",
+          "code": "change-set:incomplete-waves",
+          "message": "Not every wave of the change-set completed cleanly."
+        }
+      ],
+      "critical": [
+        {
+          "source": "coordinator",
+          "severity": "critical",
+          "code": "coordinator:failed-nodes",
+          "message": "One or more task nodes failed and were not recovered."
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "critical",
+          "code": "change-set:incomplete-waves",
+          "message": "Not every wave of the change-set completed cleanly."
+        }
+      ],
+      "advisory": [],
+      "primaryBlockReason": "One or more task nodes failed and were not recovered.",
+      "summary": "MERGE BLOCKED — 2 critical, 0 advisory"
+    },
+    "totalCost": {
+      "model": "qwen3.6-plus",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "estimatedCostUsd": 0
+    },
+    "commitSha": null,
+    "durationMs": 20321,
+    "executionVerified": false,
+    "executionGateReason": "No-op execution detected: no files were created, modified, or deleted, no commit was produced, and no read-only output was returned",
+    "executionEvidence": [],
+    "executionReceipts": [
+      {
+        "workerType": "scout",
+        "taskId": "93f4d6ed-e82b-4240-8150-d88264d2d25c",
+        "filesTouched": [
+          {
+            "path": "apps/api/src/config/advisor-policy.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/model-registry.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/model-roles.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/peers.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/personality-judge.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/prompt-versions.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/lib/personality-loader.ts",
+            "operation": "read"
+          }
+        ],
+        "changesMade": "Scout assessed risk=high",
+        "verification": "not-applicable",
+        "evidence": []
+      },
+      {
+        "workerType": "builder",
+        "taskId": "e2c4ef08-f726-408a-aeef-55781ebe5925",
+        "filesTouched": [],
+        "changesMade": "FAILED: ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+        "verification": "fail",
+        "evidence": []
+      },
+      {
+        "workerType": "builder",
+        "taskId": "f1e9d85e-d944-45f0-931d-6a3759ef6cd0",
+        "filesTouched": [],
+        "changesMade": "FAILED: ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+        "verification": "fail",
+        "evidence": []
+      },
+      {
+        "workerType": "builder",
+        "taskId": "358fff75-4196-47fc-b250-4fba5bcd1608",
+        "filesTouched": [],
+        "changesMade": "FAILED: ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'",
+        "verification": "fail",
+        "evidence": []
+      }
+    ],
+    "humanSummary": {
+      "classification": "NO_OP",
+      "classificationReason": "No files were created, modified, or deleted and no commit was produced",
+      "classificationReasonCode": "gate-no-op",
+      "headline": "Aedis did not change any files. Confidence: 25%.",
+      "narrative": "Aedis finished without producing any real changes. No files were created, modified, or deleted and no commit was produced. Most likely cause: Every worker reported success but no files were created, modified, or deleted. The builder returned changes that never actually landed on disk, or the plan had no builder work to do. Suggested next step: Inspect the builder's raw output in the receipt to see what it returned. If the builder claimed changes that didn't land, the target files may be read-only, outside the project root, or excluded by your filesystem. Consider narrowing the scope or naming specific files explicitly. Blast radius was projected as low. Cost: $0.0000. Confidence: 25%.",
+      "whatWasAttempted": "in apps/api/src/lib/system-knowledge.ts, add a JSDoc comment above the initCapabilityCache function",
+      "whatChanged": [],
+      "filesTouchedCount": 0,
+      "verification": "not-run",
+      "verificationChecks": [],
+      "blastRadius": {
+        "level": "low",
+        "scopeType": "multi-file",
+        "estimatedFiles": 3,
+        "rawScore": 3,
+        "recommendDecompose": false,
+        "rationale": "~3 file(s) · spans multiple files (level=low, raw=3)",
+        "signals": [
+          "scope:multi-file"
+        ]
+      },
+      "confidence": {
+        "overall": 0.2525,
+        "planning": 0.7,
+        "execution": 0,
+        "verification": 0.25,
+        "basis": [
+          "planning:multi-file → +0.20 (coordinated scope)",
+          "execution:gate not verified → 0.00",
+          "verification:not run → 0.25 (no positive signal)",
+          "overall = 0.2·plan(0.70) + 0.35·exec(0.00) + 0.45·verify(0.25)"
+        ]
+      },
+      "cost": {
+        "model": "qwen3.6-plus",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "estimatedCostUsd": 0,
+        "displayUsd": "$0.0000"
+      },
+      "failureExplanation": {
+        "code": "no-op",
+        "stage": "execution-gate",
+        "rootCause": "Every worker reported success but no files were created, modified, or deleted. The builder returned changes that never actually landed on disk, or the plan had no builder work to do.",
+        "suggestedFix": "Inspect the builder's raw output in the receipt to see what it returned. If the builder claimed changes that didn't land, the target files may be read-only, outside the project root, or excluded by your filesystem. Consider narrowing the scope or naming specific files explicitly.",
+        "evidence": [
+          "verdict:failed",
+          "gate:No-op execution detected: no files were created, modified, or deleted, no commi…",
+          "merge:One or more task nodes failed and were not recovered.",
+          "failedNodes:1"
+        ]
+      },
+      "factors": [
+        "verdict:failed",
+        "executionVerified:false",
+        "merge:block",
+        "gate:no_op"
+      ]
+    },
+    "blastRadius": {
+      "level": "low",
+      "scopeType": "multi-file",
+      "estimatedFiles": 2,
+      "rawScore": 3,
+      "recommendDecompose": false,
+      "rationale": "~2 file(s) · spans multiple files (level=low, raw=3)",
+      "signals": [
+        "scope:multi-file",
+        "files:2"
+      ]
+    },
+    "escalation": null,
+    "memorySuggestions": [
+      "Re-run the task with tighter scope around the failing files before attempting broader changes.",
+      "Address the merge blocker first: One or more task nodes failed and were not recovered.",
+      "Check nearby cluster files next: apps/api/src/lib/system-awareness-tools.ts, apps/api/src/routes/chat.ts, apps/api/src/config/public-mode.ts"
+    ]
+  }
+}

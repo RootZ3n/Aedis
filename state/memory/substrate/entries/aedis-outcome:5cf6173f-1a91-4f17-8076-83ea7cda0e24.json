@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:5cf6173f-1a91-4f17-8076-83ea7cda0e24",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a multiply function to src/utils.ts that takes two numbers and returns their product.",
+  "summary": "\"test/utils.test.ts\" references \"divide\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"isEven\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"capitalize\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"validateEmail\" removed from \"src…",
+  "raw": "{\n  \"issues\": [\n    \"\\\"test/utils.test.ts\\\" references \\\"divide\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n    \"import/export alignment 100%; Partial migration \\\"divide\\\" → \\\"multiply\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"isEven\\\" → \\\"divide\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:type-alignment\",\n        \"message\": \"\\\"test/utils.test.ts\\\" references \\\"divide\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:cross-file-coherence\",\n        \"message\": \"import/export alignment 100%; Partial migration \\\"divide\\\" → \\\"multiply\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"isEven\\\" → \\\"divide\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:type-alignment\",\n        \"message\": \"\\\"test/utils.test.ts\\\" references \\\"divide\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:cross-file-coherence\",\n        \"message\": \"import/export alignment 100%; Partial migration \\\"divide\\\" → \\\"multiply\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"isEven\\\" → \\\"divide\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"\\\"test/utils.test.ts\\\" references \\\"divide\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"isEven\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"capitalize\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n    \"summary\": \"MERGE BLOCKED — 4 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T01:45:38.611Z",
+  "updatedAt": "2026-04-22T01:45:38.613Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "5cf6173f-1a91-4f17-8076-83ea7cda0e24",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "5e62752c-67d1-4cd4-9a7f-2021f83ad022",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:5cf6173f-1a91-4f17-8076-83ea7cda0e24",
+    "aedis-task:5cf6173f-1a91-4f17-8076-83ea7cda0e24"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:5cf6173f-1a91-4f17-8076-83ea7cda0e24"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:5cf6173f-1a91-4f17-8076-83ea7cda0e24"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "\"test/utils.test.ts\" references \"divide\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"isEven\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"capitalize\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"validateEmail\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"Stack\" removed from \"src/utils.ts\""
+  }
+}

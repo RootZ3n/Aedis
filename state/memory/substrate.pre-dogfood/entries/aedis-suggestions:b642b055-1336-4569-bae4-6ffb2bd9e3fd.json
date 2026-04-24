@@ -1,0 +1,59 @@
+{
+  "id": "aedis-suggestions:b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+  "space": "aedis/project/mnt-ai-squidley-v2",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Validate apps/api/src/lib/personality-loader.ts, apps/api/src/config/advisor-policy.ts, apps/api/src/config/model-registry.ts with focused verification before the next attempt. Check n…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-12T12:45:04.306Z",
+  "updatedAt": "2026-04-12T12:45:04.371Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/lib/personality-loader.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "5336ce7c-39ea-416f-ab18-fa3c231c8166",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "edad7bdc-f8f4-4f77-a23f-d03a9256ce82",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+    "aedis-run:b642b055-1336-4569-bae4-6ffb2bd9e3fd",
+    "aedis-task:b642b055-1336-4569-bae4-6ffb2bd9e3fd"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:b642b055-1336-4569-bae4-6ffb2bd9e3fd"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:b642b055-1336-4569-bae4-6ffb2bd9e3fd"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

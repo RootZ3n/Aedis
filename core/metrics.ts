@@ -27,7 +27,7 @@ import type { RunReceipt } from "./coordinator.js";
 export interface TrackedRunLike {
   readonly taskId: string;
   readonly runId: string | null;
-  readonly status: "queued" | "running" | "complete" | "failed" | "cancelled";
+  readonly status: "queued" | "running" | "complete" | "partial" | "failed" | "cancelled";
   readonly prompt: string;
   readonly submittedAt: string;
   readonly completedAt: string | null;

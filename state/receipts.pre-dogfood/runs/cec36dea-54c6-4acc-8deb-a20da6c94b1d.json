@@ -1,0 +1,2667 @@
+{
+  "version": 1,
+  "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+  "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+  "createdAt": "2026-04-12T12:55:45.206Z",
+  "updatedAt": "2026-04-12T12:58:07.577Z",
+  "startedAt": "2026-04-12T12:55:45.206Z",
+  "completedAt": "2026-04-12T12:58:07.479Z",
+  "prompt": "in apps/api/src/routes/chat.ts, add a JSDoc comment above the registerChatRoutes function",
+  "taskSummary": "Aedis updated 1 file but some checks raised warnings. Confidence: 81% (f35b2b9a).",
+  "status": "COMPLETE",
+  "phase": "complete",
+  "finalClassification": "PARTIAL_SUCCESS",
+  "totalCost": {
+    "model": "integration-judge",
+    "inputTokens": 3994,
+    "outputTokens": 3628,
+    "estimatedCostUsd": 0.015385
+  },
+  "confidence": {
+    "overall": 0.8079685290148447,
+    "planning": 0.7,
+    "execution": 0.9877122807017543,
+    "verification": 0.7161538461538461
+  },
+  "workerEvents": [
+    {
+      "at": "2026-04-12T12:55:45.212Z",
+      "workerType": "scout",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "status": "started",
+      "summary": "Scout: gather context and assess risk",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:55:45.256Z",
+      "workerType": "scout",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "status": "completed",
+      "summary": "scout completed",
+      "confidence": 0.92,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts",
+        "apps/api/src/config/advisor-policy.ts",
+        "apps/api/src/config/model-registry.ts",
+        "apps/api/src/config/model-roles.ts",
+        "apps/api/src/config/peers.ts",
+        "apps/api/src/config/personality-judge.ts",
+        "apps/api/src/config/prompt-versions.ts",
+        "apps/api/src/lib/personality-loader.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:55:45.257Z",
+      "workerType": "builder",
+      "taskId": "d845d163-6461-4ccc-b5b3-abcfb5ac99c8",
+      "status": "started",
+      "summary": "Build: Modify apps/api/src/routes/chat.ts",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:56:46.629Z",
+      "workerType": "builder",
+      "taskId": "d845d163-6461-4ccc-b5b3-abcfb5ac99c8",
+      "status": "completed",
+      "summary": "builder completed",
+      "confidence": 0.78,
+      "costUsd": 0.009544,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts",
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:56:46.629Z",
+      "workerType": "critic",
+      "taskId": "4154c5df-a54d-4c98-9475-061b6f47f162",
+      "status": "started",
+      "summary": "Critic: review all builder outputs",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:56:55.047Z",
+      "workerType": "critic",
+      "taskId": "4154c5df-a54d-4c98-9475-061b6f47f162",
+      "status": "completed",
+      "summary": "critic completed",
+      "confidence": 0.84,
+      "costUsd": 0.005841,
+      "filesTouched": [],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:56:55.050Z",
+      "workerType": "verifier",
+      "taskId": "87709d74-cc59-4228-865c-860d02ab299c",
+      "status": "started",
+      "summary": "Verifier: tests, types, lint",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:57:14.548Z",
+      "workerType": "verifier",
+      "taskId": "87709d74-cc59-4228-865c-860d02ab299c",
+      "status": "completed",
+      "summary": "verifier completed",
+      "confidence": 0.8456140350877194,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": [
+        "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files",
+        ""
+      ]
+    },
+    {
+      "at": "2026-04-12T12:57:14.549Z",
+      "workerType": "integrator",
+      "taskId": "98208b39-a05e-4213-9fc4-5ee00c00999e",
+      "status": "started",
+      "summary": "Integrator: merge and final coherence",
+      "confidence": null,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": []
+    },
+    {
+      "at": "2026-04-12T12:57:14.555Z",
+      "workerType": "integrator",
+      "taskId": "98208b39-a05e-4213-9fc4-5ee00c00999e",
+      "status": "completed",
+      "summary": "integrator completed",
+      "confidence": 1,
+      "costUsd": 0,
+      "filesTouched": [
+        "apps/api/src/routes/chat.ts"
+      ],
+      "issues": []
+    }
+  ],
+  "checkpoints": [
+    {
+      "at": "2026-04-12T12:55:45.206Z",
+      "type": "run_started",
+      "status": "RUNNING",
+      "phase": "charter",
+      "summary": "in apps/api/src/routes/chat.ts, add a JSDoc comment above the registerChatRoutes function"
+    },
+    {
+      "at": "2026-04-12T12:55:45.208Z",
+      "type": "planner_finished",
+      "status": "RUNNING",
+      "phase": "planning",
+      "summary": "Planner built 5 task node(s)",
+      "details": {
+        "graphSummary": {
+          "totalNodes": 5,
+          "planned": 4,
+          "ready": 1,
+          "dispatched": 0,
+          "completed": 0,
+          "failed": 0,
+          "skipped": 0,
+          "blocked": 0,
+          "edgeCount": 4,
+          "mergeGroupCount": 0,
+          "checkpointCount": 1,
+          "escalationCount": 1
+        }
+      }
+    },
+    {
+      "at": "2026-04-12T12:55:45.212Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "scouting",
+      "summary": "Scout: gather context and assess risk",
+      "details": {
+        "workerType": "scout",
+        "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T12:55:45.256Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "scouting",
+      "summary": "scout completed",
+      "details": {
+        "workerType": "scout",
+        "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-04-12T12:55:45.257Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "Build: Modify apps/api/src/routes/chat.ts",
+      "details": {
+        "workerType": "builder",
+        "taskId": "d845d163-6461-4ccc-b5b3-abcfb5ac99c8",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T12:56:46.629Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "building",
+      "summary": "builder completed",
+      "details": {
+        "workerType": "builder",
+        "taskId": "d845d163-6461-4ccc-b5b3-abcfb5ac99c8",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-04-12T12:56:46.629Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "reviewing",
+      "summary": "Critic: review all builder outputs",
+      "details": {
+        "workerType": "critic",
+        "taskId": "4154c5df-a54d-4c98-9475-061b6f47f162",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T12:56:55.047Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "reviewing",
+      "summary": "critic completed",
+      "details": {
+        "workerType": "critic",
+        "taskId": "4154c5df-a54d-4c98-9475-061b6f47f162",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-04-12T12:56:55.050Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "verifying",
+      "summary": "Verifier: tests, types, lint",
+      "details": {
+        "workerType": "verifier",
+        "taskId": "87709d74-cc59-4228-865c-860d02ab299c",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T12:57:14.548Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "verifying",
+      "summary": "verifier completed",
+      "details": {
+        "workerType": "verifier",
+        "taskId": "87709d74-cc59-4228-865c-860d02ab299c",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-04-12T12:57:14.549Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "integrating",
+      "summary": "Integrator: merge and final coherence",
+      "details": {
+        "workerType": "integrator",
+        "taskId": "98208b39-a05e-4213-9fc4-5ee00c00999e",
+        "status": "started"
+      }
+    },
+    {
+      "at": "2026-04-12T12:57:14.555Z",
+      "type": "worker_step",
+      "status": "RUNNING",
+      "phase": "integrating",
+      "summary": "integrator completed",
+      "details": {
+        "workerType": "integrator",
+        "taskId": "98208b39-a05e-4213-9fc4-5ee00c00999e",
+        "status": "completed"
+      }
+    },
+    {
+      "at": "2026-04-12T12:57:56.356Z",
+      "type": "verification_result",
+      "status": "RUNNING",
+      "phase": "integrating",
+      "summary": "[change-set] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+      "details": {
+        "verdict": "pass-with-warnings"
+      }
+    },
+    {
+      "at": "2026-04-12T12:58:07.479Z",
+      "type": "run_completed",
+      "status": "COMPLETE",
+      "phase": "complete",
+      "summary": "Aedis updated 1 file but some checks raised warnings. Confidence: 81% (f35b2b9a)."
+    }
+  ],
+  "filesTouched": [
+    {
+      "path": "apps/api/src/routes/chat.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/config/advisor-policy.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/config/model-registry.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/config/model-roles.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/config/peers.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/config/personality-judge.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/config/prompt-versions.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/lib/personality-loader.ts",
+      "operation": "read",
+      "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+      "timestamp": "2026-04-12T12:55:45.256Z"
+    },
+    {
+      "path": "apps/api/src/routes/chat.ts",
+      "operation": "read",
+      "taskId": "d845d163-6461-4ccc-b5b3-abcfb5ac99c8",
+      "timestamp": "2026-04-12T12:56:46.629Z"
+    },
+    {
+      "path": "apps/api/src/routes/chat.ts",
+      "operation": "modify",
+      "taskId": "d845d163-6461-4ccc-b5b3-abcfb5ac99c8",
+      "timestamp": "2026-04-12T12:56:46.629Z"
+    },
+    {
+      "path": "apps/api/src/routes/chat.ts",
+      "operation": "read",
+      "taskId": "87709d74-cc59-4228-865c-860d02ab299c",
+      "timestamp": "2026-04-12T12:57:14.548Z"
+    },
+    {
+      "path": "apps/api/src/routes/chat.ts",
+      "operation": "read",
+      "taskId": "98208b39-a05e-4213-9fc4-5ee00c00999e",
+      "timestamp": "2026-04-12T12:57:14.555Z"
+    }
+  ],
+  "changesSummary": [
+    {
+      "path": "apps/api/src/routes/chat.ts",
+      "operation": "modify"
+    }
+  ],
+  "verificationResults": {
+    "final": {
+      "id": "c1c2bb43-2b41-4fdb-8c13-1eb1365bca9d",
+      "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+      "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+      "timestamp": "2026-04-12T12:57:56.356Z",
+      "verdict": "pass-with-warnings",
+      "confidenceScore": 0.8646153846153847,
+      "stages": [
+        {
+          "stage": "diff-check",
+          "name": "Diff Validation",
+          "passed": true,
+          "score": 1,
+          "issues": [],
+          "durationMs": 0,
+          "details": "1 changes validated"
+        },
+        {
+          "stage": "contract-check",
+          "name": "Worker Contract Validation",
+          "passed": true,
+          "score": 0.85,
+          "issues": [
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+            },
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+            },
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+            },
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+            }
+          ],
+          "durationMs": 0,
+          "details": "5 worker results validated"
+        },
+        {
+          "stage": "cross-file-check",
+          "name": "Cross-File Coherence",
+          "passed": true,
+          "score": 1,
+          "issues": [],
+          "durationMs": 1,
+          "details": "PASSED — 8/8 checks passed, coherence 100%"
+        },
+        {
+          "stage": "lint",
+          "name": "Lint",
+          "passed": true,
+          "score": 1,
+          "issues": [
+            {
+              "stage": "lint",
+              "severity": "warning",
+              "message": "lint hook not configured — skipped"
+            }
+          ],
+          "durationMs": 0,
+          "details": "lint hook not configured — skipped"
+        },
+        {
+          "stage": "typecheck",
+          "name": "TypeScript Check",
+          "passed": true,
+          "score": 1,
+          "issues": [],
+          "durationMs": 1558,
+          "details": "TypeScript Check passed"
+        },
+        {
+          "stage": "custom-hook",
+          "name": "Tests",
+          "passed": false,
+          "score": 0,
+          "issues": [
+            {
+              "stage": "custom-hook",
+              "severity": "error",
+              "message": ""
+            }
+          ],
+          "durationMs": 18025,
+          "details": "Tests failed (exit 1)"
+        }
+      ],
+      "judgmentReport": {
+        "id": "c5d2f6a6-aaff-4e8c-b879-d6d6564f2f05",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "timestamp": "2026-04-12T12:57:36.773Z",
+        "phase": "pre-apply",
+        "checks": [
+          {
+            "name": "Type Alignment",
+            "category": "type-alignment",
+            "passed": true,
+            "score": 1,
+            "details": "All export changes align with consumers",
+            "affectedFiles": []
+          },
+          {
+            "name": "Import Coherence",
+            "category": "import-coherence",
+            "passed": true,
+            "score": 1,
+            "details": "All imports resolvable",
+            "affectedFiles": []
+          },
+          {
+            "name": "Contract Adherence",
+            "category": "contract-adherence",
+            "passed": true,
+            "score": 1,
+            "details": "All contracts satisfied",
+            "affectedFiles": []
+          },
+          {
+            "name": "Assumption Collisions",
+            "category": "assumption-collision",
+            "passed": true,
+            "score": 1,
+            "details": "No contradictory assumptions",
+            "affectedFiles": []
+          },
+          {
+            "name": "Intent Alignment",
+            "category": "intent-alignment",
+            "passed": true,
+            "score": 1,
+            "details": "All 1 deliverables addressed",
+            "affectedFiles": []
+          },
+          {
+            "name": "Scope Boundary",
+            "category": "scope-boundary",
+            "passed": true,
+            "score": 1,
+            "details": "All changes within scope",
+            "affectedFiles": []
+          },
+          {
+            "name": "Rollback Safety",
+            "category": "rollback-safety",
+            "passed": true,
+            "score": 1,
+            "details": "All changes are revertible",
+            "affectedFiles": []
+          },
+          {
+            "name": "Cross-File Coherence",
+            "category": "cross-file-coherence",
+            "passed": true,
+            "score": 1,
+            "details": "import/export alignment 100% — no orphaned references, no partial migrations",
+            "affectedFiles": []
+          }
+        ],
+        "passed": true,
+        "coherenceScore": 1,
+        "blockers": [],
+        "warnings": [],
+        "summary": "PASSED — 8/8 checks passed, coherence 100%"
+      },
+      "allIssues": [
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+        },
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+        },
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+        },
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+        },
+        {
+          "stage": "lint",
+          "severity": "warning",
+          "message": "lint hook not configured — skipped"
+        },
+        {
+          "stage": "custom-hook",
+          "severity": "error",
+          "message": ""
+        }
+      ],
+      "blockers": [],
+      "requiredChecks": [
+        "lint",
+        "typecheck",
+        "tests"
+      ],
+      "checks": [
+        {
+          "kind": "lint",
+          "name": "Lint",
+          "required": true,
+          "executed": false,
+          "passed": false,
+          "details": "lint hook not configured — skipped"
+        },
+        {
+          "kind": "typecheck",
+          "name": "TypeScript Check",
+          "required": true,
+          "executed": true,
+          "passed": true,
+          "details": "TypeScript Check passed"
+        },
+        {
+          "kind": "tests",
+          "name": "Tests",
+          "required": true,
+          "executed": true,
+          "passed": false,
+          "details": "Tests failed (exit 1)"
+        }
+      ],
+      "summary": "[change-set] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+      "totalDurationMs": 19584,
+      "scope": {
+        "kind": "change-set",
+        "fileCount": 1
+      }
+    },
+    "waves": [
+      {
+        "id": "8babec13-b048-4578-8685-b612b01c23fe",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:14.556Z",
+        "verdict": "pass",
+        "confidenceScore": 1,
+        "stages": [],
+        "judgmentReport": null,
+        "allIssues": [],
+        "blockers": [],
+        "requiredChecks": [],
+        "checks": [],
+        "summary": "[wave 1 schema/types] PASS — no changes to verify",
+        "totalDurationMs": 0,
+        "scope": {
+          "kind": "wave",
+          "waveId": 1,
+          "waveName": "schema/types",
+          "fileCount": 0
+        }
+      },
+      {
+        "id": "02e28a23-4163-463e-bcf9-5c8413186ce5",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:36.771Z",
+        "verdict": "pass-with-warnings",
+        "confidenceScore": 0.8646153846153847,
+        "stages": [
+          {
+            "stage": "diff-check",
+            "name": "Diff Validation",
+            "passed": true,
+            "score": 1,
+            "issues": [],
+            "durationMs": 1,
+            "details": "1 changes validated"
+          },
+          {
+            "stage": "contract-check",
+            "name": "Worker Contract Validation",
+            "passed": true,
+            "score": 0.85,
+            "issues": [
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+              },
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+              },
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+              },
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+              }
+            ],
+            "durationMs": 0,
+            "details": "5 worker results validated"
+          },
+          {
+            "stage": "cross-file-check",
+            "name": "Cross-File Coherence",
+            "passed": true,
+            "score": 1,
+            "issues": [],
+            "durationMs": 1,
+            "details": "PASSED — 8/8 checks passed, coherence 100%"
+          },
+          {
+            "stage": "lint",
+            "name": "Lint",
+            "passed": true,
+            "score": 1,
+            "issues": [
+              {
+                "stage": "lint",
+                "severity": "warning",
+                "message": "lint hook not configured — skipped"
+              }
+            ],
+            "durationMs": 0,
+            "details": "lint hook not configured — skipped"
+          },
+          {
+            "stage": "typecheck",
+            "name": "TypeScript Check",
+            "passed": true,
+            "score": 1,
+            "issues": [],
+            "durationMs": 1536,
+            "details": "TypeScript Check passed"
+          },
+          {
+            "stage": "custom-hook",
+            "name": "Tests",
+            "passed": false,
+            "score": 0,
+            "issues": [
+              {
+                "stage": "custom-hook",
+                "severity": "error",
+                "message": ""
+              }
+            ],
+            "durationMs": 20677,
+            "details": "Tests failed (exit 1)"
+          }
+        ],
+        "judgmentReport": {
+          "id": "3df49cf2-b5a5-4993-87cb-ed3d527512ce",
+          "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+          "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+          "timestamp": "2026-04-12T12:57:14.558Z",
+          "phase": "pre-apply",
+          "checks": [
+            {
+              "name": "Type Alignment",
+              "category": "type-alignment",
+              "passed": true,
+              "score": 1,
+              "details": "All export changes align with consumers",
+              "affectedFiles": []
+            },
+            {
+              "name": "Import Coherence",
+              "category": "import-coherence",
+              "passed": true,
+              "score": 1,
+              "details": "All imports resolvable",
+              "affectedFiles": []
+            },
+            {
+              "name": "Contract Adherence",
+              "category": "contract-adherence",
+              "passed": true,
+              "score": 1,
+              "details": "All contracts satisfied",
+              "affectedFiles": []
+            },
+            {
+              "name": "Assumption Collisions",
+              "category": "assumption-collision",
+              "passed": true,
+              "score": 1,
+              "details": "No contradictory assumptions",
+              "affectedFiles": []
+            },
+            {
+              "name": "Intent Alignment",
+              "category": "intent-alignment",
+              "passed": true,
+              "score": 1,
+              "details": "All 1 deliverables addressed",
+              "affectedFiles": []
+            },
+            {
+              "name": "Scope Boundary",
+              "category": "scope-boundary",
+              "passed": true,
+              "score": 1,
+              "details": "All changes within scope",
+              "affectedFiles": []
+            },
+            {
+              "name": "Rollback Safety",
+              "category": "rollback-safety",
+              "passed": true,
+              "score": 1,
+              "details": "All changes are revertible",
+              "affectedFiles": []
+            },
+            {
+              "name": "Cross-File Coherence",
+              "category": "cross-file-coherence",
+              "passed": true,
+              "score": 1,
+              "details": "import/export alignment 100% — no orphaned references, no partial migrations",
+              "affectedFiles": []
+            }
+          ],
+          "passed": true,
+          "coherenceScore": 1,
+          "blockers": [],
+          "warnings": [],
+          "summary": "PASSED — 8/8 checks passed, coherence 100%"
+        },
+        "allIssues": [
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+          },
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+          },
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+          },
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+          },
+          {
+            "stage": "lint",
+            "severity": "warning",
+            "message": "lint hook not configured — skipped"
+          },
+          {
+            "stage": "custom-hook",
+            "severity": "error",
+            "message": ""
+          }
+        ],
+        "blockers": [],
+        "requiredChecks": [
+          "lint",
+          "typecheck",
+          "tests"
+        ],
+        "checks": [
+          {
+            "kind": "lint",
+            "name": "Lint",
+            "required": true,
+            "executed": false,
+            "passed": false,
+            "details": "lint hook not configured — skipped"
+          },
+          {
+            "kind": "typecheck",
+            "name": "TypeScript Check",
+            "required": true,
+            "executed": true,
+            "passed": true,
+            "details": "TypeScript Check passed"
+          },
+          {
+            "kind": "tests",
+            "name": "Tests",
+            "required": true,
+            "executed": true,
+            "passed": false,
+            "details": "Tests failed (exit 1)"
+          }
+        ],
+        "summary": "[wave 2 consumers] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+        "totalDurationMs": 22215,
+        "scope": {
+          "kind": "wave",
+          "waveId": 2,
+          "waveName": "consumers",
+          "fileCount": 1
+        }
+      },
+      {
+        "id": "9d090a63-a48c-479b-b694-0dcf1a607aa6",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:36.771Z",
+        "verdict": "pass",
+        "confidenceScore": 1,
+        "stages": [],
+        "judgmentReport": null,
+        "allIssues": [],
+        "blockers": [],
+        "requiredChecks": [],
+        "checks": [],
+        "summary": "[wave 3 tests/docs] PASS — no changes to verify",
+        "totalDurationMs": 0,
+        "scope": {
+          "kind": "wave",
+          "waveId": 3,
+          "waveName": "tests/docs",
+          "fileCount": 0
+        }
+      },
+      {
+        "id": "997f64c5-562d-4ae9-82cb-ba5cee5b9a7c",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:36.771Z",
+        "verdict": "pass",
+        "confidenceScore": 1,
+        "stages": [],
+        "judgmentReport": null,
+        "allIssues": [],
+        "blockers": [],
+        "requiredChecks": [],
+        "checks": [],
+        "summary": "[wave 4 integration] PASS — no changes to verify",
+        "totalDurationMs": 0,
+        "scope": {
+          "kind": "wave",
+          "waveId": 4,
+          "waveName": "integration",
+          "fileCount": 0
+        }
+      }
+    ]
+  },
+  "errors": [],
+  "graphSummary": {
+    "totalNodes": 5,
+    "planned": 0,
+    "ready": 0,
+    "dispatched": 0,
+    "completed": 5,
+    "failed": 0,
+    "skipped": 0,
+    "blocked": 0,
+    "edgeCount": 4,
+    "mergeGroupCount": 0,
+    "checkpointCount": 1,
+    "escalationCount": 1
+  },
+  "runSummary": {
+    "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+    "intentId": "c7ce87d5-3d3b-45ea-82e1-81540ed43aab",
+    "phase": "complete",
+    "taskCounts": {
+      "total": 5,
+      "pending": 0,
+      "active": 0,
+      "completed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "totalCost": {
+      "model": "integration-judge",
+      "inputTokens": 3994,
+      "outputTokens": 3628,
+      "estimatedCostUsd": 0.015385
+    },
+    "filesModified": 8,
+    "assumptions": 0,
+    "decisions": 4,
+    "issues": {
+      "info": 0,
+      "warning": 1,
+      "error": 1,
+      "critical": 0
+    },
+    "duration": 142273
+  },
+  "humanSummary": {
+    "classification": "PARTIAL_SUCCESS",
+    "classificationReason": "Changes applied but flagged: verification warnings, 47 advisory finding(s)",
+    "classificationReasonCode": "partial",
+    "headline": "Aedis updated 1 file but some checks raised warnings. Confidence: 81% (f35b2b9a).",
+    "narrative": "Aedis applied 1 change but not every gate was clean. Changes applied but flagged: verification warnings, 47 advisory finding(s). Most likely cause: The run did not reach a verified success state, but no specific blocker was captured on the receipt. This typically means a gate failed silently or a worker returned an empty result. Suggested next step: Check the worker grid and Lumen log for this run. If nothing is visible, re-run with a tighter scope or ask Loqui for a dry-run plan first. Checks run: lint=missing, typecheck=pass, tests=fail. Blast radius was low. Cost: $0.02. Confidence: 81%.",
+    "whatWasAttempted": "in apps/api/src/routes/chat.ts, add a JSDoc comment above the registerChatRoutes function",
+    "whatChanged": [
+      {
+        "path": "apps/api/src/routes/chat.ts",
+        "operation": "modify"
+      }
+    ],
+    "filesTouchedCount": 1,
+    "verification": "pass-with-warnings",
+    "verificationChecks": [
+      {
+        "kind": "lint",
+        "name": "Lint",
+        "required": true,
+        "executed": false,
+        "passed": false,
+        "details": "lint hook not configured — skipped"
+      },
+      {
+        "kind": "typecheck",
+        "name": "TypeScript Check",
+        "required": true,
+        "executed": true,
+        "passed": true,
+        "details": "TypeScript Check passed"
+      },
+      {
+        "kind": "tests",
+        "name": "Tests",
+        "required": true,
+        "executed": true,
+        "passed": false,
+        "details": "Tests failed (exit 1)"
+      }
+    ],
+    "blastRadius": {
+      "level": "low",
+      "scopeType": "multi-file",
+      "estimatedFiles": 1,
+      "rawScore": 3,
+      "recommendDecompose": false,
+      "rationale": "~1 file(s) · spans multiple files (level=low, raw=3)",
+      "signals": [
+        "scope:multi-file",
+        "files:1"
+      ]
+    },
+    "confidence": {
+      "overall": 0.8079685290148447,
+      "planning": 0.7,
+      "execution": 0.9877122807017543,
+      "verification": 0.7161538461538461,
+      "basis": [
+        "planning:multi-file → +0.20 (coordinated scope)",
+        "execution:gate verified → 0.75",
+        "execution:3 evidence items → +0.10",
+        "execution:commit f35b2b9a → +0.10",
+        "execution:avg worker conf 0.88 → +0.04",
+        "verification:pass-with-warnings (pipeline conf 0.86) → 0.72",
+        "overall = 0.2·plan(0.70) + 0.35·exec(0.99) + 0.45·verify(0.72)"
+      ]
+    },
+    "cost": {
+      "model": "integration-judge",
+      "inputTokens": 3994,
+      "outputTokens": 3628,
+      "estimatedCostUsd": 0.015385,
+      "displayUsd": "$0.02"
+    },
+    "failureExplanation": {
+      "code": "unknown",
+      "stage": "unknown",
+      "rootCause": "The run did not reach a verified success state, but no specific blocker was captured on the receipt. This typically means a gate failed silently or a worker returned an empty result.",
+      "suggestedFix": "Check the worker grid and Lumen log for this run. If nothing is visible, re-run with a tighter scope or ask Loqui for a dry-run plan first.",
+      "evidence": [
+        "verdict:partial",
+        "gate:Execution verified: 1 file(s) modified, commit f35b2b9a",
+        "verification:pass-with-warnings"
+      ]
+    },
+    "factors": [
+      "verdict:partial",
+      "executionVerified:true",
+      "verification:pass-with-warnings",
+      "merge:apply",
+      "partial:verification warnings,47 advisory finding(s)"
+    ]
+  },
+  "finalReceipt": {
+    "id": "fc3f05a7-9296-4b2c-9411-8b1250860a1d",
+    "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+    "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+    "timestamp": "2026-04-12T12:58:07.479Z",
+    "verdict": "partial",
+    "summary": {
+      "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+      "intentId": "c7ce87d5-3d3b-45ea-82e1-81540ed43aab",
+      "phase": "complete",
+      "taskCounts": {
+        "total": 5,
+        "pending": 0,
+        "active": 0,
+        "completed": 5,
+        "failed": 0,
+        "skipped": 0
+      },
+      "totalCost": {
+        "model": "integration-judge",
+        "inputTokens": 3994,
+        "outputTokens": 3628,
+        "estimatedCostUsd": 0.015385
+      },
+      "filesModified": 8,
+      "assumptions": 0,
+      "decisions": 4,
+      "issues": {
+        "info": 0,
+        "warning": 1,
+        "error": 1,
+        "critical": 0
+      },
+      "duration": 142273
+    },
+    "graphSummary": {
+      "totalNodes": 5,
+      "planned": 0,
+      "ready": 0,
+      "dispatched": 0,
+      "completed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "blocked": 0,
+      "edgeCount": 4,
+      "mergeGroupCount": 0,
+      "checkpointCount": 1,
+      "escalationCount": 1
+    },
+    "verificationReceipt": {
+      "id": "c1c2bb43-2b41-4fdb-8c13-1eb1365bca9d",
+      "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+      "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+      "timestamp": "2026-04-12T12:57:56.356Z",
+      "verdict": "pass-with-warnings",
+      "confidenceScore": 0.8646153846153847,
+      "stages": [
+        {
+          "stage": "diff-check",
+          "name": "Diff Validation",
+          "passed": true,
+          "score": 1,
+          "issues": [],
+          "durationMs": 0,
+          "details": "1 changes validated"
+        },
+        {
+          "stage": "contract-check",
+          "name": "Worker Contract Validation",
+          "passed": true,
+          "score": 0.85,
+          "issues": [
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+            },
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+            },
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+            },
+            {
+              "stage": "contract-check",
+              "severity": "warning",
+              "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+            }
+          ],
+          "durationMs": 0,
+          "details": "5 worker results validated"
+        },
+        {
+          "stage": "cross-file-check",
+          "name": "Cross-File Coherence",
+          "passed": true,
+          "score": 1,
+          "issues": [],
+          "durationMs": 1,
+          "details": "PASSED — 8/8 checks passed, coherence 100%"
+        },
+        {
+          "stage": "lint",
+          "name": "Lint",
+          "passed": true,
+          "score": 1,
+          "issues": [
+            {
+              "stage": "lint",
+              "severity": "warning",
+              "message": "lint hook not configured — skipped"
+            }
+          ],
+          "durationMs": 0,
+          "details": "lint hook not configured — skipped"
+        },
+        {
+          "stage": "typecheck",
+          "name": "TypeScript Check",
+          "passed": true,
+          "score": 1,
+          "issues": [],
+          "durationMs": 1558,
+          "details": "TypeScript Check passed"
+        },
+        {
+          "stage": "custom-hook",
+          "name": "Tests",
+          "passed": false,
+          "score": 0,
+          "issues": [
+            {
+              "stage": "custom-hook",
+              "severity": "error",
+              "message": ""
+            }
+          ],
+          "durationMs": 18025,
+          "details": "Tests failed (exit 1)"
+        }
+      ],
+      "judgmentReport": {
+        "id": "c5d2f6a6-aaff-4e8c-b879-d6d6564f2f05",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "timestamp": "2026-04-12T12:57:36.773Z",
+        "phase": "pre-apply",
+        "checks": [
+          {
+            "name": "Type Alignment",
+            "category": "type-alignment",
+            "passed": true,
+            "score": 1,
+            "details": "All export changes align with consumers",
+            "affectedFiles": []
+          },
+          {
+            "name": "Import Coherence",
+            "category": "import-coherence",
+            "passed": true,
+            "score": 1,
+            "details": "All imports resolvable",
+            "affectedFiles": []
+          },
+          {
+            "name": "Contract Adherence",
+            "category": "contract-adherence",
+            "passed": true,
+            "score": 1,
+            "details": "All contracts satisfied",
+            "affectedFiles": []
+          },
+          {
+            "name": "Assumption Collisions",
+            "category": "assumption-collision",
+            "passed": true,
+            "score": 1,
+            "details": "No contradictory assumptions",
+            "affectedFiles": []
+          },
+          {
+            "name": "Intent Alignment",
+            "category": "intent-alignment",
+            "passed": true,
+            "score": 1,
+            "details": "All 1 deliverables addressed",
+            "affectedFiles": []
+          },
+          {
+            "name": "Scope Boundary",
+            "category": "scope-boundary",
+            "passed": true,
+            "score": 1,
+            "details": "All changes within scope",
+            "affectedFiles": []
+          },
+          {
+            "name": "Rollback Safety",
+            "category": "rollback-safety",
+            "passed": true,
+            "score": 1,
+            "details": "All changes are revertible",
+            "affectedFiles": []
+          },
+          {
+            "name": "Cross-File Coherence",
+            "category": "cross-file-coherence",
+            "passed": true,
+            "score": 1,
+            "details": "import/export alignment 100% — no orphaned references, no partial migrations",
+            "affectedFiles": []
+          }
+        ],
+        "passed": true,
+        "coherenceScore": 1,
+        "blockers": [],
+        "warnings": [],
+        "summary": "PASSED — 8/8 checks passed, coherence 100%"
+      },
+      "allIssues": [
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+        },
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+        },
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+        },
+        {
+          "stage": "contract-check",
+          "severity": "warning",
+          "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+        },
+        {
+          "stage": "lint",
+          "severity": "warning",
+          "message": "lint hook not configured — skipped"
+        },
+        {
+          "stage": "custom-hook",
+          "severity": "error",
+          "message": ""
+        }
+      ],
+      "blockers": [],
+      "requiredChecks": [
+        "lint",
+        "typecheck",
+        "tests"
+      ],
+      "checks": [
+        {
+          "kind": "lint",
+          "name": "Lint",
+          "required": true,
+          "executed": false,
+          "passed": false,
+          "details": "lint hook not configured — skipped"
+        },
+        {
+          "kind": "typecheck",
+          "name": "TypeScript Check",
+          "required": true,
+          "executed": true,
+          "passed": true,
+          "details": "TypeScript Check passed"
+        },
+        {
+          "kind": "tests",
+          "name": "Tests",
+          "required": true,
+          "executed": true,
+          "passed": false,
+          "details": "Tests failed (exit 1)"
+        }
+      ],
+      "summary": "[change-set] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+      "totalDurationMs": 19584,
+      "scope": {
+        "kind": "change-set",
+        "fileCount": 1
+      }
+    },
+    "waveVerifications": [
+      {
+        "id": "8babec13-b048-4578-8685-b612b01c23fe",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:14.556Z",
+        "verdict": "pass",
+        "confidenceScore": 1,
+        "stages": [],
+        "judgmentReport": null,
+        "allIssues": [],
+        "blockers": [],
+        "requiredChecks": [],
+        "checks": [],
+        "summary": "[wave 1 schema/types] PASS — no changes to verify",
+        "totalDurationMs": 0,
+        "scope": {
+          "kind": "wave",
+          "waveId": 1,
+          "waveName": "schema/types",
+          "fileCount": 0
+        }
+      },
+      {
+        "id": "02e28a23-4163-463e-bcf9-5c8413186ce5",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:36.771Z",
+        "verdict": "pass-with-warnings",
+        "confidenceScore": 0.8646153846153847,
+        "stages": [
+          {
+            "stage": "diff-check",
+            "name": "Diff Validation",
+            "passed": true,
+            "score": 1,
+            "issues": [],
+            "durationMs": 1,
+            "details": "1 changes validated"
+          },
+          {
+            "stage": "contract-check",
+            "name": "Worker Contract Validation",
+            "passed": true,
+            "score": 0.85,
+            "issues": [
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+              },
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+              },
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+              },
+              {
+                "stage": "contract-check",
+                "severity": "warning",
+                "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+              }
+            ],
+            "durationMs": 0,
+            "details": "5 worker results validated"
+          },
+          {
+            "stage": "cross-file-check",
+            "name": "Cross-File Coherence",
+            "passed": true,
+            "score": 1,
+            "issues": [],
+            "durationMs": 1,
+            "details": "PASSED — 8/8 checks passed, coherence 100%"
+          },
+          {
+            "stage": "lint",
+            "name": "Lint",
+            "passed": true,
+            "score": 1,
+            "issues": [
+              {
+                "stage": "lint",
+                "severity": "warning",
+                "message": "lint hook not configured — skipped"
+              }
+            ],
+            "durationMs": 0,
+            "details": "lint hook not configured — skipped"
+          },
+          {
+            "stage": "typecheck",
+            "name": "TypeScript Check",
+            "passed": true,
+            "score": 1,
+            "issues": [],
+            "durationMs": 1536,
+            "details": "TypeScript Check passed"
+          },
+          {
+            "stage": "custom-hook",
+            "name": "Tests",
+            "passed": false,
+            "score": 0,
+            "issues": [
+              {
+                "stage": "custom-hook",
+                "severity": "error",
+                "message": ""
+              }
+            ],
+            "durationMs": 20677,
+            "details": "Tests failed (exit 1)"
+          }
+        ],
+        "judgmentReport": {
+          "id": "3df49cf2-b5a5-4993-87cb-ed3d527512ce",
+          "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+          "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+          "timestamp": "2026-04-12T12:57:14.558Z",
+          "phase": "pre-apply",
+          "checks": [
+            {
+              "name": "Type Alignment",
+              "category": "type-alignment",
+              "passed": true,
+              "score": 1,
+              "details": "All export changes align with consumers",
+              "affectedFiles": []
+            },
+            {
+              "name": "Import Coherence",
+              "category": "import-coherence",
+              "passed": true,
+              "score": 1,
+              "details": "All imports resolvable",
+              "affectedFiles": []
+            },
+            {
+              "name": "Contract Adherence",
+              "category": "contract-adherence",
+              "passed": true,
+              "score": 1,
+              "details": "All contracts satisfied",
+              "affectedFiles": []
+            },
+            {
+              "name": "Assumption Collisions",
+              "category": "assumption-collision",
+              "passed": true,
+              "score": 1,
+              "details": "No contradictory assumptions",
+              "affectedFiles": []
+            },
+            {
+              "name": "Intent Alignment",
+              "category": "intent-alignment",
+              "passed": true,
+              "score": 1,
+              "details": "All 1 deliverables addressed",
+              "affectedFiles": []
+            },
+            {
+              "name": "Scope Boundary",
+              "category": "scope-boundary",
+              "passed": true,
+              "score": 1,
+              "details": "All changes within scope",
+              "affectedFiles": []
+            },
+            {
+              "name": "Rollback Safety",
+              "category": "rollback-safety",
+              "passed": true,
+              "score": 1,
+              "details": "All changes are revertible",
+              "affectedFiles": []
+            },
+            {
+              "name": "Cross-File Coherence",
+              "category": "cross-file-coherence",
+              "passed": true,
+              "score": 1,
+              "details": "import/export alignment 100% — no orphaned references, no partial migrations",
+              "affectedFiles": []
+            }
+          ],
+          "passed": true,
+          "coherenceScore": 1,
+          "blockers": [],
+          "warnings": [],
+          "summary": "PASSED — 8/8 checks passed, coherence 100%"
+        },
+        "allIssues": [
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+          },
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+          },
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+          },
+          {
+            "stage": "contract-check",
+            "severity": "warning",
+            "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+          },
+          {
+            "stage": "lint",
+            "severity": "warning",
+            "message": "lint hook not configured — skipped"
+          },
+          {
+            "stage": "custom-hook",
+            "severity": "error",
+            "message": ""
+          }
+        ],
+        "blockers": [],
+        "requiredChecks": [
+          "lint",
+          "typecheck",
+          "tests"
+        ],
+        "checks": [
+          {
+            "kind": "lint",
+            "name": "Lint",
+            "required": true,
+            "executed": false,
+            "passed": false,
+            "details": "lint hook not configured — skipped"
+          },
+          {
+            "kind": "typecheck",
+            "name": "TypeScript Check",
+            "required": true,
+            "executed": true,
+            "passed": true,
+            "details": "TypeScript Check passed"
+          },
+          {
+            "kind": "tests",
+            "name": "Tests",
+            "required": true,
+            "executed": true,
+            "passed": false,
+            "details": "Tests failed (exit 1)"
+          }
+        ],
+        "summary": "[wave 2 consumers] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+        "totalDurationMs": 22215,
+        "scope": {
+          "kind": "wave",
+          "waveId": 2,
+          "waveName": "consumers",
+          "fileCount": 1
+        }
+      },
+      {
+        "id": "9d090a63-a48c-479b-b694-0dcf1a607aa6",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:36.771Z",
+        "verdict": "pass",
+        "confidenceScore": 1,
+        "stages": [],
+        "judgmentReport": null,
+        "allIssues": [],
+        "blockers": [],
+        "requiredChecks": [],
+        "checks": [],
+        "summary": "[wave 3 tests/docs] PASS — no changes to verify",
+        "totalDurationMs": 0,
+        "scope": {
+          "kind": "wave",
+          "waveId": 3,
+          "waveName": "tests/docs",
+          "fileCount": 0
+        }
+      },
+      {
+        "id": "997f64c5-562d-4ae9-82cb-ba5cee5b9a7c",
+        "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+        "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+        "timestamp": "2026-04-12T12:57:36.771Z",
+        "verdict": "pass",
+        "confidenceScore": 1,
+        "stages": [],
+        "judgmentReport": null,
+        "allIssues": [],
+        "blockers": [],
+        "requiredChecks": [],
+        "checks": [],
+        "summary": "[wave 4 integration] PASS — no changes to verify",
+        "totalDurationMs": 0,
+        "scope": {
+          "kind": "wave",
+          "waveId": 4,
+          "waveName": "integration",
+          "fileCount": 0
+        }
+      }
+    ],
+    "judgmentReport": {
+      "id": "f8091e48-8a45-45c0-a9ca-1b070e11bd13",
+      "intentId": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+      "runId": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+      "timestamp": "2026-04-12T12:57:36.772Z",
+      "phase": "pre-apply",
+      "checks": [
+        {
+          "name": "Type Alignment",
+          "category": "type-alignment",
+          "passed": true,
+          "score": 1,
+          "details": "All export changes align with consumers",
+          "affectedFiles": []
+        },
+        {
+          "name": "Import Coherence",
+          "category": "import-coherence",
+          "passed": true,
+          "score": 1,
+          "details": "All imports resolvable",
+          "affectedFiles": []
+        },
+        {
+          "name": "Contract Adherence",
+          "category": "contract-adherence",
+          "passed": true,
+          "score": 1,
+          "details": "All contracts satisfied",
+          "affectedFiles": []
+        },
+        {
+          "name": "Assumption Collisions",
+          "category": "assumption-collision",
+          "passed": true,
+          "score": 1,
+          "details": "No contradictory assumptions",
+          "affectedFiles": []
+        },
+        {
+          "name": "Intent Alignment",
+          "category": "intent-alignment",
+          "passed": true,
+          "score": 1,
+          "details": "All 1 deliverables addressed",
+          "affectedFiles": []
+        },
+        {
+          "name": "Scope Boundary",
+          "category": "scope-boundary",
+          "passed": true,
+          "score": 1,
+          "details": "All changes within scope",
+          "affectedFiles": []
+        },
+        {
+          "name": "Rollback Safety",
+          "category": "rollback-safety",
+          "passed": true,
+          "score": 1,
+          "details": "All changes are revertible",
+          "affectedFiles": []
+        },
+        {
+          "name": "Cross-File Coherence",
+          "category": "cross-file-coherence",
+          "passed": true,
+          "score": 1,
+          "details": "import/export alignment 100% — no orphaned references, no partial migrations",
+          "affectedFiles": []
+        }
+      ],
+      "passed": true,
+      "coherenceScore": 1,
+      "blockers": [],
+      "warnings": [],
+      "summary": "PASSED — 8/8 checks passed, coherence 100%"
+    },
+    "mergeDecision": {
+      "action": "apply",
+      "findings": [
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:lint",
+          "message": "lint hook not configured — skipped"
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/provider-manager/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/memory/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/tool-runner/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/model-router/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/archelon/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/archelon/context-router.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/model-router/classifier.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/legatus/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/integrations/archivum/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/integrations/telegram/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../security/promptGuard.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/squidley-voice.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/prompt-builder.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/chat-turn-finalization.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/system-knowledge.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/caput/tools.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/caput/tools.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/capabilities/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/model-roles.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../middleware/velum.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/rollback.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/verify.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/risk-assessor.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/route-receipts.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/chat-side-effects.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/prompt-versions.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./codex.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./cc.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./fabrica-runtime.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./grimoire-scan.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./crucible-code-benchmark.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./unified-search.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./model-feedback-loop.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./project-context.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./local-mode.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./sibyl.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./crucible-integration-probes.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./imperium.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./tenticode.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/model-roles.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/advisor.js\""
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:wave-2-warnings",
+          "message": "Wave 2 (consumers) passed with warnings: [wave 2 consumers] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+          "files": []
+        }
+      ],
+      "critical": [],
+      "advisory": [
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"scout\" (task 29cd3402-4567-42cc-a37e-c22473c8eb8f) reported zero cost"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"critic\" (task 4154c5df-a54d-4c98-9475-061b6f47f162) reported no touched files"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"verifier\" (task 87709d74-cc59-4228-865c-860d02ab299c) reported zero cost"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:contract-check",
+          "message": "Worker \"integrator\" (task 98208b39-a05e-4213-9fc4-5ee00c00999e) reported zero cost"
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:lint",
+          "message": "lint hook not configured — skipped"
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/provider-manager/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/memory/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/tool-runner/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/model-router/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/archelon/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/archelon/context-router.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/model-router/classifier.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/legatus/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/integrations/archivum/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/integrations/telegram/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../security/promptGuard.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/squidley-voice.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/prompt-builder.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/chat-turn-finalization.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/system-knowledge.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/caput/tools.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/caput/tools.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/capabilities/index.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/model-roles.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../middleware/velum.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/rollback.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/verify.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/risk-assessor.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/route-receipts.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/chat-side-effects.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/prompt-versions.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./codex.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./cc.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./fabrica-runtime.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./grimoire-scan.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./crucible-code-benchmark.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./unified-search.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./model-feedback-loop.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./project-context.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./local-mode.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./sibyl.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./crucible-integration-probes.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./imperium.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"./tenticode.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../config/model-roles.js\""
+        },
+        {
+          "source": "change-set-gate",
+          "severity": "advisory",
+          "code": "change-set:repair",
+          "message": "apps/api/src/routes/chat.ts: broken import target \"../lib/advisor.js\""
+        },
+        {
+          "source": "verification-pipeline",
+          "severity": "advisory",
+          "code": "verification:wave-2-warnings",
+          "message": "Wave 2 (consumers) passed with warnings: [wave 2 consumers] PASS-WITH-WARNINGS — 5/6 stages passed, confidence 86%, 0 blockers, checks typecheck:pass, tests:fail, skipped checks: lint",
+          "files": []
+        }
+      ],
+      "primaryBlockReason": "",
+      "summary": "MERGE APPROVED — 47 advisory finding(s), 0 critical"
+    },
+    "totalCost": {
+      "model": "integration-judge",
+      "inputTokens": 3994,
+      "outputTokens": 3628,
+      "estimatedCostUsd": 0.015385
+    },
+    "commitSha": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+    "durationMs": 142380,
+    "executionVerified": true,
+    "executionGateReason": "Execution verified: 1 file(s) modified, commit f35b2b9a",
+    "executionEvidence": [
+      {
+        "kind": "file_modified",
+        "ref": "apps/api/src/routes/chat.ts",
+        "detail": "321812 bytes",
+        "producedBy": "builder",
+        "verifiedOnDisk": true
+      },
+      {
+        "kind": "file_diff",
+        "ref": "apps/api/src/routes/chat.ts",
+        "detail": "11 diff line(s)",
+        "producedBy": "builder",
+        "verifiedOnDisk": true
+      },
+      {
+        "kind": "commit_sha",
+        "ref": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+        "detail": "f35b2b9a",
+        "verifiedOnDisk": true
+      }
+    ],
+    "executionReceipts": [
+      {
+        "workerType": "scout",
+        "taskId": "29cd3402-4567-42cc-a37e-c22473c8eb8f",
+        "filesTouched": [
+          {
+            "path": "apps/api/src/routes/chat.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/advisor-policy.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/model-registry.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/model-roles.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/peers.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/personality-judge.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/config/prompt-versions.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/lib/personality-loader.ts",
+            "operation": "read"
+          }
+        ],
+        "changesMade": "Scout assessed risk=high",
+        "verification": "not-applicable",
+        "evidence": [
+          {
+            "kind": "commit_sha",
+            "ref": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+            "detail": "f35b2b9a",
+            "verifiedOnDisk": true
+          }
+        ]
+      },
+      {
+        "workerType": "builder",
+        "taskId": "d845d163-6461-4ccc-b5b3-abcfb5ac99c8",
+        "filesTouched": [
+          {
+            "path": "apps/api/src/routes/chat.ts",
+            "operation": "read"
+          },
+          {
+            "path": "apps/api/src/routes/chat.ts",
+            "operation": "modify"
+          }
+        ],
+        "changesMade": "Builder wrote 1 change(s) — modify:apps/api/src/routes/chat.ts",
+        "verification": "not-applicable",
+        "evidence": [
+          {
+            "kind": "file_modified",
+            "ref": "apps/api/src/routes/chat.ts",
+            "detail": "321812 bytes",
+            "producedBy": "builder",
+            "verifiedOnDisk": true
+          },
+          {
+            "kind": "file_diff",
+            "ref": "apps/api/src/routes/chat.ts",
+            "detail": "11 diff line(s)",
+            "producedBy": "builder",
+            "verifiedOnDisk": true
+          },
+          {
+            "kind": "commit_sha",
+            "ref": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+            "detail": "f35b2b9a",
+            "verifiedOnDisk": true
+          }
+        ]
+      },
+      {
+        "workerType": "critic",
+        "taskId": "4154c5df-a54d-4c98-9475-061b6f47f162",
+        "filesTouched": [],
+        "changesMade": "Critic verdict=approve",
+        "verification": "pass",
+        "evidence": [
+          {
+            "kind": "commit_sha",
+            "ref": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+            "detail": "f35b2b9a",
+            "verifiedOnDisk": true
+          }
+        ]
+      },
+      {
+        "workerType": "verifier",
+        "taskId": "87709d74-cc59-4228-865c-860d02ab299c",
+        "filesTouched": [
+          {
+            "path": "apps/api/src/routes/chat.ts",
+            "operation": "read"
+          }
+        ],
+        "changesMade": "Verifier passed=true",
+        "verification": "pass",
+        "evidence": [
+          {
+            "kind": "commit_sha",
+            "ref": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+            "detail": "f35b2b9a",
+            "verifiedOnDisk": true
+          }
+        ]
+      },
+      {
+        "workerType": "integrator",
+        "taskId": "98208b39-a05e-4213-9fc4-5ee00c00999e",
+        "filesTouched": [
+          {
+            "path": "apps/api/src/routes/chat.ts",
+            "operation": "read"
+          }
+        ],
+        "changesMade": "Integrator merged 1 change(s)",
+        "verification": "not-applicable",
+        "evidence": [
+          {
+            "kind": "commit_sha",
+            "ref": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+            "detail": "f35b2b9a",
+            "verifiedOnDisk": true
+          }
+        ]
+      }
+    ],
+    "humanSummary": {
+      "classification": "PARTIAL_SUCCESS",
+      "classificationReason": "Changes applied but flagged: verification warnings, 47 advisory finding(s)",
+      "classificationReasonCode": "partial",
+      "headline": "Aedis updated 1 file but some checks raised warnings. Confidence: 81% (f35b2b9a).",
+      "narrative": "Aedis applied 1 change but not every gate was clean. Changes applied but flagged: verification warnings, 47 advisory finding(s). Most likely cause: The run did not reach a verified success state, but no specific blocker was captured on the receipt. This typically means a gate failed silently or a worker returned an empty result. Suggested next step: Check the worker grid and Lumen log for this run. If nothing is visible, re-run with a tighter scope or ask Loqui for a dry-run plan first. Checks run: lint=missing, typecheck=pass, tests=fail. Blast radius was low. Cost: $0.02. Confidence: 81%.",
+      "whatWasAttempted": "in apps/api/src/routes/chat.ts, add a JSDoc comment above the registerChatRoutes function",
+      "whatChanged": [
+        {
+          "path": "apps/api/src/routes/chat.ts",
+          "operation": "modify"
+        }
+      ],
+      "filesTouchedCount": 1,
+      "verification": "pass-with-warnings",
+      "verificationChecks": [
+        {
+          "kind": "lint",
+          "name": "Lint",
+          "required": true,
+          "executed": false,
+          "passed": false,
+          "details": "lint hook not configured — skipped"
+        },
+        {
+          "kind": "typecheck",
+          "name": "TypeScript Check",
+          "required": true,
+          "executed": true,
+          "passed": true,
+          "details": "TypeScript Check passed"
+        },
+        {
+          "kind": "tests",
+          "name": "Tests",
+          "required": true,
+          "executed": true,
+          "passed": false,
+          "details": "Tests failed (exit 1)"
+        }
+      ],
+      "blastRadius": {
+        "level": "low",
+        "scopeType": "multi-file",
+        "estimatedFiles": 1,
+        "rawScore": 3,
+        "recommendDecompose": false,
+        "rationale": "~1 file(s) · spans multiple files (level=low, raw=3)",
+        "signals": [
+          "scope:multi-file",
+          "files:1"
+        ]
+      },
+      "confidence": {
+        "overall": 0.8079685290148447,
+        "planning": 0.7,
+        "execution": 0.9877122807017543,
+        "verification": 0.7161538461538461,
+        "basis": [
+          "planning:multi-file → +0.20 (coordinated scope)",
+          "execution:gate verified → 0.75",
+          "execution:3 evidence items → +0.10",
+          "execution:commit f35b2b9a → +0.10",
+          "execution:avg worker conf 0.88 → +0.04",
+          "verification:pass-with-warnings (pipeline conf 0.86) → 0.72",
+          "overall = 0.2·plan(0.70) + 0.35·exec(0.99) + 0.45·verify(0.72)"
+        ]
+      },
+      "cost": {
+        "model": "integration-judge",
+        "inputTokens": 3994,
+        "outputTokens": 3628,
+        "estimatedCostUsd": 0.015385,
+        "displayUsd": "$0.02"
+      },
+      "failureExplanation": {
+        "code": "unknown",
+        "stage": "unknown",
+        "rootCause": "The run did not reach a verified success state, but no specific blocker was captured on the receipt. This typically means a gate failed silently or a worker returned an empty result.",
+        "suggestedFix": "Check the worker grid and Lumen log for this run. If nothing is visible, re-run with a tighter scope or ask Loqui for a dry-run plan first.",
+        "evidence": [
+          "verdict:partial",
+          "gate:Execution verified: 1 file(s) modified, commit f35b2b9a",
+          "verification:pass-with-warnings"
+        ]
+      },
+      "factors": [
+        "verdict:partial",
+        "executionVerified:true",
+        "verification:pass-with-warnings",
+        "merge:apply",
+        "partial:verification warnings,47 advisory finding(s)"
+      ]
+    },
+    "blastRadius": {
+      "level": "low",
+      "scopeType": "multi-file",
+      "estimatedFiles": 2,
+      "rawScore": 3,
+      "recommendDecompose": false,
+      "rationale": "~2 file(s) · spans multiple files (level=low, raw=3)",
+      "signals": [
+        "scope:multi-file",
+        "files:2"
+      ]
+    },
+    "memorySuggestions": [
+      "Re-run the task with tighter scope around the failing files before attempting broader changes.",
+      "Validate apps/api/src/routes/chat.ts, apps/api/src/config/advisor-policy.ts, apps/api/src/config/model-registry.ts with focused verification before the next attempt.",
+      "Inspect repair-pass fallout: apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/provider-manager/index.js\" | apps/api/src/routes/chat.ts: broken import target \"../../../../modules/system/memory/index.js\"",
+      "Check nearby cluster files next: apps/api/src/config/public-mode.ts, apps/api/src/config/python-policy.ts, apps/api/src/config/squidley-voice.ts"
+    ]
+  }
+}

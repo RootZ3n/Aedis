@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:dbdf879a-0c6d-4d85-958f-4e4135e65a53",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for dbdf879a-0c6d-4d85-958f-4e4135e65a53",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: Worker critic: Scope drift: test/utils.test.ts is outside contract scope; Worker verifier: Worker critic: Scope drift: test/utils.test.ts is outside co…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T15:25:55.681Z",
+  "updatedAt": "2026-04-22T15:25:55.683Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "dbdf879a-0c6d-4d85-958f-4e4135e65a53",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "989475f3-f24d-49ac-8b42-f42c90e952b5",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:dbdf879a-0c6d-4d85-958f-4e4135e65a53",
+    "aedis-run:dbdf879a-0c6d-4d85-958f-4e4135e65a53",
+    "aedis-task:dbdf879a-0c6d-4d85-958f-4e4135e65a53"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:dbdf879a-0c6d-4d85-958f-4e4135e65a53"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:dbdf879a-0c6d-4d85-958f-4e4135e65a53"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

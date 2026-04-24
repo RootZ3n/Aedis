@@ -33,6 +33,52 @@ export interface ScopeClassification {
 const HIGH_IMPACT_KEYWORDS = ["rename", "refactor", "migrate", "all", "every"];
 const SWEEP_KEYWORDS = ["everywhere", "across all", "every file", "global rename", "codemod", "find and replace"];
 
+/**
+ * Keywords that indicate a bugfix-shaped request. Conservative list —
+ * false-positives here weaken feature/refactor runs because a bugfix-
+ * flagged task picks up the must-modify-source-file rule. Words that
+ * routinely appear in feature/refactor prompts (improve, clean up,
+ * adjust) are deliberately excluded.
+ */
+const BUGFIX_KEYWORDS: readonly string[] = [
+  "bug",
+  "bugfix",
+  "broken",
+  "crash",
+  "error",
+  "exception",
+  "fail",
+  "fails",
+  "failing",
+  "fix",
+  "incorrect",
+  "off-by-one",
+  "regression",
+  "throws",
+  "wrong",
+];
+
+/**
+ * Heuristic: does this user request look like a bugfix?
+ *
+ * Used by the coordinator's merge-gate to apply a stricter rule
+ * (must-modify a source file) to bugfix tasks — if the builder only
+ * modified tests, the gate blocks with `bugfix_target_not_modified`.
+ * The check is intentionally narrow so it doesn't bite feature or
+ * refactor tasks, which legitimately change non-source files.
+ *
+ * Pure function — no I/O, easy to test.
+ */
+export function isBugfixLikePrompt(userRequest: string | null | undefined): boolean {
+  if (!userRequest || typeof userRequest !== "string") return false;
+  const normalized = userRequest.toLowerCase();
+  return BUGFIX_KEYWORDS.some((word) => {
+    // Whole-word match so "prefix" doesn't match "fix". Escape hyphens.
+    const escaped = word.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(normalized);
+  });
+}
+
 function normalizeFiles(files: readonly string[]): string[] {
   return Array.from(
     new Set(

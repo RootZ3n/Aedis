@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:23bdb268-984b-4e8c-87eb-21f534d6b66b",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in RETRY: the previous attempt modified zero files. Produce an actual code change this time.\nTarget file(s): src/utils.ts.",
+  "summary": "import/export alignment 100%; Partial migration \"isEven\" → \"multiply\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \"fibonacci\" → \"isEven\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration…",
+  "raw": "{\n  \"issues\": [\n    \"import/export alignment 100%; Partial migration \\\"isEven\\\" → \\\"multiply\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fibonacci\\\" → \\\"isEven\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fetchData\\\" → \\\"Stack\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n    \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.66 (keywords: retry, previous, attempt, modified)\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:cross-file-coherence\",\n        \"message\": \"import/export alignment 100%; Partial migration \\\"isEven\\\" → \\\"multiply\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fibonacci\\\" → \\\"isEven\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fetchData\\\" → \\\"Stack\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"Scout↔Builder agreement 50%\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.66 (keywords: retry, previous, attempt, modified)\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:cross-file-coherence\",\n        \"message\": \"import/export alignment 100%; Partial migration \\\"isEven\\\" → \\\"multiply\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fibonacci\\\" → \\\"isEven\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fetchData\\\" → \\\"Stack\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"Scout↔Builder agreement 50%\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.66 (keywords: retry, previous, attempt, modified)\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"primaryBlockReason\": \"import/export alignment 100%; Partial migration \\\"isEven\\\" → \\\"multiply\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fibonacci\\\" → \\\"isEven\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"capitalize\\\" → \\\"fibonacci\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"validateEmail\\\" → \\\"capitalize\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"Stack\\\" → \\\"validateEmail\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \\\"fetchData\\\" → \\\"Stack\\\" introduced in src/utils.ts, but test/utils.test.ts still use the old name\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 2 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T15:22:54.239Z",
+  "updatedAt": "2026-04-22T15:22:54.240Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "23bdb268-984b-4e8c-87eb-21f534d6b66b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "6a32f96d-e666-4afb-bbb2-7ed2be26cec0",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:23bdb268-984b-4e8c-87eb-21f534d6b66b",
+    "aedis-task:23bdb268-984b-4e8c-87eb-21f534d6b66b"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:23bdb268-984b-4e8c-87eb-21f534d6b66b"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:23bdb268-984b-4e8c-87eb-21f534d6b66b"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "import/export alignment 100%; Partial migration \"isEven\" → \"multiply\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \"fibonacci\" → \"isEven\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \"capitalize\" → \"fibonacci\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \"validateEmail\" → \"capitalize\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \"Stack\" → \"validateEmail\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partial migration \"fetchData\" → \"Stack\" introduced in src/utils.ts, but test/utils.test.ts still use the old name"
+  }
+}

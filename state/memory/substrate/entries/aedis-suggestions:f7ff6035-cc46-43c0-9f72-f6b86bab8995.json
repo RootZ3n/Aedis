@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: 1 file(s) changed but not declared in manifest: test/utils.test.ts Check nearby cluster files next: src/email.ts",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T17:26:47.586Z",
+  "updatedAt": "2026-04-22T17:26:47.588Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3e8126e2-5ed4-4d22-92aa-4aa2854a5e6e",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+    "aedis-run:f7ff6035-cc46-43c0-9f72-f6b86bab8995",
+    "aedis-task:f7ff6035-cc46-43c0-9f72-f6b86bab8995"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:f7ff6035-cc46-43c0-9f72-f6b86bab8995"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:f7ff6035-cc46-43c0-9f72-f6b86bab8995"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

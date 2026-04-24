@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:23bdb268-984b-4e8c-87eb-21f534d6b66b",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 23bdb268-984b-4e8c-87eb-21f534d6b66b",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: import/export alignment 100%; Partial migration \"isEven\" → \"multiply\" introduced in src/utils.ts, but test/utils.test.ts still use the old name; Partia…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T15:22:54.239Z",
+  "updatedAt": "2026-04-22T15:22:54.240Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "23bdb268-984b-4e8c-87eb-21f534d6b66b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "6a32f96d-e666-4afb-bbb2-7ed2be26cec0",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:23bdb268-984b-4e8c-87eb-21f534d6b66b",
+    "aedis-run:23bdb268-984b-4e8c-87eb-21f534d6b66b",
+    "aedis-task:23bdb268-984b-4e8c-87eb-21f534d6b66b"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:23bdb268-984b-4e8c-87eb-21f534d6b66b"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:23bdb268-984b-4e8c-87eb-21f534d6b66b"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "aedis-suggestions:64a01a94-9830-4dfb-a5bc-251a2316b455",
+  "space": "aedis/project/mnt-ai-squidley-v2",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 64a01a94-9830-4dfb-a5bc-251a2316b455",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: One or more task nodes failed and were not recovered. Inspect repair-pass fallout: /mnt/ai/squidley-v2/apps/api/src/routes/index.ts: broken import targ…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-19T20:06:54.660Z",
+  "updatedAt": "2026-04-19T20:06:54.706Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/routes/index.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "64a01a94-9830-4dfb-a5bc-251a2316b455",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "6f902ef0-4b55-472e-a41d-33e32ecf2585",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:64a01a94-9830-4dfb-a5bc-251a2316b455",
+    "aedis-run:64a01a94-9830-4dfb-a5bc-251a2316b455",
+    "aedis-task:64a01a94-9830-4dfb-a5bc-251a2316b455"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:64a01a94-9830-4dfb-a5bc-251a2316b455"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:64a01a94-9830-4dfb-a5bc-251a2316b455"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 4
+  }
+}

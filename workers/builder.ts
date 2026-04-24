@@ -20,6 +20,7 @@ import { loadModelConfig } from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
+  validateWorkerAssignment,
   type BuildDecision,
   type BuilderOutput,
   type FileChange,
@@ -57,6 +58,14 @@ export interface BuilderResult extends WorkerResult {
     readonly contract: TaskContract;
     readonly prompt: string;
     readonly rawModelResponse: string;
+    /**
+     * Phase 8.5 — provider-anomaly findings from classifyProviderAnomaly
+     * against the raw model response + produced changes. Empty when the
+     * response looked consistent with the diff. Aggregated alongside
+     * scout injection findings + execution content-identity findings
+     * by collectAdversarialFindingsForConfidence.
+     */
+    readonly providerFindings?: readonly GuardFinding[];
   };
 }
 
@@ -74,14 +83,12 @@ export interface BuilderWorkerConfig {
   readonly fallbackModel?: { provider: Provider; model: string } | null;
 }
 
-// Default fallback chain target — MiniMax M2.7 as the cheap-and-fast
-// backstop. The whole point of Aedis is sub-cent builds, so we must
-// never silently fall back to Anthropic unless the operator explicitly
-// opts in at the per-repo model config. MiniMax has an OpenAI-compatible
-// API and Zen has credits.
+// Default fallback chain target — Kimi K2 via OpenRouter as the cheap-and-fast
+// backstop for the builder. qwen3.6-plus via OpenRouter is the primary;
+// Kimi K2 via OpenRouter is the fallback when qwen is unavailable.
 const DEFAULT_FALLBACK: { provider: Provider; model: string } = {
-  provider: "minimax",
-  model: "MiniMax-M2.7",
+  provider: "openrouter",
+  model: "moonshotai/kimi-k2",
 };
 
 // Maximum number of run contexts to keep in memory. Each entry is tiny
@@ -107,12 +114,16 @@ const MAX_RUN_CONTEXTS = 50;
 //     model to produce a unified diff with original line numbers, and
 //     applies that diff to the full file on disk. This keeps coordinator.ts
 //     (54k+ chars) and similar large files editable without blowing the cap.
-const PROMPT_TOKEN_CAP = 8_000;
-const PROMPT_CHAR_CAP = PROMPT_TOKEN_CAP * 4;     // 32_000
-const CONTEXT_TOKEN_CAP = 6_000;
-const CONTEXT_CHAR_CAP = CONTEXT_TOKEN_CAP * 4;   // 24_000
-const LARGE_FILE_CHAR_THRESHOLD = 16_000;
+const PROMPT_TOKEN_CAP = 16_000;
+const PROMPT_CHAR_CAP = PROMPT_TOKEN_CAP * 4;     // 64_000
+const CONTEXT_TOKEN_CAP = 12_000;
+const CONTEXT_CHAR_CAP = CONTEXT_TOKEN_CAP * 4;   // 48_000
+const LARGE_FILE_CHAR_THRESHOLD = 30_000;
 import { computeBuilderConfidence } from "../core/confidence-scoring.js";
+import {
+  classifyProviderAnomaly,
+  type GuardFinding,
+} from "../core/adversarial-guard.js";
 
 // Reserved overhead for separators and the "Relevant context:" header
 // when computing the available context budget.
@@ -144,6 +155,299 @@ const CODE_FILE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|rb|kt|swift
  * Tuned to be conservative — false positives are worse than
  * false negatives here because this throws and reverts the run.
  */
+// ─── Phase 11 — export preservation ─────────────────────────────────
+
+/**
+ * Regex covering the named-export shapes TypeScript files emit most
+ * often. Mirrors EXPORT_DECL_REGEX in core/integration-judge.ts so the
+ * two layers agree on what counts as an export. Kept local to avoid a
+ * cross-module dependency between the builder and the judge.
+ */
+const NAMED_EXPORT_REGEX =
+  /(?:^|\n)\s*export\s+(?:abstract\s+)?(?:async\s+)?(?:default\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)/g;
+const EXPORT_CLAUSE_REGEX = /(?:^|\n)\s*export\s*\{\s*([^}]+)\}/g;
+
+// Phase 12 — per-export signature capture. Matches the same export
+// shapes as NAMED_EXPORT_REGEX but additionally captures everything
+// from the keyword (function/const/…) up to the first `{` (body) or
+// `=` (initializer) — i.e. the signature line. Used to detect the
+// "kept the name but changed the shape" corruption mode where the
+// model preserves an export by name but mutates its parameters /
+// generics / return type / class hierarchy in a way that breaks
+// downstream callers.
+const NAMED_EXPORT_SIG_REGEX =
+  /(?:^|\n)\s*export\s+(?:abstract\s+)?(?:async\s+)?(?:default\s+)?(function|const|let|var|class|interface|type|enum)\s+(\w+)([^{=\n]*)/g;
+
+/**
+ * Extract the set of named exports from a source file. Returns a
+ * stable-sorted, deduplicated list of identifiers. Returns an empty
+ * array on non-TS/JS files — the caller is responsible for gating by
+ * extension so we don't false-positive on markdown, JSON, etc.
+ */
+export function extractNamedExports(content: string): string[] {
+  if (!content) return [];
+  const names = new Set<string>();
+  const haystack = "\n" + content;
+  for (const match of haystack.matchAll(NAMED_EXPORT_REGEX)) {
+    if (match[1]) names.add(match[1]);
+  }
+  for (const match of haystack.matchAll(EXPORT_CLAUSE_REGEX)) {
+    for (const name of match[1].split(",")) {
+      const cleaned = name.trim().split(/\s+as\s+/)[1]?.trim() ?? name.trim().split(/\s+as\s+/)[0].trim();
+      if (cleaned) names.add(cleaned);
+    }
+  }
+  return [...names].sort();
+}
+
+/**
+ * Phase 12 — per-export signature fingerprint. For every named export
+ * declaration, capture a normalized signature string of the form
+ * `<kind> <name><tail>` where `<tail>` is everything from the name up
+ * to the body (`{`) or initializer (`=`), with whitespace collapsed.
+ * Re-export clauses (`export { … } from …`) get a `clause` kind with
+ * no signature payload — the source of truth for those is the upstream
+ * file, not this one.
+ *
+ * Returns a Map keyed by exported name so the caller can ask "did the
+ * shape of `foo` change?" via a single lookup rather than re-scanning
+ * the diff. Pure, deterministic, no I/O.
+ */
+export function extractNamedExportSignatures(content: string): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!content) return out;
+  const haystack = "\n" + content;
+
+  for (const match of haystack.matchAll(NAMED_EXPORT_SIG_REGEX)) {
+    const kind = match[1];
+    const name = match[2];
+    const tail = (match[3] ?? "").replace(/\s+/g, " ").trim();
+    if (!name) continue;
+    out.set(name, tail ? `${kind} ${name} ${tail}` : `${kind} ${name}`);
+  }
+  for (const match of haystack.matchAll(EXPORT_CLAUSE_REGEX)) {
+    for (const raw of match[1].split(",")) {
+      const cleaned = raw.trim().split(/\s+as\s+/)[1]?.trim() ?? raw.trim().split(/\s+as\s+/)[0].trim();
+      if (cleaned && !out.has(cleaned)) out.set(cleaned, `clause ${cleaned}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Phase 11 — export-preservation guard. The dominant merge-gate
+ * failure mode for simple bugfix/feature tasks on targeted files
+ * (stress-01, stress-02, stress-09, stress-11..14) is a wholesale
+ * file rewrite: the model "fixes" fibonacci by emitting a new file
+ * that contains only fibonacci, deleting every sibling export
+ * (divide, isEven, capitalize, Stack, etc.) that downstream tests
+ * depend on. The integration judge catches the aftermath as
+ * type-alignment + cross-file-coherence + intent-alignment blockers,
+ * but by then the patch is already written and the run is wasted.
+ *
+ * This guard fires BEFORE the patch is applied. When the updated
+ * content has lost two or more named exports present in the original,
+ * we throw — the coordinator surfaces a builder error and the run
+ * classifies concretely as worker_issue instead of merge_blocked.
+ *
+ * Threshold is intentionally >= 2 removals. A legitimate rename
+ * (1 removed, 1 added) or a targeted deletion named in the prompt
+ * would have exactly 1 removal and slip through. A rewrite always
+ * trashes many.
+ */
+export interface ExportSignatureChange {
+  readonly name: string;
+  readonly before: string;
+  readonly after: string;
+}
+
+export interface ExportPreservationIssue {
+  /**
+   * Names that were exported in the original but are no longer
+   * exported in the updated content. Catches:
+   *   - explicit removal of the `export` keyword (symbol may still
+   *     exist in the file — extractNamedExports only matches when
+   *     `export` is present, so the comparison is set-based, not
+   *     diff-line based)
+   *   - moves to a different file with no re-export clause kept
+   *   - wholesale rewrites
+   */
+  readonly missing: readonly string[];
+  /**
+   * Phase 12 — names that are exported in BOTH versions but whose
+   * declared signature changed. Catches:
+   *   - parameter list changes
+   *   - return type changes
+   *   - generic constraint changes
+   *   - class extends/implements changes
+   *   - const type-annotation changes
+   * Body / initializer values are intentionally excluded (those can
+   * change without breaking downstream callers).
+   */
+  readonly signatureChanges: readonly ExportSignatureChange[];
+  readonly originalCount: number;
+  readonly updatedCount: number;
+}
+
+/**
+ * Compare the export sets of two file revisions and report:
+ *   - missing exports (case 1 + case 3 from the corruption taxonomy)
+ *   - signature changes for exports kept by name (case 2)
+ *
+ * Comparison is between the EXTRACTED EXPORT SETS, not raw diff
+ * lines — this is what makes "removed `export` keyword but kept
+ * `function foo`" a detected case: `foo` is in the before-set but
+ * not the after-set because `extractNamedExports` requires the
+ * `export` prefix to match.
+ */
+export function findRemovedExports(
+  originalContent: string,
+  updatedContent: string,
+): ExportPreservationIssue {
+  const beforeSigs = extractNamedExportSignatures(originalContent);
+  const afterSigs = extractNamedExportSignatures(updatedContent);
+
+  const missing: string[] = [];
+  const signatureChanges: ExportSignatureChange[] = [];
+
+  for (const [name, before] of beforeSigs) {
+    const after = afterSigs.get(name);
+    if (!after) {
+      missing.push(name);
+      continue;
+    }
+    // Re-export clauses don't carry a signature payload, so a
+    // `clause name` ↔ `function name(…)` swap is treated as a kept
+    // export — that's a legitimate "move with re-export" pattern.
+    if (before.startsWith("clause ") || after.startsWith("clause ")) continue;
+    if (before !== after) {
+      signatureChanges.push({ name, before, after });
+    }
+  }
+  missing.sort();
+  return {
+    missing,
+    signatureChanges,
+    originalCount: beforeSigs.size,
+    updatedCount: afterSigs.size,
+  };
+}
+
+const EXPORT_LOSS_THRESHOLD_DEFAULT = 2;
+const EXPORT_LOSS_THRESHOLD_STRICT = 1;
+
+/**
+ * Phase 11 Task 1 — does the user's request explicitly authorize
+ * removing or renaming an export? If yes, a single-export drop is a
+ * legitimate outcome and should not trip the preservation guard.
+ * Exported for reuse in tests. Pure function, whole-word matching.
+ */
+export function requestAuthorizesRemoval(userRequest: string | null | undefined): boolean {
+  if (!userRequest || typeof userRequest !== "string") return false;
+  const lower = userRequest.toLowerCase();
+  if (/\b(remove|removing|delete|deleting|drop|dropping|eliminate|eliminating)\b/.test(lower)) return true;
+  if (/\brename|renaming\b/.test(lower)) return true;
+  // "replace" only authorizes removal when it looks structural/API-level,
+  // not when the user means "replace this string/message/logic".
+  if (
+    /\breplac(?:e|ing)\b[\s\S]{0,80}\b(function|class|helper|module|validator|logger|export|symbol|api|component|hook)\b[\s\S]{0,80}\bwith\b/.test(lower)
+  ) return true;
+  // "extract" authorizes removal only when moving code into a file/module
+  // boundary, which is the common re-export/refactor shape.
+  if (/\bextract(?:ing)?\b[\s\S]{0,80}\b(into|to)\b[\s\S]{0,80}\b(file|module)\b/.test(lower)) return true;
+  return false;
+}
+
+/**
+ * Phase 11 Task 1 — enforce that the builder's output keeps the
+ * original file's exports. The threshold is dynamic:
+ *
+ *   - If the user request contains NO removal/rename intent (the
+ *     common "fix" / "add" shape for simple targeted tasks), then
+ *     dropping ANY export is suspicious — threshold is 1. This
+ *     catches the single-symbol corruption case observed on
+ *     stress-01..14 where the builder silently drops `Stack` or
+ *     `validateEmail` while "fixing" a sibling function.
+ *
+ *   - If the user request explicitly authorizes removal / rename /
+ *     replacement / extraction, keep the original >=2 threshold so
+ *     legitimate rename flows (1 removed, 1 added) still slip
+ *     through.
+ *
+ * `userRequest` is optional; when absent the check falls back to the
+ * original >=2 threshold, preserving backward compatibility for any
+ * caller that hasn't adopted the new signature yet.
+ */
+export function enforcePreservedExports(
+  originalContent: string,
+  updatedContent: string,
+  filePath: string,
+  userRequest?: string | null,
+): void {
+  if (!CODE_FILE_EXTENSIONS.test(filePath)) return;
+  const issue = findRemovedExports(originalContent, updatedContent);
+  if (issue.missing.length === 0 && issue.signatureChanges.length === 0) return;
+
+  const authorizedRemoval =
+    userRequest === undefined
+      ? true // legacy caller: assume authorized so we keep the old threshold
+      : requestAuthorizesRemoval(userRequest);
+  const removalThreshold = authorizedRemoval
+    ? EXPORT_LOSS_THRESHOLD_DEFAULT
+    : EXPORT_LOSS_THRESHOLD_STRICT;
+  // Phase 12 — signature-change threshold is intentionally one step
+  // looser than the removal threshold. Reasoning: a single signature
+  // change is often the EXACT thing the user asked for ("fix
+  // capitalize to handle empty strings" may legitimately add a
+  // parameter). Two or more signature changes in unrelated exports
+  // signals broader rewrite. Authorized requests get a higher
+  // threshold for the same reason renames/extracts can legitimately
+  // mutate multiple shapes during a refactor.
+  const sigThreshold = authorizedRemoval ? 3 : 2;
+
+  const removalTrips = issue.missing.length >= removalThreshold;
+  const sigTrips = issue.signatureChanges.length >= sigThreshold;
+  if (!removalTrips && !sigTrips) return;
+
+  const parts: string[] = [];
+  if (issue.missing.length > 0) {
+    parts.push(
+      `removed ${issue.missing.length} existing export(s) (${issue.missing.slice(0, 8).join(", ")}${issue.missing.length > 8 ? "…" : ""})`,
+    );
+  }
+  if (issue.signatureChanges.length > 0) {
+    const names = issue.signatureChanges.slice(0, 4).map((c) => c.name).join(", ");
+    parts.push(
+      `changed ${issue.signatureChanges.length} export signature(s) (${names}${issue.signatureChanges.length > 4 ? "…" : ""})`,
+    );
+  }
+  const modeLabel = authorizedRemoval ? "wholesale rewrite" : "unrelated-symbol corruption";
+  throw new Error(
+    `SAFETY: Builder output ${parts.join(" and ")} from ${filePath}. ` +
+      `Original had ${issue.originalCount} export(s); updated has ${issue.updatedCount}. ` +
+      `Refusing the patch — detected ${modeLabel}; the user request did not authorize ${
+        sigTrips && !removalTrips ? "this many signature changes" : "removing these symbols"
+      }.`,
+  );
+}
+
+/**
+ * Phase 11 — produce the EXPORT PRESERVATION directive for the
+ * builder prompt. When the source has >= 2 named exports, list them
+ * by name so the model is confronted with the concrete identifiers
+ * it must keep. When the source has fewer than 2 exports, the
+ * directive is a no-op line that still conveys the rule.
+ */
+export function buildExportPreservationDirective(content: string): string {
+  const names = extractNamedExports(content);
+  if (names.length === 0) {
+    return "EXPORT PRESERVATION: do not remove any existing top-level declaration unless the user request explicitly asks for it.";
+  }
+  const listed = names.slice(0, 16).join(", ");
+  const suffix = names.length > 16 ? `, and ${names.length - 16} more` : "";
+  return `EXPORT PRESERVATION: this file currently exports ${names.length} symbol(s): ${listed}${suffix}. Your output MUST still export every one of them. Do not delete, rename, or "simplify" any existing export unless the user request explicitly asks to remove it. Removing exports here will break downstream imports and fail the build.`;
+}
+
 function looksLikeConversationalProse(content: string, filePath: string): boolean {
   if (!CODE_FILE_EXTENSIONS.test(filePath)) return false;
   const trimmed = content.trimStart();
@@ -302,6 +606,10 @@ export class BuilderWorker extends AbstractWorker {
   }
 
   async execute(assignment: WorkerAssignment): Promise<BuilderResult> {
+    // FAIL-FAST: reject malformed assignments at the worker boundary.
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+    validateWorkerAssignment(assignment, this.type);
+
     const startedAt = Date.now();
     const taskId = assignment.task.id;
 
@@ -337,7 +645,29 @@ export class BuilderWorker extends AbstractWorker {
       // ALWAYS read the full file. In section-edit mode we use a windowed
       // slice for the prompt, but the diff is applied back to the FULL
       // content on disk — so fullContent must be the source of truth.
-      const fullContent = await readFile(targetPath, "utf8");
+      // Guard against directory paths resolved from ambiguous file references.
+      let fullContent: string;
+      try {
+        fullContent = await readFile(targetPath, "utf8");
+      } catch (err) {
+        if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "EISDIR") {
+          console.warn(`[builder] readFile: path is a directory, skipping: ${relativePath}`);
+          return this.failure(
+            assignment,
+            `EISDIR: resolved path is a directory: ${relativePath}`,
+            { model: this.getActiveModelConfig(configRoot).model, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+            Date.now() - startedAt,
+          ) as BuilderResult;
+        }
+        if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+          // File does not exist yet — builder treats this as create-from-empty.
+          // Model receives empty content and generates the full new file,
+          // then writeFile creates it normally.
+          fullContent = "";
+        } else {
+          throw err;
+        }
+      }
       this.logFileTouch(taskId, relativePath, "read");
 
       // ─── LARGE FILE HANDLING ─────────────────────────────────────────
@@ -451,6 +781,19 @@ export class BuilderWorker extends AbstractWorker {
       );
       this.enforceForbiddenChanges(contract, updatedContent, fullContent);
 
+      // Phase 11 — catch the wholesale-rewrite failure mode before it
+      // reaches the merge gate. Pass the user request so the guard
+      // can switch to strict single-export-loss mode when the user
+      // didn't authorize any removal (the simple-targeted bugfix
+      // case). See findRemovedExports + enforcePreservedExports for
+      // context.
+      enforcePreservedExports(
+        fullContent,
+        updatedContent,
+        relativePath,
+        assignment.intent?.userRequest,
+      );
+
       if (updatedContent === fullContent) {
         throw new Error("Model returned no effective file changes");
       }
@@ -511,6 +854,20 @@ export class BuilderWorker extends AbstractWorker {
         estimatedCostUsd: response.costUsd,
       };
 
+      // Phase 8.5 — run provider-anomaly detection against the raw
+      // response + produced changes. On the happy path (changes > 0 and
+      // coherent response) this emits zero findings. It catches the
+      // edge cases where the upstream prose / raw-diff / empty-change
+      // gates didn't fire but the response still looks inconsistent
+      // with the work produced — e.g. a completion claim that survived
+      // content-identity but was glued to a trivial whitespace diff.
+      const providerFindings: GuardFinding[] = classifyProviderAnomaly({
+        responseText: response.text,
+        filesChanged: changes.map((c) => c.path),
+        verdict: "success",
+        model: response.usedModel,
+      }).findings as GuardFinding[];
+
       const output: BuilderResult["output"] = {
         kind: "builder",
         changes,
@@ -519,6 +876,7 @@ export class BuilderWorker extends AbstractWorker {
         contract,
         prompt,
         rawModelResponse: response.text,
+        providerFindings,
       };
 
       // Compute builder confidence from actual run signals
@@ -767,6 +1125,18 @@ export class BuilderWorker extends AbstractWorker {
         "  4. If the request is to add a line/comment, your output should differ from the input by EXACTLY that line and no other.",
         "  5. If your edit would produce a diff larger than the request implies, STOP and return the original file unchanged.",
         "You MUST make exactly the change the User request describes. Do not invent or remove unrelated content. If the request is to add a comment, add a comment — do not also delete, rename, or reformat anything else.",
+        // Phase 10.3 — Scout-to-Builder targeting bias. Tell the model
+        // explicitly that relevant context files came from a scout
+        // pass and are the preferred targets. Prevents drift to
+        // invented file paths when the scope is already known.
+        "TARGETING BIAS: any files listed in the 'Relevant context' section below were identified by a prior scout pass — prefer working within their scope. Do NOT invent new file paths when the relevant context already names candidate files.",
+        // Phase 11 — export preservation. When the file has existing
+        // named exports, list them explicitly so the model can't
+        // accidentally rewrite the file as "just the function the
+        // request mentions." Seen in stress-01..14: asked to fix one
+        // function, the model returns a file containing only that
+        // function, deleting 4-5 siblings the tests depend on.
+        buildExportPreservationDirective(promptContent),
         "Current file:",
         promptContent,
       ];

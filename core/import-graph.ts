@@ -410,3 +410,83 @@ function isTestFile(filePath: string): boolean {
     TEST_DIRS.some((d) => lower.includes(`/${d}/`) || lower.startsWith(`${d}/`))
   );
 }
+
+/**
+ * Inverse of findTestForImpl: given a test file path, return the
+ * implementation file it pairs with (if one exists on disk).
+ *
+ * Strategies (mirror findTestForImpl, in priority order):
+ *   1. Strip the test suffix (`foo.test.ts` → `foo.ts`) in the same dir.
+ *   2. Hop out of a co-located test dir (`a/__tests__/foo.test.ts` →
+ *      `a/foo.ts`).
+ *   3. Hop out of a sibling test dir (`tests/foo.test.ts` →
+ *      `src/foo.ts` or sibling source dirs).
+ *
+ * Used by the coordinator to keep the task graph non-empty when the
+ * charter only extracted a test-file target — we infer the source the
+ * test exercises so the builder has something concrete to operate on.
+ *
+ * Pure (apart from `existsSync` for path verification, identical to
+ * findTestForImpl's I/O surface). Returns null when no matching
+ * implementation file exists.
+ */
+export function findImplForTest(
+  testPath: string,
+  projectRoot: string,
+): string | null {
+  if (!isTestFile(testPath)) return null;
+  const ext = extname(testPath);
+  if (!ext) return null;
+
+  const stem = testPath.slice(0, -ext.length);
+
+  // 1. Strip the .test / .spec suffix in the same directory.
+  for (const suffix of TEST_SUFFIXES) {
+    if (stem.endsWith(suffix)) {
+      const candidate = stem.slice(0, -suffix.length) + ext;
+      if (existsSync(resolve(projectRoot, candidate))) return candidate;
+    }
+  }
+
+  // 2. Co-located test directory: hop out one level.
+  //    a/__tests__/foo.test.ts → a/foo.ts
+  const testDir = dirname(testPath);
+  const baseName = testPath.slice(testDir.length + 1);
+  const baseStem = baseName.slice(0, -ext.length);
+
+  // Strip a TEST_SUFFIX from the basename to get the impl basename.
+  let implBaseName: string | null = null;
+  for (const suffix of TEST_SUFFIXES) {
+    if (baseStem.endsWith(suffix)) {
+      implBaseName = baseStem.slice(0, -suffix.length) + ext;
+      break;
+    }
+  }
+  if (implBaseName === null) implBaseName = baseName;
+
+  const dirParts = testDir.split("/").filter(Boolean);
+  const lastDir = dirParts[dirParts.length - 1] ?? "";
+  if (TEST_DIRS.includes(lastDir)) {
+    const parentDir = dirParts.slice(0, -1).join("/");
+    const candidate = parentDir ? `${parentDir}/${implBaseName}` : implBaseName;
+    if (existsSync(resolve(projectRoot, candidate))) return candidate;
+  }
+
+  // 3. Sibling test directory: tests/foo.test.ts → src/foo.ts (and
+  //    other common source-dir conventions). Only checked when the
+  //    test lives at the top of a recognized test dir.
+  const SIBLING_SOURCE_DIRS = ["src", "lib", "app"];
+  if (TEST_DIRS.includes(lastDir) || dirParts[0] && TEST_DIRS.includes(dirParts[0])) {
+    const tail = TEST_DIRS.includes(dirParts[0])
+      ? dirParts.slice(1).join("/")
+      : dirParts.slice(0, -1).join("/");
+    for (const srcDir of SIBLING_SOURCE_DIRS) {
+      const candidate = tail
+        ? `${srcDir}/${tail}/${implBaseName}`
+        : `${srcDir}/${implBaseName}`;
+      if (existsSync(resolve(projectRoot, candidate))) return candidate;
+    }
+  }
+
+  return null;
+}

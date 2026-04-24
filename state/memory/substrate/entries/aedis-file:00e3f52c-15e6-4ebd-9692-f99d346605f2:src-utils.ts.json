@@ -1,0 +1,68 @@
+{
+  "id": "aedis-file:00e3f52c-15e6-4ebd-9692-f99d346605f2:src-utils.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "src/utils.ts",
+  "summary": "failed after modify in src/utils.ts",
+  "raw": "{\n  \"file\": \"src/utils.ts\",\n  \"peers\": [\n    \"src/email.ts\",\n    \"test/utils.test.ts\"\n  ],\n  \"scopeType\": \"small-linked\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:src",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T17:10:42.470Z",
+  "updatedAt": "2026-04-22T17:10:42.472Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "00e3f52c-15e6-4ebd-9692-f99d346605f2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "a4cf3918-a284-4726-8219-96c31fd32170",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "0272d866-f61a-4f09-b4ef-65b6ea8b3999",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:00e3f52c-15e6-4ebd-9692-f99d346605f2",
+    "aedis-run:00e3f52c-15e6-4ebd-9692-f99d346605f2",
+    "aedis-task:00e3f52c-15e6-4ebd-9692-f99d346605f2"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:00e3f52c-15e6-4ebd-9692-f99d346605f2"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:00e3f52c-15e6-4ebd-9692-f99d346605f2"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:src-email.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:test-utils.test.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "small-linked",
+    "clusterPeers": [
+      "src/email.ts",
+      "test/utils.test.ts"
+    ]
+  }
+}

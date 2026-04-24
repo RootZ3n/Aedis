@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:743d109b-d033-417f-83e2-1b969488de5c",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 743d109b-d033-417f-83e2-1b969488de5c",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: 1 file(s) changed but not declared in manifest: test/utils.test.ts",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T14:32:37.464Z",
+  "updatedAt": "2026-04-22T14:32:37.466Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "743d109b-d033-417f-83e2-1b969488de5c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "e935ddbe-f92d-4c23-ad8f-7ed40b1639a4",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:743d109b-d033-417f-83e2-1b969488de5c",
+    "aedis-run:743d109b-d033-417f-83e2-1b969488de5c",
+    "aedis-task:743d109b-d033-417f-83e2-1b969488de5c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:743d109b-d033-417f-83e2-1b969488de5c"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:743d109b-d033-417f-83e2-1b969488de5c"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 2
+  }
+}

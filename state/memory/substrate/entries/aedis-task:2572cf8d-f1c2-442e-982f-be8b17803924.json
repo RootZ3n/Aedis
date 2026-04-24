@@ -1,0 +1,55 @@
+{
+  "id": "aedis-task:2572cf8d-f1c2-442e-982f-be8b17803924",
+  "space": "aedis/project/tmp-aedis-stress-fixture",
+  "kind": "aedis-task",
+  "title": "in src/utils.ts, Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.",
+  "summary": "small-linked · Model returned no effective file changes",
+  "raw": "{\n  \"rawInput\": \"Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.\",\n  \"normalizedPrompt\": \"in src/utils.ts, Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"a5252e13-4886-442a-bb97-f01a54a4921d\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [\n          {\n            \"name\": \"class-based-module\",\n            \"description\": \"Class-oriented module pattern in src/utils.ts\",\n            \"examples\": [\n              \"src/utils.ts\"\n            ]\n          },\n          {\n            \"name\": \"function-cluster\",\n            \"description\": \"Function-heavy implementation in src/utils.ts\",\n            \"examples\": [\n              \"src/utils.ts\"\n            ]\n          }\n        ],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": [\n            \"Require focused verification on touched files and nearby cluster peers\"\n          ]\n        },\n        \"suggestedApproach\": \"Start with src/utils.ts. Watch exports add, subtract, divide, isEven. Risk is low; follow existing patterns.\",\n        \"inspections\": {\n          \"reads\": [\n            {\n              \"path\": \"src/utils.ts\",\n              \"content\": \"// Simple utils module for stress testing\\nexport function add(a: number, b: number): number {\\n  return a + b;\\n}\\n\\nexport function subtract(a: number, b: number): number {\\n  return a - b;\\n}\\n\\nexport function divide(a: number, b: number): number {\\n  if (b === 0) throw new Error(\\\"Division by zero\\\");\\n  return a / b;\\n}\\n\\nexport function isEven(n: number): boolean {\\n  return n % 2 === 0;\\n}\\n\\nexport function fibonacci(n: number): number {\\n  if (n <= 1) return n;\\n  return fibonacci(n - 1) + fibonacci(n - 2);\\n}\\n\\nexport function capitalize(str: string): string {\\n  return str.charAt(0).toUpperCase() + str.slice(1);\\n}\\n\\nexport function validateEmail(email: string): boolean {\\n  return email.includes(\\\"@\\\");\\n}\\n\\nexport class Stack<T> {\\n  private items: T[] = [];\\n  \\n  push(item: T): void {\\n    this.items.push(item);\\n  }\\n  \\n  pop(): T | undefined {\\n    return this.items.pop();\\n  }\\n  \\n  peek(): T | undefined {\\n    return this.items[this.items.length - 1];\\n  }\\n  \\n  get size(): number {\\n    return this.items.length;\\n  }\\n}\\n\\nexport async function fetchData(url: string): Promise<string> {\\n  return `data from ${url}`;\\n}\\n\",\n              \"lineCount\": 55\n            }\n          ],\n          \"summaries\": [\n            {\n              \"imports\": [],\n              \"exports\": [\n                \"add\",\n                \"subtract\",\n                \"divide\",\n                \"isEven\",\n                \"fibonacci\",\n                \"capitalize\",\n                \"validateEmail\",\n                \"Stack\",\n                \"fetchData\"\n              ],\n              \"functions\": [\n                \"add\",\n                \"subtract\",\n                \"divide\",\n                \"isEven\",\n                \"fibonacci\",\n                \"capitalize\",\n                \"validateEmail\",\n                \"fetchData\"\n              ],\n              \"classes\": [\n                \"Stack\"\n              ],\n              \"patterns\": [\n                \"exports\",\n                \"class-based\"\n              ],\n              \"summary\": \"9 exports; 8 functions; 1 classes; patterns exports, class-based\"\n            }\n          ],\n          \"directoryListing\": {\n            \"path\": \"src\",\n            \"type\": \"directory\",\n            \"children\": [\n              {\n                \"path\": \"src/utils.ts\",\n                \"type\": \"file\"\n              }\n            ]\n          },\n          \"grepMatches\": [],\n          \"gitStatus\": null,\n          \"gitDiff\": null,\n          \"complexity\": [\n            {\n              \"path\": \"src/utils.ts\",\n              \"lineCount\": 55,\n              \"functionCount\": 8,\n              \"classCount\": 1,\n              \"maxNestingDepth\": 2,\n              \"dependencyCount\": 0,\n              \"score\": 55,\n              \"bucket\": \"medium\"\n            }\n          ],\n          \"injectionFindings\": []\n        }\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.7166666666666666,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/utils.ts\",\n          \"operation\": \"read\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"8c9393fd-a31d-4259-9d93-a6e7b9726129\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": true\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"qwen/qwen3.6-plus\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 97688\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"ddda68ac-63ca-4641-89a7-74e472f9f11b\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": true\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"qwen/qwen3.6-plus\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 156809\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"1222e5ef-6c67-40ff-a9d1-1ffa61f84976\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": true\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"qwen/qwen3.6-plus\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 110864\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "ext:ts",
+    "module:src",
+    "scope:small-linked",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-22T16:58:04.321Z",
+  "updatedAt": "2026-04-22T16:58:04.325Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "2572cf8d-f1c2-442e-982f-be8b17803924",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "4405ae33-d405-4585-b691-b71af7eb4849",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:2572cf8d-f1c2-442e-982f-be8b17803924",
+    "aedis-run:2572cf8d-f1c2-442e-982f-be8b17803924"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:2572cf8d-f1c2-442e-982f-be8b17803924"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:2572cf8d-f1c2-442e-982f-be8b17803924"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "small-linked",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 1
+  }
+}

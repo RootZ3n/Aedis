@@ -185,11 +185,32 @@ export class CharterGenerator {
       /[\w\-./]+\.(?:gdshader|svelte|scala|swift|tscn|tres|yaml|json|toml|html|scss|sass|less|pyi|mjs|cjs|tsx|jsx|cpp|hpp|php|bash|vue|sh|ts|js|md|yml|py|rs|go|cs|rb|gd|cc|lua|c|h|kt|java)\b/g,
     );
     // Directory/module patterns — include common non-TS layouts too
-    // (`scripts/`, `scenes/`, `hymn_sources/`, etc.).
+    // (`scripts/`, `scenes/`, `hymn_sources/`, etc.). Also include bare
+    // `src/<identifier>` paths (no trailing slash) like `src/utils` or
+    // `src/email` which are common in prompts but missed by the slash-only
+    // pattern when the identifier isn't followed by another path segment.
     const dirPatterns = request.match(
       /(?:src|lib|core|modules|apps|workers|router|scripts|scenes|assets|utils|handlers|routes|services|models|views|templates|tests?|spec)\/[\w\-./]*/g,
     );
-    return [...new Set([...(filePatterns ?? []), ...(dirPatterns ?? [])])];
+    // Bare src/ paths: src/utils, src/email.ts (src/ followed by identifier without trailing /)
+    const bareSrcPatterns = request.match(/\bsrc\/[\w.-]+/g) ?? [];
+    const normalizeTarget = (target: string): string => {
+      const trimmed = target.trim();
+      if (!trimmed) return "";
+      return trimmed.replace(/[),:;]+$/g, "").replace(/\.$/, "");
+    };
+    const deduped = [
+      ...new Set(
+        [...(filePatterns ?? []), ...(dirPatterns ?? []), ...bareSrcPatterns]
+          .map(normalizeTarget)
+          .filter((target) => target.length > 0),
+      ),
+    ];
+    return deduped.filter((target) =>
+      !deduped.some((other) =>
+        other !== target && (other.startsWith(`${target}/`) || other.includes(`/${target}/`)),
+      ),
+    );
   }
 
   private estimateScope(

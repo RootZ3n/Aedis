@@ -267,6 +267,20 @@ function detectAuthIssue(detail: string): FailureExplanation | null {
 
 function matchMergeBlocker(reason: string): FailureExplanation | null {
   const lower = reason.toLowerCase();
+  // Bugfix must-modify rule — the coordinator emits this with a
+  // distinctive `bugfix_target_not_modified` stem so it surfaces
+  // cleanly to the harness instead of being bucketed as generic
+  // merge-blocked.
+  if (/bugfix[_-]target[_-]not[_-]modified/.test(lower)) {
+    return {
+      code: "bugfix-target-not-modified",
+      stage: "merging",
+      rootCause: `Merge blocked: ${truncate(reason, 160)}`,
+      suggestedFix:
+        "The builder modified test files but never touched the source file containing the bug. Re-run the task with the specific source file named explicitly in the prompt, or split the work into a source fix followed by a test addition.",
+      evidence: [],
+    };
+  }
   if (/typecheck/.test(lower)) {
     return {
       code: "merge-typecheck",

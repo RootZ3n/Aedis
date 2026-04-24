@@ -27,10 +27,11 @@
  * the exception path so caught errors cannot be silently swallowed.
  */
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
 import type { FileChange, TouchedFile, WorkerResult, WorkerType } from "../workers/base.js";
 import type { VerificationReceipt } from "./verification-pipeline.js";
+import { detectContentIdentity, type GuardFinding } from "./adversarial-guard.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -102,6 +103,15 @@ export interface ExecutionGateDecision {
   readonly reason: string;
   /** When errored: the error message captured at gate time. */
   readonly errorMessage?: string;
+  /**
+   * Phase 8: per-change content-identity findings. Populated when a
+   * modify change's post-apply content is byte-identical (or
+   * whitespace-identical) to its originalContent — i.e. the file
+   * exists on disk but was not actually modified. These findings
+   * suppress the corresponding `file_modified` evidence so the gate
+   * does not treat content-identity as real work.
+   */
+  readonly contentIdentityFindings: readonly GuardFinding[];
   /** Counts used for logging and UI display. */
   readonly counts: {
     readonly filesCreated: number;
@@ -127,7 +137,7 @@ export function evaluateExecutionGate(input: ExecutionGateInput): ExecutionGateD
   // Exception path short-circuit — an uncaught error is never a
   // silent success, regardless of what other evidence exists.
   if (input.thrownError) {
-    const evidence = collectEvidence(input);
+    const { evidence, contentIdentityFindings } = collectEvidence(input);
     return {
       verdict: "errored",
       executionVerified: false,
@@ -135,6 +145,7 @@ export function evaluateExecutionGate(input: ExecutionGateInput): ExecutionGateD
       workerReceipts: synthesizeWorkerReceipts(input, evidence),
       reason: `Execution errored: ${input.thrownError.message}`,
       errorMessage: input.thrownError.message,
+      contentIdentityFindings,
       counts: countEvidence(evidence),
     };
   }
@@ -142,13 +153,14 @@ export function evaluateExecutionGate(input: ExecutionGateInput): ExecutionGateD
   // Cancelled runs are never "verified" — they may have partial
   // evidence but the user aborted before completion.
   if (input.cancelled) {
-    const evidence = collectEvidence(input);
+    const { evidence, contentIdentityFindings } = collectEvidence(input);
     return {
       verdict: "no_op",
       executionVerified: false,
       evidence,
       workerReceipts: synthesizeWorkerReceipts(input, evidence),
       reason: "Execution cancelled by user before completion",
+      contentIdentityFindings,
       counts: countEvidence(evidence),
     };
   }
@@ -163,22 +175,30 @@ export function evaluateExecutionGate(input: ExecutionGateInput): ExecutionGateD
       workerReceipts: [],
       reason:
         "No-op execution detected: task graph produced zero nodes — the planner could not identify any actionable work",
+      contentIdentityFindings: [],
       counts: countEvidence([]),
     };
   }
 
-  const evidence = collectEvidence(input);
+  const { evidence, contentIdentityFindings } = collectEvidence(input);
   const counts = countEvidence(evidence);
   const workerReceipts = synthesizeWorkerReceipts(input, evidence);
 
   if (evidence.length === 0) {
+    // Choose a more specific reason when we have positive evidence
+    // of content-identity (the builder "modified" files that are
+    // byte-identical to their originalContent).
+    const reason =
+      contentIdentityFindings.length > 0
+        ? `No-op execution detected: ${contentIdentityFindings.length} change(s) were content-identical — no real modification applied`
+        : "No-op execution detected: no files were created, modified, or deleted, no commit was produced, and no read-only output was returned";
     return {
       verdict: "no_op",
       executionVerified: false,
       evidence,
       workerReceipts,
-      reason:
-        "No-op execution detected: no files were created, modified, or deleted, no commit was produced, and no read-only output was returned",
+      reason,
+      contentIdentityFindings,
       counts,
     };
   }
@@ -199,6 +219,7 @@ export function evaluateExecutionGate(input: ExecutionGateInput): ExecutionGateD
     evidence,
     workerReceipts,
     reason: `Execution verified: ${parts.join(", ")}`,
+    contentIdentityFindings,
     counts,
   };
 }
@@ -209,9 +230,20 @@ export function evaluateExecutionGate(input: ExecutionGateInput): ExecutionGateD
  * Walk the run state and collect every verifiable piece of evidence.
  * Order is stable: file changes first (verified on disk), then commit
  * SHA, then verifier signals, then worker-reported reads.
+ *
+ * Phase 8 hardening: for `modify` operations carrying `originalContent`
+ * the gate reads the post-apply file and verifies the on-disk content
+ * actually differs from the baseline. A byte-identical or whitespace-
+ * normalized-identical post-apply content is a content-identity trap —
+ * the builder "modified" the file without changing anything. The gate
+ * suppresses the `file_modified` / `file_diff` evidence in that case
+ * and records a finding on the decision.
  */
-function collectEvidence(input: ExecutionGateInput): ExecutionEvidence[] {
+function collectEvidence(
+  input: ExecutionGateInput,
+): { evidence: ExecutionEvidence[]; contentIdentityFindings: GuardFinding[] } {
   const evidence: ExecutionEvidence[] = [];
+  const contentIdentityFindings: GuardFinding[] = [];
   const seen = new Set<string>();
 
   for (const change of input.changes) {
@@ -232,7 +264,28 @@ function collectEvidence(input: ExecutionGateInput): ExecutionEvidence[] {
         });
       }
     } else if (change.operation === "modify") {
-      if (onDisk) {
+      // Phase 8: compare on-disk content to originalContent when
+      // available. If identical, skip evidence and log a finding.
+      let contentIdentity = false;
+      if (onDisk && typeof change.originalContent === "string") {
+        const current = safeReadFile(absPath!);
+        if (current !== null) {
+          const id = detectContentIdentity(change.originalContent, current);
+          if (id.identical || id.normalizedIdentical) {
+            contentIdentity = true;
+            contentIdentityFindings.push({
+              code: id.identical
+                ? "execution.content_identity"
+                : "execution.content_identity_whitespace",
+              severity: "downgrade",
+              message: `modify operation on ${change.path} produced no real change: ${id.reason}`,
+              ref: change.path,
+            });
+          }
+        }
+      }
+
+      if (onDisk && !contentIdentity) {
         pushEvidence(evidence, seen, {
           kind: "file_modified",
           ref: change.path,
@@ -241,7 +294,7 @@ function collectEvidence(input: ExecutionGateInput): ExecutionEvidence[] {
           verifiedOnDisk: true,
         });
       }
-      if (change.diff && change.diff.length > 0) {
+      if (change.diff && change.diff.length > 0 && !contentIdentity) {
         pushEvidence(evidence, seen, {
           kind: "file_diff",
           ref: change.path,
@@ -276,7 +329,14 @@ function collectEvidence(input: ExecutionGateInput): ExecutionEvidence[] {
   if (
     input.verificationReceipt &&
     input.verificationReceipt.verdict === "pass" &&
-    input.changes.length > 0
+    evidence.some(
+      (e) =>
+        e.kind === "file_created" ||
+        e.kind === "file_modified" ||
+        e.kind === "file_deleted" ||
+        e.kind === "file_diff" ||
+        e.kind === "commit_sha",
+    )
   ) {
     pushEvidence(evidence, seen, {
       kind: "verifier_pass",
@@ -302,7 +362,16 @@ function collectEvidence(input: ExecutionGateInput): ExecutionEvidence[] {
     }
   }
 
-  return evidence;
+  return { evidence, contentIdentityFindings };
+}
+
+/** Read a file as UTF-8; returns null on any error (ENOENT, permission, binary). */
+function safeReadFile(absPath: string): string | null {
+  try {
+    return readFileSync(absPath, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -1,0 +1,63 @@
+{
+  "id": "aedis-file:run-smoke-1:core-coordinator.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "core/coordinator.ts",
+  "summary": "failed after modify in core/coordinator.ts",
+  "raw": "{\n  \"file\": \"core/coordinator.ts\",\n  \"peers\": [\n    \"core/context-gate.ts\"\n  ],\n  \"scopeType\": \"multi-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:core",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-12T00:50:20.500Z",
+  "updatedAt": "2026-04-12T00:50:20.501Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-smoke-repo",
+  "filePaths": [
+    "core/coordinator.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "run-smoke-1",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "intent-smoke-1",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "v-1",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:run-smoke-1",
+    "aedis-run:run-smoke-1",
+    "aedis-task:run-smoke-1"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:run-smoke-1"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:run-smoke-1"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-context-gate.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "multi-file",
+    "clusterPeers": [
+      "core/context-gate.ts"
+    ]
+  }
+}

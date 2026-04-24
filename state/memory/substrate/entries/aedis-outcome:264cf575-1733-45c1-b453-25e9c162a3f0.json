@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:264cf575-1733-45c1-b453-25e9c162a3f0",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Fix the capitalize function in src/utils.ts to handle empty strings without throwing an error.",
+  "summary": "\"test/utils.test.ts\" references \"validateEmail\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"Stack\" removed from \"src/utils.ts\"",
+  "raw": "{\n  \"issues\": [\n    \"All fallback providers failed (1 chain entries attempted, 0 skipped via blacklist, plus portum last-resort): openrouter/qwen/qwen3.6-plus (network): Network error calling https://openrouter.ai/api/v1/chat/completions: fetch failed | portum/qwen3.6-plus (network): Network error calling http://localhost:18797/v1/chat/completions: fetch failed\",\n    \"\\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:type-alignment\",\n        \"message\": \"\\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:type-alignment\",\n        \"message\": \"\\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n        \"files\": [\n          \"test/utils.test.ts\",\n          \"src/utils.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: test/utils.test.ts\",\n        \"files\": [\n          \"test/utils.test.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"\\\"test/utils.test.ts\\\" references \\\"validateEmail\\\" removed from \\\"src/utils.ts\\\"; \\\"test/utils.test.ts\\\" references \\\"Stack\\\" removed from \\\"src/utils.ts\\\"\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-22T01:35:31.028Z",
+  "updatedAt": "2026-04-22T01:35:31.029Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "264cf575-1733-45c1-b453-25e9c162a3f0",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "8d67c86c-83c0-488c-b6e7-ff371486c35d",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:264cf575-1733-45c1-b453-25e9c162a3f0",
+    "aedis-task:264cf575-1733-45c1-b453-25e9c162a3f0"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:264cf575-1733-45c1-b453-25e9c162a3f0"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:264cf575-1733-45c1-b453-25e9c162a3f0"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "\"test/utils.test.ts\" references \"validateEmail\" removed from \"src/utils.ts\"; \"test/utils.test.ts\" references \"Stack\" removed from \"src/utils.ts\""
+  }
+}

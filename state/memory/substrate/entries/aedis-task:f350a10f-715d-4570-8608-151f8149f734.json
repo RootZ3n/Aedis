@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:f350a10f-715d-4570-8608-151f8149f734",
+  "space": "aedis/project/mnt-ai-shiki-test",
+  "kind": "aedis-task",
+  "title": "In packages/core/src/constructors/bundle-factory.ts, change the nested function resolveLang() to return null instead of throwing ShikiError when a language is n",
+  "summary": "architectural · EISDIR: illegal operation on a directory, read",
+  "raw": "{\n  \"rawInput\": \"In packages/core/src/constructors/bundle-factory.ts, change the nested function resolveLang() to return null instead of throwing ShikiError when a language is not in the bundle. Update all callers in createBundledHighlighter() to handle null gracefully by defaulting to an empty array.\",\n  \"normalizedPrompt\": \"In packages/core/src/constructors/bundle-factory.ts, change the nested function resolveLang() to return null instead of throwing ShikiError when a language is not in the bundle. Update all callers in createBundledHighlighter() to handle null gracefully by defaulting to an empty array.\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"8a01256b-b31d-4c4b-a2b8-fecee7f4d939\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"EISDIR: illegal operation on a directory, read\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    },\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"fa4dae91-79da-42bf-80ff-c2a7ebf28baf\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"EISDIR: illegal operation on a directory, read\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"eee25135-ca61-4966-b076-ccc4bff31cd5\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"EISDIR: illegal operation on a directory, read\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:architectural",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-21T14:04:57.560Z",
+  "updatedAt": "2026-04-21T14:04:57.563Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/shiki-test",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "f350a10f-715d-4570-8608-151f8149f734",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "dee564dc-5866-4a55-87c1-4a7024f19684",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:f350a10f-715d-4570-8608-151f8149f734",
+    "aedis-run:f350a10f-715d-4570-8608-151f8149f734"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:f350a10f-715d-4570-8608-151f8149f734"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:f350a10f-715d-4570-8608-151f8149f734"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "architectural",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

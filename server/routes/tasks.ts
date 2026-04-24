@@ -56,7 +56,7 @@ interface LoquiUnifiedBody {
 interface TrackedRun {
   taskId: string;
   runId: string;
-  status: "queued" | "running" | "complete" | "failed" | "cancelled";
+  status: "queued" | "running" | "complete" | "partial" | "failed" | "cancelled";
   prompt: string;
   submittedAt: string;
   completedAt: string | null;
@@ -173,7 +173,10 @@ async function submitBuildTask(
   gateResult.receipt.then((receipt) => {
     console.log(`[tasks] coordinator.submit resolved: taskId=${taskId}, verdict=${receipt.verdict}, cost=$${receipt.totalCost.estimatedCostUsd}`);
     tracked.runId = receipt.runId;
-    tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
+    tracked.status =
+      receipt.verdict === "success" ? "complete" :
+      receipt.verdict === "partial" ? "partial" :
+      receipt.verdict === "aborted" ? "cancelled" : "failed";
     tracked.completedAt = new Date().toISOString();
     tracked.receipt = receipt;
     void ctx.receiptStore.updateTask(taskId, {
@@ -337,6 +340,59 @@ async function findKnownRunById(
 export const taskRoutes: FastifyPluginAsync = async (fastify) => {
   const ctx = (): ServerContext => fastify.ctx;
 
+  fastify.get<{
+    Querystring: {
+      limit?: string | number;
+      sort?: string;
+      status?: string;
+    };
+  }>(
+    "/",
+    async (request, reply) => {
+      const rawLimit = Number(request.query.limit ?? 20);
+      const limit = Number.isFinite(rawLimit)
+        ? Math.max(1, Math.min(Math.trunc(rawLimit), 100))
+        : 20;
+      const sort = String(request.query.sort ?? "desc").toLowerCase();
+      const statusFilter = typeof request.query.status === "string" && request.query.status.trim().length > 0
+        ? request.query.status.trim()
+        : undefined;
+
+      const persisted = await ctx().receiptStore.listRuns(limit * 2, statusFilter);
+      const tasks = await Promise.all(
+        persisted.map(async (entry) => {
+          const task = await ctx().receiptStore.getTaskByRunId(entry.runId);
+          return {
+            task_id: task?.taskId ?? null,
+            run_id: entry.runId,
+            prompt: task?.prompt ?? entry.prompt,
+            submitted_at: task?.submittedAt ?? entry.createdAt,
+            completed_at: task?.completedAt ?? entry.completedAt,
+            status: task?.status ?? entry.status,
+            verdict: entry.finalClassification ?? entry.status,
+            cost: entry.costUsd,
+            confidence: entry.confidence,
+            summary: entry.summary,
+          };
+        }),
+      );
+
+      tasks.sort((a, b) => {
+        const left = a.submitted_at ?? "";
+        const right = b.submitted_at ?? "";
+        return sort === "asc"
+          ? (left < right ? -1 : left > right ? 1 : 0)
+          : (left < right ? 1 : left > right ? -1 : 0);
+      });
+
+      reply.send({
+        tasks: tasks.slice(0, limit),
+        count: Math.min(tasks.length, limit),
+        sort,
+      });
+    },
+  );
+
   async function cancelTrackedTask(id: string): Promise<{
     ok: boolean;
     taskId: string;
@@ -443,7 +499,10 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
 
   function toTaskStatus(
     status: import("../../core/receipt-store.js").PersistentRunStatus,
+    finalClassification?: string | null,
   ): TrackedRun["status"] {
+    // PARTIAL_SUCCESS maps to "partial" regardless of the underlying status
+    if (finalClassification === "PARTIAL_SUCCESS") return "partial";
     switch (status) {
       // Active states
       case "PROPOSED":
@@ -837,10 +896,16 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         const completedTasks = activeRun ? activeRun.run.tasks.filter((task) => task.status === "completed").length : 0;
         const failedTasks = activeRun ? activeRun.run.tasks.filter((task) => task.status === "failed").length : 0;
 
+        // If the coordinator has resolved the receipt, extract extended fields
+        const receipt = tracked.receipt as any;
         reply.send({
           task_id: tracked.taskId,
           run_id: tracked.runId,
           status: tracked.status,
+          verdict: receipt?.finalClassification ?? receipt?.humanSummary?.classification ?? null,
+          summary: receipt?.humanSummary?.headline ?? null,
+          confidence: receipt?.confidence?.overall ?? null,
+          cost: receipt?.totalCost?.estimatedCostUsd ?? null,
           prompt: tracked.prompt,
           submitted_at: tracked.submittedAt,
           completed_at: tracked.completedAt,
@@ -866,11 +931,17 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         reply.send({
           task_id: persistedTask.taskId,
           run_id: persistedTask.runId,
-          status: persistedRun ? toTaskStatus(persistedRun.status) : persistedTask.status,
+          status: persistedRun
+            ? toTaskStatus(persistedRun.status, persistedRun.finalClassification)
+            : persistedTask.status,
+          verdict: persistedRun?.finalClassification ?? null,
+          summary: persistedRun?.taskSummary ?? null,
+          confidence: persistedRun?.confidence?.overall ?? null,
+          cost: persistedRun?.totalCost?.estimatedCostUsd ?? null,
           prompt: persistedTask.prompt,
           submitted_at: persistedTask.submittedAt,
           completed_at: persistedRun?.completedAt ?? persistedTask.completedAt,
-          error: persistedRun?.errors[0] ?? persistedTask.error,
+          error: persistedRun?.errors?.[0] ?? persistedTask.error,
           active_run: Boolean(activeRun),
           progress: activeRun ? {
             phase: activeRun.run.phase,
@@ -880,8 +951,8 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
             total_cost: activeRun.run.totalCost,
           } : persistedRun ? {
             phase: persistedRun.phase,
-            completed_tasks: persistedRun.workerEvents.filter((event) => event.status === "completed").length,
-            failed_tasks: persistedRun.workerEvents.filter((event) => event.status === "failed").length,
+            completed_tasks: persistedRun.workerEvents.filter((event: any) => event.status === "completed").length,
+            failed_tasks: persistedRun.workerEvents.filter((event: any) => event.status === "failed").length,
             total_tasks: persistedRun.workerEvents.length,
             total_cost: persistedRun.totalCost,
           } : null,
@@ -1026,7 +1097,10 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
 
       result.receipt.then((receipt) => {
         tracked.runId = receipt.runId;
-        tracked.status = receipt.verdict === "success" ? "complete" : receipt.verdict === "aborted" ? "cancelled" : "failed";
+        tracked.status =
+          receipt.verdict === "success" ? "complete" :
+          receipt.verdict === "partial" ? "partial" :
+          receipt.verdict === "aborted" ? "cancelled" : "failed";
         tracked.completedAt = new Date().toISOString();
         tracked.receipt = receipt;
 

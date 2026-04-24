@@ -1,0 +1,59 @@
+{
+  "id": "aedis-outcome:313da809-452f-4ded-a513-1cbba40df6b3",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in apps/api/src/lib/system-knowledge.ts, add a JSDoc comment above the initCapabilityCache function",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"ENOENT: no such file or directory, open '/mnt/ai/squidley-v2/apps/api/src/lib/system-knowledge.ts'\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:apps",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-12T18:35:04.089Z",
+  "updatedAt": "2026-04-12T18:35:04.125Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/lib/personality-loader.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "313da809-452f-4ded-a513-1cbba40df6b3",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "97689f2c-dea3-4eba-b124-1c44597e8331",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:313da809-452f-4ded-a513-1cbba40df6b3",
+    "aedis-task:313da809-452f-4ded-a513-1cbba40df6b3"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:313da809-452f-4ded-a513-1cbba40df6b3"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:313da809-452f-4ded-a513-1cbba40df6b3"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

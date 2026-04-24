@@ -1,0 +1,60 @@
+{
+  "id": "aedis-suggestions:4bab9a3e-d544-46fa-83d1-156429823c89",
+  "space": "aedis/project/mnt-ai-squidley-v2",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 4bab9a3e-d544-46fa-83d1-156429823c89",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: Verification failed: FAIL — 5/5 stages passed, confidence 94%, 0 blockers, checks typecheck:pass, tests:fail, active validation 0%, strict mode: 1 file…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-19T17:57:01.926Z",
+  "updatedAt": "2026-04-19T17:57:02.000Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/routes/chat.ts",
+    "apps/api/src/routes/index.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "4bab9a3e-d544-46fa-83d1-156429823c89",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "8593217b-640d-49d5-82d7-9d849dbf75e3",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "024c011b-3195-4965-ad33-25a25a609211",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:4bab9a3e-d544-46fa-83d1-156429823c89",
+    "aedis-run:4bab9a3e-d544-46fa-83d1-156429823c89",
+    "aedis-task:4bab9a3e-d544-46fa-83d1-156429823c89"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:4bab9a3e-d544-46fa-83d1-156429823c89"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:4bab9a3e-d544-46fa-83d1-156429823c89"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 4
+  }
+}

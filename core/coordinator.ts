@@ -55,6 +55,7 @@ import {
 } from "./intent.js";
 import { getCallLog, escalateOnLowConfidence, createRunInvocationContext, type RunInvocationContext } from "./model-invoker.js";
 import { captureAndAnalyze } from "./vision.js";
+import { runPreflight } from "./preflight.js";
 import {
   CharterGenerator,
   type RequestAnalysis,
@@ -112,6 +113,7 @@ import {
   IntegrationJudge,
   type JudgmentReport,
 } from "./integration-judge.js";
+import type { GuardFinding } from "./adversarial-guard.js";
 import {
   VerificationPipeline,
   type VerificationPipelineConfig,
@@ -127,6 +129,7 @@ import {
   loadMemory,
   recordTask,
 } from "./project-memory.js";
+import { ProjectMemoryStore } from "./project-memory-store.js";
 import {
   gateContext,
   gateContextForArchitectural,
@@ -150,7 +153,11 @@ import { buildDispatchAssignment, workerCompleteEventType } from "./coordinator-
 import { determineRunVerdict } from "./coordinator-lifecycle.js";
 import { estimateBlastRadius, type BlastRadiusEstimate } from "./blast-radius.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
-import { classifyScope, type ScopeClassification } from "./scope-classifier.js";
+import {
+  classifyScope,
+  isBugfixLikePrompt,
+  type ScopeClassification,
+} from "./scope-classifier.js";
 
 import { createChangeSet, type ChangeSet } from "./change-set.js";
 import {
@@ -168,7 +175,11 @@ import {
   type MergeDecision,
   type MergeFinding,
 } from "./merge-gate.js";
-import { verifyGitDiff, type GitDiffResult } from "./git-diff-verifier.js";
+import {
+  isTestInjectionFile,
+  verifyGitDiff,
+  type GitDiffResult,
+} from "./git-diff-verifier.js";
 import { scanInput as velumScanInput } from "./velum-input.js";
 import { scanDiff as velumScanDiff, type VelumResult } from "./velum-output.js";
 import { classifyTask, type ImpactClassification, type ImpactLevel } from "./impact-classifier.js";
@@ -182,7 +193,7 @@ import {
   type WorkspaceCleanupResult,
   type PatchArtifact,
 } from "./workspace-manager.js";
-import { findMissingTestFiles } from "./import-graph.js";
+import { findImplForTest, findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
   type BaseWorker,
@@ -308,6 +319,22 @@ export type TaskSubmissionResult =
   | { kind: "executing"; receipt: Promise<RunReceipt> }
   | { kind: "needs_clarification"; question: string }
   | { kind: "needs_decomposition"; taskId: string; plan: Plan; message: string };
+
+/**
+ * Normalized build result for session-coordinator cycles.
+ * Abstracts the full RunReceipt into the fields that session-coordinator
+ * needs for iteration decisions and receipt storage.
+ */
+export interface BuildResult {
+  success: boolean;
+  touchedFiles: string[];
+  verificationPassed: boolean;
+  errorType?: string;
+  errorMessage?: string;
+  model?: string;
+  costUsd?: number;
+  runId: string;
+}
 
 /**
  * Pending decomposition plan awaiting user approval. Stored in
@@ -459,9 +486,78 @@ export interface RunReceipt {
   readonly confidenceGate: ConfidenceResult | null;
 }
 
+// ─── Coordinator Errors ────────────────────────────────────────────
+
+export class CoordinatorError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CoordinatorError";
+  }
+}
+
+export function collectAdversarialFindingsForConfidence(
+  workerResults: readonly WorkerResult[],
+  executionDecision: ExecutionGateDecision | null,
+  judgmentReport: JudgmentReport | null,
+): GuardFinding[] {
+  const findings: GuardFinding[] = [];
+  const seen = new Set<string>();
+  const push = (finding: GuardFinding) => {
+    const key = `${finding.code}|${finding.severity}|${finding.ref ?? ""}|${finding.message}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    findings.push(finding);
+  };
+
+  for (const result of workerResults) {
+    if (result.workerType === "scout") {
+      const scoutOutput = result.output as { inspections?: { injectionFindings?: readonly GuardFinding[] } };
+      for (const finding of scoutOutput.inspections?.injectionFindings ?? []) {
+        push(finding);
+      }
+      continue;
+    }
+    if (result.workerType === "builder") {
+      // Phase 8.5 — provider-anomaly findings from the builder flow
+      // through the same aggregation path so they gate confidence
+      // alongside scout / execution / judge findings.
+      const builderOutput = result.output as { providerFindings?: readonly GuardFinding[] };
+      for (const finding of builderOutput.providerFindings ?? []) {
+        push(finding);
+      }
+      continue;
+    }
+  }
+
+  for (const finding of executionDecision?.contentIdentityFindings ?? []) {
+    push(finding);
+  }
+
+  for (const check of judgmentReport?.checks ?? []) {
+    if (check.category !== "adversarial-guard" || check.score >= 1) continue;
+    push({
+      code:
+        check.name === "Adversarial Consensus"
+          ? "judge.adversarial_consensus"
+          : check.name === "Adversarial Intent"
+            ? "judge.adversarial_intent"
+            : "judge.adversarial_guard",
+      severity: check.score <= 0.3 ? "downgrade" : "warn",
+      message: check.details,
+      ref: check.affectedFiles[0],
+    });
+  }
+
+  return findings;
+}
+
 // ─── Coordinator ─────────────────────────────────────────────────────
 
 export class Coordinator {
+  /** Deduplicate a list of strings, filtering out empty values. */
+  private uniqueStrings(values: readonly string[]): string[] {
+    return Array.from(new Set(values.filter((v): v is string => typeof v === "string" && v.length > 0)));
+  }
   private config: CoordinatorConfig;
   private charterGen: CharterGenerator;
   // ContextAssembler and IntegrationJudge are NOT class fields. They are
@@ -599,6 +695,12 @@ export class Coordinator {
     const charterTargets = Array.from(
       new Set(charter.deliverables.flatMap((d) => [...d.targetFiles])),
     );
+    const preflight = runPreflight({
+      input: normalizedInput,
+      projectRoot: effectiveProjectRoot,
+      extractedTargets: analysis.targets,
+      ambiguities: analysis.ambiguities,
+    });
 
     // GAP 1.5 — Extracted-target gate
     // If the charter couldn't pull a single file/path out of the prompt,
@@ -612,6 +714,18 @@ export class Coordinator {
       return {
         kind: "needs_clarification",
         question: "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.",
+      };
+    }
+
+    const allTargetsMissing = preflight.findings.some((f) => f.code === "all-targets-missing");
+    const hasCreateIntent =
+      analysis.category === "scaffold" ||
+      /\b(create|new file|new module|extract\s+\w+\s+into|move\s+\w+\s+to\s+a\s+new)\b/i.test(normalizedInput);
+    if (allTargetsMissing && !hasCreateIntent) {
+      console.log(`[coordinator] all extracted targets missing — asking for clarification: "${input}"`);
+      return {
+        kind: "needs_clarification",
+        question: "The file path you named does not exist in this repo. Check the path and retry, or name the correct file/module to work on.",
       };
     }
 
@@ -861,6 +975,31 @@ export class Coordinator {
         suggestedNextSteps: ["Review whether the planned file set is broad enough for this task pattern."],
       });
       console.log(`[coordinator] pattern memory: ${patternWarnings.length} warning(s) injected`);
+    }
+
+    // ── Phase 5: Project Memory Store (advisory hints) ─────────────
+    // Retrieve relevant memory entries and inject as prior-knowledge hints.
+    // Memory is ADVISORY ONLY — current source code always takes precedence.
+    try {
+      const memoryStore = await ProjectMemoryStore.open(effectiveProjectRoot);
+      const taskTags = [
+        scopeClassification.type,
+        ...(charterTargets.length > 0 ? ["multi-file"] : ["single-file"]),
+      ];
+      const priorKnowledge = await memoryStore.getMemoryForTask(taskTags);
+      if (priorKnowledge.length > 0) {
+        const hints = priorKnowledge.map((e) =>
+          `// Prior knowledge [${e.key}] (confidence ${e.confidence}): ${e.value}`,
+        );
+        const existingNotes = gatedContext.memoryNotes ?? [];
+        gatedContext = mergeGatedContext(gatedContext, {
+          memoryNotes: [...existingNotes, ...hints],
+        });
+        console.log(`[coordinator] project memory: ${priorKnowledge.length} prior knowledge hint(s) injected`);
+      }
+      memoryStore.close();
+    } catch (err) {
+      console.warn(`[coordinator] project memory store unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     try {
@@ -1553,7 +1692,14 @@ export class Coordinator {
       // files are critical because they indicate the on-disk state diverged
       // from what was declared.
       const gitDiffFindings = this.gitDiffFindings(gitDiffResult);
-      const extraFindings = [...waveFailures, ...gitDiffFindings];
+      // Bugfix must-modify rule — fires only when the user request
+      // looks bugfix-shaped AND no non-test source files were
+      // actually modified. Feature / refactor tasks are unaffected.
+      const bugfixFindings = this.bugfixTargetFindings(
+        active.intent.userRequest,
+        gitDiffResult,
+      );
+      const extraFindings = [...waveFailures, ...gitDiffFindings, ...bugfixFindings];
       const mergeDecision: MergeDecision =
         extraFindings.length === 0
           ? baseDecision
@@ -1996,6 +2142,60 @@ export class Coordinator {
   }
 
   /**
+   * Lightweight build cycle for session-coordinator.
+   *
+   * Runs the full pipeline (charter → intent → workspace → graph →
+   * execute → verify → merge) on a single task intent string and
+   * returns a normalized BuildResult.
+   *
+   * Unlike submit(), this does NOT go through submitWithGates — it is
+   * called directly by the session coordinator which already has the
+   * validated task intent from a prior session-scoped LLM call.
+   *
+   * @param taskIntent  The task description (e.g. "add error handling to
+   *                    the parseFile function in utils.ts")
+   * @param projectRoot The path to the project root for this session's
+   *                    workspace (from SessionState.projectRoot)
+   */
+  async buildCycle(taskIntent: string, projectRoot: string): Promise<BuildResult> {
+    try {
+      const receipt = await this.submit({
+        input: taskIntent,
+        projectRoot,
+        // No extraConstraints — session coordinator provides a clean intent
+      });
+
+      const verdict = receipt.verdict;
+      const success = verdict === "success" || verdict === "partial";
+      const touchedFiles = receipt.humanSummary?.whatChanged?.map((f) => f.path) ?? [];
+
+      return {
+        success,
+        touchedFiles,
+        verificationPassed:
+          receipt.humanSummary?.verification === "pass" ||
+          receipt.humanSummary?.verification === "pass-with-warnings",
+        errorType: success ? undefined : verdict,
+        errorMessage: success
+          ? undefined
+          : (receipt.humanSummary?.failureExplanation?.rootCause ?? receipt.summary.phase),
+        model: receipt.totalCost?.model,
+        costUsd: receipt.totalCost?.estimatedCostUsd,
+        runId: receipt.runId,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        touchedFiles: [],
+        verificationPassed: false,
+        errorType: err instanceof Error ? err.name : "UnknownError",
+        errorMessage: err instanceof Error ? err.message : String(err),
+        runId: "",
+      };
+    }
+  }
+
+  /**
    * Cancel a running task.
    */
   cancel(runId: string): boolean {
@@ -2230,8 +2430,32 @@ export class Coordinator {
         const wasExplicit = isExplicit(file);
 
         if (wasExplicit) {
-          decisions.push(`  keep ${file} (explicitly mentioned in request)`);
-          return true;
+          if (exists) {
+            decisions.push(`  keep ${file} (explicitly mentioned in request)`);
+            return true;
+          }
+          // Phase 12 — explicit files that don't exist are kept when
+          // the deliverable type signals a create operation OR the
+          // analysis indicates create intent ("new file", "create",
+          // "extract … into a new file"). Without this, prompts like
+          // "Create src/email.ts with isValidEmail" produce zero
+          // deliverables → empty graph → empty-graph failure code →
+          // ambiguous_prompt classification, even though the user
+          // gave a perfectly clear file target.
+          const isCreateDeliverable = deliverable.type === "create";
+          const promptHasCreateIntent =
+            /\b(create|new file|new module|extract\s+\w+\s+into|move\s+\w+\s+to\s+a\s+new)\b/i.test(
+              analysis.raw,
+            );
+          if (isCreateDeliverable || promptHasCreateIntent) {
+            decisions.push(
+              `  keep ${file} (explicit new-file target — ${isCreateDeliverable ? "deliverable.type=create" : "prompt has create intent"})`,
+            );
+            return true;
+          }
+          decisions.push(`  drop ${file} (explicitly mentioned but does not exist)`);
+          didFilter = true;
+          return false;
         }
 
         // Test files: keep existing tests (they pair with implementation files
@@ -2308,11 +2532,73 @@ export class Coordinator {
       deduped.push({ ...d, targetFiles: uniqueFiles });
     }
 
+    // ── PHASE 3.5 — Source inference for test-only deliverables ─────────
+    // When every surviving target is a test file, the builder has no
+    // real implementation to operate on — the resulting graph would
+    // either be empty (if filtering also dropped the implementation)
+    // or limited to test-file edits, which leaves the actual source
+    // bug unfixed. Phase 12: if all deliverable targets are test
+    // files, infer the implementation file each one pairs with via
+    // findImplForTest and add it as a sibling deliverable. The
+    // implementation must exist on disk (findImplForTest verifies)
+    // and not already be in scope.
+    //
+    // Skipped for the explicit "test" category — the user is
+    // genuinely asking to write tests, so we should not force
+    // unrelated source edits into the manifest.
+    if (deduped.length > 0 && analysis.category !== "test") {
+      const allTargets = deduped.flatMap((d) => d.targetFiles);
+      const allTests = allTargets.length > 0 && allTargets.every((f) => this.isTestFile(f));
+      if (allTests) {
+        const inferred: string[] = [];
+        for (const t of allTargets) {
+          const impl = findImplForTest(t, active.projectRoot);
+          if (!impl) continue;
+          const abs = resolve(active.projectRoot, impl);
+          if (seenPaths.has(abs)) continue;
+          seenPaths.add(abs);
+          inferred.push(impl);
+        }
+        if (inferred.length > 0) {
+          deduped.unshift({
+            type: "modify" as const,
+            description: `Source implementation file(s) inferred from test target(s)`,
+            targetFiles: inferred,
+          });
+          for (const impl of inferred) {
+            decisions.push(`  infer ${impl} (implementation paired with test-only deliverable)`);
+          }
+          console.log(
+            `[coordinator] prepareDeliverablesForGraph: P12 inferred ${inferred.length} source file(s) from test-only deliverables: ${inferred.join(", ")}`,
+          );
+          didFilter = true;
+        }
+      }
+    }
+
     // ── PHASE 4 — Test pair injection ───────────────────────────────────
     // For implementation files that have existing test files, inject the
     // test as an optional deliverable so verification is more complete.
     // Only injects tests that EXIST on disk — does not create phantom targets.
-    if (!explicitTestRequest) {
+    //
+    // Bugfix tasks opt out: the bug lives in the source file and should
+    // be fixed there. Injecting a test pair causes the builder to spend
+    // its shot on the test file (or mutate the test alongside the
+    // source), which is exactly the "modified only test/utils.test.ts"
+    // failure mode observed on stress-01/02/09/11..14. Feature and
+    // refactor tasks are unaffected — they benefit from the test-pair
+    // verification coverage.
+    //
+    // Primary signal: the charter's own category classifier
+    // (analysis.category === "bugfix"). This is the authoritative
+    // label already computed in Phase 1 and logged as `category=bugfix`.
+    // The isBugfixLikePrompt heuristic is kept as a belt-and-suspenders
+    // second check — both must agree that it's NOT bugfix for
+    // injection to proceed.
+    const isBugfixCategory = analysis.category === "bugfix";
+    const isBugfixPrompt = isBugfixLikePrompt(active.intent.userRequest);
+    const isBugfix = isBugfixCategory || isBugfixPrompt;
+    if (!explicitTestRequest && !isBugfix) {
       const allTargetFiles = deduped.flatMap((d) => d.targetFiles);
       const missingTests = findMissingTestFiles(allTargetFiles, active.projectRoot);
       if (missingTests.length > 0) {
@@ -2332,6 +2618,56 @@ export class Coordinator {
           console.log(`[coordinator] prepareDeliverablesForGraph: injected ${testFiles.length} test pair(s)`);
         }
       }
+    } else if (isBugfix) {
+      console.log(
+        `[coordinator] prepareDeliverablesForGraph: skipping test-pair injection (category=${analysis.category}, promptMatch=${isBugfixPrompt}) — focus on source file`,
+      );
+    }
+
+    // ── PHASE 4.5 — Bugfix belt-and-suspenders test-file stripper ──────
+    // Even with test-pair injection disabled, a test file can still
+    // reach the deliverables via:
+    //   - charter target extraction if the prompt names a test file
+    //   - memory-backed clusterFiles flowing into context (rare)
+    //   - a future injection path we haven't seen yet
+    // For bugfix-shaped tasks, the contract is "fix the source file";
+    // a test file appearing as a deliverable is always a leak. Strip
+    // any deliverable whose targetFiles are all test files, and
+    // filter test files out of mixed deliverables. If a deliverable
+    // loses all its targets it's dropped with a decision note.
+    if (isBugfix && !explicitTestRequest) {
+      const before = deduped.length;
+      const stripped: Deliverable[] = [];
+      for (const d of deduped) {
+        const nonTest = d.targetFiles.filter((f) => !isTestInjectionFile(f));
+        if (nonTest.length === 0) {
+          decisions.push(`  strip deliverable "${d.description}" (bugfix task: all targets were test files)`);
+          // Remove stripped files from seenPaths so a legitimate test
+          // is never blocked on a later run that DOES want tests.
+          for (const f of d.targetFiles) {
+            seenPaths.delete(resolve(active.projectRoot, f));
+          }
+          continue;
+        }
+        if (nonTest.length < d.targetFiles.length) {
+          const dropped = d.targetFiles.filter((f) => isTestInjectionFile(f));
+          decisions.push(`  bugfix test-strip: drop ${dropped.join(", ")} from "${d.description}"`);
+          for (const f of dropped) {
+            seenPaths.delete(resolve(active.projectRoot, f));
+          }
+          stripped.push({ ...d, targetFiles: nonTest });
+        } else {
+          stripped.push(d);
+        }
+      }
+      if (stripped.length !== before) {
+        console.log(
+          `[coordinator] prepareDeliverablesForGraph: bugfix test-strip removed ${before - stripped.length} deliverable(s)`,
+        );
+        didFilter = true;
+      }
+      deduped.length = 0;
+      deduped.push(...stripped);
     }
 
     console.log(`[coordinator] prepareDeliverablesForGraph: ${deduped.length} deliverable(s) after filter+dedup+test-inject`);
@@ -2372,6 +2708,28 @@ export class Coordinator {
           charter: { deliverables: deduped },
         });
         console.log(`[coordinator] prepareDeliverablesForGraph: intent revised to v${active.intent.version} with ${deduped.length} deliverable(s)`);
+
+        // CRITICAL: also sync the ChangeSet so its manifest stays in sync with
+        // the revised intent. The ChangeSet was built from the original
+        // charterTargets before filtering; without this, the integration-judge
+        // and git-diff-verifier will expect the phantom (filtered-out) files
+        // to be modified and will block the merge gate even when execution succeeded.
+        const filteredFiles = deduped.flatMap((d) => d.targetFiles);
+        const revisedChangeSet = createChangeSet(
+          active.intent,
+          filteredFiles,
+          undefined, // importGraph not available here; use heuristic inference
+          active.projectRoot,
+        );
+        // Preserve wave invariants and sharedInvariants from the original ChangeSet
+        // since they were already computed correctly; only sync filesInScope and
+        // acceptance criteria from the revised intent's deliverables.
+        active.changeSet = Object.freeze({
+          ...revisedChangeSet,
+          invariants: active.changeSet.invariants,
+          sharedInvariants: active.changeSet.sharedInvariants,
+        });
+        console.log(`[coordinator] prepareDeliverablesForGraph: ChangeSet synced — ${filteredFiles.length} file(s) in scope (phantom files removed)`);
       } catch (err) {
         console.error(`[coordinator] prepareDeliverablesForGraph: reviseIntent FAILED — ${err instanceof Error ? err.message : String(err)}`);
         throw err;
@@ -3410,6 +3768,52 @@ export class Coordinator {
     return findings;
   }
 
+  /**
+   * Bugfix must-modify rule (post-Phase-11).
+   *
+   * A task whose user request looks bugfix-shaped (see
+   * `isBugfixLikePrompt`) must actually modify at least one non-test
+   * source file. If the builder's on-disk changes consist only of
+   * test files — or nothing at all — the run silently "succeeded"
+   * without touching the broken code, which is exactly the failure
+   * mode we want to surface. Returns a critical merge finding so the
+   * merge-gate blocks with a concrete, machine-matchable reason
+   * (`bugfix-target-not-modified`). Feature / refactor tasks are not
+   * affected — they legitimately touch test-only or config-only
+   * surfaces.
+   *
+   * Uses `gitDiffResult.actualChangedFiles` (the authoritative
+   * post-apply on-disk truth) and the shared `isTestInjectionFile`
+   * predicate so the source/test split stays consistent with the
+   * git-diff verifier's existing rules.
+   */
+  private bugfixTargetFindings(
+    userRequest: string,
+    gitDiffResult: GitDiffResult | null,
+  ): MergeFinding[] {
+    if (!isBugfixLikePrompt(userRequest)) return [];
+    // If we couldn't run git diff, stay silent — the merge gate
+    // already has a `git-diff:unavailable` advisory for that case,
+    // and firing this critical finding on unknown input would
+    // false-positive on infra failures.
+    if (!gitDiffResult) return [];
+    const actual = gitDiffResult.actualChangedFiles;
+    const sourceChanged = actual.filter((f) => !isTestInjectionFile(f));
+    if (sourceChanged.length > 0) return [];
+    const detail = actual.length === 0
+      ? "no files were modified on disk"
+      : `only test file(s) were modified: ${actual.slice(0, 3).join(", ")}${actual.length > 3 ? "…" : ""}`;
+    return [
+      {
+        source: "coordinator",
+        severity: "critical",
+        code: "bugfix-target-not-modified",
+        message: `bugfix_target_not_modified — user request looks like a bugfix but ${detail}. A bugfix must modify at least one non-test source file.`,
+        files: [...actual],
+      },
+    ];
+  }
+
   // ─── Merge Gate Helpers ────────────────────────────────────────────
 
   /**
@@ -4204,16 +4608,47 @@ export class Coordinator {
     const criticIterations = active.run.decisions.filter(
       (d) => d.description.startsWith("Rehearsal round"),
     ).length;
+    const adversarialFindings = collectAdversarialFindingsForConfidence(
+      active.workerResults,
+      executionDecision ?? null,
+      judgmentReport ?? null,
+    );
     const confidenceGate = scoreConfidence({
       testsPassed: verificationReceipt?.verdict !== "fail",
       integrationPassed: judgmentReport?.passed ?? false,
       criticIterations,
       impactLevel: active.scopeClassification?.type === "architectural" ? "high"
         : (active.changeSet.filesInScope.length > 1 ? "medium" : "low"),
+      adversarialFindings,
     });
     console.log(
       `[coordinator] confidence.gate: level=${confidenceGate.level} reasons=[${confidenceGate.reasons.join("; ")}]`,
     );
+
+    // Phase 8.5 — operator-facing escalation signal. When an
+    // `escalate`-severity adversarial finding fired (e.g. an injection
+    // directive was detected in scout-harvested text), surface it as
+    // both a prominent log line and a dedicated event so the UI /
+    // WebSocket consumer / human operator can react. The run still
+    // completes normally — we detect, downgrade, and escalate, we do
+    // not refuse — but the escalation signal is now consumed rather
+    // than silently dropped.
+    if (confidenceGate.escalationRecommended) {
+      const escalateFindings = adversarialFindings
+        .filter((f) => f.severity === "escalate")
+        .map((f) => `${f.code}${f.ref ? `@${f.ref}` : ""}`);
+      console.warn(
+        `[coordinator] ESCALATION RECOMMENDED — run=${active.run.id} findings=[${escalateFindings.join(", ")}] reasons="${confidenceGate.reasons.join("; ")}"`,
+      );
+      this.emit({
+        type: "adversarial_escalation",
+        payload: {
+          runId: active.run.id,
+          findings: escalateFindings,
+          reasons: confidenceGate.reasons,
+        },
+      });
+    }
 
     // Build the receipt without humanSummary first, then compose
     // the summary from the receipt itself (the summary generator
@@ -4510,7 +4945,7 @@ export class Coordinator {
     repairResult: RepairResult | null,
     commitSha: string | null,
   ): Promise<string[]> {
-    const filesTouched = uniqueStrings([
+    const filesTouched = this.uniqueStrings([
       ...active.changes.map((change) => change.path),
       ...active.run.filesTouched.map((touch) => touch.filePath),
     ]);
@@ -4530,8 +4965,8 @@ export class Coordinator {
       verificationVerdict: verificationReceipt?.verdict,
       failureSummary: mergeDecision?.primaryBlockReason || active.run.failureReason || undefined,
       successPattern: receipt.verdict === "success" ? "Scoped fix passed commit and verification gates." : undefined,
-      affectedSystems: uniqueStrings(filesTouched.map((file) => file.split("/")[0] ?? "").filter(Boolean)),
-      changeTypes: uniqueStrings(active.changes.map((change) => change.operation)),
+      affectedSystems: this.uniqueStrings(filesTouched.map((file) => file.split("/")[0] ?? "").filter(Boolean)),
+      changeTypes: this.uniqueStrings(active.changes.map((change) => change.operation)),
       taskTypeKey: deriveTaskTypeKey(normalizedInput, active.scopeClassification?.type),
       plannedFilesCount: active.changeSet.filesInScope.length,
       missingFiles: active.gitDiffResult?.expectedButUnchanged ?? [],
@@ -4774,17 +5209,4 @@ interface ActiveRun {
   confidenceDampening: number;
   /** Historical reliability tier for the matched task archetype. */
   historicalReliabilityTier: "reliable" | "risky" | "caution" | "unknown" | null;
-}
-
-// ─── Errors ──────────────────────────────────────────────────────────
-
-export class CoordinatorError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "CoordinatorError";
-  }
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }

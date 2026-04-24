@@ -1,0 +1,62 @@
+{
+  "id": "aedis-outcome:d7a4fd24-7e11-4243-bbd5-6600923ce09c",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/change-set.ts, In packages/core/src/constructors/bundle-factory.ts, change the nested function resolveLang() to",
+  "summary": "Required file \"packages/core/src/constructors/bundle-factory.ts\" declared in manifest but not changed (modify required for deliverable: Modify packages/core/src/constructors/bundle-factory.ts); Required file \"core/src/constructors/bundle-factory.ts\" declared in manifest but not…",
+  "raw": "{\n  \"issues\": [\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"packages/core/src/constructors/bundle-factory.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify packages/core/src/constructors/bundle-factory.ts); Required file \\\"core/src/constructors/bundle-factory.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/src/constructors/bundle-factory.ts)\",\n        \"files\": [\n          \"packages/core/src/constructors/bundle-factory.ts\",\n          \"core/src/constructors/bundle-factory.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:invariants-unsatisfied\",\n        \"message\": \"Change-set coherence verdict failed.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./intent.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./invariant-extractor.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./import-graph.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./intent.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./invariant-extractor.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./import-graph.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: packages/core/src/constructors/bundle-factory.ts, core/src/constructors/bundle-factory.ts\",\n        \"files\": [\n          \"packages/core/src/constructors/bundle-factory.ts\",\n          \"core/src/constructors/bundle-factory.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"packages/core/src/constructors/bundle-factory.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify packages/core/src/constructors/bundle-factory.ts); Required file \\\"core/src/constructors/bundle-factory.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/src/constructors/bundle-factory.ts)\",\n        \"files\": [\n          \"packages/core/src/constructors/bundle-factory.ts\",\n          \"core/src/constructors/bundle-factory.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:invariants-unsatisfied\",\n        \"message\": \"Change-set coherence verdict failed.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: packages/core/src/constructors/bundle-factory.ts, core/src/constructors/bundle-factory.ts\",\n        \"files\": [\n          \"packages/core/src/constructors/bundle-factory.ts\",\n          \"core/src/constructors/bundle-factory.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./intent.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./invariant-extractor.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./import-graph.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./intent.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./invariant-extractor.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"core/change-set.ts: broken import target \\\"./import-graph.js\\\"\"\n      }\n    ],\n    \"primaryBlockReason\": \"Required file \\\"packages/core/src/constructors/bundle-factory.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify packages/core/src/constructors/bundle-factory.ts); Required file \\\"core/src/constructors/bundle-factory.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/src/constructors/bundle-factory.ts)\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 6 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 6,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"core/change-set.ts: broken import target \\\"./intent.js\\\"\",\n      \"core/change-set.ts: broken import target \\\"./invariant-extractor.js\\\"\",\n      \"core/change-set.ts: broken import target \\\"./import-graph.js\\\"\",\n      \"core/change-set.ts: broken import target \\\"./intent.js\\\"\",\n      \"core/change-set.ts: broken import target \\\"./invariant-extractor.js\\\"\",\n      \"core/change-set.ts: broken import target \\\"./import-graph.js\\\"\"\n    ]\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "module:server",
+    "module:workers",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-21T14:43:04.962Z",
+  "updatedAt": "2026-04-21T14:43:04.972Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/change-set.ts",
+    "core/coordinator.ts",
+    "core/intent.ts",
+    "core/project-memory.ts",
+    "core/runstate.ts",
+    "core/verification-pipeline.ts",
+    "server/websocket.ts",
+    "workers/base.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d7a4fd24-7e11-4243-bbd5-6600923ce09c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "4793a182-5e0e-4597-bbda-f45909a0fed0",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:d7a4fd24-7e11-4243-bbd5-6600923ce09c",
+    "aedis-task:d7a4fd24-7e11-4243-bbd5-6600923ce09c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d7a4fd24-7e11-4243-bbd5-6600923ce09c"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:d7a4fd24-7e11-4243-bbd5-6600923ce09c"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Required file \"packages/core/src/constructors/bundle-factory.ts\" declared in manifest but not changed (modify required for deliverable: Modify packages/core/src/constructors/bundle-factory.ts); Required file \"core/src/constructors/bundle-factory.ts\" declared in manifest but not changed (modify required for deliverable: Modify core/src/constructors/bundle-factory.ts)"
+  }
+}

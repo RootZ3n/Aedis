@@ -1044,6 +1044,14 @@ body .app::before{
         <div id="ss-score" class="ss-score">0%</div>
       </div>
 
+      <!-- NAV LINKS -->
+      <div style="display:flex;gap:20px;align-items:center;padding:8px 0 12px;border-bottom:1px solid var(--abyss-line);margin-bottom:14px;flex-wrap:wrap">
+        <a href="/ui/cost.html" style="font-family:var(--mono);font-size:12px;color:var(--teal-dim);transition:color 200ms" onmouseover="this.style.color='var(--teal)'" onmouseout="this.style.color='var(--teal-dim)'">Cost</a>
+        <a href="/ui/sessions.html" style="font-family:var(--mono);font-size:12px;color:var(--teal-dim);transition:color 200ms" onmouseover="this.style.color='var(--teal)'" onmouseout="this.style.color='var(--teal-dim)'">Sessions</a>
+        <a href="/ui/receipt.html" style="font-family:var(--mono);font-size:12px;color:var(--teal-dim);transition:color 200ms" onmouseover="this.style.color='var(--teal)'" onmouseout="this.style.color='var(--teal-dim)'">Receipts</a>
+        <a href="/ui/trust.html" style="font-family:var(--mono);font-size:12px;color:var(--teal-dim);transition:color 200ms" onmouseover="this.style.color='var(--teal)'" onmouseout="this.style.color='var(--teal-dim)'">Trust</a>
+      </div>
+
       <!-- VITALS — 3 metric glyphs -->
       <div class="vitals" style="grid-template-columns:repeat(3,minmax(0,1fr))">
         <article class="vital">
@@ -1060,8 +1068,30 @@ body .app::before{
         </article>
       </div>
 
+      <!-- METRICS SUMMARY STRIP -->
+      <div id="metrics-strip" class="vitals" style="grid-template-columns:repeat(4,minmax(0,1fr));display:none">
+        <article class="vital">
+          <div class="v-label">Success Rate</div>
+          <div id="metrics-success-rate" class="v-readout teal">—</div>
+        </article>
+        <article class="vital">
+          <div class="v-label">Runs (ok / fail)</div>
+          <div id="metrics-run-count" class="v-readout">—</div>
+        </article>
+        <article class="vital">
+          <div class="v-label">Avg Confidence</div>
+          <div id="metrics-confidence" class="v-readout teal">—</div>
+        </article>
+        <article class="vital">
+          <div class="v-label">Avg Cost / Run</div>
+          <div id="metrics-avg-cost" class="v-readout teal">—</div>
+        </article>
+      </div>
+
+
       <!-- Run progress bar -->
       <div id="run-progress" class="run-progress" aria-hidden="true"></div>
+
 
       <!-- Loqui chat panel -->
       <section class="panel loqui-panel">
@@ -1426,6 +1456,27 @@ body .app::before{
       } catch {
         // Corrupt JSON, ignore — we'll start fresh.
       }
+    }
+
+    async function loadMetrics() {
+      try {
+        const res = await fetch(`${API_BASE}/metrics`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const el = document.getElementById('metrics-strip');
+        if (!el) return;
+        const rate = ((data.successRate ?? 0) * 100).toFixed(1);
+        const ok = data.successfulRuns ?? 0;
+        const fail = data.failedRuns ?? 0;
+        const partial = data.partialRuns ?? 0;
+        const conf = ((data.avgConfidence ?? 0) * 100).toFixed(0);
+        const avgCost = `$${(data.avgCostPerRunUsd ?? 0).toFixed(4)}`;
+        document.getElementById('metrics-success-rate').textContent = rate + '%';
+        document.getElementById('metrics-run-count').textContent = `${ok}/${fail+partial}`;
+        document.getElementById('metrics-confidence').textContent = conf + '%';
+        document.getElementById('metrics-avg-cost').textContent = avgCost;
+        el.style.display = 'grid';
+      } catch { /* metrics load failure is non-fatal */ }
     }
 
     async function loadPersistedRuns() {
@@ -3458,6 +3509,7 @@ body .app::before{
     render();
     connect();
     void loadPersistedRuns();
+    void loadMetrics();
     // Fetch provider registry first so dropdowns reflect server truth,
     // then pull the saved worker-model assignments.
     (async () => {

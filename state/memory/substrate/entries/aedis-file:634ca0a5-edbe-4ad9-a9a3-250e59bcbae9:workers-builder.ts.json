@@ -1,0 +1,73 @@
+{
+  "id": "aedis-file:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9:workers-builder.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "workers/builder.ts",
+  "summary": "failed after modify in workers/builder.ts",
+  "raw": "{\n  \"file\": \"workers/builder.ts\",\n  \"peers\": [\n    \"core/aedis-memory.test.ts\",\n    \"core/change-set.ts\",\n    \"core/charter.ts\",\n    \"core/confidence-scoring.ts\"\n  ],\n  \"scopeType\": \"single-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:workers",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-24T15:35:07.945Z",
+  "updatedAt": "2026-04-24T15:35:07.956Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "workers/builder.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "634ca0a5-edbe-4ad9-a9a3-250e59bcbae9",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "7a64c796-7d99-4ae2-bf87-b116c6d6809d",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9",
+    "aedis-run:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9",
+    "aedis-task:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:634ca0a5-edbe-4ad9-a9a3-250e59bcbae9"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-aedis-memory.test.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-change-set.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-charter.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-confidence-scoring.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "single-file",
+    "clusterPeers": [
+      "core/aedis-memory.test.ts",
+      "core/change-set.ts",
+      "core/charter.ts",
+      "core/confidence-scoring.ts"
+    ]
+  }
+}

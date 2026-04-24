@@ -1,0 +1,55 @@
+{
+  "id": "aedis-outcome:7aa26907-c40a-485d-a218-5347eea67923",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"Model returned no effective file changes\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"2 manifest file(s) expected to change but unchanged on disk: src/utils.ts, ./test/utils.test.ts\",\n        \"files\": [\n          \"src/utils.ts\",\n          \"./test/utils.test.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 0 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "module:test",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-21T22:47:54.942Z",
+  "updatedAt": "2026-04-21T22:47:54.950Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-stress-fixture",
+  "filePaths": [
+    "src/utils.ts",
+    "test/utils.test.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "7aa26907-c40a-485d-a218-5347eea67923",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "794c27d6-a33f-4d32-b9c6-cf3a853966f2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:7aa26907-c40a-485d-a218-5347eea67923",
+    "aedis-task:7aa26907-c40a-485d-a218-5347eea67923"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:7aa26907-c40a-485d-a218-5347eea67923"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:7aa26907-c40a-485d-a218-5347eea67923"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

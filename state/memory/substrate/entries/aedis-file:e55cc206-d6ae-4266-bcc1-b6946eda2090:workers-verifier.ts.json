@@ -1,0 +1,73 @@
+{
+  "id": "aedis-file:e55cc206-d6ae-4266-bcc1-b6946eda2090:workers-verifier.ts",
+  "space": "aedis/files",
+  "kind": "aedis-file-touch",
+  "title": "workers/verifier.ts",
+  "summary": "failed after modify in workers/verifier.ts",
+  "raw": "{\n  \"file\": \"workers/verifier.ts\",\n  \"peers\": [\n    \"core/aedis-memory.test.ts\",\n    \"core/change-set.ts\",\n    \"core/charter.ts\",\n    \"core/confidence-scoring.ts\"\n  ],\n  \"scopeType\": \"single-file\"\n}",
+  "tags": [
+    "ext:ts",
+    "file-touch",
+    "module:workers",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-24T15:54:29.635Z",
+  "updatedAt": "2026-04-24T15:54:29.644Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "workers/verifier.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "e55cc206-d6ae-4266-bcc1-b6946eda2090",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "9719a207-1f8b-4e73-a650-9dd479ebe2b1",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:e55cc206-d6ae-4266-bcc1-b6946eda2090",
+    "aedis-run:e55cc206-d6ae-4266-bcc1-b6946eda2090",
+    "aedis-task:e55cc206-d6ae-4266-bcc1-b6946eda2090"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:e55cc206-d6ae-4266-bcc1-b6946eda2090"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:e55cc206-d6ae-4266-bcc1-b6946eda2090"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-aedis-memory.test.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-change-set.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-charter.ts"
+    },
+    {
+      "type": "cluster-peer",
+      "targetId": "file:core-confidence-scoring.ts"
+    }
+  ],
+  "metadata": {
+    "scopeType": "single-file",
+    "clusterPeers": [
+      "core/aedis-memory.test.ts",
+      "core/change-set.ts",
+      "core/charter.ts",
+      "core/confidence-scoring.ts"
+    ]
+  }
+}

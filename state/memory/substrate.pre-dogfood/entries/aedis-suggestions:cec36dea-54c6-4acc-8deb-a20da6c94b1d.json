@@ -1,0 +1,65 @@
+{
+  "id": "aedis-suggestions:cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+  "space": "aedis/project/mnt-ai-squidley-v2",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Validate apps/api/src/routes/chat.ts, apps/api/src/config/advisor-policy.ts, apps/api/src/config/model-registry.ts with focused verification before the next attempt. Inspect repair-pas…",
+  "tags": [
+    "suggestions",
+    "verdict:partial"
+  ],
+  "createdAt": "2026-04-12T12:58:07.479Z",
+  "updatedAt": "2026-04-12T12:58:07.562Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/squidley-v2",
+  "filePaths": [
+    "apps/api/src/config/advisor-policy.ts",
+    "apps/api/src/config/model-registry.ts",
+    "apps/api/src/config/model-roles.ts",
+    "apps/api/src/config/peers.ts",
+    "apps/api/src/config/personality-judge.ts",
+    "apps/api/src/config/prompt-versions.ts",
+    "apps/api/src/lib/personality-loader.ts",
+    "apps/api/src/routes/chat.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "599bc37c-8fca-4e23-9d44-1f8eff3bca22",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "f35b2b9aa3bbc642cd078dba41a045caa868cb86",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "c1c2bb43-2b41-4fdb-8c13-1eb1365bca9d",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+    "aedis-run:cec36dea-54c6-4acc-8deb-a20da6c94b1d",
+    "aedis-task:cec36dea-54c6-4acc-8deb-a20da6c94b1d"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:cec36dea-54c6-4acc-8deb-a20da6c94b1d"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:cec36dea-54c6-4acc-8deb-a20da6c94b1d"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 4
+  }
+}

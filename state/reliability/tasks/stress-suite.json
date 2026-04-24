@@ -1,0 +1,237 @@
+[
+  {
+    "id": "stress-01-off-by-one",
+    "taskType": "bugfix",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Fix the off-by-one error in the fibonacci function in src/utils.ts. The function should return fibonacci(3) = 2, not 3.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 2
+  },
+  {
+    "id": "stress-02-capitalize-empty",
+    "taskType": "bugfix",
+    "difficulty": "trivial",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Fix the capitalize function in src/utils.ts to handle empty strings without throwing an error.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 2
+  },
+  {
+    "id": "stress-03-divide-by-zero",
+    "taskType": "bugfix",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Fix divide function to return Infinity instead of throwing when dividing by zero.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 2
+  },
+  {
+    "id": "stress-04-stack-underflow",
+    "taskType": "bugfix",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Fix the Stack class pop() method to return null instead of undefined when the stack is empty.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 2
+  },
+  {
+    "id": "stress-05-email-no-at",
+    "taskType": "bugfix",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Fix validateEmail to return false (not true) when the email string has no @ character.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 2
+  },
+
+  {
+    "id": "stress-06-add-tests-for-stack",
+    "taskType": "coverage",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add Jest tests for the Stack class covering: push, pop on empty stack returns null, peek, and size getter.",
+    "expectedFiles": ["test/utils.test.ts"],
+    "minDiffLines": 15
+  },
+  {
+    "id": "stress-07-add-tests-for-fib",
+    "taskType": "coverage",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add tests for fibonacci covering: fibonacci(0)=0, fibonacci(1)=1, fibonacci(5)=5, fibonacci(10)=55",
+    "expectedFiles": ["test/utils.test.ts"],
+    "minDiffLines": 10
+  },
+
+  {
+    "id": "stress-08-extract-math-utils",
+    "taskType": "refactor",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Extract all arithmetic functions (add, subtract, divide, isEven) into a new file src/math-utils.ts. Export them from the new file and re-export from src/utils.ts so existing imports continue to work.",
+    "expectedFiles": ["src/math-utils.ts", "src/utils.ts"],
+    "minDiffLines": 10
+  },
+  {
+    "id": "stress-09-extract-email-validator",
+    "taskType": "refactor",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Extract the email validation logic into a new file src/email.ts with an exported isValidEmail function. Update src/utils.ts to import and re-export it.",
+    "expectedFiles": ["src/email.ts", "src/utils.ts"],
+    "minDiffLines": 8
+  },
+  {
+    "id": "stress-10-extract-stack-generic",
+    "taskType": "refactor",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Refactor the Stack class to use a private array with explicit typing. Move it to src/stack.ts. Ensure backward compatibility by re-exporting from utils.ts.",
+    "expectedFiles": ["src/stack.ts", "src/utils.ts"],
+    "minDiffLines": 10
+  },
+
+  {
+    "id": "stress-11-multiply-feature",
+    "taskType": "feature",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add a multiply function to src/utils.ts that takes two numbers and returns their product.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 3
+  },
+  {
+    "id": "stress-12-modulo-feature",
+    "taskType": "feature",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add a modulo function to src/utils.ts that returns the remainder of integer division.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 3
+  },
+  {
+    "id": "stress-13-is-palindrome-feature",
+    "taskType": "feature",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add an isPalindrome function to src/utils.ts that returns true if a string reads the same forwards and backwards.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 4
+  },
+  {
+    "id": "stress-14-string-reversefeature",
+    "taskType": "feature",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add a reverseString function to src/utils.ts.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 3
+  },
+
+  {
+    "id": "stress-15-extend-divide-with-mod",
+    "taskType": "extend",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Extend the divide function to accept an optional third parameter 'mod' that returns the remainder when mod=true.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 5
+  },
+  {
+    "id": "stress-16-extend-capitalize-locale",
+    "taskType": "extend",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Extend capitalize to accept an optional second parameter 'locale' that applies locale-specific casing rules.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 5
+  },
+  {
+    "id": "stress-17-extend-stack-maxsize",
+    "taskType": "extend",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Extend the Stack class with a constructor that accepts an optional maxSize parameter. push() should throw if the stack exceeds maxSize.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 8
+  },
+
+  {
+    "id": "stress-18-security-xss-guard",
+    "taskType": "security",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add an sanitizeHTML function that escapes <, >, &, \", and ' characters to prevent XSS when rendering user input.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 6
+  },
+  {
+    "id": "stress-19-security-sql-injection",
+    "taskType": "security",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Add an escapeSQL function that escapes single quotes in SQL query strings to prevent injection.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 5
+  },
+
+  {
+    "id": "stress-20-perf-fibonacci-memo",
+    "taskType": "perf",
+    "difficulty": "medium",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Optimize fibonacci to use memoization so fibonacci(20) completes in under 1ms without recursive calls.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 8
+  },
+  {
+    "id": "stress-21-perf-is-even-bitwise",
+    "taskType": "perf",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Replace the modulo-based isEven with a bitwise AND operation (& 1) for better performance.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 2
+  },
+
+  {
+    "id": "stress-22-empty-repo-bugfix",
+    "taskType": "bugfix",
+    "difficulty": "hard",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Make capitalize handle strings with more than 100 characters without causing a stack overflow.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 3
+  },
+
+  {
+    "id": "stress-23-content-identity-bugfix",
+    "taskType": "bugfix",
+    "difficulty": "easy",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Change isEven to return the opposite result (swap even/odd logic).",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 2
+  },
+
+  {
+    "id": "stress-24-multi-file-integration",
+    "taskType": "feature",
+    "difficulty": "hard",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Create a new file src/string-utils.ts with trim, trimStart, trimEnd, and padStart functions. Export them from src/utils.ts. Then add tests in test/string-utils.test.ts.",
+    "expectedFiles": ["src/string-utils.ts", "src/utils.ts", "test/string-utils.test.ts"],
+    "minDiffLines": 20
+  },
+
+  {
+    "id": "stress-25-brittle-context-ambiguous",
+    "taskType": "bugfix",
+    "difficulty": "hard",
+    "repoPath": "/tmp/aedis-stress-fixture",
+    "prompt": "Fix the bug where capitalize('hello world') returns 'Hello' instead of 'Hello World'.",
+    "expectedFiles": ["src/utils.ts"],
+    "minDiffLines": 3
+  }
+]

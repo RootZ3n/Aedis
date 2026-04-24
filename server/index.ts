@@ -36,6 +36,7 @@ import { VerifierWorker } from "../workers/verifier.js";
 import { IntegratorWorker } from "../workers/integrator.js";
 import type { TrustProfile } from "../router/trust-router.js";
 
+import { costRoutes } from "./routes/cost.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { runRoutes } from "./routes/runs.js";
 import { workerRoutes } from "./routes/workers.js";
@@ -46,7 +47,10 @@ import { metricsRoutes } from "./routes/metrics.js";
 import { loquiRoutes } from "./routes/loqui.js";
 import { trustRoutes } from "./routes/trust.js";
 import { proveRoutes } from "./routes/prove.js";
+import { reliabilityRoutes } from "./routes/reliability.js";
 import { campaignRoutes } from "./routes/campaign.js";
+import { sessionRoutes } from "./routes/sessions.js";
+import { memoryRoutes } from "./routes/memory.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -375,15 +379,26 @@ export async function createServer(
   await server.register(taskRoutes, { prefix: "/tasks" });
   await server.register(runRoutes, { prefix: "/runs" });
   await server.register(workerRoutes, { prefix: "/workers" });
+  // External API layer — /api/* mirrors the internal routes for external consumers
+  // (Crucibulum, CLI tools) that expect the /api prefix convention.
+  await server.register(workerRoutes, { prefix: "/api/workers" });
+  await server.register(taskRoutes, { prefix: "/api/tasks" });
+  await server.register(sessionRoutes, { prefix: "/api/sessions" });
+  await server.register(runRoutes, { prefix: "/api/runs" });
+  await server.register(metricsRoutes, { prefix: "/api/metrics" });
   await server.register(healthRoutes);
   await server.register(configRoutes, { prefix: "/config" });
   await server.register(providerRoutes, { prefix: "/config/providers" });
   // Metrics + External API Layer v1 — read-only external surface.
+  await server.register(costRoutes, { prefix: "/cost" });
   await server.register(metricsRoutes, { prefix: "/metrics" });
   await server.register(loquiRoutes, { prefix: "/loqui" });
   await server.register(trustRoutes, { prefix: "/trust" });
   await server.register(proveRoutes, { prefix: "/prove" });
+  await server.register(reliabilityRoutes, { prefix: "/reliability" });
   await server.register(campaignRoutes, { prefix: "/campaign" });
+  await server.register(sessionRoutes, { prefix: "/sessions" });
+  await server.register(memoryRoutes, { prefix: "/memory" });
 
   // ─── Approval gate endpoints ──────────────────────────────────
 

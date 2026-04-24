@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aedis — Cost Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --abyss-0:#00030a;--abyss-1:#02061a;--abyss-2:#040d26;--abyss-3:#07173a;
+  --abyss-line:rgba(120,210,255,.14);--abyss-edge:rgba(160,220,255,.22);
+  --orange:#fb923c;--orange-hot:#ffb366;--orange-dim:rgba(251,146,60,.58);
+  --teal:#4df5c8;--teal-hot:#7bffdd;--teal-dim:rgba(77,245,200,.58);
+  --cyan:#6fd9ff;--cyan-hot:#a0e9ff;--violet:#b196ff;
+  --red:#ff5577;--amber:#ffcf6b;--good:#4df5c8;--gray:rgba(255,255,255,.55);
+  --ink:var(--orange);--ink-soft:rgba(251,146,60,.72);
+  --body:'Space Grotesk',sans-serif;--mono:'DM Mono',monospace;
+  --shadow-panel:0 24px 80px rgba(0,0,0,.72),0 0 0 1px rgba(20,40,80,.6);
+}
+html,body{
+  min-height:100%;
+  background:radial-gradient(ellipse 70% 55% at 50% 42%,transparent 24%,rgba(0,0,4,.82) 100%),radial-gradient(circle at 8% 12%,rgba(111,217,255,.16),transparent 34%),radial-gradient(circle at 92% 8%,rgba(77,245,200,.14),transparent 36%),linear-gradient(180deg,#020617 0%,#01030d 46%,#020818 100%);
+  color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased;
+}
+a{color:var(--cyan);text-decoration:none}
+a:hover{color:var(--teal)}
+.nav{background:rgba(4,10,24,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--abyss-line);padding:12px 24px;display:flex;gap:24px;align-items:center;position:sticky;top:0;z-index:100}
+.nav a{color:var(--ink-soft);font-size:14px;transition:color 200ms}
+.nav a:hover,.nav a.active{color:var(--orange)}
+.nav .brand{font-weight:700;font-size:18px;color:var(--orange);margin-right:auto}
+.panel{background:rgba(4,10,24,.72);border:1px solid rgba(20,40,80,.6);border-radius:16px;padding:20px 24px;box-shadow:var(--shadow-panel);margin:20px auto;max-width:1100px}
+.page-title{font-size:22px;font-weight:700;color:var(--orange);margin-bottom:4px}
+.page-sub{font-size:13px;color:var(--ink-soft);margin-bottom:20px}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+.kpi{border-radius:14px;background:rgba(111,217,255,.04);border:1px solid rgba(120,200,255,.08);padding:16px 18px}
+.kpi .label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim)}
+.kpi .value{font-family:var(--mono);font-size:28px;color:var(--teal);margin-top:6px;line-height:1}
+.kpi .sub{font-size:12px;color:var(--ink-soft);margin-top:4px}
+.chart-section{margin-top:8px}
+.chart-title{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:12px}
+.bar-chart{display:flex;align-items:flex-end;gap:3px;height:120px;padding:8px 0}
+.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.bar{width:100%;background:linear-gradient(180deg,var(--teal) 0%,var(--cyan) 100%);border-radius:3px 3px 0 0;min-height:2px;opacity:.8;transition:opacity 200ms}
+.bar:hover{opacity:1}
+.bar-label{font-family:var(--mono);font-size:9px;color:var(--ink-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;text-align:center}
+.bar-cost{font-family:var(--mono);font-size:10px;color:var(--ink-soft);text-align:center}
+.by-status{margin-top:20px}
+.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.status-card{border-radius:12px;background:rgba(4,10,24,.6);border:1px solid var(--abyss-line);padding:14px}
+.status-card .sc-label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
+.status-card .sc-count{font-family:var(--mono);font-size:22px;color:var(--teal);margin-top:4px}
+.status-card .sc-cost{font-size:12px;color:var(--ink-soft);margin-top:2px}
+.trend-table{margin-top:20px;width:100%;border-collapse:collapse}
+.trend-table th{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);text-align:left;padding:8px 12px;border-bottom:1px solid var(--abyss-line)}
+.trend-table td{font-family:var(--mono);font-size:13px;padding:10px 12px;border-bottom:1px solid rgba(120,210,255,.05);color:var(--ink-soft)}
+.trend-table tr:hover td{background:rgba(111,217,255,.04)}
+.trend-table .ok{color:var(--teal)}
+.trend-table .fail{color:var(--red)}
+.trend-table .partial{color:var(--amber)}
+.loading{font-family:var(--mono);color:var(--ink-dim);padding:40px;text-align:center}
+.error{color:var(--red);padding:20px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="brand">Aedis</a>
+  <a href="/">Loqui</a>
+  <a href="/ui/cost.html" class="active">Cost</a>
+  <a href="/ui/sessions.html">Sessions</a>
+  <a href="/ui/receipt.html">Receipts</a>
+  <a href="/ui/trust.html">Trust</a>
+</nav>
+
+<main class="panel" style="margin-top:12px">
+  <h1 class="page-title">Cost Dashboard</h1>
+  <p class="page-sub">Spend across all runs. Data sourced from persisted receipts.</p>
+
+  <div id="kpi-grid" class="kpi-grid"></div>
+
+  <div class="chart-section">
+    <div class="chart-title">Cost per Run — Last 50 Runs</div>
+    <div id="bar-chart" class="bar-chart"></div>
+  </div>
+
+  <div class="by-status">
+    <div class="chart-title">By Run Status</div>
+    <div id="status-grid" class="status-grid"></div>
+  </div>
+
+  <div class="chart-title" style="margin-top:24px">Run Cost History</div>
+  <table class="trend-table">
+    <thead><tr><th>Run ID</th><th>Status</th><th>Classification</th><th>Cost (USD)</th><th>Completed</th></tr></thead>
+    <tbody id="trend-tbody"></tbody>
+  </table>
+</main>
+
+<script>
+const API = "http://localhost:18796";
+
+async function load() {
+  try {
+    const [costData, trendData] = await Promise.all([
+      fetch(`${API}/cost`).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/cost/trend?limit=50`).then(r => r.ok ? r.json() : null),
+    ]);
+
+    if (!costData) { document.getElementById("kpi-grid").innerHTML = '<div class="error">Failed to load cost data</div>'; return; }
+
+    // KPIs
+    document.getElementById("kpi-grid").innerHTML = `
+      <div class="kpi"><div class="label">Total Cost</div><div class="value">$${costData.totalCostUsd?.toFixed(4) ?? "0.0000"}</div><div class="sub">across ${costData.runsAnalyzed ?? 0} runs</div></div>
+      <div class="kpi"><div class="label">Avg Cost / Run</div><div class="value">$${costData.avgCostPerRunUsd?.toFixed(4) ?? "0.0000"}</div><div class="sub">median: $${costData.medianCostUsd?.toFixed(4) ?? "0.0000"}</div></div>
+      <div class="kpi"><div class="label">Max Cost</div><div class="value">$${costData.maxCostUsd?.toFixed(4) ?? "0.0000"}</div><div class="sub">min: $${costData.minCostUsd?.toFixed(4) ?? "0.0000"}</div></div>
+      <div class="kpi"><div class="label">Runs Analyzed</div><div class="value">${costData.runsAnalyzed ?? 0}</div></div>
+    `;
+
+    // Bar chart
+    if (trendData?.trend?.length) {
+      const maxCost = Math.max(...trendData.trend.map(e => e.costUsd), 0.001);
+      const bars = trendData.trend.map((e, i) => {
+        const h = Math.max((e.costUsd / maxCost) * 100, 2);
+        const shortId = e.runId.slice(0, 6);
+        return `<div class="bar-wrap" title="${shortId}: $${e.costUsd.toFixed(4)}">
+          <div class="bar" style="height:${h}%;opacity:${0.4 + (i/trendData.trend.length)*0.6}"></div>
+          <div class="bar-label">${shortId}</div>
+        </div>`;
+      }).join("");
+      document.getElementById("bar-chart").innerHTML = bars;
+    } else {
+      document.getElementById("bar-chart").innerHTML = '<div class="loading">No run data yet.</div>';
+    }
+
+    // By status
+    const statusHtml = Object.entries(costData.byStatus ?? {}).map(([status, info]) =>
+      `<div class="status-card"><div class="sc-label">${status}</div><div class="sc-count">${info.count}</div><div class="sc-cost">$${info.totalCostUsd.toFixed(4)} total</div></div>`
+    ).join("");
+    document.getElementById("status-grid").innerHTML = statusHtml || '<div class="loading">No status data.</div>';
+
+    // Trend table
+    if (trendData?.trend?.length) {
+      const rows = trendData.trend.slice().reverse().map(e => {
+        const cls = e.status === "COMPLETE" || e.status === "VERIFIED_PASS" ? "ok" : e.status === "FAILED" || e.status === "VERIFIED_FAIL" ? "fail" : "partial";
+        return `<tr>
+          <td style="color:var(--cyan)">${e.runId.slice(0, 12)}</td>
+          <td class="${cls}">${e.status}</td>
+          <td>${e.classification ?? "—"}</td>
+          <td style="color:var(--teal)">$${e.costUsd.toFixed(4)}</td>
+          <td>${e.timestamp ? new Date(e.timestamp).toLocaleString() : "—"}</td>
+        </tr>`;
+      }).join("");
+      document.getElementById("trend-tbody").innerHTML = rows;
+    }
+  } catch(err) {
+    document.querySelector(".panel").innerHTML += `<div class="error">Load failed: ${err.message}</div>`;
+  }
+}
+
+load();
+</script>
+</body>
+</html>
