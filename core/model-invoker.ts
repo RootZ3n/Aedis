@@ -1,12 +1,6 @@
 /**
  * ModelInvoker — Unified model caller for all Aedis providers.
  *
- * OpenRouter hardening features added 2026-04-24:
- *   - Cross-run circuit breaker: persisted to .aedis/circuit-breaker-state.json
- *   - 429 / Retry-After handling with exponential backoff
- *   - Transient HTTP retry (502, 503, 504) with backoff
- *   - OpenRouter-specific headers (HTTP-Referer, X-Title)
- *
  * Reads API keys from process.env. Logs every call.
  *
  * Providers:
@@ -28,10 +22,6 @@
  *   and never retried within the same run. Other errors fall through to
  *   the next chain entry without blacklisting (e.g. transient HTTP errors
  *   on a different provider may still be worth a future attempt).
- *
- *   Circuit breaker state (cross-run) is checked before every call:
- *   providers that have failed >5 times in the last 15 minutes are skipped
- *   entirely until the cooling period expires.
  *
  *   After the caller-provided chain is exhausted, a final last-resort
  *   attempt is made against portum/qwen3.6-plus. Portum is the local
@@ -86,7 +76,7 @@ export interface FallbackInvokeResult extends InvokeResult {
   readonly attemptedProviders: readonly Provider[];
   /** Whether at least one provider was skipped due to a prior timeout in the same run. */
   readonly skippedDueToBlacklist: boolean;
-  /** Whether a circuit-breaker skip occurred. */
+  /** Whether a circuit-breaker skip occurred this run. */
   readonly skippedDueToCircuitBreaker: boolean;
 }
 
@@ -103,87 +93,79 @@ export interface RunInvocationContext {
   /** Number of confidence-based escalations performed in this run. */
   escalationCount: number;
   /** Providers skipped this run due to circuit breaker. */
-  circuitBreakerSkips: Set<Provider>;
+  readonly circuitBreakerSkips: Set<Provider>;
 }
 
 export function createRunInvocationContext(): RunInvocationContext {
   return { timedOutProviders: new Set<Provider>(), escalationCount: 0, circuitBreakerSkips: new Set<Provider>() };
 }
 
-// ─── Circuit Breaker ─────────────────────────────────────────────────
 
-const CIRCUIT_BREAKER_PATH = ".aedis/circuit-breaker-state.json";
+// ─── Circuit Breaker (cross-run, persisted) ──────────────────────────
 
-interface CircuitBreakerEntry {
-  failures: number;        // consecutive failures for this provider
-  lastFailure: number;     // unix ms timestamp of last failure
-}
+const CB_PATH = ".aedis/circuit-breaker-state.json";
 
-interface CircuitBreakerState {
-  providers: Record<string, CircuitBreakerEntry>;
-}
+interface CbEntry { failures: number; lastFailure: number; }
+interface CbState { providers: Record<string, CbEntry>; }
 
-const CB_MAX_FAILURES = 5;           // trips after this many consecutive failures
-const CB_COOLING_MS   = 15 * 60 * 1000; // 15-minute cooling period
-const CB_HALF_LIFE_MS = 5 * 60 * 1000;  // exponential decay window
+const CB_MAX = 5;
+const CB_COOLING_MS = 15 * 60 * 1000;
+const CB_HALF_LIFE_MS = 5 * 60 * 1000;
 
-function readCircuitBreaker(): CircuitBreakerState {
+function cbRead(): CbState {
   try {
-    const raw = Deno.readFileSync(CIRCUIT_BREAKER_PATH);
-    return JSON.parse(new TextDecoder().decode(raw)) as CircuitBreakerState;
-  } catch {
-    return { providers: {} };
-  }
+    return JSON.parse(String(require("fs").readFileSync(CB_PATH))) as CbState;
+  } catch { return { providers: {} }; }
+}
+function cbWrite(s: CbState): void {
+  const { writeFileSync, mkdirSync } = require("fs") as typeof import("fs");
+  try { mkdirSync(".aedis", { recursive: true }); } catch { /* exists */ }
+  writeFileSync(CB_PATH, JSON.stringify(s, null, 2));
+}
+function cbScore(e: CbEntry): number {
+  const age = Date.now() - e.lastFailure;
+  return age >= CB_COOLING_MS ? 1 : Math.pow(0.5, age / CB_HALF_LIFE_MS);
+}
+function cbOpen(p: Provider, s: CbState): boolean {
+  const e = s.providers[p];
+  if (!e) return false;
+  return e.failures * (1 - cbScore(e)) >= CB_MAX;
+}
+function cbFail(p: Provider, s: CbState): void {
+  const ex = s.providers[p];
+  if (ex) { ex.failures++; ex.lastFailure = Date.now(); }
+  else s.providers[p] = { failures: 1, lastFailure: Date.now() };
+  cbWrite(s);
+}
+function cbOk(p: Provider, s: CbState): void {
+  if (s.providers[p]) { delete s.providers[p]; cbWrite(s); }
 }
 
-function writeCircuitBreaker(state: CircuitBreakerState): void {
-  // Runs in Node.js (aiofs unavailable), use sync fs
-  const { writeFileSync, mkdirSync } = require("fs");
-  try { mkdirSync(".aedis", { recursive: true }); } catch { /* already exists */ }
-  writeFileSync(CIRCUIT_BREAKER_PATH, JSON.stringify(state, null, 2));
-}
+// ─── Retry / Backoff ────────────────────────────────────────────────
 
-/**
- * Decay function: each past failure "counts less" as time passes,
- * preventing a single bad window from blocking a provider forever.
- * Returns a score from 0 (fresh failure) to 1 (ancient/irrelevant).
- */
-function cbFailureScore(entry: CircuitBreakerEntry): number {
-  const age = Date.now() - entry.lastFailure;
-  if (age >= CB_COOLING_MS) return 1; // fully decayed, treat as recovered
-  return Math.pow(0.5, age / CB_HALF_LIFE_MS);
-}
+const RETRYABLE_HTTP = new Set([429, 502, 503, 504]);
+const RETRYABLE_NET = new Set(["ECONNRESET","ETIMEDOUT","ENETUNREACH","EHOSTUNREACH","ECONNREFUSED","EAGAIN","EPIPE"]);
+const DEF_MAX_RETRIES = 2;
+const DEF_BASE_DELAY = 1000;
+const DEF_MAX_DELAY = 32_000;
 
-function isProviderCircuitOpen(provider: Provider, state: CircuitBreakerState): boolean {
-  const entry = state.providers[provider];
-  if (!entry) return false;
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
-  // Decay-based scoring: multiply consecutive failures by time-decayed weight
-  const score = entry.failures * (1 - cbFailureScore(entry));
-  return score >= CB_MAX_FAILURES;
-}
-
-function recordProviderFailure(provider: Provider, state: CircuitBreakerState): void {
-  const existing = state.providers[provider];
-  if (existing) {
-    existing.failures += 1;
-    existing.lastFailure = Date.now();
-  } else {
-    state.providers[provider] = { failures: 1, lastFailure: Date.now() };
-  }
-  writeCircuitBreaker(state);
-}
-
-function recordProviderSuccess(provider: Provider, state: CircuitBreakerState): void {
-  // On success, reset failure count for this provider
-  if (state.providers[provider]) {
-    delete state.providers[provider];
-    writeCircuitBreaker(state);
-  }
+function retryDelay(attempt: number, retryAfterSec?: number): number {
+  if (retryAfterSec !== undefined) return Math.min(retryAfterSec * 1000, DEF_MAX_DELAY);
+  const exp = DEF_BASE_DELAY * Math.pow(2, attempt);
+  const jitter = exp * 0.2 * (Math.random() * 2 - 1);
+  return Math.min(exp + jitter, DEF_MAX_DELAY);
 }
 
 // ─── Last-resort fallback ────────────────────────────────────────────
 
+/**
+ * Universal last-resort entry appended after every caller-provided chain.
+ * Portum is the local OpenAI-compatible gateway running on port 18797 and
+ * has no API-key requirement, so it can be reached unconditionally as long
+ * as the local service is up.
+ */
 const PORTUM_LAST_RESORT: { provider: Provider; model: string } = {
   provider: "portum",
   model: "qwen3.6-plus",
@@ -194,26 +176,27 @@ const PORTUM_LAST_RESORT: { provider: Provider; model: string } = {
 const COST_PER_1K: Record<string, { input: number; output: number }> = {
   // Ollama — local, free
   "local":            { input: 0,      output: 0      },
-  "qwen3.5:4b":       { input: 0,      output: 0      },
-  "qwen3.5:9b":       { input: 0,      output: 0      },
+  "qwen3.5:4b":      { input: 0,      output: 0      },
+  "qwen3.5:9b":      { input: 0,      output: 0      },
   // ModelStudio
-  "qwen3.6-plus":     { input: 0.0008, output: 0.002  },
-  "glm-4":            { input: 0.001,  output: 0.002  },
+  "qwen3.6-plus":    { input: 0.0008, output: 0.002  },
+  "glm-4":           { input: 0.001,  output: 0.002  },
   // OpenRouter
-  "xiaomi/mimo-v2.5": { input: 0.001,  output: 0.002  },
+  "xiaomi/mimo-v2-pro": { input: 0.0005, output: 0.0015 },
+  "xiaomi/mimo-v2.5": { input: 0.001, output: 0.002 },
   "xiaomi/mimo-v2.5-pro": { input: 0.002, output: 0.004 },
   // Anthropic
-  "claude-opus-4-6":  { input: 0.015,  output: 0.075  },
-  "claude-sonnet-4-6": { input: 0.003, output: 0.015 },
+  "claude-opus-4-6":   { input: 0.015,  output: 0.075  },
+  "claude-sonnet-4-6": { input: 0.003,  output: 0.015  },
   // OpenAI
-  "gpt-4o":           { input: 0.0025, output: 0.01   },
-  "gpt-5.4":          { input: 0.005,  output: 0.015  },
+  "gpt-4o":          { input: 0.0025, output: 0.01   },
+  "gpt-5.4":         { input: 0.005,  output: 0.015  },
   // MiniMax
-  "minimax-coding":   { input: 0.0004, output: 0.0016 },
+  "minimax-coding":  { input: 0.0004, output: 0.0016 },
   // ZAI
-  "glm-5.1":          { input: 0.002,  output: 0.006  },
+  "glm-5.1":        { input: 0.002,  output: 0.006  },
   // GLM-5.1 via OpenRouter ($0.95/M in, $3.15/M out)
-  "z-ai/glm-5.1":     { input: 0.00095, output: 0.00315 },
+  "z-ai/glm-5.1":   { input: 0.00095, output: 0.00315 },
 };
 
 function estimateCost(model: string, tokensIn: number, tokensOut: number): number {
@@ -260,50 +243,16 @@ function logCall(entry: CallLogEntry): void {
   );
 }
 
-// ─── Retry / Backoff ────────────────────────────────────────────────
-
-/** HTTP status codes that represent transient errors — retry with backoff. */
-const RETRYABLE_HTTP_STATUS = new Set([429, 502, 503, 504]);
-
-/** Network errors that are transient and worth retrying. */
-const RETRYABLE_NETWORK_ERRORS = new Set([
-  "ECONNRESET", "ETIMEDOUT", "ENETUNREACH", "EHOSTUNREACH",
-  "ECONNREFUSED", "EAGAIN", "EPIPE",
-]);
-
-const DEFAULT_MAX_RETRIES = 2;
-const DEFAULT_BASE_DELAY_MS = 1000; // 1 second
-const DEFAULT_MAX_DELAY_MS = 32_000; // 32 seconds
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getRetryDelay(attempt: number, retryAfterSec?: number): number {
-  // If server sent Retry-After, use that directly (clamped to max)
-  if (retryAfterSec !== undefined) {
-    return Math.min(retryAfterSec * 1000, DEFAULT_MAX_DELAY_MS);
-  }
-  // Exponential backoff: 1s, 2s, 4s, ...
-  const exponential = DEFAULT_BASE_DELAY_MS * Math.pow(2, attempt);
-  // Add jitter (±20%) to avoid thundering herd
-  const jitter = exponential * 0.2 * (Math.random() * 2 - 1);
-  return Math.min(exponential + jitter, DEFAULT_MAX_DELAY_MS);
-}
-
 // ─── Main Entry Point ────────────────────────────────────────────────
 
 export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
   const { provider, model, prompt, systemPrompt, maxTokens } = config;
   const startMs = Date.now();
 
-  // ── Circuit breaker check ────────────────────────────────────────
-  const cbState = readCircuitBreaker();
-  if (isProviderCircuitOpen(provider, cbState)) {
-    throw new InvokerError(
-      `Circuit breaker OPEN for ${provider} — provider skipped (too many recent failures)`,
-      "circuit_breaker",
-    );
+  // Circuit breaker check (cross-run)
+  const cbState = cbRead();
+  if (cbOpen(provider, cbState)) {
+    throw new InvokerError(`Circuit breaker OPEN for ${provider} -- too many recent failures`, "circuit_breaker");
   }
 
   try {
@@ -327,8 +276,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         result = await invokeOpenAICompatible(
           "https://openrouter.ai/api/v1",
           requireEnv("OPENROUTER_API_KEY"),
-          model, prompt, systemPrompt, maxTokens,
-          true, // isOpenRouter
+          model, prompt, systemPrompt, maxTokens, true,
         );
         break;
       case "anthropic":
@@ -346,7 +294,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         break;
       case "minimax":
         result = await invokeOpenAICompatible(
-          process.env.MINIMAX_BASE_URL ?? "https://api.minimax.io/v1",
+          process.env.MINIMAX_BASE_URL ?? "https://api.minimax.chat/v1",
           requireEnv("MINIMAX_API_KEY"),
           model, prompt, systemPrompt, maxTokens,
         );
@@ -363,7 +311,6 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
           "https://openrouter.ai/api/v1",
           requireEnv("OPENROUTER_API_KEY"),
           "z-ai/glm-5.1", prompt, systemPrompt, maxTokens,
-          true, // isOpenRouter
         );
         break;
       case "glm-5.1-direct":
@@ -384,9 +331,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         throw new InvokerError(`Unknown provider "${provider}"`, "config");
     }
 
-    // ── Success: reset circuit breaker ─────────────────────────────
-    recordProviderSuccess(provider, cbState);
-
+    cbOk(provider, cbState);
     logCall({
       timestamp: new Date().toISOString(),
       provider, model,
@@ -401,12 +346,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const kind = err instanceof InvokerError ? err.kind : "unknown";
-
-    // ── Failure: record in circuit breaker ────────────────────────
-    if (kind !== "circuit_breaker") {
-      recordProviderFailure(provider, cbState);
-    }
-
+    if (kind !== "circuit_breaker") cbFail(provider, cbState);
     logCall({
       timestamp: new Date().toISOString(),
       provider, model,
@@ -423,18 +363,21 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
  * Invoke a model with a fallback chain.
  *
  * Walks `chain` in order. For each entry:
- *   - Check circuit breaker (cross-run) — skip if open, record skip in ctx.circuitBreakerSkips
  *   - If the provider is in `runContext.timedOutProviders`, skip it and log.
  *   - Otherwise call invokeModel(). On success, return immediately.
  *   - On InvokerError of kind "timeout": add provider to blacklist, continue.
- *   - On InvokerError of kind "circuit_breaker": continue to next entry.
  *   - On any other error: continue to next entry without blacklisting.
  *
  * After the caller-provided chain is fully exhausted, a final last-resort
- * attempt is made against portum/qwen3.6-plus. The last-resort is skipped
- * if portum was already in the chain or is blacklisted/tripped.
+ * attempt is made against portum/qwen3.6-plus (the local OpenAI-compatible
+ * gateway). The last-resort is skipped if portum was already in the chain
+ * (no point in double-attempting) or if portum is in the blacklist
+ * (timed out earlier in this run). If every entry — including the
+ * last-resort — fails, throws an aggregated InvokerError.
  *
- * The runContext is mutated in place.
+ * The runContext is mutated in place — callers can pass the same context
+ * across multiple invokeModelWithFallback calls within a single run, and
+ * the timeout blacklist accumulates across the whole run.
  */
 export async function invokeModelWithFallback(
   chain: readonly InvokeConfig[],
@@ -449,7 +392,7 @@ export async function invokeModelWithFallback(
   const errors: string[] = [];
   let skippedDueToBlacklist = false;
   let skippedDueToCircuitBreaker = false;
-  const cbState = readCircuitBreaker();
+  const cbState = cbRead();
 
   for (const cfg of chain) {
     if (ctx.timedOutProviders.has(cfg.provider)) {
@@ -459,10 +402,9 @@ export async function invokeModelWithFallback(
       skippedDueToBlacklist = true;
       continue;
     }
-
-    if (isProviderCircuitOpen(cfg.provider, cbState)) {
+    if (cbOpen(cfg.provider, cbState)) {
       console.warn(
-        `[model-invoker] fallback: skipping ${cfg.provider}/${cfg.model} — circuit breaker is OPEN (too many recent failures)`
+        `[model-invoker] fallback: skipping ${cfg.provider}/${cfg.model} -- circuit breaker OPEN`
       );
       ctx.circuitBreakerSkips.add(cfg.provider);
       skippedDueToCircuitBreaker = true;
@@ -493,29 +435,37 @@ export async function invokeModelWithFallback(
           `[model-invoker] fallback: ${cfg.provider}/${cfg.model} TIMED OUT — blacklisting provider for the rest of this run`
         );
         ctx.timedOutProviders.add(cfg.provider);
-      } else if (kind === "circuit_breaker") {
-        console.warn(
-          `[model-invoker] fallback: ${cfg.provider}/${cfg.model} circuit breaker open — skipping`
-        );
-        ctx.circuitBreakerSkips.add(cfg.provider);
-        skippedDueToCircuitBreaker = true;
       } else {
         console.warn(
           `[model-invoker] fallback: ${cfg.provider}/${cfg.model} failed (${kind}) — trying next in chain`
         );
       }
+      // Continue to next chain entry
     }
   }
 
+  // Snapshot how many of the original chain entries were tried vs. skipped
+  // BEFORE we add Portum to attemptedProviders. The error message below
+  // reports both numbers, and we don't want Portum's last-resort entry to
+  // skew the chain-skip count.
   const chainEntriesAttempted = attemptedProviders.length;
   const chainEntriesSkipped = chain.length - chainEntriesAttempted;
 
-  // ─── Last resort: Portum ────────────────────────────────────────
+  // ─── Last resort: Portum ──────────────────────────────────────────
+  // Portum is the local OpenAI-compatible gateway at localhost:18797 and
+  // requires no API key, so it can be reached unconditionally as long as
+  // the local service is up. We try it once after the caller's chain is
+  // exhausted — but only if Portum wasn't already in the chain (avoid
+  // double-attempting) and isn't blacklisted from a prior timeout.
   const portumInChain = chain.some((cfg) => cfg.provider === PORTUM_LAST_RESORT.provider);
   const portumBlacklisted = ctx.timedOutProviders.has(PORTUM_LAST_RESORT.provider);
-  const portumCircuitOpen = isProviderCircuitOpen(PORTUM_LAST_RESORT.provider, cbState);
+  const portumCircuitOpen = cbOpen(PORTUM_LAST_RESORT.provider, cbState);
 
   if (!portumInChain && !portumBlacklisted && !portumCircuitOpen) {
+    // Inherit prompt/systemPrompt/maxTokens from the most recent chain
+    // entry — in current usage every chain entry shares the same prompt,
+    // and the last entry is the most recently constructed so it tends to
+    // reflect any per-run adjustments.
     const template = chain[chain.length - 1]!;
     const portumCfg: InvokeConfig = {
       provider: PORTUM_LAST_RESORT.provider,
@@ -550,17 +500,24 @@ export async function invokeModelWithFallback(
       if (kind === "timeout") {
         ctx.timedOutProviders.add(PORTUM_LAST_RESORT.provider);
       }
-      console.warn(`[model-invoker] fallback: portum last-resort failed (${kind}) — giving up`);
+      console.warn(
+        `[model-invoker] fallback: portum last-resort failed (${kind}) — giving up`
+      );
     }
+  } else if (portumInChain) {
+    console.warn(
+      "[model-invoker] fallback: chain exhausted — portum was already in caller chain, skipping last-resort"
+    );
   } else {
-    if (portumInChain) console.warn("[model-invoker] fallback: chain exhausted — portum was already in caller chain, skipping last-resort");
-    else if (portumBlacklisted) console.warn("[model-invoker] fallback: chain exhausted — portum is blacklisted (timed out earlier in this run), skipping last-resort");
-    else if (portumCircuitOpen) console.warn("[model-invoker] fallback: chain exhausted — portum circuit breaker is OPEN, skipping last-resort");
-    skippedDueToCircuitBreaker = true;
+    // portum is blacklisted from an earlier timeout
+    console.warn(
+      "[model-invoker] fallback: chain exhausted — portum is blacklisted (timed out earlier in this run), skipping last-resort"
+    );
+    skippedDueToBlacklist = true;
   }
 
   throw new InvokerError(
-    `All fallback providers failed (${chainEntriesAttempted} chain entries attempted, ${chainEntriesSkipped} skipped via blacklist/circuit, plus portum last-resort): ${errors.join(" | ")}`,
+    `All fallback providers failed (${chainEntriesAttempted} chain entries attempted, ${chainEntriesSkipped} skipped via blacklist, plus portum last-resort): ${errors.join(" | ")}`,
     "unknown",
   );
 }
@@ -620,25 +577,15 @@ async function invokeOpenAICompatible(
   prompt: string,
   systemPrompt?: string,
   maxTokens?: number,
-  isOpenRouter: boolean = false,
+  isOpenRouter = false,
 ): Promise<InvokeResult> {
   const messages: Array<{ role: string; content: string }> = [];
   if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
   messages.push({ role: "user", content: prompt });
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-
-  if (apiKey) {
-    headers.Authorization = `Bearer ${apiKey}`;
-  }
-
-  // OpenRouter-specific headers — helps with quota tracking and reduces 429s
-  if (isOpenRouter) {
-    headers["HTTP-Referer"] = "https://squidley.ai";
-    headers["X-Title"] = "Squidley-Aedis";
-  }
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  if (isOpenRouter) { headers["HTTP-Referer"] = "https://squidley.ai"; headers["X-Title"] = "Squidley-Aedis"; }
 
   const res = await fetchWithRetry(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -722,99 +669,49 @@ function requireEnv(name: string): string {
 }
 
 async function fetchWithRetry(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number = 300_000,
-  maxRetries: number = DEFAULT_MAX_RETRIES,
+  url: string, init: RequestInit, timeoutMs = 300_000, maxRetries = DEF_MAX_RETRIES,
 ): Promise<Response> {
-  const controller = new AbortController();
-  let lastError: Error | null = null;
-
+  const ctrl = new AbortController();
+  let lastErr: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
-
-      // ── Success ──────────────────────────────────────────────
+      const res = await fetch(url, { ...init, signal: ctrl.signal });
       clearTimeout(timer);
-
-      if (response.ok) {
-        return response;
-      }
-
-      // ── HTTP error — decide if retryable ──────────────────────
-      const status = response.status;
-
-      if (!RETRYABLE_HTTP_STATUS.has(status)) {
-        // Non-retryable HTTP error (400, 401, 403, 404, 500, 501, etc.) — return as-is
-        return response;
-      }
-
-      // ── Retryable HTTP error (429, 502, 503, 504) ─────────────
+      if (res.ok) return res;
+      if (!RETRYABLE_HTTP.has(res.status)) return res;
       let retryAfterSec: number | undefined;
-
-      // Read Retry-After header if present
-      const retryAfter = response.headers.get("Retry-After");
-      if (retryAfter) {
-        const parsed = parseInt(retryAfter, 10);
-        if (!isNaN(parsed)) retryAfterSec = parsed;
+      const ra = res.headers.get("Retry-After");
+      if (ra) {
+        const p = parseInt(ra, 10);
+        if (!isNaN(p)) retryAfterSec = p;
         else {
-          // Could be a HTTP-date (e.g. "Wed, 21 Oct 2025 07:28:00 GMT") — treat as seconds from now
-          const httpDate = new Date(retryAfter).getTime();
+          const httpDate = new Date(ra).getTime();
           if (!isNaN(httpDate)) retryAfterSec = Math.max(0, Math.floor((httpDate - Date.now()) / 1000));
         }
       }
-
-      const delay = getRetryDelay(attempt, retryAfterSec);
-
+      const delay = retryDelay(attempt, retryAfterSec);
       if (attempt < maxRetries) {
-        console.warn(
-          `[model-invoker] fetchWithRetry: ${url} returned ${status} — retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries})${retryAfterSec !== undefined ? ` (Retry-After: ${retryAfterSec}s)` : ""}`
-        );
+        console.warn(`[model-invoker] fetchWithRetry: ${url} HTTP ${res.status} -- retry in ${Math.round(delay)}ms (attempt ${attempt+1}/${maxRetries})${retryAfterSec !== undefined ? ` (Retry-After: ${retryAfterSec}s)` : ""}`);
         await sleep(delay);
         continue;
-      } else {
-        // Exhausted retries — return the last response (will become an error in caller)
-        return response;
       }
-
+      return res;
     } catch (err: any) {
       clearTimeout(timer);
-      lastError = err;
-
-      if (err.name === "AbortError") {
-        throw new InvokerError(`Request to ${url} timed out after ${timeoutMs}ms`, "timeout");
-      }
-
-      // Network error — check if it's retryable
-      const isRetryable =
-        RETRYABLE_NETWORK_ERRORS.has(err.code) ||
-        (err.message && (
-          err.message.includes("ECONNRESET") ||
-          err.message.includes("ETIMEDOUT") ||
-          err.message.includes("ENETUNREACH") ||
-          err.message.includes("EHOSTUNREACH") ||
-          err.message.includes("ECONNREFUSED")
-        ));
-
-      if (!isRetryable || attempt >= maxRetries) {
-        throw new InvokerError(`Network error calling ${url}: ${err.message ?? err}`, "network");
-      }
-
-      const delay = getRetryDelay(attempt);
-      console.warn(
-        `[model-invoker] fetchWithRetry: ${url} network error (${err.code ?? err.message}) — retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries})`
-      );
+      lastErr = err;
+      if (err.name === "AbortError") throw new InvokerError(`Request to ${url} timed out after ${timeoutMs}ms`, "timeout");
+      const isRetry = RETRYABLE_NET.has(err.code) || (err.message && (err.message.includes("ECONNRESET") || err.message.includes("ETIMEDOUT") || err.message.includes("ENETUNREACH") || err.message.includes("ECONNREFUSED")));
+      if (!isRetry || attempt >= maxRetries) throw new InvokerError(`Network error calling ${url}: ${err.message ?? err}`, "network");
+      const delay = retryDelay(attempt);
+      console.warn(`[model-invoker] fetchWithRetry: ${url} network error (${err.code ?? err.message}) -- retry in ${Math.round(delay)}ms (attempt ${attempt+1}/${maxRetries})`);
       await sleep(delay);
     }
   }
-
-  // Should not reach here, but TypeScript doesn't know that
-  throw lastError ?? new InvokerError(`fetchWithRetry exhausted all attempts for ${url}`, "network");
+  throw lastErr ?? new InvokerError(`fetchWithRetry exhausted for ${url}`, "network");
 }
 
-// ─── Confidence-Based Escalation ─────────────────────────────────────
+// ─── Confidence-Based Escalation ────────────────────────────────────
 
 export interface EscalationResult {
   /** Whether an escalation was performed. */
@@ -829,11 +726,6 @@ export interface EscalationResult {
   readonly reason: string;
 }
 
-/**
- * Check a builder result's confidence and escalate to a better model if
- * confidence is below the threshold. Capped at 1 escalation per run to
- * prevent cost runaway.
- */
 export async function escalateOnLowConfidence(
   confidence: number,
   config: InvokeConfig,
@@ -841,23 +733,26 @@ export async function escalateOnLowConfidence(
   threshold: number = 0.6,
 ): Promise<EscalationResult> {
   if (confidence >= threshold) {
-    return {
-      escalated: false,
-      result: null,
-      escalationProvider: null,
-      escalationModel: null,
-      reason: `confidence ${(confidence * 100).toFixed(0)}% >= ${(threshold * 100).toFixed(0)}% threshold — no escalation needed`,
-    };
+    return { escalated: false, result: null, escalationProvider: null, escalationModel: null,
+      reason: `confidence ${(confidence*100).toFixed(0)}% >= ${(threshold*100).toFixed(0)}% -- no escalation` };
   }
-
   if (runContext.escalationCount >= 1) {
-    console.log(
-      `[model-invoker] low confidence (${(confidence * 100).toFixed(0)}%) but escalation cap reached (${runContext.escalationCount}/1) — skipping retry`,
-    );
-    return {
-      escalated: false,
-      result: null,
-      escalationProvider
+    return { escalated: false, result: null, escalationProvider: null, escalationModel: null,
+      reason: `low confidence but escalation cap (1 per run) already reached` };
+  }
+  console.log(`[model-invoker] low confidence (${(confidence*100).toFixed(0)}%) -- escalating to claude-sonnet-4-6`);
+  runContext.escalationCount += 1;
+  try {
+    const result = await invokeModel({ ...config, provider: "anthropic", model: "claude-sonnet-4-6" });
+    return { escalated: true, result, escalationProvider: "anthropic", escalationModel: "claude-sonnet-4-6",
+      reason: `escalated from ${(confidence*100).toFixed(0)}% confidence` };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { escalated: true, result: null, escalationProvider: "anthropic", escalationModel: "claude-sonnet-4-6",
+      reason: `escalation failed: ${msg}` };
+  }
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────
 
 export type InvokerErrorKind = "timeout" | "http" | "network" | "config" | "unknown" | "circuit_breaker";
