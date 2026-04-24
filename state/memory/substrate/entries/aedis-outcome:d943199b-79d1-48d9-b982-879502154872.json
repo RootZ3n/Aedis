@@ -1,0 +1,71 @@
+{
+  "id": "aedis-outcome:d943199b-79d1-48d9-b982-879502154872",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add // MIMOV25_TEST at the top of workers/base.ts",
+  "summary": "PASS-WITH-WARNINGS — 7/7 stages passed, confidence 98%, 0 blockers, checks typecheck:pass, tests:fail, typecheck:pass, typecheck:pass, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.90 (keywords: mimov25_test, top, workers, base)\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.90 (keywords: mimov25_test, top, workers, base)\",\n        \"files\": [\n          \"workers/base.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.90 (keywords: mimov25_test, top, workers, base)\",\n        \"files\": [\n          \"workers/base.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] '}' expected.\",\n        \"files\": [\n          \"core/model-invoker.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.90 (keywords: mimov25_test, top, workers, base)\",\n        \"files\": [\n          \"workers/base.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.90 (keywords: mimov25_test, top, workers, base)\",\n        \"files\": [\n          \"workers/base.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] '}' expected.\",\n        \"files\": [\n          \"core/model-invoker.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 4 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "module:workers",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-24T16:23:50.602Z",
+  "updatedAt": "2026-04-24T16:23:50.613Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "core/blast-radius.ts",
+    "workers/base.ts",
+    "workers/builder.ts",
+    "workers/critic.ts",
+    "workers/integrator.ts",
+    "workers/scout.ts",
+    "workers/verifier.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d943199b-79d1-48d9-b982-879502154872",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "e307a30d-54fe-48e0-b334-5bdf09c86a4b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "d7eda4e69c2fbd92b6b626ff1a4235555828e11e",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "f0fccefa-9e59-4511-9e46-f9eb50675270",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:d943199b-79d1-48d9-b982-879502154872",
+    "aedis-task:d943199b-79d1-48d9-b982-879502154872"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d943199b-79d1-48d9-b982-879502154872"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:d943199b-79d1-48d9-b982-879502154872"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

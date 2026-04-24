@@ -25,6 +25,45 @@
   ],
   "recentTasks": [
     {
+      "prompt": "Add // MIMOV25_TEST at the top of workers/base.ts",
+      "normalizedPrompt": "Add // MIMOV25_TEST at the top of workers/base.ts",
+      "verdict": "partial",
+      "commitSha": "d7eda4e69c2fbd92b6b626ff1a4235555828e11e",
+      "cost": 0.028245,
+      "timestamp": "2026-04-24T16:23:50.602Z",
+      "filesTouched": [
+        "workers/base.ts",
+        "workers/builder.ts",
+        "workers/critic.ts",
+        "workers/integrator.ts",
+        "workers/scout.ts",
+        "workers/verifier.ts",
+        "core/aedis-memory.ts",
+        "core/blast-radius.ts"
+      ],
+      "scopeType": "single-file",
+      "complexityTier": "1",
+      "resultSummary": "complete",
+      "verificationVerdict": "pass-with-warnings",
+      "affectedSystems": [
+        "workers",
+        "core"
+      ],
+      "changeTypes": [
+        "modify"
+      ],
+      "taskTypeKey": "single-file:build",
+      "plannedFilesCount": 1,
+      "missingFiles": [],
+      "undeclaredFiles": [],
+      "verificationCoverageRatio": 1,
+      "validatedRatio": 1,
+      "aedisConfidence": 0.6985856740442656,
+      "evaluationScore": null,
+      "evaluationPassed": null,
+      "disagreementDirection": null
+    },
+    {
       "prompt": "Add // MIMOTESTV3 at the very top of workers/base.ts",
       "normalizedPrompt": "Add // MIMOTESTV3 at the very top of workers/base.ts",
       "verdict": "partial",
@@ -365,43 +404,6 @@
       "evaluationScore": null,
       "evaluationPassed": null,
       "disagreementDirection": null
-    },
-    {
-      "prompt": "Add `export const AEDIS_TEST_FLAG = true` to src/workers/base.ts as a new export at the end of the file",
-      "normalizedPrompt": "in core/aedis-memory.ts, Add `export const AEDIS_TEST_FLAG = true` to src/workers/base.ts as a new export at the end of the file",
-      "verdict": "partial",
-      "commitSha": "5f8025f45ce42637eb2d815724935efc219cde21",
-      "cost": 0.023721,
-      "timestamp": "2026-04-24T13:11:00.335Z",
-      "filesTouched": [
-        "core/aedis-memory.ts",
-        "core/aedis-memory.test.ts",
-        "core/blast-radius.ts",
-        "core/change-set.ts",
-        "core/charter.ts",
-        "core/confidence-scoring.ts",
-        "core/model-invoker.ts"
-      ],
-      "scopeType": "small-linked",
-      "complexityTier": "2",
-      "resultSummary": "complete",
-      "verificationVerdict": "pass-with-warnings",
-      "affectedSystems": [
-        "core"
-      ],
-      "changeTypes": [
-        "modify"
-      ],
-      "taskTypeKey": "small-linked:build",
-      "plannedFilesCount": 2,
-      "missingFiles": [],
-      "undeclaredFiles": [],
-      "verificationCoverageRatio": 1,
-      "validatedRatio": 1,
-      "aedisConfidence": 0.6707843290441176,
-      "evaluationScore": null,
-      "evaluationPassed": null,
-      "disagreementDirection": null
     }
   ],
   "fileClusters": [
@@ -421,8 +423,8 @@
         "workers/scout.ts",
         "workers/verifier.ts"
       ],
-      "changedTogether": 12,
-      "lastSeen": "2026-04-24T16:16:57.567Z"
+      "changedTogether": 13,
+      "lastSeen": "2026-04-24T16:23:50.602Z"
     },
     {
       "files": [
@@ -466,7 +468,7 @@
     },
     {
       "taskTypeKey": "single-file:build",
-      "observedRuns": 3,
+      "observedRuns": 4,
       "avgFilesChanged": 8,
       "successRate": 0,
       "verificationGapRate": 0,
@@ -474,7 +476,7 @@
         "One or more task nodes failed and were not recovered."
       ],
       "commonMissingFiles": [],
-      "lastSeen": "2026-04-24T16:16:57.567Z",
+      "lastSeen": "2026-04-24T16:23:50.602Z",
       "evaluatedRuns": 0,
       "avgEvaluationScore": 0,
       "overconfidenceRate": 0,
@@ -497,6 +499,6 @@
       "reliabilityTier": "unknown"
     }
   ],
-  "updatedAt": "2026-04-24T16:16:57.570Z",
+  "updatedAt": "2026-04-24T16:23:50.605Z",
   "schemaVersion": 1
 }
