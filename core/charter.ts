@@ -206,6 +206,23 @@ export class CharterGenerator {
   }
 
   private extractTargets(request: string): string[] {
+    // Strip double-quoted content before scanning. A quoted region in
+    // a user prompt is almost always a literal value the user wants
+    // Aedis to insert verbatim — most often a comment line, a string
+    // constant, or a docstring — NOT a list of files to edit. Run
+    // d3524769 (commit 5838aad on absent-pianist, since reverted) hit
+    // this exact trap: the prompt
+    //   `add a single-line trailing comment: "# See README.md for usage details."`
+    // had `README.md` extracted as a build target because it sat
+    // inside the quoted comment text. The planner then expanded the
+    // intent to two files and produced a 4-wave decomposition for
+    // what should have been a single-file edit.
+    //
+    // Single quotes are deliberately NOT stripped — they show up too
+    // often as natural-language apostrophes ("Aedis's", "doesn't") to
+    // strip safely. Backtick fences are also kept because developers
+    // commonly use them to highlight a real target like `core/foo.ts`.
+    const sanitized = request.replace(/"[^"]*"/g, "");
     // Supported file extensions — widen beyond TS/JS so the charter can
     // pick up targets in Python projects, Godot games, and the other
     // repos Zen actually drives Aedis on. Keep the list explicit so a
@@ -215,7 +232,7 @@ export class CharterGenerator {
     // not .ts; "scenes/main.tscn" must match .tscn; "config.json" must
     // match .json not .js). \b at the end prevents runaway matches into
     // words that happen to start with a letter.
-    const filePatterns = request.match(
+    const filePatterns = sanitized.match(
       /[\w\-./]+\.(?:gdshader|svelte|scala|swift|tscn|tres|yaml|json|toml|html|scss|sass|less|pyi|mjs|cjs|tsx|jsx|cpp|hpp|php|bash|vue|sh|ts|js|md|yml|py|rs|go|cs|rb|gd|cc|lua|c|h|kt|java)\b/g,
     );
     // Directory/module patterns — include common non-TS layouts too
@@ -223,11 +240,11 @@ export class CharterGenerator {
     // `src/<identifier>` paths (no trailing slash) like `src/utils` or
     // `src/email` which are common in prompts but missed by the slash-only
     // pattern when the identifier isn't followed by another path segment.
-    const dirPatterns = request.match(
+    const dirPatterns = sanitized.match(
       /(?:src|lib|core|modules|apps|workers|router|scripts|scenes|assets|utils|handlers|routes|services|models|views|templates|tests?|spec)\/[\w\-./]*/g,
     );
     // Bare src/ paths: src/utils, src/email.ts (src/ followed by identifier without trailing /)
-    const bareSrcPatterns = request.match(/\bsrc\/[\w.-]+/g) ?? [];
+    const bareSrcPatterns = sanitized.match(/\bsrc\/[\w.-]+/g) ?? [];
     const normalizeTarget = (target: string): string => {
       const trimmed = target.trim();
       if (!trimmed) return "";
