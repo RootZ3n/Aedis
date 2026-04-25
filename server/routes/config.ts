@@ -76,14 +76,23 @@ export interface ModelConfig {
 //
 // Critic default change history:
 //   - was: qwen3.5:9b / ollama
-//   - now: claude-sonnet-4-6 / anthropic (with ollama/qwen3.5:9b as the
-//          worker-level fallback) — Critic gates the pipeline so a stronger
-//          model here pays for itself by catching issues before Verify.
+//   - was: claude-sonnet-4-6 / anthropic (with ollama/qwen3.5:9b as the
+//          worker-level fallback) — Critic gates the pipeline so a
+//          stronger model here was thought to pay for itself
+//   - now: qwen3.5:9b / ollama (back to local-cheap default — the
+//          Anthropic-primary default violated the no-Anthropic-hot-path
+//          doctrine documented in DOCTRINE.md and silently routed
+//          every empty-config installation to a paid provider for the
+//          Critic role. Per-repo `.aedis/model-config.json` can still
+//          override this with a stronger model when explicitly chosen.)
 
 const DEFAULT_MODEL_CONFIG: ModelConfig = {
   scout: { model: "local", provider: "local" },
   builder: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
-  critic: { model: "claude-sonnet-4-6", provider: "anthropic" },
+  // No Anthropic in the hot path — see DOCTRINE.md. Per-repo
+  // `.aedis/model-config.json` is authoritative; this is only the
+  // empty-config fallback.
+  critic: { model: "qwen3.5:9b", provider: "ollama" },
   verifier: { model: "local", provider: "local" },
   integrator: { model: "glm-5.1", provider: "zai" },
   escalation: { model: "glm-5.1", provider: "zai" },

@@ -54,11 +54,41 @@ test("loadModelConfig falls back to defaults when no config file exists (fallbac
   const projectRoot = mkdtempSync(join(tmpdir(), "aedis-config-test-"));
   try {
     const config = loadModelConfig(projectRoot);
-    // Defaults from server/routes/config.ts DEFAULT_MODEL_CONFIG
+    // Defaults from server/routes/config.ts DEFAULT_MODEL_CONFIG.
+    // Critic must NOT default to Anthropic — that would violate the
+    // no-Anthropic-hot-path doctrine on every empty-config install.
     assert.equal(config.builder.provider, "openrouter");
-    assert.equal(config.critic.provider, "anthropic");
+    assert.equal(config.critic.provider, "ollama");
+    assert.equal(config.critic.model, "qwen3.5:9b");
     assert.equal(config.integrator.model, "glm-5.1");
   } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("DEFAULT_MODEL_CONFIG (the empty-config fallback) does not violate the no-Anthropic-hot-path doctrine", () => {
+  // Regression lock-in: the default config was previously routing
+  // Critic to claude-sonnet-4-6 / anthropic, which silently put every
+  // empty-config installation on the paid Anthropic path. The fix
+  // moved Critic to ollama/qwen3.5:9b. This test asserts the default
+  // never re-introduces Anthropic in builder/critic/integrator.
+  const prev = process.env.AEDIS_ALLOW_ANTHROPIC;
+  delete process.env.AEDIS_ALLOW_ANTHROPIC;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-default-doctrine-"));
+  _resetDoctrineWarningCache();
+  try {
+    // Loading from a project root with no .aedis/model-config.json
+    // resolves to the DEFAULT_MODEL_CONFIG fallback, which is exactly
+    // what the doctrine validator should clear.
+    const config = loadModelConfig(projectRoot);
+    const violations = checkAnthropicHotPathDoctrine(config);
+    assert.deepEqual(
+      violations,
+      [],
+      `default config introduced Anthropic in hot-path roles: ${JSON.stringify(violations)}`,
+    );
+  } finally {
+    if (prev !== undefined) process.env.AEDIS_ALLOW_ANTHROPIC = prev;
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });

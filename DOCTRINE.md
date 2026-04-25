@@ -164,12 +164,13 @@ Builder model defaults intentionally do *not* point at Anthropic. The doctrine i
 ### Critic
 
 - **Resolution order:** `.aedis/model-config.json` → `critic` → constructor fallback
+- **`DEFAULT_MODEL_CONFIG.critic` (empty-config fallback):** `qwen3.5:9b` on local Ollama
 - **Constructor default:** `qwen3.5:9b` on local Ollama (cheap, no API key, no rate limit)
 - **Real Aedis-on-Aedis config:** `xiaomi/mimo-v2.5` on OpenRouter (overrides the constructor default)
 
 The Critic gates the pipeline — its verdict decides whether work reaches Verify and Apply, or gets sent back to the Builder for rework. The active config is the source of truth; the constructor default exists only for environments without a `.aedis/model-config.json`.
 
-> **Known doctrine inconsistency (2026-04-25):** `DEFAULT_MODEL_CONFIG.critic` in `server/routes/config.ts` still resolves to `claude-sonnet-4-6 / anthropic` when no `.aedis/model-config.json` is present. The Phase 3 hot-path validator (`checkAnthropicHotPathDoctrine`) emits a one-time warning at load time when this resolves into a build. The default should be retired in a follow-up; for now, every active deployment overrides it via `.aedis/model-config.json`.
+The `DEFAULT_MODEL_CONFIG.critic` value was previously `claude-sonnet-4-6 / anthropic`, which silently routed every empty-config installation onto the paid Anthropic path — a no-Anthropic-hot-path doctrine violation. As of 2026-04-25 the default is `qwen3.5:9b / ollama`, matching the constructor default. A regression test in `server/routes/config.test.ts` asserts that `DEFAULT_MODEL_CONFIG` itself never re-introduces Anthropic in builder/critic/integrator.
 
 ### Other Roles
 
