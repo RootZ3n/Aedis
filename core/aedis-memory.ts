@@ -9,7 +9,7 @@ import type { RunState } from "./runstate.js";
 import type { FileChange, WorkerResult } from "../workers/base.js";
 import type { VerificationReceipt } from "./verification-pipeline.js";
 import type { MergeDecision } from "./merge-gate.js";
-import type { RepairResult } from "./repair-pass.js";
+import type { RepairAuditResult } from "./repair-audit-pass.js";
 
 type MemoryPrimitive = string | number | boolean | null;
 type MemoryValue = MemoryPrimitive | MemoryValue[] | { [key: string]: MemoryValue };
@@ -111,7 +111,13 @@ export interface PersistRunMemoryInput {
   workerResults: readonly WorkerResult[];
   verificationReceipt: VerificationReceipt | null;
   mergeDecision: MergeDecision | null;
-  repairResult: RepairResult | null;
+  /**
+   * Audit-only structural findings from repair-audit-pass. Carries
+   * advisory information about the change-set; never represents a
+   * "repair was applied" claim. Null when the audit did not run
+   * (e.g. single-file changes).
+   */
+  repairAudit: RepairAuditResult | null;
   commitSha: string | null;
 }
 
@@ -201,7 +207,7 @@ export class AedisMemoryAdapter {
       ...input.run.filesTouched.map((touch) => touch.filePath),
     ]);
     const clusterFiles = await this.resolveClusterFiles(input.projectRoot, input.projectMemory, filesTouched);
-    const suggestions = suggestFollowups(input.receipt, input.mergeDecision, input.verificationReceipt, input.repairResult, filesTouched, clusterFiles);
+    const suggestions = suggestFollowups(input.receipt, input.mergeDecision, input.verificationReceipt, input.repairAudit, filesTouched, clusterFiles);
     const entries = buildRunMemoryEntries({
       ...input,
       repoId,
@@ -313,7 +319,7 @@ function buildRunMemoryEntries(input: PersistRunMemoryInput & {
         run: input.run,
         verificationReceipt: input.verificationReceipt,
         mergeDecision: input.mergeDecision,
-        repairResult: input.repairResult,
+        repairAudit: input.repairAudit,
       }, null, 2),
       tags: uniqueStrings([
         "aedis-run",
@@ -382,7 +388,7 @@ function buildRunMemoryEntries(input: PersistRunMemoryInput & {
       raw: JSON.stringify({
         issues: collectIssueMessages(input.workerResults),
         mergeDecision: input.mergeDecision,
-        repairResult: input.repairResult,
+        repairAudit: input.repairAudit,
       }, null, 2),
       tags: uniqueStrings([
         input.receipt.verdict === "success" ? "success-pattern" : "failure-pattern",
@@ -497,7 +503,7 @@ function summarizeOutcome(input: PersistRunMemoryInput & { filesTouched: string[
   }
   return [
     input.mergeDecision?.primaryBlockReason,
-    input.repairResult && input.repairResult.issues.length > 0 ? `Repair-pass issues: ${input.repairResult.issues.slice(0, 2).join(" | ")}` : null,
+    input.repairAudit && input.repairAudit.findings.length > 0 ? `Repair-audit findings (audit-only, no repairs attempted): ${input.repairAudit.findings.slice(0, 2).join(" | ")}` : null,
     input.verificationReceipt?.summary,
   ].filter(Boolean).join(" ");
 }
@@ -522,7 +528,7 @@ function suggestFollowups(
   receipt: RunReceipt,
   mergeDecision: MergeDecision | null,
   verificationReceipt: VerificationReceipt | null,
-  repairResult: RepairResult | null,
+  repairAudit: RepairAuditResult | null,
   filesTouched: readonly string[],
   clusterFiles: readonly string[],
 ): string[] {
@@ -536,8 +542,8 @@ function suggestFollowups(
   if (verificationReceipt && verificationReceipt.verdict !== "pass") {
     suggestions.push(`Validate ${filesTouched.slice(0, 3).join(", ") || "the touched files"} with focused verification before the next attempt.`);
   }
-  if (repairResult && repairResult.issues.length > 0) {
-    suggestions.push(`Inspect repair-pass fallout: ${repairResult.issues.slice(0, 2).join(" | ")}`);
+  if (repairAudit && repairAudit.findings.length > 0) {
+    suggestions.push(`Inspect repair-audit findings (audit-only, no repairs attempted): ${repairAudit.findings.slice(0, 2).join(" | ")}`);
   }
   if (clusterFiles.length > 0) {
     suggestions.push(`Check nearby cluster files next: ${clusterFiles.slice(0, 3).join(", ")}`);

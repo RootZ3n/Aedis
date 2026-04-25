@@ -5,7 +5,7 @@ import type { RunReceipt } from "./coordinator.js";
 import type { RunState } from "./runstate.js";
 import type { VerificationReceipt } from "./verification-pipeline.js";
 import type { MergeDecision } from "./merge-gate.js";
-import type { RepairResult } from "./repair-pass.js";
+import type { RepairAuditResult } from "./repair-audit-pass.js";
 import type { FileChange, WorkerResult } from "../workers/base.js";
 import { AedisMemoryAdapter, toGatedContext, type AedisMemoryRuntime, type MemoryEntryRecord } from "./aedis-memory.js";
 
@@ -242,7 +242,7 @@ function samplePersistInput(overrides?: Partial<{
   workerResults: readonly WorkerResult[];
   verificationReceipt: VerificationReceipt | null;
   mergeDecision: MergeDecision | null;
-  repairResult: RepairResult | null;
+  repairAudit: RepairAuditResult | null;
   commitSha: string | null;
   scopeClassification: { type: "multi-file"; blastRadius: number; recommendDecompose: boolean; reason: string; governance: { decompositionRequired: boolean; approvalRequired: boolean; escalationRecommended: boolean; wavesRequired: boolean } };
 } {
@@ -257,7 +257,7 @@ function samplePersistInput(overrides?: Partial<{
     workerResults: [sampleWorkerResult()],
     verificationReceipt: overrides?.verificationReceipt ?? sampleVerification("pass"),
     mergeDecision: overrides?.mergeDecision ?? sampleMergeDecision("apply"),
-    repairResult: { repairsAttempted: 1, repairsApplied: 1, issues: [] },
+    repairAudit: { findings: [], findingsCount: 0, auditOnly: true },
     commitSha: "abc123def456",
     scopeClassification: { type: "multi-file", blastRadius: 7, recommendDecompose: true, reason: "multi-file", governance: { decompositionRequired: false, approvalRequired: false, escalationRecommended: false, wavesRequired: false } },
   };

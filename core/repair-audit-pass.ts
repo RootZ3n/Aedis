@@ -1,13 +1,53 @@
+/**
+ * RepairAuditPass — audit-only structural check on a multi-file change-set.
+ *
+ * IMPORTANT: this pass NEVER modifies any file. It walks the in-scope
+ * files, parses imports/exports/local symbols with regex, and reports
+ * structural inconsistencies (broken imports, missing exports, stale
+ * markers) as a list of `findings`. The result carries an explicit
+ * `auditOnly: true` invariant so consumers cannot accidentally treat
+ * the audit as a repair.
+ *
+ * Why audit-only:
+ *   - Predecessor `repair-pass` exposed `repairsApplied: number` but
+ *     the value was hardcoded `0`. Consumers (merge-gate, aedis-memory,
+ *     coordinator log line) read the field as if real repairs had
+ *     happened, which built false confidence — exactly the opposite
+ *     of Aedis's trust doctrine.
+ *   - Implementing real repairs without verifier coverage is the kind
+ *     of thing that builds *more* false confidence, so retiring the
+ *     misleading shape comes first; a future, separate phase may add
+ *     real repair behavior behind a flag with verifier coverage.
+ *
+ * Output contract:
+ *   - `findings`: human-readable strings, one per detected issue
+ *   - `findingsCount`: same as `findings.length` (convenience)
+ *   - `auditOnly`: literal `true` — type-level invariant that no
+ *     repair was performed. Removing this field would break callers,
+ *     forcing migrations to acknowledge the audit-only stance.
+ *
+ * Output explicitly does NOT carry `repairsApplied` or
+ * `repairsAttempted`. The previous shape implied repair behavior
+ * that did not exist.
+ */
+
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 
 import type { ChangeSet } from "./change-set.js";
 
-export interface RepairResult {
-  readonly repairsAttempted: number;
-  readonly repairsApplied: number;
-  readonly issues: string[];
+export interface RepairAuditResult {
+  /** Human-readable structural findings — one entry per detected issue. */
+  readonly findings: readonly string[];
+  /** Convenience: same as findings.length. */
+  readonly findingsCount: number;
+  /**
+   * Type-level invariant: this pass is audit-only and never modifies
+   * any file. Always literally `true`. Consumers should rely on this
+   * marker rather than infer repair behavior from `findingsCount`.
+   */
+  readonly auditOnly: true;
 }
 
 interface ExportIndexEntry {
@@ -218,48 +258,54 @@ function findMismatchedExports(
   return issues;
 }
 
-export async function runRepairPass(
+/**
+ * Run an audit-only structural pass over the change-set's in-scope
+ * files. Reports findings; never modifies any file. Callers should
+ * surface findings as advisory signals — they are NOT a "repair was
+ * attempted" claim.
+ */
+export async function runRepairAuditPass(
   changeSet: ChangeSet,
   projectRoot: string,
-): Promise<RepairResult> {
+): Promise<RepairAuditResult> {
   try {
     const scopeFiles = normalizeScopeFiles(changeSet);
     if (scopeFiles.length === 0) {
       return {
-        repairsAttempted: 0,
-        repairsApplied: 0,
-        issues: ["repair-pass: no files in scope"],
+        findings: ["repair-audit: no files in scope (no repairs attempted; this pass is audit-only)"],
+        findingsCount: 1,
+        auditOnly: true,
       };
     }
 
     const existingFiles = scopeFiles.filter((file) => existsSync(resolve(projectRoot, file)));
     const contents = await readChangedFiles(existingFiles, projectRoot);
     const exportIndex = buildExportIndex(contents);
-    const issues: string[] = [];
+    const findings: string[] = [];
 
     for (const file of existingFiles) {
       const content = contents.get(file) ?? "";
-      issues.push(...findBrokenImports(file, content, existingFiles, exportIndex));
-      issues.push(...findStaleReferences(file, content));
-      issues.push(...findMismatchedExports(file, exportIndex, changeSet.dependencyRelationships));
+      findings.push(...findBrokenImports(file, content, existingFiles, exportIndex));
+      findings.push(...findStaleReferences(file, content));
+      findings.push(...findMismatchedExports(file, exportIndex, changeSet.dependencyRelationships));
     }
 
-    for (const issue of issues) {
-      console.log(`[repair-pass] ${issue}`);
+    for (const finding of findings) {
+      console.log(`[repair-audit] ${finding}`);
     }
 
     return {
-      repairsAttempted: issues.length,
-      repairsApplied: 0,
-      issues,
+      findings,
+      findingsCount: findings.length,
+      auditOnly: true,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.log(`[repair-pass] unexpected failure: ${message}`);
+    console.log(`[repair-audit] unexpected failure: ${message}`);
     return {
-      repairsAttempted: 0,
-      repairsApplied: 0,
-      issues: [`repair-pass failed: ${message}`],
+      findings: [`repair-audit failed: ${message} (no repairs attempted; this pass is audit-only)`],
+      findingsCount: 1,
+      auditOnly: true,
     };
   }
 }

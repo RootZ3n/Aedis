@@ -8,7 +8,7 @@
  *                      passed, verification was positive.
  *   PARTIAL_SUCCESS  — real evidence exists but at least one gate
  *                      raised a warning (pass-with-warnings,
- *                      repair-pass fallout, failed waves).
+ *                      repair-audit findings, failed waves).
  *   NO_OP            — no real evidence at all. The execution gate
  *                      blocked the run; no files were written, no
  *                      commit was made. This is the fake-success

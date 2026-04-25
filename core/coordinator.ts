@@ -183,7 +183,7 @@ import {
   type RejectedCandidate,
 } from "./implementation-brief.js";
 import { tryDeterministicBuilder, type DeterministicBuilderResult } from "./code-transforms/deterministic-builder.js";
-import { runRepairPass, type RepairResult } from "./repair-pass.js";
+import { runRepairAuditPass, type RepairAuditResult } from "./repair-audit-pass.js";
 import { prepareTargetsForPrompt } from "./target-discovery.js";
 import {
   decideMerge,
@@ -877,7 +877,7 @@ export class Coordinator {
     let commitSha: string | null = null;
     let verificationReceipt: VerificationReceipt | null = null;
     let judgmentReport: JudgmentReport | null = null;
-    let repairResult: RepairResult | null = null;
+    let repairAudit: RepairAuditResult | null = null;
     const input = submission.input;
 
     console.log(`[coordinator] ═══ submit() entry — input="${submission.input.slice(0, 80)}${submission.input.length > 80 ? "…" : ""}"`);
@@ -1717,9 +1717,10 @@ export class Coordinator {
         console.log(`[coordinator] PHASE 9 SKIPPED — judgmentReport=${judgmentReport ? `passed=${judgmentReport.passed}` : "null"} cancelled=${active.cancelled}`);
       }
 
-      // Phase 9b: change-set gate (invariants + repair-pass) — only
+      // Phase 9b: change-set gate (invariants + repair-audit) — only
       // meaningful for multi-file runs. Output is fed into the
-      // MergeGate alongside judgment and verification.
+      // MergeGate alongside judgment and verification. The repair-audit
+      // pass is audit-only — its findings are advisory, never blocking.
       let changeSetGateInput:
         | Parameters<typeof decideMerge>[0]["changeSetGate"]
         | undefined;
@@ -1731,7 +1732,7 @@ export class Coordinator {
               active.changeSet.filesInScope.map((entry) => entry.path),
               active.projectRoot,
             );
-        repairResult = await runRepairPass(active.changeSet, active.projectRoot);
+        repairAudit = await runRepairAuditPass(active.changeSet, active.projectRoot);
 
         const allWavesComplete = isGraphComplete(active.graph) && !hasFailedNodes(active.graph);
         const invariantsSatisfied =
@@ -1742,7 +1743,7 @@ export class Coordinator {
           allWavesComplete,
           invariantsSatisfied,
           invariantCount: invariants.length,
-          repairPass: repairResult,
+          repairAudit,
         };
       }
 
@@ -1935,9 +1936,13 @@ export class Coordinator {
         console.log(`[coordinator] PHASE 10 SKIPPED — autoCommit=${this.config.autoCommit} cancelled=${active.cancelled} changeCount=${changeCount}`);
       }
 
-      if (repairResult) {
+      if (repairAudit) {
+        // Audit-only: log the finding count without any "applied" claim.
+        // The previous repair-pass log line said "X attempted, 0 applied"
+        // which read as "we tried but failed to repair" — misleading,
+        // since the pass never attempts repairs at all.
         console.log(
-          `[coordinator] repair-pass: ${repairResult.repairsAttempted} attempted, ${repairResult.repairsApplied} applied, ${repairResult.issues.length} issues`
+          `[coordinator] repair-audit: ${repairAudit.findingsCount} finding(s) — audit-only, no repairs attempted`
         );
       }
 
@@ -2042,7 +2047,7 @@ export class Coordinator {
         receipt,
         verificationReceipt,
         mergeDecision,
-        repairResult,
+        repairAudit,
         commitSha,
       );
       const finalReceipt: RunReceipt = active.memorySuggestions.length > 0
@@ -2228,7 +2233,7 @@ export class Coordinator {
         receipt,
         verificationReceipt,
         null,
-        repairResult,
+        repairAudit,
         null,
       );
       const finalReceipt: RunReceipt = active.memorySuggestions.length > 0
@@ -6068,7 +6073,7 @@ export class Coordinator {
     receipt: RunReceipt,
     verificationReceipt: VerificationReceipt | null,
     mergeDecision: MergeDecision | null,
-    repairResult: RepairResult | null,
+    repairAudit: RepairAuditResult | null,
     commitSha: string | null,
   ): Promise<string[]> {
     const filesTouched = this.uniqueStrings([
@@ -6121,7 +6126,7 @@ export class Coordinator {
       workerResults: active.workerResults,
       verificationReceipt,
       mergeDecision,
-      repairResult,
+      repairAudit,
       commitSha,
     });
     return result.suggestions;

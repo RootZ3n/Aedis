@@ -5,7 +5,7 @@
  *   - IntegrationJudge report (cross-file coherence)
  *   - VerificationPipeline receipt (diff/contract/lint/typecheck/hooks)
  *   - Change-set level gate (wave completion, invariant satisfaction,
- *     repair-pass findings)
+ *     repair-audit findings — advisory only; no repairs are attempted)
  *
  * Each of those signals produces *findings* with a severity. MergeGate
  * collects every finding, classifies it as `critical` or `advisory`,
@@ -30,7 +30,7 @@ import type {
   VerificationIssue,
 } from "./verification-pipeline.js";
 import type { ChangeSet } from "./change-set.js";
-import type { RepairResult } from "./repair-pass.js";
+import type { RepairAuditResult } from "./repair-audit-pass.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -102,7 +102,14 @@ export interface ChangeSetGateInput {
   readonly allWavesComplete: boolean;
   readonly invariantsSatisfied: boolean;
   readonly invariantCount: number;
-  readonly repairPass: RepairResult;
+  /**
+   * Audit-only structural findings from repair-audit-pass. Treated by
+   * the merge gate as ADVISORY signal — never blocks on its own. The
+   * audit performs no repairs (auditOnly invariant); a non-empty
+   * `findings[]` means the audit *noticed* something, not that
+   * anything was fixed.
+   */
+  readonly repairAudit: RepairAuditResult;
 }
 
 // ─── Decision ────────────────────────────────────────────────────────
@@ -304,17 +311,18 @@ function translateChangeSetGate(gate: ChangeSetGateInput): MergeFinding[] {
     });
   }
 
-  if (gate.repairPass.issues.length > 0) {
-    // Repair-pass findings are advisory unless they represent structural
-    // damage (missing imports, broken exports). Repair-pass currently
-    // only surfaces strings, so we treat them uniformly as advisory —
-    // the critic/verifier are the ones that block on broken contracts.
-    for (const issue of gate.repairPass.issues) {
+  if (gate.repairAudit.findings.length > 0) {
+    // Repair-audit findings are uniformly advisory. The audit pass is
+    // explicitly read-only (`auditOnly: true`) — it surfaces structural
+    // smells (broken imports, missing exports, stale markers) but does
+    // NOT block the merge on its own. Critic and Verifier are the
+    // gates that block on broken contracts.
+    for (const finding of gate.repairAudit.findings) {
       out.push({
         source: "change-set-gate",
         severity: "advisory",
-        code: "change-set:repair",
-        message: issue,
+        code: "change-set:repair-audit",
+        message: finding,
       });
     }
   }

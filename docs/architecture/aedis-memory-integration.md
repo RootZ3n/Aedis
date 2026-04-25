@@ -20,7 +20,7 @@ Aedis now writes durable entries for:
   - failed run patterns
   - merge blockers
   - regression indicators
-  - repair-pass fallout
+  - repair-audit findings (audit-only signals; no automatic repairs are attempted)
 - `aedis/success`
   - successful patterns
   - safe scoped approaches
