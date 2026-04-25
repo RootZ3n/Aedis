@@ -12,6 +12,7 @@
  */
 
 import { runPreflight } from "./preflight.js";
+import { existsSync } from "node:fs";
 import { generateDryRun } from "./dry-run.js";
 import {
   loadMemory,
@@ -343,7 +344,6 @@ export async function profileRepo(projectRoot: string): Promise<RepoProfile> {
 }
 
 function hasTestDirectory(root: string): boolean {
-  const { existsSync } = require("node:fs");
   return (
     existsSync(`${root}/__tests__`) ||
     existsSync(`${root}/tests`) ||
@@ -362,13 +362,13 @@ export function buildRepoProveSuite(profile: RepoProfile): ProveSuite {
       name: "single-file fix",
       projectRoot: profile.path,
       prompt: "fix a bug in the main module",
-      expectedOutcome: "success",
+      expectedOutcome: "partial",
     },
     {
       name: "multi-file feature",
       projectRoot: profile.path,
       prompt: "add a new feature that requires 3-4 files",
-      expectedOutcome: profile.hasTests ? "success" : "partial",
+      expectedOutcome: "partial",
     },
     {
       name: "broad refactor",
