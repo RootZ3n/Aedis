@@ -90,6 +90,7 @@ import {
   type ReceiptWorkerEvent,
   type ReceiptRoutingDecision,
   type ReceiptRoutingEscalation,
+  type ReceiptProviderAttempt,
 } from "./receipt-store.js";
 import {
   createTaskGraph,
@@ -4176,6 +4177,7 @@ export class Coordinator {
         }
         result = syntheticFailure(`Worker threw: ${errMessage}`);
       }
+      await this.persistProviderAttempts(active, runTask.id, result);
     }
 
     // ── Weak-output recovery ─────────────────────────────────────────
@@ -4295,6 +4297,7 @@ export class Coordinator {
           result = syntheticFailure(`Retry failed: ${rmsg} (original: ${errMsg})`);
           currentTier = retryTier;
         }
+        await this.persistProviderAttempts(active, runTask.id, result);
       }
     }
 
@@ -5533,6 +5536,57 @@ export class Coordinator {
       graphSummary: getGraphSummary(active.graph),
       appendCheckpoints: [checkpoint, ...(extra.appendCheckpoints ?? [])],
     });
+  }
+
+  /**
+   * Persist provider-fallback attempts (the chain log from
+   * invokeModelWithFallback) returned by Builder/Critic on the run
+   * receipt. The model invoker already classifies cancelled attempts
+   * distinctly and does NOT increment the circuit breaker for them, so
+   * passing them straight through preserves that semantics in receipts.
+   * Each invocation gets its own slice; the retry path produces
+   * separate attempts so calling this twice (initial + weak-output
+   * retry) does not double-count.
+   */
+  private async persistProviderAttempts(
+    active: ActiveRun,
+    taskId: string,
+    result: WorkerResult,
+  ): Promise<void> {
+    const attempts = result.providerAttempts;
+    if (!attempts || attempts.length === 0) return;
+    const at = new Date().toISOString();
+    const transformed: ReceiptProviderAttempt[] = attempts.map((a, index) => ({
+      at,
+      taskId,
+      attemptIndex: index,
+      provider: a.provider,
+      model: a.model,
+      outcome: a.outcome,
+      durationMs: a.durationMs,
+      costUsd: a.costUsd,
+      ...(a.tokensIn !== undefined ? { tokensIn: a.tokensIn } : {}),
+      ...(a.tokensOut !== undefined ? { tokensOut: a.tokensOut } : {}),
+      ...(a.errorMsg !== undefined ? { errorMsg: a.errorMsg } : {}),
+    }));
+    const cbSkips = transformed
+      .filter((entry) => entry.outcome === "skipped_circuit_breaker")
+      .map((entry) => ({
+        at: entry.at,
+        taskId: entry.taskId,
+        provider: entry.provider,
+        model: entry.model,
+      }));
+    await this.receiptStore
+      .patchRun(active.run.id, {
+        appendProviderAttempts: transformed,
+        ...(cbSkips.length > 0 ? { appendCircuitBreakerSkips: cbSkips } : {}),
+      })
+      .catch((err) => {
+        console.warn(
+          `[coordinator] persistProviderAttempts: patchRun failed — ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
   }
 
   private async persistReceiptWorkerEvent(

@@ -24,6 +24,7 @@ import type { GatedContext } from "../core/context-gate.js";
 import type { ExecutionReceipt } from "../core/execution-gate.js";
 import type { CostEntry, Issue, RunTask, RunState } from "../core/runstate.js";
 import type { ImplementationBrief } from "../core/implementation-brief.js";
+import type { InvokeAttempt } from "../core/model-invoker.js";
 
 // ─── Worker Types ────────────────────────────────────────────────────
 
@@ -189,6 +190,17 @@ export interface WorkerResult {
    * way, every run ends with one receipt per worker in the RunReceipt.
    */
   readonly executionReceipt?: ExecutionReceipt;
+  /**
+   * Per-attempt log from invokeModelWithFallback for every model
+   * call this worker made (initial dispatch, repair retries, etc.)
+   * in dispatch order. The Coordinator transforms these to
+   * ReceiptProviderAttempt entries and persists them on the run
+   * receipt so trust signals (which provider failed how, how long,
+   * what it cost) survive past the run. Optional because workers
+   * that make no model calls (deterministic transforms, local-only
+   * Verifier) don't produce one.
+   */
+  readonly providerAttempts?: readonly InvokeAttempt[];
 }
 
 export interface TouchedFile {
@@ -380,6 +392,7 @@ export abstract class AbstractWorker implements BaseWorker {
       assumptions?: string[];
       issues?: Issue[];
       durationMs: number;
+      providerAttempts?: readonly InvokeAttempt[];
     }
   ): WorkerResult {
     return {
@@ -393,6 +406,9 @@ export abstract class AbstractWorker implements BaseWorker {
       touchedFiles: opts.touchedFiles,
       assumptions: opts.assumptions ?? [],
       durationMs: opts.durationMs,
+      ...(opts.providerAttempts && opts.providerAttempts.length > 0
+        ? { providerAttempts: opts.providerAttempts }
+        : {}),
     };
   }
 
@@ -401,7 +417,8 @@ export abstract class AbstractWorker implements BaseWorker {
     assignment: WorkerAssignment,
     error: string,
     cost: CostEntry,
-    durationMs: number
+    durationMs: number,
+    providerAttempts?: readonly InvokeAttempt[],
   ): WorkerResult {
     return {
       workerType: this.type,
@@ -414,6 +431,9 @@ export abstract class AbstractWorker implements BaseWorker {
       touchedFiles: [],
       assumptions: [],
       durationMs,
+      ...(providerAttempts && providerAttempts.length > 0
+        ? { providerAttempts }
+        : {}),
     };
   }
 

@@ -11,6 +11,7 @@ import { recordDecision, recordFileTouch } from "../core/runstate.js";
 import {
   invokeModelWithFallback,
   createRunInvocationContext,
+  type InvokeAttempt,
   type InvokeConfig,
   type Provider,
   type RunInvocationContext,
@@ -680,6 +681,11 @@ export class BuilderWorker extends AbstractWorker {
     // ones that throw — so the receipt records cost/model/exports for
     // failed work, not just successful patches.
     const allAttemptRecords: BuilderAttemptRecord[] = [];
+    // Mutable across all targets so provider-fallback log survives any
+    // per-target throw — pushed into directly by executeTargetFile and
+    // tryExportRepair, surfaced on the WorkerResult so the Coordinator
+    // can persist appendProviderAttempts on the run receipt.
+    const allProviderAttempts: InvokeAttempt[] = [];
 
     try {
       if (!this.canHandle(assignment)) {
@@ -698,6 +704,7 @@ export class BuilderWorker extends AbstractWorker {
             configRoot,
             runCtx,
             runId,
+            allProviderAttempts,
           );
           targetPatches.push(patch);
           appliedChanges.push(patch.change);
@@ -750,6 +757,7 @@ export class BuilderWorker extends AbstractWorker {
         assumptions: [],
         issues: [],
         durationMs: Date.now() - startedAt,
+        providerAttempts: allProviderAttempts,
       }) as BuilderResult;
     } catch (error) {
       if (appliedChanges.length > 0) {
@@ -786,6 +794,7 @@ export class BuilderWorker extends AbstractWorker {
         error instanceof Error ? error.message : String(error),
         fallbackCost,
         Date.now() - startedAt,
+        allProviderAttempts,
       ) as BuilderResult;
       // Stamp attempt records onto the failure output so the Coordinator
       // can persist them. We mutate via Object.defineProperty because
@@ -1437,6 +1446,7 @@ export class BuilderWorker extends AbstractWorker {
     configRoot: string,
     runCtx: RunInvocationContext,
     runId: string,
+    providerAttempts: InvokeAttempt[],
   ): Promise<ExecutedTargetPatch> {
     const taskId = assignment.task.id;
     const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(configRoot, assignment.tier);
@@ -1537,6 +1547,7 @@ export class BuilderWorker extends AbstractWorker {
     // Attempt 1 — initial model call.
     const attempt1Started = Date.now();
     const response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
+    providerAttempts.push(...response.attempts);
     if (response.usedProvider !== primaryProvider) {
       console.warn(
         `[builder] PRIMARY FAILED — used fallback ${response.usedProvider}/${response.usedModel} ` +
@@ -1597,6 +1608,7 @@ export class BuilderWorker extends AbstractWorker {
       attempt1Content,
       attemptRecords,
       declaredChain,
+      providerAttempts,
     });
     if (usedExportRepair) {
       updatedContent = usedExportRepair.updatedContent;
@@ -1860,6 +1872,7 @@ export class BuilderWorker extends AbstractWorker {
     attempt1Content: string;
     attemptRecords: BuilderAttemptRecord[];
     declaredChain?: readonly { provider: string; model: string }[];
+    providerAttempts: InvokeAttempt[];
   }): Promise<{ updatedContent: string; diff: string; record: BuilderAttemptRecord } | null> {
     if (!CODE_FILE_EXTENSIONS.test(input.relativePath)) return null;
     if (input.sectionInfo) return null; // section-edit mode preserves untouched code by construction
@@ -1910,6 +1923,7 @@ export class BuilderWorker extends AbstractWorker {
       );
       return null;
     }
+    input.providerAttempts.push(...repairResponse.attempts);
     const { updatedContent: repaired, diff: repairedDiff } = this.processModelResponse(
       repairResponse.text,
       input.relativePath,

@@ -3,6 +3,7 @@ import { recordDecision } from "../core/runstate.js";
 import {
   invokeModelWithFallback,
   createRunInvocationContext,
+  type InvokeAttempt,
   type InvokeConfig,
   type Provider,
   type RunInvocationContext,
@@ -147,6 +148,9 @@ export class CriticWorker extends AbstractWorker {
     // which is gitignored and therefore absent from the workspace worktree.
     // Prefer sourceRepo when the Coordinator supplied it.
     const configRoot = assignment.sourceRepo ?? projectRoot;
+    // Declared at execute() scope so the catch handler can also surface
+    // any attempts captured before a downstream throw.
+    let providerAttempts: readonly InvokeAttempt[] = [];
 
     try {
       if (!builderResult || builderResult.output.kind !== "builder") {
@@ -193,6 +197,7 @@ export class CriticWorker extends AbstractWorker {
         );
 
         const response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
+        providerAttempts = response.attempts;
 
         if (response.usedProvider !== primaryProvider) {
           console.warn(
@@ -274,6 +279,7 @@ export class CriticWorker extends AbstractWorker {
         touchedFiles: [],
         issues: heuristicIssues,
         durationMs: Date.now() - startedAt,
+        providerAttempts,
       }) as CriticResult;
     } catch (error) {
       this.eventBus?.emit({
@@ -290,6 +296,7 @@ export class CriticWorker extends AbstractWorker {
         error instanceof Error ? error.message : String(error),
         { model, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
         Date.now() - startedAt,
+        providerAttempts,
       ) as CriticResult;
     }
   }
