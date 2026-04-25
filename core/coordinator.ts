@@ -93,6 +93,10 @@ import {
   type ReceiptProviderAttempt,
 } from "./receipt-store.js";
 import {
+  PROMOTION_EXCLUDE_PATHSPECS,
+  filterRuntimeArtifacts,
+} from "./promotion-filter.js";
+import {
   createTaskGraph,
   addNode,
   addEdge,
@@ -5429,11 +5433,18 @@ export class Coordinator {
           await rmTmp(patchTmp).catch(() => {});
         }
 
-        const files = patchArtifact.changedFiles ?? [];
+        // Defense-in-depth: even though generatePatch already filters
+        // runtime artifacts, re-filter here in case a receipt produced
+        // by an older Aedis version carries unfiltered changedFiles.
+        const files = filterRuntimeArtifacts(patchArtifact.changedFiles ?? []);
         if (files.length > 0) {
           await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
-        } else {
-          await exec("git", ["add", "-A"], { cwd: sourceRepo });
+        } else if ((patchArtifact.changedFiles ?? []).length === 0) {
+          // Only fall back to "git add -A" when the receipt explicitly
+          // had no file list — never sweep all changes blindly when the
+          // filter dropped everything (that means the patch was *only*
+          // runtime artifacts and there is nothing legitimate to stage).
+          await exec("git", ["add", "-A", "--", ".", ...PROMOTION_EXCLUDE_PATHSPECS], { cwd: sourceRepo });
         }
 
         const SUBJECT_MAX = 60;
@@ -5490,8 +5501,12 @@ export class Coordinator {
         await rmTmp(patchTmp).catch(() => {});
       }
 
-      const { stdout: diffOut } = await exec("git", ["diff", "--name-only", "HEAD"], { cwd: workspacePath });
-      const files = diffOut.trim().split("\n").filter(Boolean);
+      const { stdout: diffOut } = await exec(
+        "git",
+        ["diff", "--name-only", "HEAD", "--", ".", ...PROMOTION_EXCLUDE_PATHSPECS],
+        { cwd: workspacePath },
+      );
+      const files = filterRuntimeArtifacts(diffOut.trim().split("\n").filter(Boolean));
       if (files.length > 0) {
         await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
       }

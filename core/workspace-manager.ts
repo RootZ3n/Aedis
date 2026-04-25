@@ -25,6 +25,11 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 
+import {
+  PROMOTION_EXCLUDE_PATHSPECS,
+  filterRuntimeArtifacts,
+} from "./promotion-filter.js";
+
 // AEDIS_TMPDIR lets the operator override where workspaces are created.
 // Default is the system temp dir, but large repos can fill small /tmp partitions.
 const WORKSPACE_ROOT = process.env.AEDIS_TMPDIR ?? tmpdir();
@@ -201,24 +206,40 @@ export async function generatePatch(
 ): Promise<PatchArtifact> {
   const generatedAt = new Date().toISOString();
 
+  // Pathspec arguments that exclude Aedis runtime artifacts from every
+  // git query below. The leading "." is a positive pathspec (without a
+  // positive entry, exclude-only pathspecs match nothing). This stops
+  // `.aedis/memory.json`, workspace-local receipts, and similar Aedis-
+  // written files from ever showing up in the patch artifact, so they
+  // cannot be staged into a promoted commit.
+  const excludePathspecs = [".", ...PROMOTION_EXCLUDE_PATHSPECS];
+
   try {
+    // Determine whether the workspace has its own commit. Drives both
+    // diff source (commit-range vs working-tree) and changedFiles
+    // source (diff --name-only vs status --porcelain) so they always
+    // agree on what is in the patch.
+    let workspaceHead: string | null = null;
+    try {
+      const { stdout: headOut } = await exec("git", ["rev-parse", "HEAD"], { cwd: handle.workspacePath, timeout: 5_000 });
+      const parsed = headOut.trim();
+      if (parsed && parsed !== handle.sourceCommitSha) workspaceHead = parsed;
+    } catch { /* no commit yet */ }
+
     // Get the diff — prefer commit diff if available, else working tree diff
     let diff = "";
-    try {
-      const { stdout: commitSha } = await exec("git", ["rev-parse", "HEAD"], { cwd: handle.workspacePath, timeout: 5_000 });
-      const head = commitSha.trim();
-      if (head !== handle.sourceCommitSha) {
-        // We committed — get the diff from the source commit to HEAD
-        const { stdout: patchDiff } = await exec(
-          "git", ["diff", handle.sourceCommitSha + "..HEAD"],
-          { cwd: handle.workspacePath, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
-        );
-        diff = patchDiff;
-      }
-    } catch { /* no commit yet, fall through */ }
+    if (workspaceHead) {
+      // We committed — get the diff from the source commit to HEAD,
+      // scoped to the non-runtime-artifact pathspecs.
+      const { stdout: patchDiff } = await exec(
+        "git", ["diff", `${handle.sourceCommitSha}..${workspaceHead}`, "--", ...excludePathspecs],
+        { cwd: handle.workspacePath, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
+      );
+      diff = patchDiff;
+    }
     if (!diff) {
       const { stdout: workingDiff } = await exec(
-        "git", ["diff", "HEAD"],
+        "git", ["diff", "HEAD", "--", ...excludePathspecs],
         { cwd: handle.workspacePath, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
       );
       diff = workingDiff;
@@ -231,31 +252,40 @@ export async function generatePatch(
       { cwd: handle.workspacePath, timeout: 10_000, maxBuffer: 10 * 1024 * 1024 },
     ).catch(() => ({ stdout: "" }));
 
-    // Get list of changed files
-    const { stdout: statusOutput } = await exec(
-      "git",
-      ["status", "--porcelain"],
-      { cwd: handle.workspacePath, timeout: 10_000 },
-    );
-    const changedFiles = statusOutput
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => line.slice(3).trim());
-
-    // Try to get the workspace commit SHA
-    let commitSha: string | null = null;
-    try {
-      const { stdout: sha } = await exec(
+    // Source the file list from the SAME range as the diff. When the
+    // workspace has committed, `git status --porcelain` is empty (the
+    // index matches HEAD), so we need `git diff --name-only` against
+    // the source commit instead. Otherwise downstream promotion sees an
+    // empty changedFiles list and falls back to `git add -A`, which is
+    // exactly how `.aedis/memory.json` leaked into the absent-pianist
+    // 5838aad commit.
+    //
+    // The `-u` flag on `git status` (no-commit branch) enumerates
+    // untracked files individually instead of collapsing them to a
+    // single `?? .aedis/` line — without it the exclude pathspecs
+    // match the directory rather than the runtime artifact inside.
+    let rawFiles: string[];
+    if (workspaceHead) {
+      const { stdout: nameOnly } = await exec(
         "git",
-        ["rev-parse", "HEAD"],
-        { cwd: handle.workspacePath, timeout: 5_000 },
+        ["diff", "--name-only", `${handle.sourceCommitSha}..${workspaceHead}`, "--", ...excludePathspecs],
+        { cwd: handle.workspacePath, timeout: 10_000 },
       );
-      const parsed = sha.trim();
-      // Only record if it differs from source (meaning we committed)
-      commitSha = parsed !== handle.sourceCommitSha ? parsed : null;
-    } catch {
-      // No commit yet
+      rawFiles = nameOnly.split("\n").filter(Boolean).map((s) => s.trim());
+    } else {
+      const { stdout: statusOutput } = await exec(
+        "git",
+        ["status", "--porcelain", "-u", "--", ...excludePathspecs],
+        { cwd: handle.workspacePath, timeout: 10_000 },
+      );
+      rawFiles = statusOutput.split("\n").filter(Boolean).map((line) => line.slice(3).trim());
     }
+    // Belt-and-suspenders: filter once more against the canonical
+    // denylist in case the underlying git treats exclude pathspecs
+    // differently on this host.
+    const changedFiles = filterRuntimeArtifacts(rawFiles);
+
+    const commitSha: string | null = workspaceHead;
 
     const fullDiff = [diff, untrackedDiff].filter(Boolean).join("\n");
 
