@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:af483565-fed6-4393-a48b-e4a5b31ec19a",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in core/widget.ts, replace the widget constant",
+  "summary": "Missing deliverables: Modify core/widget.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/widget.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"core/widget.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/widget.ts)\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"prompt requested a change but no files were modified — cannot satisfy intent\",\n        \"files\": []\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify core/widget.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"core/widget.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify core/widget.ts)\",\n        \"files\": [\n          \"core/widget.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"prompt requested a change but no files were modified — cannot satisfy intent\",\n        \"files\": []\n      }\n    ],\n    \"primaryBlockReason\": \"Missing deliverables: Modify core/widget.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 1 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-24T22:32:33.536Z",
+  "updatedAt": "2026-04-24T22:32:33.537Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-bogus-F551Se/nope-1777069933367",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "af483565-fed6-4393-a48b-e4a5b31ec19a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "ad65013b-8955-43b1-bf1e-dd4ed5bb68a2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:af483565-fed6-4393-a48b-e4a5b31ec19a",
+    "aedis-task:af483565-fed6-4393-a48b-e4a5b31ec19a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:af483565-fed6-4393-a48b-e4a5b31ec19a"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:af483565-fed6-4393-a48b-e4a5b31ec19a"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Missing deliverables: Modify core/widget.ts"
+  }
+}

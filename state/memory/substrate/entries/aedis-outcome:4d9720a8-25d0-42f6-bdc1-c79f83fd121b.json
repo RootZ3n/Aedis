@@ -1,0 +1,60 @@
+{
+  "id": "aedis-outcome:4d9720a8-25d0-42f6-bdc1-c79f83fd121b",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a comment // AEDIS_TEST_COMMENT at the top of /mnt/ai/aedis/workers/builder.ts",
+  "summary": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval",
+  "raw": "{\n  \"issues\": [\n    \"Debug logging added without contract approval\",\n    \"Worker critic: Debug logging added without contract approval\",\n    \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.89 (keywords: comment, aedis_test_comment, top, mnt)\",\n    \"Type check passed\",\n    \"Worker verifier: Worker critic: Debug logging added without contract approval\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval\",\n        \"files\": [\n          \"workers/builder.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: comment, aedis_test_comment, top, mnt)\",\n        \"files\": [\n          \"workers/builder.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:contract-adherence\",\n        \"message\": \"Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval\",\n        \"files\": [\n          \"workers/builder.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: comment, aedis_test_comment, top, mnt)\",\n        \"files\": [\n          \"workers/builder.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 2 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "module:workers",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-24T21:36:35.433Z",
+  "updatedAt": "2026-04-24T21:36:35.443Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/aedis-memory.ts",
+    "workers/base.ts",
+    "workers/builder.ts",
+    "workers/critic.ts",
+    "workers/integrator.ts",
+    "workers/scout.ts",
+    "workers/verifier.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "4d9720a8-25d0-42f6-bdc1-c79f83fd121b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3e455bfa-83c0-4789-ae2d-aa5de39d494b",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:4d9720a8-25d0-42f6-bdc1-c79f83fd121b",
+    "aedis-task:4d9720a8-25d0-42f6-bdc1-c79f83fd121b"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:4d9720a8-25d0-42f6-bdc1-c79f83fd121b"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:4d9720a8-25d0-42f6-bdc1-c79f83fd121b"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval"
+  }
+}

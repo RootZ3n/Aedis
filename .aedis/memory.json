@@ -2,28 +2,179 @@
   "projectRoot": "/mnt/ai/aedis",
   "language": "typescript",
   "recentFiles": [
-    "workers/base.ts",
+    "server/routes/health.ts",
+    "server/routes/tasks.ts",
+    "server/routes/config.ts",
+    "server/routes/loqui.ts",
+    "server/routes/metrics.ts",
+    "server/index.ts",
+    "server/middleware/auth.ts",
+    "core/aedis-memory.ts",
     "workers/builder.ts",
+    "workers/base.ts",
     "workers/critic.ts",
     "workers/integrator.ts",
     "workers/scout.ts",
     "workers/verifier.ts",
-    "core/aedis-memory.ts",
+    "core/model-invoker.ts",
     "core/blast-radius.ts",
     "core/aedis-memory.test.ts",
     "core/change-set.ts",
     "core/charter.ts",
-    "core/confidence-scoring.ts",
-    "core/model-invoker.ts",
-    "server/routes/tasks.ts",
-    "server/index.ts",
-    "server/middleware/auth.ts",
-    "server/routes/config.ts",
-    "server/routes/health.ts",
-    "server/routes/loqui.ts",
-    "server/routes/metrics.ts"
+    "core/confidence-scoring.ts"
   ],
   "recentTasks": [
+    {
+      "prompt": "in server/routes/health.ts, add an uptime_seconds field to the health response that returns Math.floor(uptime_ms / 1000)",
+      "normalizedPrompt": "in server/routes/health.ts, add an uptime_seconds field to the health response that returns Math.floor(uptime_ms / 1000)",
+      "verdict": "partial",
+      "commitSha": "777def4770c1612dd4838701c1a1357d2b4334e6",
+      "cost": 0.009321,
+      "timestamp": "2026-04-25T01:28:45.502Z",
+      "filesTouched": [
+        "server/routes/health.ts",
+        "server/routes/tasks.ts",
+        "server/routes/config.ts",
+        "server/routes/loqui.ts",
+        "server/routes/metrics.ts",
+        "server/index.ts",
+        "server/middleware/auth.ts"
+      ],
+      "scopeType": "small-linked",
+      "complexityTier": "2",
+      "resultSummary": "complete",
+      "verificationVerdict": "pass-with-warnings",
+      "affectedSystems": [
+        "server"
+      ],
+      "changeTypes": [
+        "modify"
+      ],
+      "taskTypeKey": "small-linked:build",
+      "plannedFilesCount": 1,
+      "missingFiles": [],
+      "undeclaredFiles": [],
+      "verificationCoverageRatio": 1,
+      "validatedRatio": 1,
+      "aedisConfidence": 0.6373319537815126,
+      "evaluationScore": null,
+      "evaluationPassed": null,
+      "disagreementDirection": null
+    },
+    {
+      "prompt": "Add // TEST_REPO_PATH_BUG at the top of server/index.ts",
+      "normalizedPrompt": "Add // TEST_REPO_PATH_BUG at the top of server/index.ts",
+      "verdict": "failed",
+      "commitSha": null,
+      "cost": 0.024544,
+      "timestamp": "2026-04-24T21:41:01.310Z",
+      "filesTouched": [
+        "server/index.ts",
+        "server/routes/tasks.ts",
+        "server/routes/config.ts",
+        "server/routes/health.ts",
+        "server/routes/loqui.ts",
+        "server/routes/metrics.ts",
+        "server/middleware/auth.ts",
+        "core/aedis-memory.ts"
+      ],
+      "scopeType": "single-file",
+      "complexityTier": "3",
+      "resultSummary": "failed",
+      "failureSummary": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval",
+      "affectedSystems": [
+        "server",
+        "core"
+      ],
+      "changeTypes": [
+        "modify"
+      ],
+      "taskTypeKey": "single-file:build",
+      "plannedFilesCount": 1,
+      "missingFiles": [],
+      "undeclaredFiles": [],
+      "verificationCoverageRatio": null,
+      "validatedRatio": null,
+      "aedisConfidence": 0.35,
+      "evaluationScore": null,
+      "evaluationPassed": null,
+      "disagreementDirection": null
+    },
+    {
+      "prompt": "Add a comment // AEDIS_TEST_COMMENT at the top of /mnt/ai/aedis/workers/builder.ts",
+      "normalizedPrompt": "Add a comment // AEDIS_TEST_COMMENT at the top of /mnt/ai/aedis/workers/builder.ts",
+      "verdict": "failed",
+      "commitSha": null,
+      "cost": 0.017778000000000002,
+      "timestamp": "2026-04-24T21:36:35.433Z",
+      "filesTouched": [
+        "workers/builder.ts",
+        "workers/base.ts",
+        "workers/critic.ts",
+        "workers/integrator.ts",
+        "workers/scout.ts",
+        "workers/verifier.ts",
+        "core/aedis-memory.ts"
+      ],
+      "scopeType": "small-linked",
+      "complexityTier": "2",
+      "resultSummary": "failed",
+      "failureSummary": "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval",
+      "affectedSystems": [
+        "workers",
+        "core"
+      ],
+      "changeTypes": [
+        "modify"
+      ],
+      "taskTypeKey": "small-linked:build",
+      "plannedFilesCount": 1,
+      "missingFiles": [],
+      "undeclaredFiles": [],
+      "verificationCoverageRatio": null,
+      "validatedRatio": null,
+      "aedisConfidence": 0.30100000000000005,
+      "evaluationScore": null,
+      "evaluationPassed": null,
+      "disagreementDirection": null
+    },
+    {
+      "prompt": "In /mnt/ai/portum/src/server.ts, add a GET /v1/models endpoint that returns the list of models Portum routes to, in OpenAI's ListModelsResponse format:\n\n{\n  \"object\": \"list\",\n  \"data\": [\n    { \"id\": \"provider/model\", \"object\": \"model\", \"created\": 0, \"owned_by\": \"provider\" }\n  ]\n}\n\nUse the existing getAllProviders() from router.ts to enumerate the models dynamically. The endpoint should be registered before the catchall /* route in server.ts.",
+      "normalizedPrompt": "In /mnt/ai/portum/src/server.ts, add a GET /v1/models endpoint that returns the list of models Portum routes to, in OpenAI's ListModelsResponse format:\n\n{\n  \"object\": \"list\",\n  \"data\": [\n    { \"id\": \"provider/model\", \"object\": \"model\", \"created\": 0, \"owned_by\": \"provider\" }\n  ]\n}\n\nUse the existing getAllProviders() from router.ts to enumerate the models dynamically. The endpoint should be registered before the catchall /* route in server.ts.",
+      "verdict": "failed",
+      "commitSha": null,
+      "cost": 0,
+      "timestamp": "2026-04-24T18:28:40.644Z",
+      "filesTouched": [
+        "server/routes/tasks.ts",
+        "server/routes/config.ts",
+        "server/routes/health.ts",
+        "server/routes/loqui.ts",
+        "server/routes/metrics.ts",
+        "core/model-invoker.ts",
+        "server/index.ts",
+        "server/middleware/auth.ts"
+      ],
+      "scopeType": "architectural",
+      "complexityTier": "8",
+      "resultSummary": "failed",
+      "failureSummary": "One or more task nodes failed and were not recovered.",
+      "affectedSystems": [
+        "server",
+        "core"
+      ],
+      "changeTypes": [],
+      "taskTypeKey": "architectural:build",
+      "plannedFilesCount": 1,
+      "missingFiles": [],
+      "undeclaredFiles": [],
+      "verificationCoverageRatio": null,
+      "validatedRatio": null,
+      "aedisConfidence": 0.23800000000000004,
+      "evaluationScore": null,
+      "evaluationPassed": null,
+      "disagreementDirection": null
+    },
     {
       "prompt": "Add // MIMOV25_TEST at the top of workers/base.ts",
       "normalizedPrompt": "Add // MIMOV25_TEST at the top of workers/base.ts",
@@ -255,155 +406,6 @@
       "evaluationScore": null,
       "evaluationPassed": null,
       "disagreementDirection": null
-    },
-    {
-      "prompt": "Append `export const AEDIS_END_TO_END_TEST = true` to the bottom of workers/base.ts",
-      "normalizedPrompt": "Append `export const AEDIS_END_TO_END_TEST = true` to the bottom of workers/base.ts",
-      "verdict": "failed",
-      "commitSha": null,
-      "cost": 0,
-      "timestamp": "2026-04-24T15:24:52.577Z",
-      "filesTouched": [
-        "workers/base.ts",
-        "core/aedis-memory.ts",
-        "workers/builder.ts",
-        "workers/critic.ts",
-        "workers/integrator.ts",
-        "workers/scout.ts",
-        "workers/verifier.ts",
-        "core/blast-radius.ts"
-      ],
-      "scopeType": "single-file",
-      "complexityTier": "1",
-      "resultSummary": "failed",
-      "failureSummary": "One or more task nodes failed and were not recovered.",
-      "affectedSystems": [
-        "workers",
-        "core"
-      ],
-      "changeTypes": [],
-      "taskTypeKey": "single-file:change",
-      "plannedFilesCount": 1,
-      "missingFiles": [],
-      "undeclaredFiles": [],
-      "verificationCoverageRatio": null,
-      "validatedRatio": null,
-      "aedisConfidence": 0.32800000000000007,
-      "evaluationScore": null,
-      "evaluationPassed": null,
-      "disagreementDirection": null
-    },
-    {
-      "prompt": "Append `export const AEDIS_STATUS_TEST = true` to the bottom of workers/base.ts",
-      "normalizedPrompt": "Append `export const AEDIS_STATUS_TEST = true` to the bottom of workers/base.ts",
-      "verdict": "failed",
-      "commitSha": null,
-      "cost": 0,
-      "timestamp": "2026-04-24T14:03:31.403Z",
-      "filesTouched": [
-        "workers/base.ts",
-        "core/aedis-memory.ts",
-        "workers/builder.ts",
-        "workers/critic.ts",
-        "workers/integrator.ts",
-        "workers/scout.ts",
-        "workers/verifier.ts",
-        "core/blast-radius.ts"
-      ],
-      "scopeType": "single-file",
-      "complexityTier": "1",
-      "resultSummary": "failed",
-      "failureSummary": "One or more task nodes failed and were not recovered.",
-      "affectedSystems": [
-        "workers",
-        "core"
-      ],
-      "changeTypes": [],
-      "taskTypeKey": "single-file:change",
-      "plannedFilesCount": 1,
-      "missingFiles": [],
-      "undeclaredFiles": [],
-      "verificationCoverageRatio": null,
-      "validatedRatio": null,
-      "aedisConfidence": 0.32800000000000007,
-      "evaluationScore": null,
-      "evaluationPassed": null,
-      "disagreementDirection": null
-    },
-    {
-      "prompt": "Append `export const AEDIS_PROMOTE_TEST = true` to the bottom of workers/base.ts",
-      "normalizedPrompt": "Append `export const AEDIS_PROMOTE_TEST = true` to the bottom of workers/base.ts",
-      "verdict": "partial",
-      "commitSha": "39ea85d90a6db9c57876420e65bfe6d633801c77",
-      "cost": 0.016948,
-      "timestamp": "2026-04-24T13:53:18.182Z",
-      "filesTouched": [
-        "workers/base.ts",
-        "core/aedis-memory.ts",
-        "workers/builder.ts",
-        "workers/critic.ts",
-        "workers/integrator.ts",
-        "workers/scout.ts",
-        "workers/verifier.ts",
-        "core/blast-radius.ts"
-      ],
-      "scopeType": "single-file",
-      "complexityTier": "1",
-      "resultSummary": "complete",
-      "verificationVerdict": "pass-with-warnings",
-      "affectedSystems": [
-        "workers",
-        "core"
-      ],
-      "changeTypes": [
-        "modify"
-      ],
-      "taskTypeKey": "single-file:change",
-      "plannedFilesCount": 1,
-      "missingFiles": [],
-      "undeclaredFiles": [],
-      "verificationCoverageRatio": 1,
-      "validatedRatio": 1,
-      "aedisConfidence": 0.6899612853592141,
-      "evaluationScore": null,
-      "evaluationPassed": null,
-      "disagreementDirection": null
-    },
-    {
-      "prompt": "Append `export const AEDIS_LIVE_TEST = true` to the bottom of workers/base.ts",
-      "normalizedPrompt": "Append `export const AEDIS_LIVE_TEST = true` to the bottom of workers/base.ts",
-      "verdict": "failed",
-      "commitSha": null,
-      "cost": 0,
-      "timestamp": "2026-04-24T13:42:35.513Z",
-      "filesTouched": [
-        "core/aedis-memory.ts",
-        "workers/base.ts",
-        "workers/builder.ts",
-        "workers/critic.ts",
-        "workers/integrator.ts",
-        "workers/scout.ts",
-        "workers/verifier.ts"
-      ],
-      "scopeType": "single-file",
-      "complexityTier": "1",
-      "resultSummary": "failed",
-      "failureSummary": "One or more task nodes failed and were not recovered.",
-      "affectedSystems": [
-        "core",
-        "workers"
-      ],
-      "changeTypes": [],
-      "taskTypeKey": "single-file:change",
-      "plannedFilesCount": 1,
-      "missingFiles": [],
-      "undeclaredFiles": [],
-      "verificationCoverageRatio": null,
-      "validatedRatio": null,
-      "aedisConfidence": 0.32800000000000007,
-      "evaluationScore": null,
-      "evaluationPassed": null,
-      "disagreementDirection": null
     }
   ],
   "fileClusters": [
@@ -416,6 +418,13 @@
         "core/charter.ts",
         "core/confidence-scoring.ts",
         "core/model-invoker.ts",
+        "server/index.ts",
+        "server/middleware/auth.ts",
+        "server/routes/config.ts",
+        "server/routes/health.ts",
+        "server/routes/loqui.ts",
+        "server/routes/metrics.ts",
+        "server/routes/tasks.ts",
         "workers/base.ts",
         "workers/builder.ts",
         "workers/critic.ts",
@@ -423,8 +432,8 @@
         "workers/scout.ts",
         "workers/verifier.ts"
       ],
-      "changedTogether": 13,
-      "lastSeen": "2026-04-24T16:23:50.602Z"
+      "changedTogether": 17,
+      "lastSeen": "2026-04-25T01:28:45.502Z"
     },
     {
       "files": [
@@ -468,15 +477,16 @@
     },
     {
       "taskTypeKey": "single-file:build",
-      "observedRuns": 4,
+      "observedRuns": 5,
       "avgFilesChanged": 8,
       "successRate": 0,
       "verificationGapRate": 0,
       "commonFailureReasons": [
-        "One or more task nodes failed and were not recovered."
+        "One or more task nodes failed and were not recovered.",
+        "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval"
       ],
       "commonMissingFiles": [],
-      "lastSeen": "2026-04-24T16:23:50.602Z",
+      "lastSeen": "2026-04-24T21:41:01.310Z",
       "evaluatedRuns": 0,
       "avgEvaluationScore": 0,
       "overconfidenceRate": 0,
@@ -485,13 +495,32 @@
     },
     {
       "taskTypeKey": "small-linked:build",
-      "observedRuns": 2,
+      "observedRuns": 4,
       "avgFilesChanged": 7,
       "successRate": 0,
       "verificationGapRate": 0,
-      "commonFailureReasons": [],
+      "commonFailureReasons": [
+        "Worker critic: Debug logging added without contract approval; Worker verifier: Worker critic: Debug logging added without contract approval; Worker integrator: Worker verifier: Worker critic: Debug logging added without contract approval"
+      ],
       "commonMissingFiles": [],
-      "lastSeen": "2026-04-24T13:11:00.335Z",
+      "lastSeen": "2026-04-25T01:28:45.502Z",
+      "evaluatedRuns": 0,
+      "avgEvaluationScore": 0,
+      "overconfidenceRate": 0,
+      "confidenceDampening": 1,
+      "reliabilityTier": "risky"
+    },
+    {
+      "taskTypeKey": "architectural:build",
+      "observedRuns": 1,
+      "avgFilesChanged": 8,
+      "successRate": 0,
+      "verificationGapRate": 0,
+      "commonFailureReasons": [
+        "One or more task nodes failed and were not recovered."
+      ],
+      "commonMissingFiles": [],
+      "lastSeen": "2026-04-24T18:28:40.644Z",
       "evaluatedRuns": 0,
       "avgEvaluationScore": 0,
       "overconfidenceRate": 0,
@@ -499,6 +528,6 @@
       "reliabilityTier": "unknown"
     }
   ],
-  "updatedAt": "2026-04-24T16:23:50.605Z",
+  "updatedAt": "2026-04-25T01:28:45.505Z",
   "schemaVersion": 1
 }

@@ -1,0 +1,56 @@
+{
+  "id": "aedis-task:153a0129-e39d-4036-b79f-036949e1e5c9",
+  "space": "aedis/project/tmp-aedis-capreg-int-ycbzgi",
+  "kind": "aedis-task",
+  "title": "in core/capability-registry.ts, build capability registry",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"in core/capability-registry.ts, build capability registry\",\n  \"normalizedPrompt\": \"in core/capability-registry.ts, build capability registry\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"7989e483-0e42-4e5b-820a-d7853f56c566\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"no-op\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"44170484-b86e-404a-8197-390ae054e424\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"core/capability-registry.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"export const CAPABILITIES = {} as const;\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"core/capability-registry.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"90490ecd-7a4d-4ab1-917f-81cf07cdbc64\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"24c182de-74bd-4f3f-abad-6f23982baf9f\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"59190873-b861-4ddd-96db-fe3fb046d5d9\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"core/capability-registry.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"export const CAPABILITIES = {} as const;\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"core/capability-registry.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:core",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-24T22:32:37.502Z",
+  "updatedAt": "2026-04-24T22:32:37.504Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-capreg-int-YCbzGI",
+  "filePaths": [
+    "core/capability-registry.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "153a0129-e39d-4036-b79f-036949e1e5c9",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "b67bebce-9ade-460b-9626-cb05d83e5df9",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:153a0129-e39d-4036-b79f-036949e1e5c9",
+    "aedis-run:153a0129-e39d-4036-b79f-036949e1e5c9"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:153a0129-e39d-4036-b79f-036949e1e5c9"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:153a0129-e39d-4036-b79f-036949e1e5c9"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 1
+  }
+}

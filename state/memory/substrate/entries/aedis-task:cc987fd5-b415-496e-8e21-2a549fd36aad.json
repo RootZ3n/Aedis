@@ -1,0 +1,56 @@
+{
+  "id": "aedis-task:cc987fd5-b415-496e-8e21-2a549fd36aad",
+  "space": "aedis/project/tmp-aedis-coord-int-y0wr6c",
+  "kind": "aedis-task",
+  "title": "modify widget.ts in core",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"modify widget.ts in core\",\n  \"normalizedPrompt\": \"modify widget.ts in core\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"634b69a1-6476-410b-a269-e767621abc20\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"no-op\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"1a782016-37cf-4ae8-9aa6-8073a61f5dff\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"core/widget.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"export const widget = 2; // modified\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"core/widget.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"3ee48460-b3aa-4a09-9672-66222247182b\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"78870f88-913d-4b85-ad34-d6438699ef23\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"f2e52e26-4196-482f-99f4-8fbfaf72f797\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"core/widget.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"export const widget = 2; // modified\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"core/widget.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:core",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T00:13:57.440Z",
+  "updatedAt": "2026-04-25T00:13:57.454Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-coord-int-y0WR6C",
+  "filePaths": [
+    "core/widget.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "cc987fd5-b415-496e-8e21-2a549fd36aad",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "dd29fca1-f3de-4a50-a9ac-550d00553f1b",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:cc987fd5-b415-496e-8e21-2a549fd36aad",
+    "aedis-run:cc987fd5-b415-496e-8e21-2a549fd36aad"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:cc987fd5-b415-496e-8e21-2a549fd36aad"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:cc987fd5-b415-496e-8e21-2a549fd36aad"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 1
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "id": "aedis-outcome:018a551f-e68e-445b-a35c-4f60b565dd03",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in In /mnt/ai/portum/src/server.ts, add a GET /v1/models endpoint that returns the list of models Portum routes to, in Open",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"Builder refused out-of-scope path: /mnt/ai/portum/src/server.ts\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 0 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "module:server",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-24T18:28:40.644Z",
+  "updatedAt": "2026-04-24T18:28:40.657Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "core/model-invoker.ts",
+    "server/index.ts",
+    "server/middleware/auth.ts",
+    "server/routes/config.ts",
+    "server/routes/health.ts",
+    "server/routes/loqui.ts",
+    "server/routes/metrics.ts",
+    "server/routes/tasks.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "018a551f-e68e-445b-a35c-4f60b565dd03",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "c22ab36b-b36e-4ae5-bf3f-96f73045f4ee",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:018a551f-e68e-445b-a35c-4f60b565dd03",
+    "aedis-task:018a551f-e68e-445b-a35c-4f60b565dd03"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:018a551f-e68e-445b-a35c-4f60b565dd03"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:018a551f-e68e-445b-a35c-4f60b565dd03"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

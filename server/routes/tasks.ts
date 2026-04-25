@@ -98,6 +98,23 @@ type BuildSubmitResult =
   | { kind: "needs_decomposition"; taskId: string; plan: unknown; message: string };
 
 /**
+ * Build a needs_decomposition API response with approval instructions.
+ * Ensures every decomposition response tells the caller exactly how to
+ * approve the plan — no more stranded work from missing UX.
+ */
+function buildDecompositionResponse(result: { taskId: string; plan: unknown; message: string }) {
+  return {
+    status: "needs_decomposition" as const,
+    task_id: result.taskId,
+    plan: result.plan,
+    message: result.message,
+    approve_url: `/tasks/${result.taskId}/approve`,
+    approve_command: `curl -X POST http://localhost:18796/tasks/${result.taskId}/approve`,
+    instructions: "POST to approve_url to approve and execute this plan, or submit a refined prompt.",
+  };
+}
+
+/**
  * Shared build-submit helper. Dispatches a build task through the
  * Coordinator (via submitWithGates) and registers the tracked run state.
  * Used by both the legacy POST /tasks handler and the new unified POST
@@ -658,10 +675,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           if (result.kind === "needs_decomposition") {
             reply.code(202).send({
               ...envelope,
-              status: "needs_decomposition",
-              task_id: result.taskId,
-              plan: result.plan,
-              message: result.message,
+              ...buildDecompositionResponse(result),
             });
             return;
           }
@@ -705,10 +719,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           if (result.kind === "needs_decomposition") {
             reply.code(202).send({
               ...envelope,
-              status: "needs_decomposition",
-              task_id: result.taskId,
-              plan: result.plan,
-              message: result.message,
+              ...buildDecompositionResponse(result),
             });
             return;
           }
@@ -862,12 +873,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       if (result.kind === "needs_decomposition") {
-        reply.code(202).send({
-          status: "needs_decomposition",
-          task_id: result.taskId,
-          plan: result.plan,
-          message: result.message,
-        });
+        reply.code(202).send(buildDecompositionResponse(result));
         return;
       }
 

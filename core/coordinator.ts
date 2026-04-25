@@ -353,6 +353,11 @@ export interface TaskSubmission {
   input: string;
   /** Durable run ID assigned before execution begins. */
   runId?: string;
+  /**
+   * Pre-normalized input from submitWithGates. When present, submit()
+   * skips the redundant normalizePrompt() call (~15-20s ollama savings).
+   */
+  normalizedInput?: string;
   /** Optional pre-structured charter params (bypasses CharterGenerator) */
   charterOverride?: CreateIntentParams;
   /** Optional constraints to add */
@@ -688,11 +693,11 @@ export class Coordinator {
     const effectiveProjectRoot = submission.projectRoot ?? this.config.projectRoot;
     const projectMemory = await loadMemory(effectiveProjectRoot);
     const gated = gateContext(projectMemory, input);
-    const normalizedInput = await normalizePrompt(input, gated, effectiveProjectRoot);
+    let normalizedInput = await normalizePrompt(input, gated, effectiveProjectRoot);
 
     const analysis = this.charterGen.analyzeRequest(normalizedInput);
     const charter = this.charterGen.generateCharter(analysis);
-    const charterTargets = Array.from(
+    const charterTargets: string[] = Array.from(
       new Set(charter.deliverables.flatMap((d) => [...d.targetFiles])),
     );
     const preflight = runPreflight({
@@ -702,19 +707,77 @@ export class Coordinator {
       ambiguities: analysis.ambiguities,
     });
 
-    // GAP 1.5 — Extracted-target gate
+    // GAP 1.5 — Extracted-target gate with repo discovery fallback
     // If the charter couldn't pull a single file/path out of the prompt,
-    // the pipeline will otherwise dispatch a placeholder deliverable with
-    // zero targetFiles, PHASE-1-drop it, and then crash the coherence
-    // gate with "No task node covers this deliverable" — an error that
-    // looks like an internal bug to the user. Surface a clarification
-    // request here so they know the actual problem is the prompt.
+    // try to discover candidates from the repo index before giving up.
+    // This enables "add health endpoint" to find server.ts without the
+    // user naming it explicitly.
     if (charterTargets.length === 0) {
-      console.log(`[coordinator] charter produced no targets — asking for clarification: "${input}"`);
-      return {
-        kind: "needs_clarification",
-        question: "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.",
-      };
+      console.log(`[coordinator] charter produced no targets — attempting repo index discovery`);
+      try {
+        const { RepoIndex } = await import("./repo-index.js");
+        const repoIdx = new RepoIndex();
+        const cached = await repoIdx.loadFromDisk(effectiveProjectRoot);
+        if (!cached) {
+          await repoIdx.buildIndex(effectiveProjectRoot);
+        }
+        const allFiles = repoIdx.getAllFiles();
+        // Score files by keyword match with prompt words
+        const promptWords = new Set(
+          normalizedInput.toLowerCase().match(/[a-z]{3,}/g) ?? [],
+        );
+        const scored = allFiles
+          .filter((f) => !f.isGenerated && !f.isConfig)
+          .map((f) => {
+            const pathWords = new Set(f.path.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+            const roleWords = new Set(f.role.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+            const exportWords = new Set(f.exports.join(" ").toLowerCase().match(/[a-z]{3,}/g) ?? []);
+            let score = 0;
+            for (const w of promptWords) {
+              if (pathWords.has(w)) score += 3;
+              if (roleWords.has(w)) score += 2;
+              if (exportWords.has(w)) score += 1;
+            }
+            // Boost high-centrality files
+            score += f.centralityScore * 0.1;
+            return { file: f, score };
+          })
+          .filter((s) => s.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3);
+
+        if (scored.length > 0) {
+          const discoveredTargets = scored.map((s) => s.file.path);
+          console.log(`[coordinator] repo index discovered ${discoveredTargets.length} candidate(s): ${discoveredTargets.join(", ")}`);
+          // Re-generate charter with discovered targets injected
+          const enrichedInput = `in ${discoveredTargets[0]}, ${normalizedInput}`;
+          const enrichedAnalysis = this.charterGen.analyzeRequest(enrichedInput);
+          const enrichedCharter = this.charterGen.generateCharter(enrichedAnalysis);
+          const enrichedTargets = Array.from(
+            new Set(enrichedCharter.deliverables.flatMap((d) => [...d.targetFiles])),
+          );
+          if (enrichedTargets.length > 0) {
+            // Replace charter and targets with enriched versions
+            Object.assign(analysis, enrichedAnalysis);
+            Object.assign(charter, enrichedCharter);
+            charterTargets.push(...enrichedTargets);
+            normalizedInput = enrichedInput;
+            console.log(`[coordinator] enriched charter with repo index discovery: ${enrichedTargets.join(", ")}`);
+          }
+        }
+        repoIdx.stopWatcher();
+      } catch (err) {
+        console.warn(`[coordinator] repo index discovery failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // Still no targets after discovery attempt — ask for clarification
+      if (charterTargets.length === 0) {
+        console.log(`[coordinator] no targets found even after repo index — asking for clarification: "${input}"`);
+        return {
+          kind: "needs_clarification",
+          question: "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.",
+        };
+      }
     }
 
     const allTargetsMissing = preflight.findings.some((f) => f.code === "all-targets-missing");
@@ -753,11 +816,23 @@ export class Coordinator {
         invariants: Object.freeze(invariants),
       });
       const plan = planChangeSet(changeSet, normalizedInput);
-      const taskId = `plan_${randomUUID().slice(0, 8)}`;
 
+      // Auto-approve when governance doesn't strictly require decomposition
+      // (e.g., multi-file with 2-4 files). This prevents the UX dead-end
+      // where simple multi-file tasks get stranded awaiting approval.
+      const governanceRequiresApproval = scopeClassification.governance.decompositionRequired;
+      if (!governanceRequiresApproval) {
+        console.log(
+          `[coordinator] decomposition recommended but NOT required by governance (blast=${scopeClassification.blastRadius}) — auto-approving plan`,
+        );
+        const receiptPromise = this.submit({ ...submission, normalizedInput });
+        return { kind: "executing", receipt: receiptPromise };
+      }
+
+      const taskId = `plan_${randomUUID().slice(0, 8)}`;
       this.pendingPlans.set(taskId, {
         taskId,
-        submission,
+        submission: { ...submission, normalizedInput },
         plan,
         scopeClassification,
         createdAt: new Date().toISOString(),
@@ -771,8 +846,10 @@ export class Coordinator {
       };
     }
 
-    // No gates tripped — proceed with full execution
-    const receiptPromise = this.submit(submission);
+    // No gates tripped — proceed with full execution.
+    // Pass the already-normalized input so submit() doesn't re-run
+    // the expensive ollama normalization call (~15-20s saved).
+    const receiptPromise = this.submit({ ...submission, normalizedInput });
     return { kind: "executing", receipt: receiptPromise };
   }
 
@@ -822,7 +899,10 @@ export class Coordinator {
     const projectMemory = await loadMemory(effectiveProjectRoot);
     let gatedContext = gateContext(projectMemory, input);
     console.log("[coordinator] gated context:", JSON.stringify(gatedContext));
-    const normalizedInput = await normalizePrompt(input, gatedContext, effectiveProjectRoot);
+    // Skip redundant normalization when submitWithGates already did it.
+    const normalizedInput = submission.normalizedInput
+      ? (console.log("[coordinator] using pre-normalized input from submitWithGates (skipped ~15-20s ollama call)"), submission.normalizedInput)
+      : await normalizePrompt(input, gatedContext, effectiveProjectRoot);
 
     // Construct per-submit ContextAssembler and IntegrationJudge so they
     // honor the effective projectRoot. These can't be class fields because
@@ -1995,13 +2075,23 @@ export class Coordinator {
       // promoted manually via the promote endpoint).
       const classification = evaluatedReceipt.humanSummary?.classification ?? null;
       const sourceRepo = active.workspace?.sourceRepo ?? active.sourceRepo ?? null;
-      if (
+      // Trust regression blocks auto-promote for VERIFIED_SUCCESS (high-bar
+      // classification) but NOT for PARTIAL_SUCCESS+verified — the execution
+      // gate already proved the code landed. Blocking verified partial
+      // successes was causing false-positive orphaned commits.
+      const regressionBlocksPromote = regressionAlert !== null && classification !== "PARTIAL_SUCCESS";
+      const shouldAutoPromote =
         this.config.autoPromoteOnSuccess &&
-        classification === "VERIFIED_SUCCESS" &&
-        !regressionAlert &&
-        sourceRepo
-      ) {
-        console.log(`[coordinator] autoPromoteOnSuccess=true + VERIFIED_SUCCESS → promoting run ${active.run.id} to ${sourceRepo}`);
+        !regressionBlocksPromote &&
+        sourceRepo &&
+        (classification === "VERIFIED_SUCCESS" ||
+          (classification === "PARTIAL_SUCCESS" && executionDecision.executionVerified));
+      if (shouldAutoPromote) {
+        const reason = classification === "VERIFIED_SUCCESS"
+          ? "VERIFIED_SUCCESS"
+          : "PARTIAL_SUCCESS+verified";
+        const regressionNote = regressionAlert ? " (regression alert present but overridden — execution verified)" : "";
+        console.log(`[coordinator] autoPromoteOnSuccess=true + ${reason}${regressionNote} → promoting run ${active.run.id} to ${sourceRepo}`);
         try {
           const promoteResult = await this.promoteToSource(active.run.id, sourceRepo);
           if (promoteResult.ok) {
@@ -2935,15 +3025,27 @@ export class Coordinator {
       const results = await Promise.all(
         waveGated.map(async (node) => {
           const stageStart = Date.now();
+          // SAFETY: Promise.race with a timeout creates a dangling promise.
+          // When the timeout wins, dispatchNode() keeps running. If it later
+          // rejects, that rejection was previously unhandled — crashing the
+          // process ~4 minutes in. Fix: attach a .catch() to the dispatch
+          // promise so its rejection is always handled regardless of which
+          // side of the race wins.
+          const dispatchPromise = this.dispatchNode(active, node);
+          let timeoutHandle: ReturnType<typeof setTimeout>;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(
+              () => reject(new Error(`execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`)),
+              stageTimeoutMs,
+            );
+          });
           const result = await Promise.race([
-            this.dispatchNode(active, node),
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`)),
-                stageTimeoutMs,
-              ),
-            ),
-          ]).catch((err): { node: TaskNode; result: WorkerResult } => {
+            dispatchPromise,
+            timeoutPromise,
+          ]).then(
+            (value) => { clearTimeout(timeoutHandle!); return value; },
+            (err) => { clearTimeout(timeoutHandle!); throw err; },
+          ).catch((err): { node: TaskNode; result: WorkerResult } => {
             const msg = err instanceof Error ? err.message : String(err);
             console.error(`[coordinator] ${msg}`);
             return {
@@ -2961,6 +3063,15 @@ export class Coordinator {
                 durationMs: Date.now() - stageStart,
               },
             };
+          });
+          // Defuse the dangling dispatch promise: if the timeout won the
+          // race, dispatchNode() is still running. When it eventually
+          // settles, swallow its result/error so it doesn't become an
+          // unhandled rejection that crashes the process.
+          dispatchPromise.catch((danglingErr) => {
+            console.warn(
+              `[coordinator] defused dangling dispatch for ${node.workerType} ${node.id.slice(0, 6)}: ${danglingErr instanceof Error ? danglingErr.message : String(danglingErr)}`,
+            );
           });
           return result;
         })
@@ -4760,7 +4871,11 @@ export class Coordinator {
   private async detectTrustRegression(active: ActiveRun, receipt: RunReceipt): Promise<TrustRegressionSnapshot | null> {
     try {
       const recentRuns = await this.receiptStore.listRuns(10);
-      if (recentRuns.length < 5) return null; // need enough data
+      // Cold-start guard: need at least 8 runs with meaningful verdicts
+      // to distinguish "still calibrating" from "real regression". The
+      // old threshold of 5 fired on every fresh project because the
+      // first few runs naturally fail while models/config stabilize.
+      if (recentRuns.length < 8) return null;
 
       const signals: string[] = [];
       const confidence = receipt.humanSummary?.confidence?.overall ?? 0;
@@ -4773,16 +4888,28 @@ export class Coordinator {
       }
 
       const recentVerdicts = recentRuns.slice(0, 10).map((r) => r.status);
-      const recentSuccesses = recentVerdicts.filter((s) => s === "VERIFIED_PASS" || s === "READY_FOR_PROMOTION" || s === "COMPLETE").length;
-      const successRate = recentSuccesses / recentVerdicts.length;
-      if (recentVerdicts.length >= 8 && successRate < 0.4) {
-        signals.push("low success rate: " + (successRate * 100).toFixed(0) + "% across last " + recentVerdicts.length + " runs");
+      // Count PROMOTED as success — auto-promoted runs are the pipeline's
+      // strongest signal that things worked correctly.
+      const SUCCESS_STATUSES = new Set([
+        "VERIFIED_PASS", "READY_FOR_PROMOTION", "COMPLETE", "PROMOTED",
+      ]);
+      // Provider/infra failures are not code quality regressions — exclude
+      // them from the denominator so a bad ollama day doesn't trigger false
+      // regression alerts.
+      const INFRA_STATUSES = new Set([
+        "INTERRUPTED", "CLEANUP_ERROR",
+      ]);
+      const meaningfulVerdicts = recentVerdicts.filter((s) => !INFRA_STATUSES.has(s));
+      const recentSuccesses = meaningfulVerdicts.filter((s) => SUCCESS_STATUSES.has(s)).length;
+      const successRate = meaningfulVerdicts.length > 0 ? recentSuccesses / meaningfulVerdicts.length : 1;
+      if (meaningfulVerdicts.length >= 8 && successRate < 0.3) {
+        signals.push("low success rate: " + (successRate * 100).toFixed(0) + "% across last " + meaningfulVerdicts.length + " meaningful runs");
       }
 
       const recentFails = recentRuns.slice(0, 5).filter(
         (r) => r.status === "VERIFIED_FAIL" || r.status === "CRUCIBULUM_FAIL",
       ).length;
-      if (recentFails >= 3) {
+      if (recentFails >= 4) {
         signals.push(recentFails + " verification failures in last 5 runs");
       }
 

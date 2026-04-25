@@ -55,6 +55,7 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
         status,
         timestamp: new Date().toISOString(),
         uptime_ms: uptimeMs,
+        uptime_seconds: Math.floor(uptimeMs / 1000),
         uptime_human: formatUptime(uptimeMs),
         port: context.config.port,
         workers: workerStatus,

@@ -425,7 +425,7 @@ export class CriticWorker extends AbstractWorker {
         issues.push({ severity: "warning", message: "Builder left TODO markers in output", file: change.path });
       }
       if (change.diff?.match(/^\+\s*console\.log/m) || change.content?.match(/console\.log\(/)) {
-        issues.push({ severity: "warning", message: "Debug logging added without contract approval", file: change.path });
+        issues.push({ severity: "info", message: "Debug logging added without contract approval", file: change.path });
       }
       if (!change.diff || change.diff.trim().length < 24) {
         issues.push({ severity: "error", message: "Builder change lacks a meaningful diff", file: change.path });

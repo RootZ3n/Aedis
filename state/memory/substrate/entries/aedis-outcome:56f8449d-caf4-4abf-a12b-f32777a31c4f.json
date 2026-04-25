@@ -1,0 +1,69 @@
+{
+  "id": "aedis-outcome:56f8449d-caf4-4abf-a12b-f32777a31c4f",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in in server/routes/health.ts, add an uptime_seconds field to the health response that returns Math.floor(uptime_ms / 1000)",
+  "summary": "PASS-WITH-WARNINGS — 6/6 stages passed, confidence 98%, 0 blockers, checks typecheck:pass, tests:fail, typecheck:pass, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"Builder left TODO markers in output\",\n    \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.89 (keywords: server, routes, health, uptime_seconds)\",\n    \"Type check passed\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: server, routes, health, uptime_seconds)\",\n        \"files\": [\n          \"server/routes/health.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: server, routes, health, uptime_seconds)\",\n        \"files\": [\n          \"server/routes/health.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"server/routes/health.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: server, routes, health, uptime_seconds)\",\n        \"files\": [\n          \"server/routes/health.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: server, routes, health, uptime_seconds)\",\n        \"files\": [\n          \"server/routes/health.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"Type check passed\",\n        \"files\": [\n          \"server/routes/health.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 4 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:server",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-25T01:28:45.502Z",
+  "updatedAt": "2026-04-25T01:28:45.511Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/aedis",
+  "filePaths": [
+    "server/index.ts",
+    "server/middleware/auth.ts",
+    "server/routes/config.ts",
+    "server/routes/health.ts",
+    "server/routes/loqui.ts",
+    "server/routes/metrics.ts",
+    "server/routes/tasks.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "56f8449d-caf4-4abf-a12b-f32777a31c4f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "428e5218-ea5c-486e-8522-4726ee2252d5",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "777def4770c1612dd4838701c1a1357d2b4334e6",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "428f6c35-98f6-417f-9b30-33faeab1349e",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:56f8449d-caf4-4abf-a12b-f32777a31c4f",
+    "aedis-task:56f8449d-caf4-4abf-a12b-f32777a31c4f"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:56f8449d-caf4-4abf-a12b-f32777a31c4f"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:56f8449d-caf4-4abf-a12b-f32777a31c4f"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

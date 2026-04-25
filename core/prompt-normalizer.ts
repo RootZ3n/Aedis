@@ -119,6 +119,15 @@ export async function normalizePrompt(
       return `in ${context.relevantFiles[0]}, ${raw}`;
     }
 
+    // Fast path: if the prompt already contains an action verb + "in"
+    // pattern like "in src/server.ts, add ..." or "add X to Y", skip
+    // the expensive ollama rewrite. The charter's analyzeRequest can
+    // handle these directly.
+    if (/\bin\s+\S+\.\w+[\s,]/i.test(raw) || /\b(add|fix|update|modify|create|remove|refactor)\b/i.test(raw)) {
+      console.log("[normalizer] fast-path: prompt has action verb, skipping ollama rewrite");
+      return raw;
+    }
+
     return await rewriteWithLocalModel(raw, context);
   } catch {
     return raw;

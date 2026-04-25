@@ -1,0 +1,63 @@
+{
+  "id": "aedis-outcome:254ecdce-67b4-44b1-b04b-e4fd877d7eff",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Create a new file /mnt/ai/auctor/src/message-summary.ts that exports a MessageSummary interface with content: string, an",
+  "summary": "PASS-WITH-WARNINGS — 7/7 stages passed, confidence 96%, 0 blockers, checks typecheck:pass, tests:fail, typecheck:pass, typecheck:pass, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.89 (keywords: create, new, mnt, auctor)\",\n    \"[pre-existing] Type '\\\"nit\\\"' is not assignable to type '\\\"info\\\" | \\\"warning\\\" | \\\"error\\\" | \\\"critical\\\"'.\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: create, new, mnt, auctor)\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: create, new, mnt, auctor)\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] Type '\\\"nit\\\"' is not assignable to type '\\\"info\\\" | \\\"warning\\\" | \\\"error\\\" | \\\"critical\\\"'.\",\n        \"files\": [\n          \"workers/critic.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: create, new, mnt, auctor)\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.89 (keywords: create, new, mnt, auctor)\",\n        \"files\": [\n          \"src/message-summary.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] Type '\\\"nit\\\"' is not assignable to type '\\\"info\\\" | \\\"warning\\\" | \\\"error\\\" | \\\"critical\\\"'.\",\n        \"files\": [\n          \"workers/critic.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 6 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-24T22:59:57.978Z",
+  "updatedAt": "2026-04-24T22:59:57.982Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/auctor",
+  "filePaths": [
+    "src/message-summary.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "254ecdce-67b4-44b1-b04b-e4fd877d7eff",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "e76e060b-25b1-4524-91e7-30366abc91bb",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "39ea7f4eb89cb6a60957e8fffafda0eb54b0670c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "235b732f-8078-49f5-85c3-65658322e132",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:254ecdce-67b4-44b1-b04b-e4fd877d7eff",
+    "aedis-task:254ecdce-67b4-44b1-b04b-e4fd877d7eff"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:254ecdce-67b4-44b1-b04b-e4fd877d7eff"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:254ecdce-67b4-44b1-b04b-e4fd877d7eff"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

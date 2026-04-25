@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:2d3afc41-d75c-4b8e-a951-3ae10ea689fd",
+  "space": "aedis/project/tmp-aedis-bogus-njjfkl-nope-1777070967741",
+  "kind": "aedis-task",
+  "title": "in core/widget.ts, replace the widget constant",
+  "summary": "single-file · failed run · single-file scope · no files touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"in core/widget.ts, replace the widget constant\",\n  \"normalizedPrompt\": \"in core/widget.ts, replace the widget constant\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"03f2c923-1a40-43d6-82ea-da7adba269ce\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"no-op\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"618e6bce-6442-4f01-9cb6-6be1bdad04f7\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"4da97ea9-fd70-4f60-b12c-5889538f36a0\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"eb3a41d3-75b2-432f-a469-4e8846d7fe6a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"b736df5a-b32c-45bf-ae44-ecb600c28f00\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-24T22:49:47.900Z",
+  "updatedAt": "2026-04-24T22:49:47.902Z",
+  "sourceSystem": "aedis",
+  "repoId": "/tmp/aedis-bogus-NjJfKL/nope-1777070967741",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "2d3afc41-d75c-4b8e-a951-3ae10ea689fd",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "cb2f6f1d-b3f7-4589-9974-26b44e1e522d",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:2d3afc41-d75c-4b8e-a951-3ae10ea689fd",
+    "aedis-run:2d3afc41-d75c-4b8e-a951-3ae10ea689fd"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:2d3afc41-d75c-4b8e-a951-3ae10ea689fd"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:2d3afc41-d75c-4b8e-a951-3ae10ea689fd"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

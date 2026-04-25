@@ -1,0 +1,63 @@
+{
+  "id": "aedis-outcome:fa186116-deb7-45da-b47f-f9dde37d1b67",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in In /mnt/ai/portum/src/server.ts, add an optional summary?: string field to the ChatMessage interface if it exists. If it",
+  "summary": "PASS-WITH-WARNINGS — 7/7 stages passed, confidence 98%, 0 blockers, checks typecheck:pass, tests:fail, typecheck:pass, typecheck:pass, baseline: 1 pre-existing failure(s) ignored",
+  "raw": "{\n  \"issues\": [\n    \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.84 (keywords: mnt, portum, src, server)\",\n    \"[pre-existing] Type '\\\"nit\\\"' is not assignable to type '\\\"info\\\" | \\\"warning\\\" | \\\"error\\\" | \\\"critical\\\"'.\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.84 (keywords: mnt, portum, src, server)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.84 (keywords: mnt, portum, src, server)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] Type '\\\"nit\\\"' is not assignable to type '\\\"info\\\" | \\\"warning\\\" | \\\"error\\\" | \\\"critical\\\"'.\",\n        \"files\": [\n          \"workers/critic.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.84 (keywords: mnt, portum, src, server)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.84 (keywords: mnt, portum, src, server)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"[pre-existing] Type '\\\"nit\\\"' is not assignable to type '\\\"info\\\" | \\\"warning\\\" | \\\"error\\\" | \\\"critical\\\"'.\",\n        \"files\": [\n          \"workers/critic.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 4 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-24T23:22:47.976Z",
+  "updatedAt": "2026-04-24T23:22:47.986Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/portum",
+  "filePaths": [
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "fa186116-deb7-45da-b47f-f9dde37d1b67",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "376fcc5e-ffa6-4a47-9822-7d3a2f10934c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "5a09ff6a1911e12ccc66922998e1d18f2232f7ee",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "5718b30c-ba15-4444-9abf-14145d4fff89",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:fa186116-deb7-45da-b47f-f9dde37d1b67",
+    "aedis-task:fa186116-deb7-45da-b47f-f9dde37d1b67"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:fa186116-deb7-45da-b47f-f9dde37d1b67"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:fa186116-deb7-45da-b47f-f9dde37d1b67"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

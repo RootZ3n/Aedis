@@ -512,14 +512,33 @@ export async function startServer(
   }
 
   // Graceful shutdown
-  const shutdown = async () => {
-    server.log.info("Shutting down Aedis server...");
+  const shutdown = async (signal: string) => {
+    server.log.info(`Shutting down Aedis server (${signal})...`);
     await server.close();
     process.exit(0);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGHUP", () => shutdown("SIGHUP"));
+
+  // Fatal error logging — a crash with no logs is unacceptable.
+  process.on("uncaughtException", (err, origin) => {
+    console.error(`[server] FATAL uncaughtException (origin=${origin}):`);
+    console.error(err.stack ?? err.message ?? String(err));
+    // Attempt to flush logs before dying
+    try { server.log.error({ err, origin }, "uncaughtException"); } catch { /* best effort */ }
+    process.exit(1);
+  });
+
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error(`[server] FATAL unhandledRejection:`);
+    console.error(reason instanceof Error ? reason.stack ?? reason.message : String(reason));
+    // Log but do NOT exit — unhandled rejections from dangling promises
+    // (e.g. timed-out dispatch) are expected. The coordinator's own
+    // catch block handles the primary error path; this is the safety net
+    // for secondary rejections from abandoned Promise.race losers.
+  });
 }
 
 // ─── Self-boot when run directly ─────────────────────────────────────
