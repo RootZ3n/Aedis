@@ -15,6 +15,7 @@ import { askLoqui } from "../../core/loqui.js";
 import { routeLoquiInput, type LoquiRouteDecision } from "../../core/loqui-router.js";
 import type { LoquiIntentContext } from "../../core/loqui-intent.js";
 import { generateDryRun } from "../../core/dry-run.js";
+import type { RunReceipt } from "../../core/coordinator.js";
 import type { ServerContext } from "../index.js";
 
 // ─── Request/Response Schemas ────────────────────────────────────────
@@ -87,6 +88,65 @@ export function getAllTrackedRuns(): readonly TrackedRun[] {
 
 /** Exported type for the external API routes. */
 export type { TrackedRun };
+
+/**
+ * Register a tracked run for an approved decomposition plan and wire
+ * the receipt-promise → tracker-status bridge. Mirrors the inline
+ * logic in POST /tasks/:id/approve so the new POST /plans/:id/approve
+ * route can reuse it without duplicating the bookkeeping.
+ *
+ * Returns the assigned taskId and a placeholder runId; both are
+ * updated when the receipt resolves so polling endpoints see the
+ * real Coordinator runId.
+ */
+export function registerTrackedPlanRun(
+  planId: string,
+  receiptPromise: Promise<RunReceipt>,
+  ctx: ServerContext,
+): { taskId: string; runId: string } {
+  const taskId = `task_${randomUUID().slice(0, 8)}`;
+  const runId = randomUUID();
+  const submittedAt = new Date().toISOString();
+  const tracked: TrackedRun = {
+    taskId,
+    runId,
+    status: "running",
+    prompt: `(approved plan ${planId})`,
+    submittedAt,
+    completedAt: null,
+    receipt: null,
+    error: null,
+  };
+  trackedRuns.set(taskId, tracked);
+
+  receiptPromise.then((receipt) => {
+    tracked.runId = receipt.runId;
+    tracked.status =
+      receipt.verdict === "success" ? "complete" :
+      receipt.verdict === "partial" ? "partial" :
+      receipt.verdict === "aborted" ? "cancelled" : "failed";
+    tracked.completedAt = new Date().toISOString();
+    tracked.receipt = receipt;
+    ctx.eventBus.emit({
+      type: "run_complete",
+      payload: {
+        taskId,
+        runId: receipt.runId,
+        verdict: receipt.verdict,
+        totalCostUsd: receipt.totalCost.estimatedCostUsd,
+        durationMs: receipt.durationMs,
+        executionVerified: receipt.executionVerified,
+        executionReason: receipt.executionGateReason,
+      },
+    });
+  }).catch((err) => {
+    tracked.status = "failed";
+    tracked.completedAt = new Date().toISOString();
+    tracked.error = err instanceof Error ? err.message : String(err);
+  });
+
+  return { taskId, runId };
+}
 
 /**
  * Result from submitBuildTask — may be a running build, a clarification
@@ -1085,52 +1145,10 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
-      const taskId = `task_${randomUUID().slice(0, 8)}`;
-      const runId = randomUUID();
-      const submittedAt = new Date().toISOString();
-
-      const tracked: TrackedRun = {
-        taskId,
-        runId,
-        status: "running",
-        prompt: `(approved plan ${id})`,
-        submittedAt,
-        completedAt: null,
-        receipt: null,
-        error: null,
-      };
-      trackedRuns.set(taskId, tracked);
-
-      result.receipt.then((receipt) => {
-        tracked.runId = receipt.runId;
-        tracked.status =
-          receipt.verdict === "success" ? "complete" :
-          receipt.verdict === "partial" ? "partial" :
-          receipt.verdict === "aborted" ? "cancelled" : "failed";
-        tracked.completedAt = new Date().toISOString();
-        tracked.receipt = receipt;
-
-        ctx().eventBus.emit({
-          type: "run_complete",
-          payload: {
-            taskId,
-            runId: receipt.runId,
-            verdict: receipt.verdict,
-            totalCostUsd: receipt.totalCost.estimatedCostUsd,
-            durationMs: receipt.durationMs,
-            executionVerified: receipt.executionVerified,
-            executionReason: receipt.executionGateReason,
-          },
-        });
-      }).catch((err) => {
-        tracked.status = "failed";
-        tracked.completedAt = new Date().toISOString();
-        tracked.error = err instanceof Error ? err.message : String(err);
-      });
-
+      const tracked = registerTrackedPlanRun(id, result.receipt, ctx());
       reply.code(202).send({
-        task_id: taskId,
-        run_id: runId,
+        task_id: tracked.taskId,
+        run_id: tracked.runId,
         status: "running",
         message: `Plan "${id}" approved. Execution started.`,
       });

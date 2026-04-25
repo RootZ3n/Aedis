@@ -51,6 +51,7 @@ import { reliabilityRoutes } from "./routes/reliability.js";
 import { campaignRoutes } from "./routes/campaign.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { memoryRoutes } from "./routes/memory.js";
+import { planRoutes } from "./routes/plans.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -406,6 +407,8 @@ export async function createServer(
   await server.register(campaignRoutes, { prefix: "/campaign" });
   await server.register(sessionRoutes, { prefix: "/sessions" });
   await server.register(memoryRoutes, { prefix: "/memory" });
+  await server.register(planRoutes, { prefix: "/plans" });
+  await server.register(planRoutes, { prefix: "/api/plans" });
 
   // ─── Approval gate endpoints ──────────────────────────────────
 

@@ -870,6 +870,21 @@ export class Coordinator {
   }
 
   /**
+   * Drop a pending decomposition plan without executing it. Returns
+   * true if a plan was removed, false if no plan existed for the
+   * given taskId. Used by the /plans/:id/reject API to discard a
+   * plan the user does not want to run.
+   */
+  rejectPlan(taskId: string): boolean {
+    const had = this.pendingPlans.has(taskId);
+    if (had) {
+      this.pendingPlans.delete(taskId);
+      console.log(`[coordinator] plan rejected for ${taskId} — pending plan dropped`);
+    }
+    return had;
+  }
+
+  /**
    * Submit a task and run the full build pipeline.
    * Returns a RunReceipt when complete.
    */
