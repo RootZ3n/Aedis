@@ -1,0 +1,58 @@
+{
+  "id": "aedis-outcome:c11619a4-da87-47e8-93fb-1e0b792ad680",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in add a GET /models endpoint in src/server.ts that returns the configured providers",
+  "summary": "typecheck hook not configured — required verification cannot run FAIL — 3/5 stages passed, confidence 60%, 2 blockers, missing required checks: typecheck, tests, active validation 0%",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.80 (keywords: get, models, endpoint, src)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 4eaa3a92-92aa-4be6-a7b3-374313662c49) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.80 (keywords: get, models, endpoint, src)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"typecheck hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"tests hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"typecheck hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"tests hook not configured — required verification cannot run\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.80 (keywords: get, models, endpoint, src)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 4eaa3a92-92aa-4be6-a7b3-374313662c49) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.80 (keywords: get, models, endpoint, src)\",\n        \"files\": [\n          \"src/server.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"typecheck hook not configured — required verification cannot run\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 6 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-25T13:09:10.362Z",
+  "updatedAt": "2026-04-25T13:09:10.370Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-HGcs5M",
+  "filePaths": [
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c11619a4-da87-47e8-93fb-1e0b792ad680",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "da001399-ae52-41ed-991b-96cb199fbe73",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "03a7f6e4-e4af-4ef8-ab41-fc015bbedd53",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:c11619a4-da87-47e8-93fb-1e0b792ad680",
+    "aedis-task:c11619a4-da87-47e8-93fb-1e0b792ad680"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c11619a4-da87-47e8-93fb-1e0b792ad680"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c11619a4-da87-47e8-93fb-1e0b792ad680"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "primaryBlockReason": "typecheck hook not configured — required verification cannot run"
+  }
+}

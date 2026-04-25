@@ -1,0 +1,66 @@
+{
+  "id": "aedis-task:fe7031b0-2ac6-464f-bd68-3083742fd037",
+  "space": "aedis/project/mnt-ai-tmp-aedis-det-lifecycle-p3ziso",
+  "kind": "aedis-task",
+  "title": "add a GET /ready endpoint in src/server.ts that returns ok",
+  "summary": "single-file · partial run · single-file scope · 1 file(s) touched · verification pass-with-warnings",
+  "raw": "{\n  \"rawInput\": \"add a GET /ready endpoint in src/server.ts that returns ok\",\n  \"normalizedPrompt\": \"add a GET /ready endpoint in src/server.ts that returns ok\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"e1f2f878-bd93-4d59-874d-56b40cac59a3\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"deterministic lifecycle fixture\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"bf6b1102-f201-4da7-aa65-4244d07be0c3\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/server.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/server.ts\\n+++ b/src/server.ts\\n@@ -7,0 +7,4 @@\\n+fastify.get(\\\"/ready\\\", async (_request, _reply) => {\\n+  return { ok: true };\\n+});\\n+\\n\",\n            \"originalContent\": \"import Fastify from \\\"fastify\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async () => ({ ok: true }));\\n\\nexport async function startServer() {\\n  await fastify.listen({ port: 0 });\\n}\\n\",\n            \"content\": \"import Fastify from \\\"fastify\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async () => ({ ok: true }));\\n\\nfastify.get(\\\"/ready\\\", async (_request, _reply) => {\\n  return { ok: true };\\n});\\n\\nexport async function startServer() {\\n  await fastify.listen({ port: 0 });\\n}\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: route-insert on src/server.ts\",\n            \"rationale\": \"Inserted GET /ready at line 6, anchored after fastify.get(\\\"/\\\").\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/server.ts\",\n          \"scopeFiles\": [\n            \"src/server.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic route-add: GET /ready → src/server.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"bf73690e-4d4c-4e55-b26f-e01dfcf7e7d0\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"bf6b1102-f201-4da7-aa65-4244d07be0c3\",\n            \"targetFile\": \"src/server.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/route-insert\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"startServer\"\n              ],\n              \"proposed\": [\n                \"startServer\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/route-insert\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"586a130e-63a1-4278-a55e-81f8cda494cd\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.95\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"5b35b618-64c0-4c9f-a409-eeeed2d021ed\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"b359ae7a-eb1b-4bf2-be1a-835f5c781182\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/server.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/server.ts\\n+++ b/src/server.ts\\n@@ -7,0 +7,4 @@\\n+fastify.get(\\\"/ready\\\", async (_request, _reply) => {\\n+  return { ok: true };\\n+});\\n+\\n\",\n            \"originalContent\": \"import Fastify from \\\"fastify\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async () => ({ ok: true }));\\n\\nexport async function startServer() {\\n  await fastify.listen({ port: 0 });\\n}\\n\",\n            \"content\": \"import Fastify from \\\"fastify\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async () => ({ ok: true }));\\n\\nfastify.get(\\\"/ready\\\", async (_request, _reply) => {\\n  return { ok: true };\\n});\\n\\nexport async function startServer() {\\n  await fastify.listen({ port: 0 });\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:partial"
+  ],
+  "createdAt": "2026-04-25T15:22:18.696Z",
+  "updatedAt": "2026-04-25T15:22:18.701Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-det-lifecycle-p3ZISo",
+  "filePaths": [
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "fe7031b0-2ac6-464f-bd68-3083742fd037",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "0918436f-df3f-4e35-8555-7eee92fd4282",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "ed3c6076a575126ecedf39c96a4c648240ba8a52",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "ab2fd459-5927-42f1-8c7b-fc5326b8ce61",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:fe7031b0-2ac6-464f-bd68-3083742fd037",
+    "aedis-run:fe7031b0-2ac6-464f-bd68-3083742fd037"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:fe7031b0-2ac6-464f-bd68-3083742fd037"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:fe7031b0-2ac6-464f-bd68-3083742fd037"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "pass-with-warnings",
+    "filesTouched": 1
+  }
+}

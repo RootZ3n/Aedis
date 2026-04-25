@@ -1,5 +1,5 @@
 // Builder worker module
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -16,7 +16,10 @@ import {
   type RunInvocationContext,
 } from "../core/model-invoker.js";
 import { DiffApplier } from "../core/diff-applier.js";
-import { loadModelConfig } from "../server/routes/config.js";
+import {
+  loadModelConfig,
+  resolveBuilderModelForTier,
+} from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
@@ -33,6 +36,9 @@ import { extractRelevantSection, type SectionExtraction } from "./scout.js";
 
 export interface TaskContract {
   readonly file: string;
+  readonly scopeFiles: readonly string[];
+  readonly siblingFiles: readonly string[];
+  readonly mode: "single-file" | "coordinated-multi-file";
   readonly goal: string;
   readonly constraints: readonly string[];
   readonly forbiddenChanges: readonly string[];
@@ -66,6 +72,13 @@ export interface BuilderResult extends WorkerResult {
      * by collectAdversarialFindingsForConfidence.
      */
     readonly providerFindings?: readonly GuardFinding[];
+    /**
+     * One entry per model attempt across all target files in this
+     * Builder dispatch — successful, guard-rejected, empty-diff, etc.
+     * Carries cost/model/tokens/exports/patchMode for each attempt
+     * so the receipt shows what was actually spent and tried.
+     */
+    readonly attemptRecords?: readonly BuilderAttemptRecord[];
   };
 }
 
@@ -124,6 +137,20 @@ import {
   classifyProviderAnomaly,
   type GuardFinding,
 } from "../core/adversarial-guard.js";
+import {
+  formatBriefForBuilder,
+  type ImplementationBrief,
+} from "../core/implementation-brief.js";
+import {
+  BuilderAttemptError,
+  sumAttemptCosts,
+  type AttemptOutcome,
+  type BuilderAttemptRecord,
+  type ExportDiff,
+  type PatchMode,
+} from "./builder-diagnostics.js";
+import { classifyTaskShape, routeStrategyDirective } from "../core/task-shape.js";
+import { randomUUID } from "node:crypto";
 
 // Reserved overhead for separators and the "Relevant context:" header
 // when computing the available context budget.
@@ -534,6 +561,25 @@ interface TruncatedFile {
   readonly reason: string;
 }
 
+interface ExecutedTargetPatch {
+  readonly change: FileChange;
+  readonly decisions: readonly BuildDecision[];
+  readonly touchedFiles: readonly { path: string; operation: "read" | "create" | "modify" }[];
+  readonly cost: CostEntry;
+  readonly confidence: number;
+  readonly contract: TaskContract;
+  readonly prompt: string;
+  readonly rawModelResponse: string;
+  readonly providerFindings: readonly GuardFinding[];
+  /**
+   * Diagnostic records for every model attempt against this target —
+   * one for the initial call, one for each repair retry. Always
+   * populated; persists through guard rejection so cost/exports/patch-mode
+   * survive failures.
+   */
+  readonly attemptRecords: readonly BuilderAttemptRecord[];
+}
+
 // Structural type for assignment.context.layers — kept loose so we don't
 // depend on the exact AssembledContext shape from elsewhere.
 type ContextLayers = ReadonlyArray<{
@@ -583,7 +629,7 @@ export class BuilderWorker extends AbstractWorker {
   }
 
   canHandle(assignment: WorkerAssignment): boolean {
-    return assignment.task.targetFiles.length === 1;
+    return assignment.task.targetFiles.length >= 1;
   }
 
   async estimateCost(assignment: WorkerAssignment): Promise<CostEntry> {
@@ -596,7 +642,7 @@ export class BuilderWorker extends AbstractWorker {
     );
     const inputTokens = Math.ceil((contextChars + assignment.task.description.length * 2) / 4);
     const outputTokens = Math.min(assignment.tokenBudget, 1800);
-    const { model } = this.getActiveModelConfig(configRoot);
+    const { model } = this.getActiveModelConfig(configRoot, assignment.tier);
     return {
       model,
       inputTokens,
@@ -627,310 +673,97 @@ export class BuilderWorker extends AbstractWorker {
     // Coordinator provided it; fall back to projectRoot for standalone
     // harnesses that don't distinguish the two.
     const configRoot = assignment.sourceRepo ?? projectRoot;
+    const appliedChanges: FileChange[] = [];
+    const observedCosts: CostEntry[] = [];
+    // Aggregate diagnostic records across every target attempt — even
+    // ones that throw — so the receipt records cost/model/exports for
+    // failed work, not just successful patches.
+    const allAttemptRecords: BuilderAttemptRecord[] = [];
 
     try {
       if (!this.canHandle(assignment)) {
-        throw new Error("Builder requires an exact single-file contract scope");
+        throw new Error("Builder requires at least one in-scope file to build");
       }
 
-      const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(configRoot);
-      const contract = this.buildContract(assignment);
-      // Normalize absolute source-repo paths to worktree-relative before resolveTarget.
-      const normalizedFile = assignment.sourceRepo && contract.file.startsWith(assignment.sourceRepo)
-        ? resolve(projectRoot, contract.file.slice(assignment.sourceRepo.length).replace(/^[\\/]+/, ""))
-        : contract.file;
-      const targetPath = this.resolveTarget(normalizedFile, projectRoot);
-      const relativePath = this.toRelative(targetPath, projectRoot);
-
-      // ALWAYS read the full file. In section-edit mode we use a windowed
-      // slice for the prompt, but the diff is applied back to the FULL
-      // content on disk — so fullContent must be the source of truth.
-      // Guard against directory paths resolved from ambiguous file references.
-      let fullContent: string;
-      try {
-        fullContent = await readFile(targetPath, "utf8");
-      } catch (err) {
-        if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "EISDIR") {
-          console.warn(`[builder] readFile: path is a directory, skipping: ${relativePath}`);
-          return this.failure(
-            assignment,
-            `EISDIR: resolved path is a directory: ${relativePath}`,
-            { model: this.getActiveModelConfig(configRoot).model, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
-            Date.now() - startedAt,
-          ) as BuilderResult;
-        }
-        if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
-          // File does not exist yet — builder treats this as create-from-empty.
-          // Model receives empty content and generates the full new file,
-          // then writeFile creates it normally.
-          fullContent = "";
-        } else {
-          throw err;
-        }
-      }
-      this.logFileTouch(taskId, relativePath, "read");
-
-      // ─── LARGE FILE HANDLING ─────────────────────────────────────────
-      let promptContent = fullContent;
-      let sectionInfo: SectionExtraction | null = null;
-
-      if (fullContent.length > LARGE_FILE_CHAR_THRESHOLD) {
-        // contract.goal is a charter-generated summary that often loses key
-        // phrases from the original user prompt. Concatenate intent.userRequest
-        // with contract.goal so the trigger phrase is matched no matter
-        // which source contains it. The regex doesn't care about extra text.
-        const taskDesc = `${assignment.intent.userRequest} ${contract.goal}`;
-        sectionInfo = extractRelevantSection(targetPath, fullContent, taskDesc);
-        if (sectionInfo) {
-          promptContent = sectionInfo.section;
-          console.log(
-            `[builder] LARGE FILE: ${fullContent.length} chars > ${LARGE_FILE_CHAR_THRESHOLD} threshold. ` +
-            `Extracted lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines} ` +
-            `(method=${sectionInfo.extractionMethod}, function=${sectionInfo.matchedFunction ?? "(none)"}, ` +
-            `keywords=[${sectionInfo.keywordsUsed.join(", ")}], section=${promptContent.length} chars)`
-          );
-          this.noteDecision(
-            taskId,
-            `Section-edit mode: lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines}`,
-            `File too large (${fullContent.length} chars > ${LARGE_FILE_CHAR_THRESHOLD}); ` +
-            `extracted via ${sectionInfo.extractionMethod}, function=${sectionInfo.matchedFunction ?? "(none)"}`,
-          );
-        } else {
-          console.warn(
-            `[builder] LARGE FILE: ${fullContent.length} chars but extractRelevantSection returned null. ` +
-            `Will send full file — prompt may exceed cap.`
-          );
-        }
-      }
-
-      // Build prompt using the *primary* model name. The fallback model sees
-      // the same prompt — it's not aware of the model identity in the prompt
-      // text, so this is purely a label inside the system message.
-      const built = this.buildPrompt(contract, assignment, promptContent, primaryModel, sectionInfo);
-      const prompt = built.prompt;
-
-      // Truncation log — emit BEFORE the prompt-size log so the operator
-      // sees what was dropped first, then the resulting size.
-      if (built.truncated.length > 0) {
-        const dropped = built.truncated
-          .map((t) => `${t.path} (${t.chars} chars, layer ${t.layerIndex}: ${t.reason})`)
-          .join("; ");
-        console.warn(
-          `[builder] context truncated: ${built.truncated.length} file(s) dropped to fit ` +
-          `${built.contextBudget}-char context budget (cap=${CONTEXT_CHAR_CAP}, ` +
-          `kept ${built.layersIncluded}/${built.layersTotal} layer(s)) — ${dropped}`
-        );
-      }
-
-      // Hard-ceiling check
-      if (built.chars > PROMPT_CHAR_CAP) {
-        console.warn(
-          `[builder] WARN: prompt is ${built.chars} chars (~${built.estimatedTokens} tokens), ` +
-          `over the ${PROMPT_CHAR_CAP}-char cap. originalContent (prompt slice) is ${built.originalContentChars} chars. ` +
-          `The Builder will proceed but the model may truncate or refuse.`
-        );
-      }
-
-      // Required log line — emit immediately before the model call.
-      console.log(
-        `[builder] prompt size: ~${built.estimatedTokens} tokens (${built.chars} chars)` +
-        (sectionInfo
-          ? ` [section mode: lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines}]`
-          : "")
-      );
-
-      // Build fallback chain
       const runId = this.extractRunId(assignment);
-      const chain = this.buildInvocationChain(
-        primaryProvider as Provider,
-        primaryModel,
-        prompt,
-        assignment.tokenBudget,
-        sectionInfo !== null,
-        runId,
-      );
-
-      // Look up (or create) the per-run fallback context.
       const runCtx = this.getOrCreateRunContext(runId);
-
-      console.log(
-        `[builder] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)} (projectRoot=${projectRoot}): ${chain.map(c => `${c.provider}/${c.model}`).join(" → ")}`
-      );
-
-      // Real model call via fallback-aware invoker
-      const response = await invokeModelWithFallback(chain, runCtx);
-
-      if (response.usedProvider !== primaryProvider) {
-        console.warn(
-          `[builder] PRIMARY FAILED — used fallback ${response.usedProvider}/${response.usedModel} ` +
-          `instead of ${primaryProvider}/${primaryModel} (attempted: ${response.attemptedProviders.join(", ")})`
-        );
-        this.noteDecision(
-          taskId,
-          `Builder fell back from ${primaryProvider}/${primaryModel} to ${response.usedProvider}/${response.usedModel}`,
-          `Primary provider failed mid-run; fallback chain promoted next entry`,
-        );
+      const targetPatches: ExecutedTargetPatch[] = [];
+      for (const targetFile of assignment.task.targetFiles) {
+        try {
+          const patch = await this.executeTargetFile(
+            assignment,
+            targetFile,
+            projectRoot,
+            configRoot,
+            runCtx,
+            runId,
+          );
+          targetPatches.push(patch);
+          appliedChanges.push(patch.change);
+          observedCosts.push(patch.cost);
+          allAttemptRecords.push(...patch.attemptRecords);
+        } catch (perTargetErr) {
+          // Carry diagnostics out of the per-target failure so the
+          // outer catch can stamp them onto the receipt.
+          if (perTargetErr instanceof BuilderAttemptError) {
+            allAttemptRecords.push(perTargetErr.record);
+          }
+          throw perTargetErr;
+        }
       }
 
-      // Process model response
-      const { updatedContent, diff } = this.processModelResponse(
-        response.text,
-        relativePath,
-        fullContent,
-        sectionInfo !== null,
-      );
-      this.enforceForbiddenChanges(contract, updatedContent, fullContent);
-
-      // Phase 11 — catch the wholesale-rewrite failure mode before it
-      // reaches the merge gate. Pass the user request so the guard
-      // can switch to strict single-export-loss mode when the user
-      // didn't authorize any removal (the simple-targeted bugfix
-      // case). See findRemovedExports + enforcePreservedExports for
-      // context.
-      enforcePreservedExports(
-        fullContent,
-        updatedContent,
-        relativePath,
-        assignment.intent?.userRequest,
-      );
-
-      if (updatedContent === fullContent) {
-        throw new Error("Model returned no effective file changes");
-      }
-
-      // Final safety gate: never write raw diff text to a source file
-      if (DiffApplier.looksLikeRawDiff(updatedContent)) {
-        throw new Error(`SAFETY: Refusing to write raw diff text to ${relativePath}`);
-      }
-
-      // Prose-output safety gate: catch local / small models that ignore
-      // the "return ONLY the full final file content" instruction and
-      // emit conversational analysis + markdown instead of code. Seen in
-      // real runs — qwen3.6:35b returned "I've reviewed the two
-      // configuration files you shared. Here's a concise summary..."
-      // which then got committed as TypeScript. Only applies to code
-      // files (.ts, .tsx, .js, .jsx, .py, .rs, .go, .java, .rb).
-      if (looksLikeConversationalProse(updatedContent, relativePath)) {
-        throw new Error(
-          `SAFETY: Builder output looks like conversational prose / markdown, not code for ${relativePath}. ` +
-          `First 200 chars: ${updatedContent.slice(0, 200).replace(/\s+/g, " ")}`,
-        );
-      }
-
-      // Apply the change
-      await writeFile(targetPath, updatedContent, "utf8");
-      this.logFileTouch(taskId, relativePath, "modify");
-      this.noteDecision(taskId, `Applied builder patch to ${relativePath}`, `Contract goal: ${contract.goal}`);
-
-      // Replace the synthetic line-by-line diff with git's real LCS-based
-      // diff. buildUnifiedDiff() below is a positional comparator — it
-      // doesn't know about insertions, so inserting a line at the top
-      // makes every subsequent line appear as a removal + re-add. git
-      // diff understands insertions and produces the minimal hunk.
-      // Fall back to the synthetic diff if git isn't available (shouldn't
-      // happen in a workspace, but be safe).
-      const realDiff = await computeGitDiff(projectRoot, relativePath).catch(() => diff);
-      const finalDiff = realDiff && realDiff.trim() ? realDiff : diff;
-
-      const changes: FileChange[] = [{
-        path: relativePath,
-        operation: "modify",
-        diff: finalDiff,
-        originalContent: fullContent,
-        content: updatedContent,
-      }];
-
-      const decisions: BuildDecision[] = [{
-        description: `Applied contract-scoped update to ${relativePath}` +
-          (sectionInfo ? ` (section-edit mode, lines ${sectionInfo.startLine}-${sectionInfo.endLine})` : ""),
-        rationale: contract.goal,
-        alternatives: ["Refuse patch outside scope", "Request narrower contract"],
-      }];
-
-      const cost: CostEntry = {
-        model: response.usedModel,
-        inputTokens: response.tokensIn,
-        outputTokens: response.tokensOut,
-        estimatedCostUsd: response.costUsd,
-      };
-
-      // Phase 8.5 — run provider-anomaly detection against the raw
-      // response + produced changes. On the happy path (changes > 0 and
-      // coherent response) this emits zero findings. It catches the
-      // edge cases where the upstream prose / raw-diff / empty-change
-      // gates didn't fire but the response still looks inconsistent
-      // with the work produced — e.g. a completion claim that survived
-      // content-identity but was glued to a trivial whitespace diff.
-      const providerFindings: GuardFinding[] = classifyProviderAnomaly({
-        responseText: response.text,
-        filesChanged: changes.map((c) => c.path),
-        verdict: "success",
-        model: response.usedModel,
-      }).findings as GuardFinding[];
-
+      const changes = targetPatches.map((patch) => patch.change);
+      const decisions = targetPatches.flatMap((patch) => patch.decisions);
+      const touchedFiles = targetPatches.flatMap((patch) => patch.touchedFiles);
+      const providerFindings = targetPatches.flatMap((patch) => patch.providerFindings);
+      // Prefer the attempt-level cost roll-up so we don't lose tokens
+      // from repair retries that the legacy CostEntry list ignored.
+      const cost = allAttemptRecords.length > 0
+        ? sumAttemptCosts(allAttemptRecords)
+        : this.sumCosts(observedCosts);
+      const builderConfidence = targetPatches.length > 0
+        ? Number(
+            (
+              targetPatches.reduce((sum, patch) => sum + patch.confidence, 0) /
+              targetPatches.length
+            ).toFixed(3),
+          )
+        : 0;
+      const summaryContract = this.buildContract(assignment, assignment.task.targetFiles[0]);
       const output: BuilderResult["output"] = {
         kind: "builder",
         changes,
         decisions,
         needsCriticReview: true,
-        contract,
-        prompt,
-        rawModelResponse: response.text,
+        contract: summaryContract,
+        prompt: targetPatches.map((patch) => patch.prompt).join("\n\n=== FILE CONTRACT BOUNDARY ===\n\n"),
+        rawModelResponse: targetPatches.map((patch) => patch.rawModelResponse).join("\n\n=== FILE RESPONSE BOUNDARY ===\n\n"),
         providerFindings,
+        attemptRecords: [...allAttemptRecords],
       };
-
-      // Compute builder confidence from actual run signals
-      const originalLines = fullContent.split("\n").length;
-      const changedLines = Math.abs(updatedContent.split("\n").length - originalLines) + (diff ? diff.split("\n").filter(l => l.startsWith("+") || l.startsWith("-")).length : 0);
-      const builderConfidence = computeBuilderConfidence({
-        diffApplied: true, // we got here, so diff applied
-        sectionEdit: sectionInfo !== null,
-        sectionRetention: sectionInfo ? updatedContent.split("\n").length / originalLines : undefined,
-        usedFallback: response.usedProvider !== primaryProvider,
-        linesChanged: changedLines,
-        totalLines: originalLines,
-        filesModified: 1,
-      });
-
-      this.eventBus?.emit({
-        type: "builder_complete",
-        payload: {
-          runId: this.extractRunId(assignment),
-          taskId,
-          workerType: this.type,
-          file: relativePath,
-          // Transparency rule: surface the actual +/- diff live so the UI
-          // can render it as the Builder finishes each file, rather than
-          // hiding the change until the end-of-run patch artifact.
-          diff,
-          path: relativePath,
-          operation: "modify",
-          model: response.usedModel,
-          provider: response.usedProvider,
-          costUsd: cost.estimatedCostUsd,
-          tokensIn: response.tokensIn,
-          tokensOut: response.tokensOut,
-          fellBack: response.usedProvider !== primaryProvider,
-          sectionMode: sectionInfo !== null,
-          sectionRange: sectionInfo
-            ? { startLine: sectionInfo.startLine, endLine: sectionInfo.endLine, totalLines: sectionInfo.totalLines }
-            : null,
-          confidence: builderConfidence,
-        },
-      });
 
       return this.success(assignment, output, {
         cost,
         confidence: builderConfidence,
-        touchedFiles: [
-          { path: relativePath, operation: "read" },
-          { path: relativePath, operation: "modify" },
-        ],
+        touchedFiles,
         assumptions: [],
         issues: [],
         durationMs: Date.now() - startedAt,
       }) as BuilderResult;
     } catch (error) {
+      if (appliedChanges.length > 0) {
+        try {
+          await this.rollbackAppliedChanges(projectRoot, appliedChanges);
+          console.warn(
+            `[builder] rolled back ${appliedChanges.length} applied file(s) after assignment failure`,
+          );
+        } catch (rollbackError) {
+          console.error(
+            `[builder] rollback after multi-file failure did not complete cleanly: ` +
+            `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+        }
+      }
       this.eventBus?.emit({
         type: "task_failed",
         payload: {
@@ -939,13 +772,29 @@ export class BuilderWorker extends AbstractWorker {
           error: error instanceof Error ? error.message : String(error),
         },
       });
-      const { model } = this.getActiveModelConfig(configRoot);
-      return this.failure(
+      // Cost roll-up: prefer attempt records (carry through guard rejection
+      // via BuilderAttemptError) over per-target cost entries which only
+      // populate on successful target patches.
+      const fallbackCost: CostEntry = allAttemptRecords.length > 0
+        ? sumAttemptCosts(allAttemptRecords)
+        : observedCosts.length > 0
+          ? this.sumCosts(observedCosts)
+          : { ...this.zeroCost(), model: this.getActiveModelConfig(configRoot, assignment.tier).model };
+      const failureResult = this.failure(
         assignment,
         error instanceof Error ? error.message : String(error),
-        { model, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        fallbackCost,
         Date.now() - startedAt,
       ) as BuilderResult;
+      // Stamp attempt records onto the failure output so the Coordinator
+      // can persist them. We mutate via Object.defineProperty because
+      // the failure() helper produces a frozen-ish object; this is the
+      // narrowest way to thread diagnostics without restructuring base.
+      const merged: BuilderResult["output"] = {
+        ...(failureResult.output as BuilderResult["output"]),
+        attemptRecords: [...allAttemptRecords],
+      };
+      return { ...failureResult, output: merged } as BuilderResult;
     }
   }
 
@@ -967,10 +816,17 @@ export class BuilderWorker extends AbstractWorker {
    * per-task projectRoot overrides honor per-repo model configurations
    * if the user has them.
    */
-  private getActiveModelConfig(projectRoot: string): { model: string; provider: string } {
+  private getActiveModelConfig(
+    projectRoot: string,
+    tier: WorkerAssignment["tier"] = "standard",
+  ): { model: string; provider: string } {
     try {
       const config = loadModelConfig(projectRoot);
-      return { model: config.builder.model, provider: config.builder.provider };
+      const resolved = resolveBuilderModelForTier(config, tier);
+      return {
+        model: resolved.assignment.model,
+        provider: resolved.assignment.provider,
+      };
     } catch {
       return { model: this.defaultModel, provider: this.defaultProvider };
     }
@@ -1038,16 +894,23 @@ export class BuilderWorker extends AbstractWorker {
 
   // ─── Contract & Prompt ───────────────────────────────────────────
 
-  private buildContract(assignment: WorkerAssignment): TaskContract {
-    const file = assignment.task.targetFiles[0];
+  private buildContract(assignment: WorkerAssignment, file = assignment.task.targetFiles[0]): TaskContract {
+    const scopeFiles = Array.from(new Set(assignment.task.targetFiles));
+    const siblingFiles = scopeFiles.filter((candidate) => candidate !== file);
+    const mode: TaskContract["mode"] = siblingFiles.length > 0
+      ? "coordinated-multi-file"
+      : "single-file";
     const constraints = assignment.intent.constraints.map((c) => c.description);
     const forbiddenChanges = assignment.intent.exclusions ?? [];
     const interfaceRules = [
       "Do not change public names unless the task explicitly requires it.",
       "Preserve file-local style and module shape.",
-      "Do not touch files outside the exact contract file.",
+      mode === "coordinated-multi-file"
+        ? "Edit only the current contract file, but keep it compatible with the sibling files in the coordinated assignment."
+        : "Do not touch files outside the exact contract file.",
+      "Do not invent paths outside the selected file set.",
     ];
-    return { file, goal: assignment.task.description, constraints, forbiddenChanges, interfaceRules };
+    return { file, scopeFiles, siblingFiles, mode, goal: assignment.task.description, constraints, forbiddenChanges, interfaceRules };
   }
 
   private buildPrompt(
@@ -1066,16 +929,35 @@ export class BuilderWorker extends AbstractWorker {
     // the gap by hallucinating a plausible edit (e.g. deleting an array
     // element to "clean up"). Surface the original request first.
     const userRequest = assignment.intent?.userRequest?.trim() || "";
+    const brief = assignment.implementationBrief ?? null;
+    const briefBlock = brief ? formatBriefForBuilder(brief) : "";
+    const taskShape = classifyTaskShape(userRequest);
+    const routeDirective = routeStrategyDirective(taskShape);
+    const blockerProtocolLines = [
+      "BLOCKER PROTOCOL — when you cannot make the requested change:",
+      "  • Do NOT return the original file unchanged (that produces an empty-diff failure).",
+      "  • Do NOT invent files or behavior. Stay within the selected-files list.",
+      "  • If the target file already satisfies the request, add a single top-of-file comment line describing that fact, and return the file otherwise unchanged.",
+      "  • If the request is ambiguous or impossible, add a single top-of-file comment line starting with `// AEDIS_BLOCKER:` stating the specific missing information, and return the rest of the file unchanged.",
+    ];
     if (sectionInfo) {
       fixedParts = [
         `You are the Builder worker on model ${model}.`,
         "You must obey the contract exactly.",
         `Target file: ${contract.file}`,
+        contract.mode === "coordinated-multi-file"
+          ? `Coordinated scope files: ${contract.scopeFiles.join(" | ")}`
+          : "",
+        contract.siblingFiles.length > 0
+          ? `Sibling files that must remain compatible: ${contract.siblingFiles.join(" | ")}`
+          : "",
         userRequest ? `User request (this is what you must actually do): ${userRequest}` : "",
         `Deliverable: ${contract.goal}`,
         `Constraints: ${contract.constraints.join(" | ") || "none"}`,
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
+        briefBlock,
+        routeDirective,
         "",
         "SECTION-EDIT MODE — LARGE FILE",
         `You are editing lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${contract.file}.`,
@@ -1112,11 +994,20 @@ export class BuilderWorker extends AbstractWorker {
         `You are the Builder worker on model ${model}.`,
         "You must obey the contract exactly.",
         `Target file: ${contract.file}`,
+        contract.mode === "coordinated-multi-file"
+          ? `Coordinated scope files: ${contract.scopeFiles.join(" | ")}`
+          : "",
+        contract.siblingFiles.length > 0
+          ? `Sibling files that must remain compatible: ${contract.siblingFiles.join(" | ")}`
+          : "",
         userRequest ? `User request (this is what you must actually do): ${userRequest}` : "",
         `Deliverable: ${contract.goal}`,
         `Constraints: ${contract.constraints.join(" | ") || "none"}`,
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
+        briefBlock,
+        routeDirective,
+        blockerProtocolLines.join("\n"),
         "Return ONLY the full final file content for the target file. No markdown fences. No explanations. No prose. No review.",
         "MINIMUM-CHANGE DISCIPLINE:",
         "  1. Identify the smallest possible edit that satisfies the User request.",
@@ -1489,5 +1380,551 @@ export class BuilderWorker extends AbstractWorker {
       alternatives: [],
       rationale,
     });
+  }
+
+  private async executeTargetFile(
+    assignment: WorkerAssignment,
+    targetFile: string,
+    projectRoot: string,
+    configRoot: string,
+    runCtx: RunInvocationContext,
+    runId: string,
+  ): Promise<ExecutedTargetPatch> {
+    const taskId = assignment.task.id;
+    const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(configRoot, assignment.tier);
+    const contract = this.buildContract(assignment, targetFile);
+    const normalizedFile = assignment.sourceRepo && contract.file.startsWith(assignment.sourceRepo)
+      ? resolve(projectRoot, contract.file.slice(assignment.sourceRepo.length).replace(/^[\\/]+/, ""))
+      : contract.file;
+    const targetPath = this.resolveTarget(normalizedFile, projectRoot);
+    const relativePath = this.toRelative(targetPath, projectRoot);
+
+    let fullContent: string;
+    let fileExistsBefore = true;
+    try {
+      fullContent = await readFile(targetPath, "utf8");
+      this.logFileTouch(taskId, relativePath, "read");
+    } catch (err) {
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "EISDIR") {
+        throw new Error(`EISDIR: resolved path is a directory: ${relativePath}`);
+      }
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        fileExistsBefore = false;
+        fullContent = "";
+      } else {
+        throw err;
+      }
+    }
+
+    let promptContent = fullContent;
+    let sectionInfo: SectionExtraction | null = null;
+    if (fullContent.length > LARGE_FILE_CHAR_THRESHOLD) {
+      const taskDesc = `${assignment.intent.userRequest} ${contract.goal}`;
+      sectionInfo = extractRelevantSection(targetPath, fullContent, taskDesc);
+      if (sectionInfo) {
+        promptContent = sectionInfo.section;
+        console.log(
+          `[builder] LARGE FILE: ${fullContent.length} chars > ${LARGE_FILE_CHAR_THRESHOLD} threshold. ` +
+          `Extracted lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines} ` +
+          `(method=${sectionInfo.extractionMethod}, function=${sectionInfo.matchedFunction ?? "(none)"}, ` +
+          `keywords=[${sectionInfo.keywordsUsed.join(", ")}], section=${promptContent.length} chars)`,
+        );
+        this.noteDecision(
+          taskId,
+          `Section-edit mode: lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines}`,
+          `File too large (${fullContent.length} chars > ${LARGE_FILE_CHAR_THRESHOLD}); ` +
+          `extracted via ${sectionInfo.extractionMethod}, function=${sectionInfo.matchedFunction ?? "(none)"}`,
+        );
+      } else {
+        console.warn(
+          `[builder] LARGE FILE: ${fullContent.length} chars but extractRelevantSection returned null. ` +
+          `Will send full file — prompt may exceed cap.`,
+        );
+      }
+    }
+
+    const built = this.buildPrompt(contract, assignment, promptContent, primaryModel, sectionInfo);
+    const prompt = built.prompt;
+    if (built.truncated.length > 0) {
+      const dropped = built.truncated
+        .map((item) => `${item.path} (${item.chars} chars, layer ${item.layerIndex}: ${item.reason})`)
+        .join("; ");
+      console.warn(
+        `[builder] context truncated: ${built.truncated.length} file(s) dropped to fit ` +
+        `${built.contextBudget}-char context budget (cap=${CONTEXT_CHAR_CAP}, ` +
+        `kept ${built.layersIncluded}/${built.layersTotal} layer(s)) — ${dropped}`,
+      );
+    }
+    if (built.chars > PROMPT_CHAR_CAP) {
+      console.warn(
+        `[builder] WARN: prompt is ${built.chars} chars (~${built.estimatedTokens} tokens), ` +
+        `over the ${PROMPT_CHAR_CAP}-char cap. originalContent (prompt slice) is ${built.originalContentChars} chars. ` +
+        `The Builder will proceed but the model may truncate or refuse.`,
+      );
+    }
+    console.log(
+      `[builder] prompt size: ~${built.estimatedTokens} tokens (${built.chars} chars)` +
+      (sectionInfo
+        ? ` [section mode: lines ${sectionInfo.startLine}-${sectionInfo.endLine} of ${sectionInfo.totalLines}]`
+        : ""),
+    );
+
+    const chain = this.buildInvocationChain(
+      primaryProvider as Provider,
+      primaryModel,
+      prompt,
+      assignment.tokenBudget,
+      sectionInfo !== null,
+      runId,
+    );
+    console.log(
+      `[builder] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)} (projectRoot=${projectRoot}): ${chain.map((cfg) => `${cfg.provider}/${cfg.model}`).join(" → ")}`,
+    );
+
+    const attemptRecords: BuilderAttemptRecord[] = [];
+    const patchMode: PatchMode = sectionInfo ? "section-edit" : "full-file";
+
+    // Attempt 1 — initial model call.
+    const attempt1Started = Date.now();
+    const response = await invokeModelWithFallback(chain, runCtx);
+    if (response.usedProvider !== primaryProvider) {
+      console.warn(
+        `[builder] PRIMARY FAILED — used fallback ${response.usedProvider}/${response.usedModel} ` +
+        `instead of ${primaryProvider}/${primaryModel} (attempted: ${response.attemptedProviders.join(", ")})`,
+      );
+      this.noteDecision(
+        taskId,
+        `Builder fell back from ${primaryProvider}/${primaryModel} to ${response.usedProvider}/${response.usedModel}`,
+        `Primary provider failed mid-run; fallback chain promoted next entry`,
+      );
+    }
+
+    const { updatedContent: attempt1Content, diff: attempt1Diff } = this.processModelResponse(
+      response.text,
+      relativePath,
+      fullContent,
+      sectionInfo !== null,
+    );
+
+    // Build the diagnostic record up-front. Outcome / failureReason
+    // get patched if a guard fires, but the cost/model/tokens/exports
+    // captured here survive any subsequent throw — that's the whole
+    // point of carrying it via BuilderAttemptError.
+    const attempt1Record = this.buildAttemptRecord({
+      attemptIndex: 1,
+      generationId: this.extractGenerationId(assignment),
+      target: relativePath,
+      patchMode,
+      provider: response.usedProvider,
+      model: response.usedModel,
+      tier: assignment.tier,
+      fellBack: response.usedProvider !== primaryProvider,
+      inputTokens: response.tokensIn,
+      outputTokens: response.tokensOut,
+      estimatedCostUsd: response.costUsd,
+      durationMs: Date.now() - attempt1Started,
+      original: fullContent,
+      proposed: attempt1Content,
+    });
+    attemptRecords.push(attempt1Record);
+
+    let updatedContent = attempt1Content;
+    let diff = attempt1Diff;
+    let activeAttemptRecord = attempt1Record;
+    const usedExportRepair = await this.tryExportRepair({
+      assignment,
+      taskId,
+      relativePath,
+      contract,
+      promptContent,
+      sectionInfo,
+      runCtx,
+      primaryProvider: primaryProvider as Provider,
+      primaryModel,
+      tokenBudget: assignment.tokenBudget,
+      runId,
+      fullContent,
+      attempt1Content,
+      attemptRecords,
+    });
+    if (usedExportRepair) {
+      updatedContent = usedExportRepair.updatedContent;
+      diff = usedExportRepair.diff;
+      activeAttemptRecord = usedExportRepair.record;
+    }
+
+    // ── Guards (final, post-repair if applicable) ──────────────────
+    try {
+      this.enforceForbiddenChanges(contract, updatedContent, fullContent);
+    } catch (err) {
+      throw new BuilderAttemptError(
+        err instanceof Error ? err.message : String(err),
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-forbidden-change", "forbidden-change", err instanceof Error ? err.message : String(err)),
+      );
+    }
+    try {
+      enforcePreservedExports(
+        fullContent,
+        updatedContent,
+        relativePath,
+        assignment.intent?.userRequest,
+      );
+    } catch (err) {
+      throw new BuilderAttemptError(
+        err instanceof Error ? err.message : String(err),
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-export-loss", "export-loss", err instanceof Error ? err.message : String(err)),
+      );
+    }
+
+    if (updatedContent === fullContent) {
+      throw new BuilderAttemptError(
+        "Model returned no effective file changes",
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-empty-diff", "empty-diff", "Model returned no effective file changes"),
+      );
+    }
+    if (DiffApplier.looksLikeRawDiff(updatedContent)) {
+      throw new BuilderAttemptError(
+        `SAFETY: Refusing to write raw diff text to ${relativePath}`,
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-raw-diff", "raw-diff", `raw diff text in output`),
+      );
+    }
+    if (looksLikeConversationalProse(updatedContent, relativePath)) {
+      const msg = `SAFETY: Builder output looks like conversational prose / markdown, not code for ${relativePath}. First 200 chars: ${updatedContent.slice(0, 200).replace(/\s+/g, " ")}`;
+      throw new BuilderAttemptError(
+        msg,
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-prose", "prose", msg),
+      );
+    }
+
+    await writeFile(targetPath, updatedContent, "utf8");
+    const operation: FileChange["operation"] = fileExistsBefore ? "modify" : "create";
+    this.logFileTouch(taskId, relativePath, operation);
+    this.noteDecision(taskId, `Applied builder patch to ${relativePath}`, `Contract goal: ${contract.goal}`);
+
+    const realDiff = await computeGitDiff(projectRoot, relativePath).catch(() => diff);
+    const finalDiff = realDiff && realDiff.trim() ? realDiff : diff;
+    const change: FileChange = {
+      path: relativePath,
+      operation,
+      diff: finalDiff,
+      originalContent: fullContent,
+      content: updatedContent,
+    };
+    const decisions: BuildDecision[] = [{
+      description: `Applied contract-scoped update to ${relativePath}` +
+        (sectionInfo ? ` (section-edit mode, lines ${sectionInfo.startLine}-${sectionInfo.endLine})` : ""),
+      rationale: contract.goal,
+      alternatives: ["Refuse patch outside scope", "Request narrower contract"],
+    }];
+    const cost: CostEntry = {
+      model: response.usedModel,
+      inputTokens: response.tokensIn,
+      outputTokens: response.tokensOut,
+      estimatedCostUsd: response.costUsd,
+    };
+    const providerFindings = classifyProviderAnomaly({
+      responseText: response.text,
+      filesChanged: [change.path],
+      verdict: "success",
+      model: response.usedModel,
+    }).findings as GuardFinding[];
+
+    const originalLines = fullContent.split("\n").length;
+    const changedLines =
+      Math.abs(updatedContent.split("\n").length - originalLines) +
+      (diff ? diff.split("\n").filter((line) => line.startsWith("+") || line.startsWith("-")).length : 0);
+    const confidence = computeBuilderConfidence({
+      diffApplied: true,
+      sectionEdit: sectionInfo !== null,
+      sectionRetention: sectionInfo ? updatedContent.split("\n").length / originalLines : undefined,
+      usedFallback: response.usedProvider !== primaryProvider,
+      linesChanged: changedLines,
+      totalLines: originalLines,
+      filesModified: 1,
+    });
+
+    this.eventBus?.emit({
+      type: "builder_complete",
+      payload: {
+        runId,
+        taskId,
+        workerType: this.type,
+        file: relativePath,
+        diff: finalDiff,
+        path: relativePath,
+        operation,
+        model: response.usedModel,
+        provider: response.usedProvider,
+        costUsd: cost.estimatedCostUsd,
+        tokensIn: response.tokensIn,
+        tokensOut: response.tokensOut,
+        fellBack: response.usedProvider !== primaryProvider,
+        sectionMode: sectionInfo !== null,
+        sectionRange: sectionInfo
+          ? { startLine: sectionInfo.startLine, endLine: sectionInfo.endLine, totalLines: sectionInfo.totalLines }
+          : null,
+        confidence,
+      },
+    });
+
+    const touchedFiles = fileExistsBefore
+      ? [
+          { path: relativePath, operation: "read" as const },
+          { path: relativePath, operation: operation as "modify" },
+        ]
+      : [{ path: relativePath, operation: "create" as const }];
+
+    // Mark the active attempt record as success.
+    const finalIndex = attemptRecords.indexOf(activeAttemptRecord);
+    if (finalIndex >= 0) {
+      attemptRecords[finalIndex] = {
+        ...activeAttemptRecord,
+        outcome: "success",
+        failureReason: null,
+        guardRejected: false,
+        guardName: null,
+      };
+    }
+
+    return {
+      change,
+      decisions,
+      touchedFiles,
+      cost,
+      confidence,
+      contract,
+      prompt,
+      rawModelResponse: response.text,
+      providerFindings,
+      attemptRecords: [...attemptRecords],
+    };
+  }
+
+  private extractGenerationId(assignment: WorkerAssignment): string {
+    const taskAny = assignment.task as { generationId?: unknown };
+    if (typeof taskAny.generationId === "string" && taskAny.generationId) return taskAny.generationId;
+    return assignment.task.id;
+  }
+
+  private buildAttemptRecord(params: {
+    attemptIndex: number;
+    generationId: string;
+    target: string;
+    patchMode: PatchMode;
+    provider: string;
+    model: string;
+    tier: string;
+    fellBack: boolean;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+    durationMs: number;
+    original: string;
+    proposed: string;
+    outcome?: AttemptOutcome;
+  }): BuilderAttemptRecord {
+    const exportDiff = CODE_FILE_EXTENSIONS.test(params.target)
+      ? this.computeExportDiff(params.original, params.proposed)
+      : null;
+    return {
+      attemptId: randomUUID(),
+      attemptIndex: params.attemptIndex,
+      generationId: params.generationId,
+      targetFile: params.target,
+      patchMode: params.patchMode,
+      provider: params.provider,
+      model: params.model,
+      tier: params.tier,
+      fellBack: params.fellBack,
+      inputTokens: params.inputTokens,
+      outputTokens: params.outputTokens,
+      estimatedCostUsd: params.estimatedCostUsd,
+      durationMs: params.durationMs,
+      outcome: params.outcome ?? "success",
+      failureReason: null,
+      guardRejected: false,
+      guardName: null,
+      exportDiff,
+      stale: false,
+    };
+  }
+
+  private computeExportDiff(original: string, proposed: string): ExportDiff {
+    const beforeNames = new Set(extractNamedExports(original));
+    const afterNames = new Set(extractNamedExports(proposed));
+    const missing: string[] = [];
+    const added: string[] = [];
+    for (const name of beforeNames) if (!afterNames.has(name)) missing.push(name);
+    for (const name of afterNames) if (!beforeNames.has(name)) added.push(name);
+    missing.sort(); added.sort();
+    return {
+      original: [...beforeNames].sort(),
+      proposed: [...afterNames].sort(),
+      missing,
+      added,
+    };
+  }
+
+  private markAttemptFailed(
+    record: BuilderAttemptRecord,
+    list: BuilderAttemptRecord[],
+    outcome: AttemptOutcome,
+    guardName: string,
+    failureReason: string,
+  ): BuilderAttemptRecord {
+    const updated: BuilderAttemptRecord = {
+      ...record,
+      outcome,
+      guardRejected: outcome.startsWith("guard-"),
+      guardName,
+      failureReason,
+    };
+    const idx = list.indexOf(record);
+    if (idx >= 0) list[idx] = updated; else list.push(updated);
+    return updated;
+  }
+
+  /**
+   * Attempt an export-loss repair when the first model output dropped
+   * exports (set-difference >= 1). Builds a focused repair prompt
+   * naming the missing exports + their original signatures, asks the
+   * model to RESTORE them while preserving the intended change, then
+   * checks the repaired output. Cost/diagnostics for both attempts
+   * are pushed to attemptRecords. Returns null when no repair was
+   * needed or the repair did not improve the export delta.
+   */
+  private async tryExportRepair(input: {
+    assignment: WorkerAssignment;
+    taskId: string;
+    relativePath: string;
+    contract: TaskContract;
+    promptContent: string;
+    sectionInfo: SectionExtraction | null;
+    runCtx: RunInvocationContext;
+    primaryProvider: Provider;
+    primaryModel: string;
+    tokenBudget: number;
+    runId: string;
+    fullContent: string;
+    attempt1Content: string;
+    attemptRecords: BuilderAttemptRecord[];
+  }): Promise<{ updatedContent: string; diff: string; record: BuilderAttemptRecord } | null> {
+    if (!CODE_FILE_EXTENSIONS.test(input.relativePath)) return null;
+    if (input.sectionInfo) return null; // section-edit mode preserves untouched code by construction
+    const exportDiff = this.computeExportDiff(input.fullContent, input.attempt1Content);
+    if (exportDiff.missing.length === 0) return null;
+
+    const sigs = extractNamedExportSignatures(input.fullContent);
+    const missingWithSigs = exportDiff.missing
+      .map((name) => `  - ${sigs.get(name) ?? name}`)
+      .join("\n");
+
+    const repairLines = [
+      `You are the Builder worker on model ${input.primaryModel}.`,
+      `Target file: ${input.contract.file}`,
+      `User request: ${input.assignment.intent?.userRequest ?? input.contract.goal}`,
+      "",
+      "EXPORT REPAIR — your previous attempt dropped existing exports.",
+      `Missing exports that you MUST restore (${exportDiff.missing.length}):`,
+      missingWithSigs,
+      "",
+      "Here is the file you produced (do not lose any lines you already added):",
+      input.attempt1Content,
+      "",
+      "Restore the missing exports above, keeping every other change you made.",
+      "Return ONLY the full final file content. No markdown fences. No explanations.",
+    ];
+    const repairPrompt = repairLines.join("\n");
+
+    const repairChain = this.buildInvocationChain(
+      input.primaryProvider,
+      input.primaryModel,
+      repairPrompt,
+      input.tokenBudget,
+      false,
+      input.runId,
+    );
+    console.log(
+      `[builder] export-repair: ${exportDiff.missing.length} missing export(s) on ${input.relativePath} — re-invoking model`,
+    );
+    const repairStarted = Date.now();
+    let repairResponse;
+    try {
+      repairResponse = await invokeModelWithFallback(repairChain, input.runCtx);
+    } catch (err) {
+      console.warn(
+        `[builder] export-repair: model invocation failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+    const { updatedContent: repaired, diff: repairedDiff } = this.processModelResponse(
+      repairResponse.text,
+      input.relativePath,
+      input.fullContent,
+      false,
+    );
+    const repairedDiffSet = this.computeExportDiff(input.fullContent, repaired);
+    const record = this.buildAttemptRecord({
+      attemptIndex: input.attemptRecords.length + 1,
+      generationId: this.extractGenerationId(input.assignment),
+      target: input.relativePath,
+      patchMode: "full-file",
+      provider: repairResponse.usedProvider,
+      model: repairResponse.usedModel,
+      tier: input.assignment.tier,
+      fellBack: repairResponse.usedProvider !== input.primaryProvider,
+      inputTokens: repairResponse.tokensIn,
+      outputTokens: repairResponse.tokensOut,
+      estimatedCostUsd: repairResponse.costUsd,
+      durationMs: Date.now() - repairStarted,
+      original: input.fullContent,
+      proposed: repaired,
+    });
+    input.attemptRecords.push(record);
+
+    if (repairedDiffSet.missing.length < exportDiff.missing.length) {
+      console.log(
+        `[builder] export-repair: improved missing-export count ${exportDiff.missing.length} → ${repairedDiffSet.missing.length}`,
+      );
+      this.noteDecision(
+        input.taskId,
+        `Export-repair retry restored ${exportDiff.missing.length - repairedDiffSet.missing.length} missing export(s) on ${input.relativePath}`,
+        `Initial output dropped: ${exportDiff.missing.slice(0, 6).join(", ")}`,
+      );
+      return { updatedContent: repaired, diff: repairedDiff, record };
+    }
+
+    console.warn(
+      `[builder] export-repair: did NOT improve (still missing ${repairedDiffSet.missing.length}). Falling back to original output for guard rejection.`,
+    );
+    return null;
+  }
+
+  private async rollbackAppliedChanges(
+    projectRoot: string,
+    changes: readonly FileChange[],
+  ): Promise<void> {
+    for (const change of [...changes].reverse()) {
+      const absPath = resolve(projectRoot, change.path);
+      if (change.operation === "create") {
+        await unlink(absPath).catch(() => undefined);
+        continue;
+      }
+      if (change.originalContent !== undefined) {
+        await writeFile(absPath, change.originalContent, "utf8");
+      }
+    }
+  }
+
+  private sumCosts(costs: readonly CostEntry[]): CostEntry {
+    if (costs.length === 0) {
+      return this.zeroCost();
+    }
+    return {
+      model: Array.from(new Set(costs.map((cost) => cost.model))).join(" + "),
+      inputTokens: costs.reduce((sum, cost) => sum + cost.inputTokens, 0),
+      outputTokens: costs.reduce((sum, cost) => sum + cost.outputTokens, 0),
+      estimatedCostUsd: Number(costs.reduce((sum, cost) => sum + cost.estimatedCostUsd, 0).toFixed(6)),
+    };
   }
 }

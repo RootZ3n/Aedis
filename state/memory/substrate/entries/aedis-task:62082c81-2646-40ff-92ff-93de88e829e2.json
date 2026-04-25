@@ -1,0 +1,56 @@
+{
+  "id": "aedis-task:62082c81-2646-40ff-92ff-93de88e829e2",
+  "space": "aedis/project/mnt-ai-tmp-aedis-gauntlet-biso4e",
+  "kind": "aedis-task",
+  "title": "Add a GET /health endpoint that returns ok/status JSON and update any route registration needed.",
+  "summary": "multi-file · failed run · multi-file scope · 1 file(s) touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"Add a GET /health endpoint that returns ok/status JSON and update any route registration needed.\",\n  \"normalizedPrompt\": \"Add a GET /health endpoint that returns ok/status JSON and update any route registration needed.\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"ed0810fc-d211-4330-be3e-09caa30b1cd4\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"c5e4fc91-cadb-425a-9e2d-6eaf86cbc6e0\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/router.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/router.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"c0ecce5b-dc15-4c21-aa7e-660aa53403d0\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"9ed867d3-3d48-4bb7-aeff-e8ba75f44bb2\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"44b2ce89-b3a5-4134-b148-eb37b961c5d5\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/router.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/router.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:multi-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T13:43:59.357Z",
+  "updatedAt": "2026-04-25T13:43:59.359Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-Biso4E",
+  "filePaths": [
+    "src/router.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "62082c81-2646-40ff-92ff-93de88e829e2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3b9d514b-317f-446f-ab61-b8c5a10c2c20",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:62082c81-2646-40ff-92ff-93de88e829e2",
+    "aedis-run:62082c81-2646-40ff-92ff-93de88e829e2"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:62082c81-2646-40ff-92ff-93de88e829e2"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:62082c81-2646-40ff-92ff-93de88e829e2"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "multi-file",
+    "complexityTier": "medium",
+    "verificationVerdict": "not-run",
+    "filesTouched": 1
+  }
+}

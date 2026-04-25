@@ -1,0 +1,54 @@
+{
+  "id": "aedis-outcome:6abb60d8-ec1f-4baa-90d2-6cde83c7fac8",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Refactor provider metadata and error shaping across src/server.ts and src/router.ts so both files share one source of tr",
+  "summary": "One or more task nodes failed and were not recovered. Repair-pass issues: src/server.ts: no shared exported names with dependency src/router.ts | src/router.ts: no shared exported names with dependency src/server.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: no shared exported names with dependency src/router.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/router.ts: no shared exported names with dependency src/server.ts\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: no shared exported names with dependency src/router.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/router.ts: no shared exported names with dependency src/server.ts\"\n      }\n    ],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 2 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 2,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"src/server.ts: no shared exported names with dependency src/router.ts\",\n      \"src/router.ts: no shared exported names with dependency src/server.ts\"\n    ]\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T10:42:44.731Z",
+  "updatedAt": "2026-04-25T10:42:44.735Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-multi-file-explicit-paths-minv1J",
+  "filePaths": [
+    "src/router.ts",
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "6abb60d8-ec1f-4baa-90d2-6cde83c7fac8",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "5435ae85-d186-4a16-b006-aa397b8d2c06",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:6abb60d8-ec1f-4baa-90d2-6cde83c7fac8",
+    "aedis-task:6abb60d8-ec1f-4baa-90d2-6cde83c7fac8"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:6abb60d8-ec1f-4baa-90d2-6cde83c7fac8"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:6abb60d8-ec1f-4baa-90d2-6cde83c7fac8"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

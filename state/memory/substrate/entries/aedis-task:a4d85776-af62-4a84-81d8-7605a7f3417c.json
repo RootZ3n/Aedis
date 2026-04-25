@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:a4d85776-af62-4a84-81d8-7605a7f3417c",
+  "space": "aedis/project/mnt-ai-tmp-aedis-nest-tx0xdl",
+  "kind": "aedis-task",
+  "title": "add GET /users method getUsers to UserController in src/controllers.ts",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"add GET /users method getUsers to UserController in src/controllers.ts\",\n  \"normalizedPrompt\": \"add GET /users method getUsers to UserController in src/controllers.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"d034ab87-435a-45c4-b50f-1d135af1744d\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"e9151127-e53d-48ad-b85b-94c1efb0ab21\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/controllers.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/controllers.ts\\n+++ b/src/controllers.ts\\n@@ -1,11 +1,18 @@\\n-export class UserController {\\n-  @Inject() service: UserService;\\n-\\n-  constructor(\\n-    private readonly repo: UserRepository,\\n-  ) {}\\n-\\n-  @Get(\\\"/user\\\")\\n-  @UseGuards(AuthGuard)\\n-  getUser() {\\n-    return null;\\n+import { Get } from \\\"@nestjs/common\\\";\\n+export class UserController {\\n+  @Inject() service: UserService;\\n+\\n+  constructor(\\n+    private readonly repo: UserRepository,\\n+  ) {}\\n+\\n+  @Get(\\\"/user\\\")\\n+  @UseGuards(AuthGuard)\\n+  getUser() {\\n+    return null;\\n+  }\\n+\\n+\\n+  @Get(\\\"/users\\\")\\n+  async getUsers() {\\n+    // TODO: implement getUsers\\n\",\n            \"originalContent\": \"export class UserController {\\n  @Inject() service: UserService;\\n\\n  constructor(\\n    private readonly repo: UserRepository,\\n  ) {}\\n\\n  @Get(\\\"/user\\\")\\n  @UseGuards(AuthGuard)\\n  getUser() {\\n    return null;\\n  }\\n}\\n\\nexport class UserService {\\n}\\n\\nexport interface CreateUserDto {\\n  name: string;\\n}\\n\\n// Malformed decorator: unbalanced @Inject(  parens\\nexport class BrokenController {\\n  @Inject(\\n  service: UserService;\\n\\n  doStuff() {}\\n}\\n\",\n            \"content\": \"import { Get } from \\\"@nestjs/common\\\";\\nexport class UserController {\\n  @Inject() service: UserService;\\n\\n  constructor(\\n    private readonly repo: UserRepository,\\n  ) {}\\n\\n  @Get(\\\"/user\\\")\\n  @UseGuards(AuthGuard)\\n  getUser() {\\n    return null;\\n  }\\n\\n\\n  @Get(\\\"/users\\\")\\n  async getUsers() {\\n    // TODO: implement getUsers\\n  }\\n}\\n\\nexport class UserService {\\n}\\n\\nexport interface CreateUserDto {\\n  name: string;\\n}\\n\\n// Malformed decorator: unbalanced @Inject(  parens\\nexport class BrokenController {\\n  @Inject(\\n  service: UserService;\\n\\n  doStuff() {}\\n}\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: decorated-class-method-add on src/controllers.ts\",\n            \"rationale\": \"Added decorated method @Get \\\"getUsers\\\" to class UserController — inserted after existing decorated route methods; Added new import for \\\"@nestjs/common\\\".\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/controllers.ts\",\n          \"scopeFiles\": [\n            \"src/controllers.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic class-extend: @Get UserController.getUsers() → src/controllers.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"8c3f166f-dd3b-45b0-8590-ef8d91beee8d\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"e9151127-e53d-48ad-b85b-94c1efb0ab21\",\n            \"targetFile\": \"src/controllers.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/decorated-class-method-add\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"BrokenController\",\n                \"CreateUserDto\",\n                \"UserController\",\n                \"UserService\"\n              ],\n              \"proposed\": [\n                \"BrokenController\",\n                \"CreateUserDto\",\n                \"UserController\",\n                \"UserService\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/route-insert\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/controllers.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/controllers.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"c5637614-2f9f-4f49-a029-3db80aabc75d\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"f26c4f46-829c-497f-a45f-4db0d46c4123\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"f3df7252-6824-4de3-b444-e4c2e276d545\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/controllers.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/controllers.ts\\n+++ b/src/controllers.ts\\n@@ -1,11 +1,18 @@\\n-export class UserController {\\n-  @Inject() service: UserService;\\n-\\n-  constructor(\\n-    private readonly repo: UserRepository,\\n-  ) {}\\n-\\n-  @Get(\\\"/user\\\")\\n-  @UseGuards(AuthGuard)\\n-  getUser() {\\n-    return null;\\n+import { Get } from \\\"@nestjs/common\\\";\\n+export class UserController {\\n+  @Inject() service: UserService;\\n+\\n+  constructor(\\n+    private readonly repo: UserRepository,\\n+  ) {}\\n+\\n+  @Get(\\\"/user\\\")\\n+  @UseGuards(AuthGuard)\\n+  getUser() {\\n+    return null;\\n+  }\\n+\\n+\\n+  @Get(\\\"/users\\\")\\n+  async getUsers() {\\n+    // TODO: implement getUsers\\n\",\n            \"originalContent\": \"export class UserController {\\n  @Inject() service: UserService;\\n\\n  constructor(\\n    private readonly repo: UserRepository,\\n  ) {}\\n\\n  @Get(\\\"/user\\\")\\n  @UseGuards(AuthGuard)\\n  getUser() {\\n    return null;\\n  }\\n}\\n\\nexport class UserService {\\n}\\n\\nexport interface CreateUserDto {\\n  name: string;\\n}\\n\\n// Malformed decorator: unbalanced @Inject(  parens\\nexport class BrokenController {\\n  @Inject(\\n  service: UserService;\\n\\n  doStuff() {}\\n}\\n\",\n            \"content\": \"import { Get } from \\\"@nestjs/common\\\";\\nexport class UserController {\\n  @Inject() service: UserService;\\n\\n  constructor(\\n    private readonly repo: UserRepository,\\n  ) {}\\n\\n  @Get(\\\"/user\\\")\\n  @UseGuards(AuthGuard)\\n  getUser() {\\n    return null;\\n  }\\n\\n\\n  @Get(\\\"/users\\\")\\n  async getUsers() {\\n    // TODO: implement getUsers\\n  }\\n}\\n\\nexport class UserService {\\n}\\n\\nexport interface CreateUserDto {\\n  name: string;\\n}\\n\\n// Malformed decorator: unbalanced @Inject(  parens\\nexport class BrokenController {\\n  @Inject(\\n  service: UserService;\\n\\n  doStuff() {}\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/controllers.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T14:54:34.875Z",
+  "updatedAt": "2026-04-25T14:54:34.876Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-nest-Tx0XDL",
+  "filePaths": [
+    "src/controllers.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "a4d85776-af62-4a84-81d8-7605a7f3417c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "9b61b0ea-0461-453c-b699-12272d3554dc",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "36b1dd6e-5bce-477f-bef1-d06d53908730",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:a4d85776-af62-4a84-81d8-7605a7f3417c",
+    "aedis-run:a4d85776-af62-4a84-81d8-7605a7f3417c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:a4d85776-af62-4a84-81d8-7605a7f3417c"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:a4d85776-af62-4a84-81d8-7605a7f3417c"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:b0766210-dad0-4cbc-9ac6-d3abd854b62c",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in maybe improve things a bit when you get a chance",
+  "summary": "Files changed outside deliverables: core/a.ts",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Files changed outside deliverables: core/a.ts\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/a.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/a.ts\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"none of the 1 changed files match any keyword from the prompt\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 0/0 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Files changed outside deliverables: core/a.ts\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/a.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"1 file(s) changed but not declared in manifest: core/a.ts\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"none of the 1 changed files match any keyword from the prompt\",\n        \"files\": [\n          \"core/a.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 0/0 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"Files changed outside deliverables: core/a.ts\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 3 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T02:44:08.094Z",
+  "updatedAt": "2026-04-25T02:44:08.096Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-nyVK78",
+  "filePaths": [
+    "core/a.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "b0766210-dad0-4cbc-9ac6-d3abd854b62c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "9e709b87-0796-4c02-b6f8-f8cd5c163557",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:b0766210-dad0-4cbc-9ac6-d3abd854b62c",
+    "aedis-task:b0766210-dad0-4cbc-9ac6-d3abd854b62c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:b0766210-dad0-4cbc-9ac6-d3abd854b62c"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:b0766210-dad0-4cbc-9ac6-d3abd854b62c"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Files changed outside deliverables: core/a.ts"
+  }
+}

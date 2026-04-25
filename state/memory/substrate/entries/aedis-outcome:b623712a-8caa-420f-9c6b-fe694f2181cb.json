@@ -1,0 +1,58 @@
+{
+  "id": "aedis-outcome:b623712a-8caa-420f-9c6b-fe694f2181cb",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in add private logger:Logger to UserController in src/controllers.ts",
+  "summary": "typecheck hook not configured — required verification cannot run FAIL — 3/5 stages passed, confidence 60%, 2 blockers, missing required checks: typecheck, tests, active validation 0%",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.92 (keywords: private, logger, usercontroller, src)\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task 1f19004c-dbf7-4e6b-a683-410c0766daab) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 7cf76531-b01a-4cf6-aa54-5e10b1a61fee) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.92 (keywords: private, logger, usercontroller, src)\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"typecheck hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"tests hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"typecheck hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:custom-hook\",\n        \"message\": \"tests hook not configured — required verification cannot run\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.92 (keywords: private, logger, usercontroller, src)\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task 1f19004c-dbf7-4e6b-a683-410c0766daab) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 7cf76531-b01a-4cf6-aa54-5e10b1a61fee) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.92 (keywords: private, logger, usercontroller, src)\",\n        \"files\": [\n          \"src/controllers.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"typecheck hook not configured — required verification cannot run\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 7 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-25T14:54:34.114Z",
+  "updatedAt": "2026-04-25T14:54:34.118Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-nest-ZdgSb8",
+  "filePaths": [
+    "src/controllers.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "b623712a-8caa-420f-9c6b-fe694f2181cb",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "91f6565d-2b4a-4142-9e8b-ae60627fa584",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "dfa2aafd-f76f-4bb5-981d-26d5bdc6cd44",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:b623712a-8caa-420f-9c6b-fe694f2181cb",
+    "aedis-task:b623712a-8caa-420f-9c6b-fe694f2181cb"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:b623712a-8caa-420f-9c6b-fe694f2181cb"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:b623712a-8caa-420f-9c6b-fe694f2181cb"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "primaryBlockReason": "typecheck hook not configured — required verification cannot run"
+  }
+}

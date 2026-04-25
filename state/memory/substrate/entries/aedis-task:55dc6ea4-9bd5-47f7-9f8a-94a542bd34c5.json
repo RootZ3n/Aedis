@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:55dc6ea4-9bd5-47f7-9f8a-94a542bd34c5",
+  "space": "aedis/project/mnt-ai-tmp-aedis-type-int-chain-m3efjx",
+  "kind": "aedis-task",
+  "title": "add enabled:boolean to FeatureFlagSchema in src/types.ts",
+  "summary": "single-file · Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies (original: Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies (original: Worker threw: SentinelBuilder: LLM…",
+  "raw": "{\n  \"rawInput\": \"add enabled:boolean to FeatureFlagSchema in src/types.ts\",\n  \"normalizedPrompt\": \"add enabled:boolean to FeatureFlagSchema in src/types.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"63a8c870-4bf4-4478-9df9-25c9b66d1593\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"57456f0b-c9a6-445d-b229-c68f35a5cb38\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies (original: Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies (original: Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies))\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"ec462ad9-9a97-4525-a2c5-6403e859a0bb\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"27c1fc55-1e91-431b-bc6c-47dac47d443b\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T15:23:15.380Z",
+  "updatedAt": "2026-04-25T15:23:15.382Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-type-int-chain-m3Efjx",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "55dc6ea4-9bd5-47f7-9f8a-94a542bd34c5",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "de1ea761-9818-4ba0-ae2a-c2e7f7cf6cec",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:55dc6ea4-9bd5-47f7-9f8a-94a542bd34c5",
+    "aedis-run:55dc6ea4-9bd5-47f7-9f8a-94a542bd34c5"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:55dc6ea4-9bd5-47f7-9f8a-94a542bd34c5"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:55dc6ea4-9bd5-47f7-9f8a-94a542bd34c5"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

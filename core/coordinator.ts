@@ -42,7 +42,7 @@ import { randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { resolve } from "path";
-import { existsSync } from "fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 
 import {
   createIntent,
@@ -77,6 +77,7 @@ import {
   getPendingTasks,
   getFailedTasks,
   getRunSummary,
+  isTerminalPhase,
   type RunState,
   type RunTask,
   type TaskResult,
@@ -159,7 +160,7 @@ import {
   type ScopeClassification,
 } from "./scope-classifier.js";
 
-import { createChangeSet, type ChangeSet } from "./change-set.js";
+import { applyFileMutationRoles, createChangeSet, type ChangeSet } from "./change-set.js";
 import {
   PostRunEvaluator,
   type EvaluationAttachment,
@@ -168,7 +169,20 @@ import {
 import { type CrucibulumConfig, DEFAULT_CRUCIBULUM_CONFIG } from "./crucibulum-client.js";
 import { extractInvariants } from "./invariant-extractor.js";
 import { planChangeSet, type Plan, type PlanWave } from "./multi-file-planner.js";
+import {
+  buildImplementationBriefOrFallback,
+  buildMinimalImplementationBrief,
+  briefWithRetryHint,
+  briefWithRejectedCandidates,
+  capabilityFloorForBrief,
+  classifyWeakOutput,
+  briefToReceiptJson,
+  type ImplementationBrief,
+  type RejectedCandidate,
+} from "./implementation-brief.js";
+import { tryDeterministicBuilder, type DeterministicBuilderResult } from "./code-transforms/deterministic-builder.js";
 import { runRepairPass, type RepairResult } from "./repair-pass.js";
+import { prepareTargetsForPrompt } from "./target-discovery.js";
 import {
   decideMerge,
   groupFindingsBySource,
@@ -204,7 +218,12 @@ import {
   WorkerRegistry,
 } from "../workers/base.js";
 import type { EventBus, AedisEvent } from "../server/websocket.js";
-import { loadModelConfig as loadModelConfigFromDisk } from "../server/routes/config.js";
+import {
+  loadModelConfig as loadModelConfigFromDisk,
+  builderTierCollapseWarning,
+  findNextStrongerBuilderTier,
+  resolveAllBuilderTierModels,
+} from "../server/routes/config.js";
 
 const exec = promisify(execFile);
 
@@ -293,7 +312,8 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
 function detectAmbiguity(input: string): boolean {
   const trimmed = input.trim();
   const words = trimmed.split(/\s+/).filter(Boolean);
-  if (words.length >= 8) return false;
+  // Longer prompts are inherently less ambiguous
+  if (words.length >= 6) return false;
 
   // Check for file path patterns (contains / or . with extension)
   const hasFilePath = /[A-Za-z0-9_-]+\/[A-Za-z0-9._/-]+/.test(trimmed) ||
@@ -307,6 +327,12 @@ function detectAmbiguity(input: string): boolean {
     /\b[A-Z][a-zA-Z0-9]{2,}\b/.test(trimmed) ||                  // PascalCase
     /\b[a-z]+_[a-z]+\b/.test(trimmed);                            // snake_case
   if (hasFunctionOrClass) return false;
+
+  // Check for concrete action verbs — a prompt with a clear verb
+  // and a domain noun is actionable even without code identifiers.
+  // "improve the health route" or "fix error handling" are clear.
+  const hasActionVerb = /\b(add|fix|update|modify|create|remove|refactor|improve|implement|replace|rename|delete|extend|extract|move|clean|optimize|simplify|make)\b/i.test(trimmed);
+  if (hasActionVerb && words.length >= 4) return false;
 
   return true;
 }
@@ -483,12 +509,25 @@ export interface RunReceipt {
    */
   readonly sourceCommitSha: string | null;
   /**
+   * Per-target mutation intent and outcome. Distinguishes required
+   * writes from files included only for context/import/type references.
+   */
+  readonly targetRoles?: readonly TargetRoleReceipt[];
+  /**
    * Discrete confidence gate label. Computed from tests_passed,
    * integration_passed, critic_iterations, and impact_level.
    * "high" | "medium" | "low". Null on early-exit paths where
    * the gate inputs aren't available.
    */
   readonly confidenceGate: ConfidenceResult | null;
+}
+
+export interface TargetRoleReceipt {
+  readonly file: string;
+  readonly role: string;
+  readonly mutationExpected: boolean;
+  readonly actualChanged: boolean;
+  readonly reason: string;
 }
 
 // ─── Coordinator Errors ────────────────────────────────────────────
@@ -695,7 +734,22 @@ export class Coordinator {
     const gated = gateContext(projectMemory, input);
     let normalizedInput = await normalizePrompt(input, gated, effectiveProjectRoot);
 
-    const analysis = this.charterGen.analyzeRequest(normalizedInput);
+    const baseAnalysis = this.charterGen.analyzeRequest(normalizedInput);
+    const preparedTargets = prepareTargetsForPrompt({
+      projectRoot: effectiveProjectRoot,
+      prompt: normalizedInput,
+      analysis: baseAnalysis,
+    });
+    const analysis: RequestAnalysis = {
+      ...baseAnalysis,
+      targets: preparedTargets.targets.length > 0
+        ? [...preparedTargets.targets]
+        : [...baseAnalysis.targets],
+      ambiguities:
+        preparedTargets.clarification && preparedTargets.targets.length === 0
+          ? [...baseAnalysis.ambiguities, preparedTargets.clarification]
+          : [...baseAnalysis.ambiguities],
+    };
     const charter = this.charterGen.generateCharter(analysis);
     const charterTargets: string[] = Array.from(
       new Set(charter.deliverables.flatMap((d) => [...d.targetFiles])),
@@ -707,75 +761,14 @@ export class Coordinator {
       ambiguities: analysis.ambiguities,
     });
 
-    // GAP 1.5 — Extracted-target gate with repo discovery fallback
-    // If the charter couldn't pull a single file/path out of the prompt,
-    // try to discover candidates from the repo index before giving up.
-    // This enables "add health endpoint" to find server.ts without the
-    // user naming it explicitly.
     if (charterTargets.length === 0) {
-      console.log(`[coordinator] charter produced no targets — attempting repo index discovery`);
-      try {
-        const { RepoIndex } = await import("./repo-index.js");
-        const repoIdx = new RepoIndex();
-        const cached = await repoIdx.loadFromDisk(effectiveProjectRoot);
-        if (!cached) {
-          await repoIdx.buildIndex(effectiveProjectRoot);
-        }
-        const allFiles = repoIdx.getAllFiles();
-        // Score files by keyword match with prompt words
-        const promptWords = new Set(
-          normalizedInput.toLowerCase().match(/[a-z]{3,}/g) ?? [],
-        );
-        const scored = allFiles
-          .filter((f) => !f.isGenerated && !f.isConfig)
-          .map((f) => {
-            const pathWords = new Set(f.path.toLowerCase().match(/[a-z]{3,}/g) ?? []);
-            const roleWords = new Set(f.role.toLowerCase().match(/[a-z]{3,}/g) ?? []);
-            const exportWords = new Set(f.exports.join(" ").toLowerCase().match(/[a-z]{3,}/g) ?? []);
-            let score = 0;
-            for (const w of promptWords) {
-              if (pathWords.has(w)) score += 3;
-              if (roleWords.has(w)) score += 2;
-              if (exportWords.has(w)) score += 1;
-            }
-            // Boost high-centrality files
-            score += f.centralityScore * 0.1;
-            return { file: f, score };
-          })
-          .filter((s) => s.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 3);
-
-        if (scored.length > 0) {
-          const discoveredTargets = scored.map((s) => s.file.path);
-          console.log(`[coordinator] repo index discovered ${discoveredTargets.length} candidate(s): ${discoveredTargets.join(", ")}`);
-          // Re-generate charter with discovered targets injected
-          const enrichedInput = `in ${discoveredTargets[0]}, ${normalizedInput}`;
-          const enrichedAnalysis = this.charterGen.analyzeRequest(enrichedInput);
-          const enrichedCharter = this.charterGen.generateCharter(enrichedAnalysis);
-          const enrichedTargets = Array.from(
-            new Set(enrichedCharter.deliverables.flatMap((d) => [...d.targetFiles])),
-          );
-          if (enrichedTargets.length > 0) {
-            // Replace charter and targets with enriched versions
-            Object.assign(analysis, enrichedAnalysis);
-            Object.assign(charter, enrichedCharter);
-            charterTargets.push(...enrichedTargets);
-            normalizedInput = enrichedInput;
-            console.log(`[coordinator] enriched charter with repo index discovery: ${enrichedTargets.join(", ")}`);
-          }
-        }
-        repoIdx.stopWatcher();
-      } catch (err) {
-        console.warn(`[coordinator] repo index discovery failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      // Still no targets after discovery attempt — ask for clarification
       if (charterTargets.length === 0) {
-        console.log(`[coordinator] no targets found even after repo index — asking for clarification: "${input}"`);
+        console.log(`[coordinator] no actionable targets found — asking for clarification: "${input}"`);
         return {
           kind: "needs_clarification",
-          question: "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.",
+          question:
+            preparedTargets.clarification ??
+            "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.",
         };
       }
     }
@@ -892,6 +885,7 @@ export class Coordinator {
     // can override via TaskSubmission.projectRoot. Workers receive the
     // effective root via assignment.projectRoot in dispatchNode.
     const effectiveProjectRoot = submission.projectRoot ?? this.config.projectRoot;
+    const sourceRootExistsAtStart = existsSync(effectiveProjectRoot);
     console.log(
       `[coordinator] effective projectRoot for this submission: ${effectiveProjectRoot}` +
       (submission.projectRoot ? " (overridden via submission)" : " (Coordinator default)")
@@ -919,7 +913,22 @@ export class Coordinator {
     console.log(`[coordinator] PHASE 1: Charter — analyzing request`);
     this.emit({ type: "run_started", payload: { runId: submission.runId ?? null, input: normalizedInput } });
 
-    const analysis = this.charterGen.analyzeRequest(normalizedInput);
+    const baseAnalysis = this.charterGen.analyzeRequest(normalizedInput);
+    const preparedTargets = prepareTargetsForPrompt({
+      projectRoot: effectiveProjectRoot,
+      prompt: normalizedInput,
+      analysis: baseAnalysis,
+    });
+    const analysis: RequestAnalysis = {
+      ...baseAnalysis,
+      targets: preparedTargets.targets.length > 0
+        ? [...preparedTargets.targets]
+        : [...baseAnalysis.targets],
+      ambiguities:
+        preparedTargets.clarification && preparedTargets.targets.length === 0
+          ? [...baseAnalysis.ambiguities, preparedTargets.clarification]
+          : [...baseAnalysis.ambiguities],
+    };
     const charter = this.charterGen.generateCharter(analysis);
     const constraints = [
       ...this.charterGen.generateDefaultConstraints(analysis),
@@ -937,6 +946,24 @@ export class Coordinator {
         charter.deliverables.flatMap((d) => [...d.targetFiles]),
       ),
     );
+    if (preparedTargets.selected.length > 0) {
+      console.log(
+        `[coordinator] target preparation selected ${preparedTargets.selected.length} candidate(s): ` +
+        `${preparedTargets.selected.map((candidate) => candidate.path).join(", ")}`,
+      );
+    }
+    if (preparedTargets.rejected.length > 0) {
+      console.log(
+        `[coordinator] target preparation rejected ${preparedTargets.rejected.length} candidate(s): ` +
+        `${preparedTargets.rejected.map((candidate) => `${candidate.path} (${candidate.reason})`).join("; ")}`,
+      );
+    }
+    if (charterTargets.length === 0) {
+      throw new CoordinatorError(
+        preparedTargets.clarification ??
+        "No actionable target files were identified for this request.",
+      );
+    }
     const scopeClassification = classifyScope(normalizedInput, charterTargets);
     console.log(
       `[coordinator] scope: ${scopeClassification.type} blastRadius=${scopeClassification.blastRadius} decompose=${scopeClassification.recommendDecompose}`
@@ -1037,10 +1064,9 @@ export class Coordinator {
       invariants: Object.freeze(invariants),
     });
     console.log(`[coordinator] invariants: ${invariants.length} cross-file alignment constraints found.`);
-    const plan =
-      scopeClassification.type === "multi-file" || scopeClassification.type === "architectural" || governance.wavesRequired
-        ? planChangeSet(changeSet, normalizedInput)
-        : undefined;
+    const plan = this.shouldPlanForScope(scopeClassification)
+      ? planChangeSet(changeSet, normalizedInput)
+      : undefined;
     if (plan) {
       console.log(`[coordinator] multi-file plan: ${plan.waves.length} wave(s).`);
     }
@@ -1055,6 +1081,23 @@ export class Coordinator {
         suggestedNextSteps: ["Review whether the planned file set is broad enough for this task pattern."],
       });
       console.log(`[coordinator] pattern memory: ${patternWarnings.length} warning(s) injected`);
+    }
+
+    if (this.config.requireWorkspace && !sourceRootExistsAtStart) {
+      console.error(
+        `[coordinator] source root missing at submit time — aborting before workspace setup: ${effectiveProjectRoot}`,
+      );
+      const run = createRunState(intent.id, submission.runId);
+      return this.abortWorkspaceRun({
+        run,
+        intentId: intent.id,
+        prompt: input,
+        blastRadius,
+        sourceRepo: effectiveProjectRoot,
+        sourceRootExistsAtStart,
+        cause: `source path does not exist at submission time: ${effectiveProjectRoot}`,
+        startTime,
+      });
     }
 
     // ── Phase 5: Project Memory Store (advisory hints) ─────────────
@@ -1158,72 +1201,25 @@ export class Coordinator {
     // Hard-abort path for requireWorkspace=true. We write a minimal
     // failing receipt so the user sees the reason, then return before
     // any worker/gate logic can touch the source repo.
-    if (!workspace && this.config.requireWorkspace) {
-      const abortReason =
-        `Workspace creation failed and requireWorkspace=true — run aborted ` +
-        `without mutating the source repo. Cause: ${workspaceCreationError ?? "unknown"}`;
-      failRun(run, abortReason);
-      await this.receiptStore.patchRun(run.id, {
+    if (this.config.requireWorkspace && (!workspace || !sourceRootExistsAtStart)) {
+      if (workspace) {
+        await discardWorkspace(workspace).catch(() => undefined);
+        workspace = null;
+      }
+      const workspaceAbortCause =
+        !sourceRootExistsAtStart
+          ? `source path does not exist at submission time: ${effectiveProjectRoot}`
+          : (workspaceCreationError ?? "unknown");
+      return this.abortWorkspaceRun({
+        run,
         intentId: intent.id,
         prompt: input,
-        taskSummary: abortReason,
-        status: "EXECUTION_ERROR",
-        phase: run.phase,
-        completedAt: new Date().toISOString(),
-        appendErrors: [abortReason],
-        appendCheckpoints: [{
-          at: new Date().toISOString(),
-          type: "failure_occurred",
-          status: "EXECUTION_ERROR",
-          phase: run.phase,
-          summary: "Workspace creation failed — run aborted before any repo mutation",
-          details: { cause: workspaceCreationError },
-        }],
-      });
-      this.emit({
-        type: "merge_blocked",
-        payload: { runId: run.id, blockers: [abortReason] },
-      });
-      this.emit({
-        type: "run_complete",
-        payload: {
-          runId: run.id,
-          verdict: "failed",
-          executionVerified: false,
-          executionReason: abortReason,
-          classification: null,
-        },
-      });
-      const durationMs = Date.now() - startTime;
-      return {
-        id: randomUUID(),
-        runId: run.id,
-        intentId: intent.id,
-        timestamp: new Date().toISOString(),
-        verdict: "failed",
-        summary: getRunSummary(run),
-        graphSummary: getGraphSummary(createTaskGraph(intent.id)),
-        verificationReceipt: null,
-        waveVerifications: [],
-        judgmentReport: null,
-        mergeDecision: null,
-        totalCost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
-        commitSha: null,
-        durationMs,
-        memorySuggestions: [],
-        executionVerified: false,
-        executionGateReason: abortReason,
-        executionEvidence: [],
-        executionReceipts: [],
-        humanSummary: null,
         blastRadius,
-        evaluation: null,
-        patchArtifact: null,
-        workspaceCleanup: null,
         sourceRepo: effectiveProjectRoot,
-        sourceCommitSha: null,
-        confidenceGate: null,
-      };
+        sourceRootExistsAtStart,
+        cause: workspaceAbortCause,
+        startTime,
+      });
     }
 
     const active: ActiveRun = {
@@ -1238,6 +1234,7 @@ export class Coordinator {
       workspace,
       gatedContext,
       projectMemory,
+      analysis,
       normalizedInput,
       memorySuggestions: [],
       contextAssembler,
@@ -1256,8 +1253,13 @@ export class Coordinator {
       historicalInsights: findHistoricalInsights(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }).map((i) => i.line),
       confidenceDampening: getConfidenceDampening(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }),
       historicalReliabilityTier: getReliabilityTier(projectMemory, { prompt: normalizedInput, scopeType: scopeClassification.type }),
+      weakOutputRetries: 0,
+      cancelledGenerations: new Set<string>(),
+      pendingDispatches: new Map<string, Promise<unknown>>(),
+      rejectedCandidates: preparedTargets.rejected.map((entry) => ({ path: entry.path, reason: entry.reason })),
     };
     this.activeRuns.set(run.id, active);
+
     if (active.confidenceDampening < 1.0) {
       console.log(`[coordinator] LEARNING: confidence dampening ${active.confidenceDampening.toFixed(2)} applied for task type (historical overconfidence)`);
     }
@@ -1292,6 +1294,20 @@ export class Coordinator {
       });
     }
 
+    if (preparedTargets.selected.length > 0 || preparedTargets.rejected.length > 0) {
+      await this.persistReceiptCheckpoint(active, {
+        at: new Date().toISOString(),
+        type: "run_started",
+        status: "EXECUTING_IN_WORKSPACE",
+        phase: run.phase,
+        summary: `target preparation: ${charterTargets.length} actionable file(s)`,
+        details: {
+          selected: preparedTargets.selected,
+          rejected: preparedTargets.rejected,
+        },
+      });
+    }
+
     // ── Worker Model Resolution Receipt ─────────────────────────────
     // Resolve the exact models Builder and Critic will dispatch with,
     // reading from the SAME source the workers read from (the source
@@ -1307,6 +1323,8 @@ export class Coordinator {
         ? "user-config"
         : "fallback";
       const resolved = loadModelConfigFromDisk(active.sourceRepo);
+      const builderTierModels = resolveAllBuilderTierModels(resolved);
+      const tierWarning = builderTierCollapseWarning(resolved);
       const workerModels = {
         builder: `${resolved.builder.provider}/${resolved.builder.model}`,
         critic: `${resolved.critic.provider}/${resolved.critic.model}`,
@@ -1320,6 +1338,9 @@ export class Coordinator {
         `[coordinator] worker models resolved (source=${configSource}, path=${configPath}): ` +
         `builder=${workerModels.builder} critic=${workerModels.critic}`,
       );
+      if (tierWarning) {
+        console.warn(`[coordinator] ${tierWarning}`);
+      }
       await this.persistReceiptCheckpoint(active, {
         at: new Date().toISOString(),
         type: "run_started",
@@ -1328,6 +1349,17 @@ export class Coordinator {
         summary: `worker models resolved (source=${configSource})`,
         details: {
           workerModels,
+          builderTierModels: {
+            fast: builderTierModels.fast.identity,
+            standard: builderTierModels.standard.identity,
+            premium: builderTierModels.premium.identity,
+          },
+          builderTierSources: {
+            fast: builderTierModels.fast.source,
+            standard: builderTierModels.standard.source,
+            premium: builderTierModels.premium.source,
+          },
+          tierWarning,
           source: configSource,
           configPath,
         },
@@ -1434,6 +1466,7 @@ export class Coordinator {
         summary: `Planner built ${active.graph.nodes.length} task node(s)`,
         details: { graphSummary: summaryAfterBuild },
       });
+      this.refreshImplementationBrief(active, "post-plan");
 
       // Phase 5: Pre-Build Coherence
       console.log(`[coordinator] PHASE 5: Pre-Build Coherence — entering`);
@@ -1689,7 +1722,6 @@ export class Coordinator {
         | undefined;
 
       if (active.changeSet.filesInScope.length > 1) {
-        const plan = active.plan ?? planChangeSet(active.changeSet, normalizedInput);
         const invariants = active.changeSet.invariants.length > 0
           ? [...active.changeSet.invariants]
           : await extractInvariants(
@@ -1700,8 +1732,7 @@ export class Coordinator {
 
         const allWavesComplete = isGraphComplete(active.graph) && !hasFailedNodes(active.graph);
         const invariantsSatisfied =
-          active.changeSet.coherenceVerdict.coherent &&
-          (invariants.length > 0 || plan.waves.every((wave) => wave.files.length <= 1));
+          active.changeSet.coherenceVerdict.coherent;
 
         changeSetGateInput = {
           changeSet: active.changeSet,
@@ -1720,12 +1751,20 @@ export class Coordinator {
       if (!active.cancelled && active.changes.length > 0) {
         try {
           const manifestFiles = active.changeSet.filesInScope.map((f) => f.path);
+          const expectedFiles = active.changeSet.filesInScope
+            .filter((f) => f.mutationExpected)
+            .map((f) => f.path);
+          const nonMutatingFiles = active.changeSet.filesInScope
+            .filter((f) => !f.mutationExpected)
+            .map((f) => f.path);
           const createdFiles = active.changes
             .filter((c) => c.operation === "create")
             .map((c) => c.path);
           gitDiffResult = await verifyGitDiff({
             projectRoot: active.projectRoot,
             manifestFiles,
+            expectedFiles,
+            nonMutatingFiles,
             createdFiles,
           });
           active.gitDiffResult = gitDiffResult;
@@ -1743,6 +1782,7 @@ export class Coordinator {
             actualChangedFiles: [],
             expectedButUnchanged: [],
             undeclaredChanges: [],
+            unexpectedReferenceChanges: [],
             confirmed: [],
             passed: false,
             confirmationRatio: 0,
@@ -1965,15 +2005,21 @@ export class Coordinator {
       // Finalize
       console.log(`[coordinator] FINALIZE — verdict=${verdictAfterGate} (pre-gate=${verdict} executionVerified=${executionDecision.executionVerified} cancelled=${active.cancelled} phase=${run.phase} hasFailedNodes=${hasFailedNodes(active.graph)} workerResults=${active.workerResults.length})`);
 
-      if (verdictAfterGate === "success" || verdictAfterGate === "partial") {
-        advancePhase(run, "complete");
-      } else {
-        failRun(
-          run,
-          !executionDecision.executionVerified
-            ? executionDecision.reason
-            : "Build did not pass all checks",
-        );
+      if (!isTerminalPhase(run.phase)) {
+        if (verdictAfterGate === "success" || verdictAfterGate === "partial") {
+          advancePhase(run, "complete");
+        } else {
+          failRun(
+            run,
+            !executionDecision.executionVerified
+              ? executionDecision.reason
+              : "Build did not pass all checks",
+          );
+        }
+      } else if (!run.failureReason && verdictAfterGate !== "success" && verdictAfterGate !== "partial") {
+        run.failureReason = !executionDecision.executionVerified
+          ? executionDecision.reason
+          : "Build did not pass all checks";
       }
 
       const receipt = this.buildReceipt(
@@ -2121,7 +2167,11 @@ export class Coordinator {
       console.error(`[coordinator]   active.projectRoot:        ${active.projectRoot}`);
       console.error(`[coordinator]   duration before failure:   ${Date.now() - startTime}ms`);
 
-      failRun(run, errMessage);
+      if (!isTerminalPhase(run.phase)) {
+        failRun(run, errMessage);
+      } else if (!run.failureReason) {
+        run.failureReason = errMessage;
+      }
 
       // Execution gate on the exception path — a thrown error is
       // always an "errored" verdict and can never flip to success.
@@ -2140,6 +2190,23 @@ export class Coordinator {
         thrownError: err instanceof Error ? err : new Error(errMessage),
       });
       this.logExecutionDecision(executionDecision);
+
+      if (!active.implementationBrief) {
+        active.implementationBrief = buildMinimalImplementationBrief({
+          intent: active.intent,
+          rawUserPrompt: active.rawUserPrompt,
+          normalizedPrompt: active.normalizedInput,
+          error: errMessage,
+          analysis: active.analysis,
+          charter: active.intent.charter,
+          scope: active.scopeClassification,
+          dispatchableFiles: active.changeSet.filesInScope.map((entry) => entry.path),
+          rejectedCandidates: active.rejectedCandidates,
+        });
+        await this.receiptStore.patchRun(active.run.id, {
+          implementationBrief: briefToReceiptJson(active.implementationBrief),
+        });
+      }
 
       const receipt = this.buildReceipt(
         active,
@@ -2203,7 +2270,12 @@ export class Coordinator {
           // the receipt is fully up to date before the finally block
           // exits — tests and downstream consumers can rely on it.
           try {
+            const persisted = await this.receiptStore.getRun(run.id);
+            const finalReceipt = persisted?.finalReceipt
+              ? { ...persisted.finalReceipt, workspaceCleanup: cleanup }
+              : undefined;
             await this.receiptStore.patchRun(run.id, {
+              ...(finalReceipt ? { finalReceipt } : {}),
               workspace: {
                 workspacePath: active.workspace.workspacePath,
                 sourceRepo: active.workspace.sourceRepo,
@@ -2213,6 +2285,20 @@ export class Coordinator {
                 worktreeBranch: active.workspace.worktreeBranch,
                 cleanedUp: true,
               },
+              appendCheckpoints: [
+                {
+                  at: new Date().toISOString(),
+                  type: "run_completed",
+                  status: persisted?.status ?? "EXECUTING_IN_WORKSPACE",
+                  phase: active.run.phase,
+                  summary: `workspace cleanup completed: ${cleanup.method}`,
+                  details: {
+                    workspacePath: active.workspace.workspacePath,
+                    success: cleanup.success,
+                    durationMs: cleanup.durationMs,
+                  },
+                },
+              ],
             });
           } catch (err) {
             console.warn(
@@ -2347,8 +2433,16 @@ export class Coordinator {
     });
     console.log(`[coordinator] buildTaskGraph: scout node added (${scoutNode.id.slice(0, 6)})`);
 
+    const builderDeliverables = this.groupBuilderDeliverables(active, deliverables);
+    if (builderDeliverables.length !== deliverables.length) {
+      console.log(
+        `[coordinator] buildTaskGraph: grouped ${deliverables.length} deliverable(s) into ` +
+        `${builderDeliverables.length} coordinated builder assignment(s)`,
+      );
+    }
+
     const builderNodes: TaskNode[] = [];
-    for (const deliverable of deliverables) {
+    for (const deliverable of builderDeliverables) {
       // Tag with wave id (P2) — if the plan exists and this deliverable's
       // files belong to a wave, attach it to metadata so downstream
       // verification and UI can attribute work per wave. Picks the
@@ -2437,6 +2531,303 @@ export class Coordinator {
     console.log(`[coordinator] buildTaskGraph: complete — total nodes=${graph.nodes.length} edges=${graph.edges.length} scout marked ready`);
   }
 
+  private shouldCoordinateBuilderScope(active: ActiveRun): boolean {
+    const scope = active.scopeClassification;
+    if (!scope) return false;
+    return (
+      scope.type === "multi-file" ||
+      scope.type === "architectural" ||
+      scope.type === "migration" ||
+      scope.type === "cross-cutting-sweep" ||
+      scope.governance.wavesRequired
+    );
+  }
+
+  private groupBuilderDeliverables(
+    active: ActiveRun,
+    deliverables: readonly Deliverable[],
+  ): readonly Deliverable[] {
+    const uniqueFiles = this.uniqueStrings(deliverables.flatMap((deliverable) => deliverable.targetFiles));
+    if (uniqueFiles.length <= 1 || !this.shouldCoordinateBuilderScope(active)) {
+      return deliverables;
+    }
+
+    const typeForFiles = (files: readonly string[]): Deliverable["type"] => {
+      const matched = new Set(
+        deliverables
+          .filter((deliverable) => deliverable.targetFiles.some((file) => files.includes(file)))
+          .map((deliverable) => deliverable.type),
+      );
+      return matched.size === 1
+        ? [...matched][0]!
+        : "modify";
+    };
+
+    const grouped: Deliverable[] = [];
+    const assigned = new Set<string>();
+    const plan = active.plan;
+
+    if (plan && plan.waves.length > 0) {
+      for (const wave of plan.waves) {
+        const files = uniqueFiles.filter((file) => wave.files.includes(file));
+        if (files.length === 0) continue;
+        files.forEach((file) => assigned.add(file));
+        grouped.push({
+          description: `Coordinated ${wave.name} update (${files.length} file(s))`,
+          targetFiles: files,
+          type: typeForFiles(files),
+        });
+      }
+    }
+
+    const leftovers = uniqueFiles.filter((file) => !assigned.has(file));
+    if (leftovers.length > 0) {
+      grouped.push({
+        description: `Coordinated implementation across ${leftovers.length} file(s)`,
+        targetFiles: leftovers,
+        type: typeForFiles(leftovers),
+      });
+    }
+
+    return grouped.length > 0
+      ? grouped
+      : [{
+          description: `Coordinated implementation across ${uniqueFiles.length} file(s)`,
+          targetFiles: uniqueFiles,
+          type: typeForFiles(uniqueFiles),
+        }];
+  }
+
+  private refreshImplementationBrief(active: ActiveRun, reason: string): void {
+    const dispatchableFiles = this.uniqueStrings(
+      active.intent.charter.deliverables.flatMap((d) => [...d.targetFiles]),
+    );
+    const scope = active.scopeClassification ?? classifyScope(active.normalizedInput, dispatchableFiles);
+    const brief = buildImplementationBriefOrFallback({
+      intent: active.intent,
+      analysis: active.analysis,
+      charter: active.intent.charter,
+      scope,
+      changeSet: active.changeSet,
+      plan: active.plan,
+      rawUserPrompt: active.rawUserPrompt,
+      normalizedPrompt: active.normalizedInput,
+      dispatchableFiles,
+      rejectedCandidates: active.rejectedCandidates,
+    });
+    active.implementationBrief = brief;
+
+    const floor = capabilityFloorForBrief(brief);
+    active.capabilityFloorApplied = {
+      floor: floor.floor,
+      reason: floor.reason,
+      configured: floor.floor,
+      escalated: false,
+    };
+
+    console.log(
+      `[coordinator] implementation brief built (${reason}) — taskType=${brief.taskType} scope=${brief.scope} ` +
+      `risk=${brief.riskLevel} files=${brief.selectedFiles.length} rejected=${brief.rejectedCandidates.length} ` +
+      `stages=${brief.stages.length} needsClarification=${brief.needsClarification}`,
+    );
+    console.log(`[coordinator] capability floor: ${floor.floor} — ${floor.reason}`);
+    this.emit({
+      type: "system_event",
+      payload: {
+        runId: active.run.id,
+        checkpointLabel: "implementation_brief",
+        summary:
+          `brief (${reason}): ${brief.taskType}/${brief.scope} risk=${brief.riskLevel} ` +
+          `files=${brief.selectedFiles.length} rejected=${brief.rejectedCandidates.length}`,
+      },
+    });
+    this.receiptStore.patchRun(active.run.id, {
+      implementationBrief: briefToReceiptJson(brief),
+    }).catch((e) => {
+      console.warn(`[coordinator] receipt persist of implementation brief failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }
+
+  private shouldPlanForScope(scope: ScopeClassification | null): boolean {
+    if (!scope) return false;
+    return scope.type === "multi-file" || scope.type === "architectural" || scope.governance.wavesRequired;
+  }
+
+  private appendRejectedCandidates(
+    active: ActiveRun,
+    rejectedCandidates: readonly RejectedCandidate[],
+  ): void {
+    const seen = new Set(active.rejectedCandidates.map((item) => `${item.path}::${item.reason}`));
+    for (const candidate of rejectedCandidates) {
+      const path = candidate.path.trim();
+      const reason = candidate.reason.trim();
+      if (!path || !reason) continue;
+      const key = `${path}::${reason}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      active.rejectedCandidates.push({ path, reason });
+    }
+  }
+
+  private builderContextTargets(
+    active: ActiveRun,
+    node: TaskNode,
+    mode: "initial" | "retry",
+  ): string[] {
+    const baseTargets = this.uniqueStrings(node.targetFiles);
+    if (node.workerType !== "builder" || !this.shouldCoordinateBuilderScope(active)) {
+      return baseTargets;
+    }
+
+    const brief = active.implementationBrief;
+    if (!brief || brief.selectedFiles.length === 0) {
+      return baseTargets;
+    }
+
+    const waveId = typeof node.metadata.waveId === "number"
+      ? node.metadata.waveId
+      : null;
+    const waveScoped = waveId == null
+      ? brief.selectedFiles.map((file) => file.path)
+      : brief.selectedFiles
+          .filter((file) => file.waveId === waveId || baseTargets.includes(file.path))
+          .map((file) => file.path);
+    const broader = mode === "retry"
+      ? brief.selectedFiles.map((file) => file.path)
+      : waveScoped;
+    const maxTargets = mode === "retry" ? 10 : 6;
+
+    return this.uniqueStrings([
+      ...baseTargets,
+      ...waveScoped,
+      ...broader,
+    ]).slice(0, Math.max(baseTargets.length, maxTargets));
+  }
+
+  private isIgnoredPlanningPath(pathLike: string): boolean {
+    return /(^|\/)(node_modules|\.git|dist|build|coverage|\.next|\.aedis|\.zendorium)(\/|$)/.test(pathLike);
+  }
+
+  private looksGeneratedPlanningFile(absolutePath: string, relativePath: string): boolean {
+    if (/\.generated\./i.test(relativePath)) return true;
+    try {
+      const preview = readFileSync(absolutePath, "utf-8").slice(0, 512);
+      return /@generated|AUTO-GENERATED|generated by/i.test(preview);
+    } catch {
+      return false;
+    }
+  }
+
+  private scoreDirectoryCandidate(relativePath: string, analysis: RequestAnalysis): number {
+    const normalized = relativePath.toLowerCase();
+    const promptWords = new Set(
+      (analysis.raw.toLowerCase().match(/[a-z]{3,}/g) ?? [])
+        .filter((word) => !["the", "and", "with", "from", "into", "that", "this", "when"].includes(word)),
+    );
+
+    let score = 0;
+    for (const word of promptWords) {
+      if (normalized.includes(word)) score += 3;
+    }
+
+    if (analysis.category === "docs" && /\.(md|mdx|rst|txt)$/i.test(relativePath)) score += 6;
+    if (analysis.category === "test" && /(?:^|\/).*\.(test|spec)\.[a-z0-9]+$/i.test(relativePath)) score += 6;
+    if (analysis.category === "config" && /\.(json|ya?ml|toml|env)$/i.test(relativePath)) score += 4;
+    if (analysis.category !== "docs" && !/\.(md|mdx|rst|txt)$/i.test(relativePath)) score += 2;
+    if (analysis.category !== "test" && !/(?:^|\/).*\.(test|spec)\.[a-z0-9]+$/i.test(relativePath)) score += 1;
+    if (/index|router|route|controller|server|provider|auth|health/i.test(relativePath)) score += 1;
+
+    const depthPenalty = relativePath.split("/").length - 1;
+    return score - depthPenalty * 0.1;
+  }
+
+  private isRelevantDirectoryCandidate(relativePath: string, analysis: RequestAnalysis): boolean {
+    if (!/\.(ts|tsx|js|jsx|mjs|cjs|json|ya?ml|toml|md|mdx|rst|txt|py|rs|go|java|kt|swift|c|cc|cpp|h|hpp|cs|rb|php|scala|lua|sh|bash|vue|svelte|html|css|scss|sass|less)$/i.test(relativePath)) {
+      return false;
+    }
+    if (analysis.category === "docs") return /\.(md|mdx|rst|txt)$/i.test(relativePath);
+    if (analysis.category === "test") return /(?:^|\/).*\.(test|spec)\.[a-z0-9]+$/i.test(relativePath) || /tests?\//i.test(relativePath);
+    return true;
+  }
+
+  private expandDirectoryTarget(
+    active: ActiveRun,
+    analysis: RequestAnalysis,
+    target: string,
+  ): { selectedFiles: string[]; rejectedCandidates: RejectedCandidate[] } | null {
+    const absoluteTarget = resolve(active.projectRoot, target);
+    let info;
+    try {
+      info = statSync(absoluteTarget);
+    } catch {
+      return null;
+    }
+    if (!info.isDirectory()) return null;
+
+    const candidates: Array<{ path: string; score: number }> = [];
+    const rejectedCandidates: RejectedCandidate[] = [];
+
+    const walk = (relativeDir: string): void => {
+      const absoluteDir = resolve(active.projectRoot, relativeDir);
+      for (const entry of readdirSync(absoluteDir, { withFileTypes: true })) {
+        const relativePath = `${relativeDir.replace(/\\/g, "/").replace(/\/+$/, "")}/${entry.name}`.replace(/^\.\//, "");
+        if (entry.isDirectory()) {
+          if (this.isIgnoredPlanningPath(relativePath)) {
+            rejectedCandidates.push({ path: relativePath, reason: "ignored path: skipped during directory expansion" });
+            continue;
+          }
+          walk(relativePath);
+          continue;
+        }
+        if (!entry.isFile()) {
+          rejectedCandidates.push({ path: relativePath, reason: "unsafe path: not a regular file" });
+          continue;
+        }
+        if (this.isIgnoredPlanningPath(relativePath)) {
+          rejectedCandidates.push({ path: relativePath, reason: "ignored path: skipped during directory expansion" });
+          continue;
+        }
+        const absoluteFile = resolve(active.projectRoot, relativePath);
+        if (this.looksGeneratedPlanningFile(absoluteFile, relativePath)) {
+          rejectedCandidates.push({ path: relativePath, reason: "generated file: skipped during directory expansion" });
+          continue;
+        }
+        if (!this.isRelevantDirectoryCandidate(relativePath, analysis)) {
+          rejectedCandidates.push({ path: relativePath, reason: "unsafe path: unsupported or irrelevant file type for this task" });
+          continue;
+        }
+        candidates.push({
+          path: relativePath,
+          score: this.scoreDirectoryCandidate(relativePath, analysis),
+        });
+      }
+    };
+
+    walk(target.replace(/\/+$/, ""));
+    candidates.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+
+    const maxSelected = analysis.category === "docs" ? 4 : analysis.category === "test" ? 6 : 5;
+    const selected = candidates.slice(0, maxSelected).map((item) => item.path);
+    for (const dropped of candidates.slice(maxSelected)) {
+      rejectedCandidates.push({
+        path: dropped.path,
+        reason: "low relevance: ranked below the directory expansion candidate cap",
+      });
+    }
+
+    rejectedCandidates.unshift({
+      path: target,
+      reason: selected.length > 0
+        ? `directory target expanded into candidate files: ${selected.join(", ")}`
+        : "directory target contained no relevant dispatchable files",
+    });
+
+    return {
+      selectedFiles: selected,
+      rejectedCandidates,
+    };
+  }
+
   private prepareDeliverablesForGraph(
     active: ActiveRun,
     analysis: RequestAnalysis
@@ -2462,6 +2853,7 @@ export class Coordinator {
     const totalBefore = active.intent.charter.deliverables.length;
     const decisions: string[] = [];
     let didFilter = false;
+    active.rejectedCandidates = [];
 
     console.log(`[coordinator] prepareDeliverablesForGraph: ${totalBefore} deliverable(s) before filter (projectRoot=${active.projectRoot})`);
 
@@ -2482,6 +2874,15 @@ export class Coordinator {
       }
       return trimmed;
     };
+    const hadDirectoryTargets = analysis.targets.some((target) => {
+      const canonical = canonicalizePath(target);
+      if (!canonical) return false;
+      try {
+        return statSync(resolve(active.projectRoot, canonical)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
 
     // ── PHASE 1 — Upstream empty guard ──────────────────────────────────
     const guarded: Deliverable[] = [];
@@ -2489,13 +2890,30 @@ export class Coordinator {
       if (!d.targetFiles || d.targetFiles.length === 0) {
         const label = d.description;
         console.warn(`[coordinator] WARN: dropping deliverable "${label}" upstream — no target files (charter placeholder or upstream bug)`);
+        this.appendRejectedCandidates(active, [
+          { path: label, reason: "upstream placeholder: deliverable had no target files" },
+        ]);
         decisions.push(`  drop deliverable "${label}" (no target files at all — upstream guard)`);
         didFilter = true;
         continue;
       }
+      const expandedTargets: string[] = [];
+      for (const rawTarget of d.targetFiles.map(canonicalizePath).filter((f) => f.length > 0)) {
+        const expansion = this.expandDirectoryTarget(active, analysis, rawTarget);
+        if (!expansion) {
+          expandedTargets.push(rawTarget);
+          continue;
+        }
+        didFilter = true;
+        this.appendRejectedCandidates(active, expansion.rejectedCandidates);
+        decisions.push(
+          `  expand ${rawTarget} -> ${expansion.selectedFiles.join(", ") || "(no dispatchable files found)"}`,
+        );
+        expandedTargets.push(...expansion.selectedFiles);
+      }
       guarded.push({
         ...d,
-        targetFiles: d.targetFiles.map(canonicalizePath).filter((f) => f.length > 0),
+        targetFiles: this.uniqueStrings(expandedTargets),
       });
     }
 
@@ -2504,12 +2922,18 @@ export class Coordinator {
     for (const deliverable of guarded) {
       const verifiedTargets = deliverable.targetFiles.filter((file) => {
         if (!file) {
+          this.appendRejectedCandidates(active, [
+            { path: deliverable.description, reason: "empty target path after canonicalization" },
+          ]);
           decisions.push(`  drop empty file path in deliverable "${deliverable.description}"`);
           return false;
         }
 
         if (file.startsWith(".aedis/") || file.endsWith(".json")) {
           console.log(`[coordinator] dropping system file from deliverables: ${file}`);
+          this.appendRejectedCandidates(active, [
+            { path: file, reason: "ignored path: system or state file excluded from deliverables" },
+          ]);
           decisions.push(`  drop ${file} (system file excluded from deliverables)`);
           didFilter = true;
           return false;
@@ -2543,6 +2967,9 @@ export class Coordinator {
             );
             return true;
           }
+          this.appendRejectedCandidates(active, [
+            { path: file, reason: "unsafe path: explicit target does not exist in the repo" },
+          ]);
           decisions.push(`  drop ${file} (explicitly mentioned but does not exist)`);
           didFilter = true;
           return false;
@@ -2557,6 +2984,9 @@ export class Coordinator {
             return true;
           }
           if (!explicitTestRequest) {
+            this.appendRejectedCandidates(active, [
+              { path: file, reason: "low relevance: auto-generated test target does not exist" },
+            ]);
             decisions.push(`  drop ${file} (auto-generated test for non-existent file)`);
             didFilter = true;
             return false;
@@ -2568,6 +2998,9 @@ export class Coordinator {
       });
 
       if (deliverable.targetFiles.length > 0 && verifiedTargets.length === 0) {
+        this.appendRejectedCandidates(active, [
+          { path: deliverable.description, reason: "all candidate targets were filtered before graph build" },
+        ]);
         decisions.push(`  drop deliverable "${deliverable.description}" (all target files were filtered)`);
         didFilter = true;
         continue;
@@ -2603,6 +3036,9 @@ export class Coordinator {
           : f;
         const abs = resolve(active.projectRoot, canonical);
         if (seenPaths.has(abs)) {
+          this.appendRejectedCandidates(active, [
+            { path: canonical, reason: "duplicate target: already covered by an earlier deliverable" },
+          ]);
           decisions.push(`  dedupe ${f} (already covered by earlier deliverable as ${abs})`);
           didFilter = true;
           continue;
@@ -2614,6 +3050,9 @@ export class Coordinator {
       if (uniqueFiles.length === 0) {
         const label = d.description;
         console.warn(`[coordinator] WARN: dropping deliverable "${label}" after dedup — all target files were duplicates of earlier deliverables`);
+        this.appendRejectedCandidates(active, [
+          { path: label, reason: "duplicate deliverable: all target files duplicated earlier work" },
+        ]);
         decisions.push(`  drop deliverable "${label}" (all target files were duplicates)`);
         didFilter = true;
         continue;
@@ -2767,18 +3206,15 @@ export class Coordinator {
 
     if (deduped.length === 0 && totalBefore > 0) {
       console.warn(
-        `[coordinator] SAFETY NET TRIPPED: filter would have produced 0 deliverables from ${totalBefore}; ` +
-        `returning original deliverables unchanged to avoid empty task graph. ` +
-        `Decisions: ${decisions.join("; ")}`
+        `[coordinator] prepareDeliverablesForGraph: every deliverable was filtered out; ` +
+        `refusing to resurrect original targets. Decisions: ${decisions.join("; ")}`,
       );
-      recordDecision(active.run, {
-        description: `Safety net: filter zeroed out ${totalBefore} deliverable(s); kept originals`,
-        madeBy: "coordinator",
-        taskId: null,
-        alternatives: ["Allow empty graph and fail downstream"],
-        rationale: decisions.join(" | "),
-      });
-      return active.intent.charter.deliverables;
+      if (hadDirectoryTargets) {
+        console.warn(
+          `[coordinator] prepareDeliverablesForGraph: directory expansion removed every dispatch target; ` +
+          `Builder will not receive a bare directory target.`,
+        );
+      }
     }
 
     if (decisions.length > 0) {
@@ -2820,6 +3256,19 @@ export class Coordinator {
           sharedInvariants: active.changeSet.sharedInvariants,
         });
         console.log(`[coordinator] prepareDeliverablesForGraph: ChangeSet synced — ${filteredFiles.length} file(s) in scope (phantom files removed)`);
+        active.scopeClassification = classifyScope(active.normalizedInput, filteredFiles);
+        active.plan = this.shouldPlanForScope(active.scopeClassification)
+          ? planChangeSet(active.changeSet, active.normalizedInput)
+          : undefined;
+        active.blastRadius = estimateBlastRadius({
+          scopeClassification: active.scopeClassification,
+          charterFileCount: filteredFiles.length,
+          prompt: active.normalizedInput,
+        });
+        console.log(
+          `[coordinator] prepareDeliverablesForGraph: scope refreshed → ${active.scopeClassification.type} ` +
+          `(blast=${active.scopeClassification.blastRadius}, plan=${active.plan ? active.plan.waves.length : 0} wave(s))`,
+        );
       } catch (err) {
         console.error(`[coordinator] prepareDeliverablesForGraph: reviseIntent FAILED — ${err instanceof Error ? err.message : String(err)}`);
         throw err;
@@ -3025,6 +3474,17 @@ export class Coordinator {
       const results = await Promise.all(
         waveGated.map(async (node) => {
           const stageStart = Date.now();
+          // Drain any prior in-flight dispatch for this node before
+          // launching a fresh one. Prevents the "recovery overlaps a
+          // timed-out attempt" race that produced ENOENT and dual
+          // writeFile contention in earlier live runs.
+          const prior = active.pendingDispatches.get(node.id);
+          if (prior) {
+            console.warn(
+              `[coordinator] drain: prior dispatch for node ${node.id.slice(0, 6)} still in flight — awaiting before re-dispatch`,
+            );
+            await prior.catch(() => undefined);
+          }
           // SAFETY: Promise.race with a timeout creates a dangling promise.
           // When the timeout wins, dispatchNode() keeps running. If it later
           // rejects, that rejection was previously unhandled — crashing the
@@ -3032,10 +3492,19 @@ export class Coordinator {
           // promise so its rejection is always handled regardless of which
           // side of the race wins.
           const dispatchPromise = this.dispatchNode(active, node);
+          active.pendingDispatches.set(node.id, dispatchPromise);
           let timeoutHandle: ReturnType<typeof setTimeout>;
+          let timedOut = false;
           const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutHandle = setTimeout(
-              () => reject(new Error(`execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`)),
+              () => {
+                timedOut = true;
+                // Mark the current generation (= node.runTaskId, set by
+                // dispatchNode at task creation) as cancelled so any late
+                // settlement of dispatchPromise will discard its result.
+                if (node.runTaskId) active.cancelledGenerations.add(node.runTaskId);
+                reject(new Error(`execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`));
+              },
               stageTimeoutMs,
             );
           });
@@ -3048,6 +3517,21 @@ export class Coordinator {
           ).catch((err): { node: TaskNode; result: WorkerResult } => {
             const msg = err instanceof Error ? err.message : String(err);
             console.error(`[coordinator] ${msg}`);
+            if (timedOut) {
+              this.persistReceiptCheckpoint(active, {
+                at: new Date().toISOString(),
+                type: "worker_step",
+                status: "EXECUTING_IN_WORKSPACE",
+                phase: run.phase,
+                summary: `stage-timeout cancelled ${node.workerType} ${node.id.slice(0, 6)}`,
+                details: {
+                  cancelledGenerationId: node.runTaskId ?? null,
+                  workerType: node.workerType,
+                  nodeId: node.id,
+                  stageTimeoutSec: this.config.maxStageTimeoutSec,
+                },
+              }).catch(() => undefined);
+            }
             return {
               node,
               result: {
@@ -3068,11 +3552,17 @@ export class Coordinator {
           // race, dispatchNode() is still running. When it eventually
           // settles, swallow its result/error so it doesn't become an
           // unhandled rejection that crashes the process.
-          dispatchPromise.catch((danglingErr) => {
-            console.warn(
-              `[coordinator] defused dangling dispatch for ${node.workerType} ${node.id.slice(0, 6)}: ${danglingErr instanceof Error ? danglingErr.message : String(danglingErr)}`,
-            );
-          });
+          dispatchPromise
+            .catch((danglingErr) => {
+              console.warn(
+                `[coordinator] defused dangling dispatch for ${node.workerType} ${node.id.slice(0, 6)}: ${danglingErr instanceof Error ? danglingErr.message : String(danglingErr)}`,
+              );
+            })
+            .finally(() => {
+              if (active.pendingDispatches.get(node.id) === dispatchPromise) {
+                active.pendingDispatches.delete(node.id);
+              }
+            });
           return result;
         })
       );
@@ -3293,11 +3783,91 @@ export class Coordinator {
 
     // Use the per-submit ContextAssembler from active so the per-task
     // projectRoot is honored.
-    const context = await active.contextAssembler.assemble([...node.targetFiles]);
+    const contextTargets = this.builderContextTargets(active, node, "initial");
+    if (
+      node.workerType === "builder" &&
+      contextTargets.length > node.targetFiles.length
+    ) {
+      console.log(
+        `[coordinator] dispatchNode: widened builder context from ${node.targetFiles.length} to ` +
+        `${contextTargets.length} file(s): ${contextTargets.join(", ")}`,
+      );
+    }
+    const context = await active.contextAssembler.assemble([...contextTargets]);
+    if (node.workerType === "builder" && !active.implementationBrief) {
+      active.implementationBrief = buildMinimalImplementationBrief({
+        intent: active.intent,
+        rawUserPrompt: active.rawUserPrompt,
+        normalizedPrompt: active.normalizedInput,
+        error: "Builder dispatch reached execution without a prepared implementation brief",
+        analysis: active.analysis,
+        charter: active.intent.charter,
+        scope: active.scopeClassification,
+        dispatchableFiles: node.targetFiles,
+        rejectedCandidates: active.rejectedCandidates,
+      });
+      this.receiptStore.patchRun(active.run.id, {
+        implementationBrief: briefToReceiptJson(active.implementationBrief),
+      }).catch(() => {});
+    }
+    if (
+      node.workerType === "builder" &&
+      active.implementationBrief &&
+      context.rejectedCandidates.length > 0
+    ) {
+      active.implementationBrief = briefWithRejectedCandidates(
+        active.implementationBrief,
+        context.rejectedCandidates,
+      );
+      this.receiptStore.patchRun(active.run.id, {
+        implementationBrief: briefToReceiptJson(active.implementationBrief),
+      }).catch(() => {});
+    }
 
-    const routingDecision = this.trustRouter.route(runTask, intent, context);
+    let routingDecision = this.trustRouter.route(runTask, intent, context);
     node.assignedTier = routingDecision.tier;
     console.log(`[coordinator] dispatchNode: ${node.workerType} routed to tier=${routingDecision.tier}`);
+
+    // Capability-floor enforcement: compare the chosen tier against the
+    // minimum the Implementation Brief says this task needs. On a
+    // Builder, a broad/architectural task routed to the fast tier is
+    // very likely to produce a weak diff; bump to at least the brief's
+    // floor so the model has a fair shot. For Critic/Verifier/etc the
+    // floor is advisory — we only log, not mutate, to avoid silently
+    // blowing cost budgets on review passes.
+    if (node.workerType === "builder" && active.implementationBrief) {
+      const floor = capabilityFloorForBrief(active.implementationBrief);
+      const tierOrder = ["fast", "standard", "premium"] as const;
+      const currentIdx = tierOrder.indexOf(routingDecision.tier);
+      const floorIdx = tierOrder.indexOf(floor.floor);
+      if (currentIdx < floorIdx) {
+        const previousTier = routingDecision.tier;
+        console.warn(
+          `[coordinator] capability-floor: builder tier=${routingDecision.tier} below floor=${floor.floor} (${floor.reason}) — escalating`,
+        );
+        const escalatedAssignment = this.trustRouter.buildAssignment(
+          { ...routingDecision, tier: floor.floor },
+          runTask,
+          intent,
+          context,
+          [],
+        );
+        // Preserve the escalation decision on the node + emit so receipts show it.
+        routingDecision = { ...routingDecision, tier: floor.floor };
+        node.assignedTier = floor.floor;
+        if (active.capabilityFloorApplied) {
+          active.capabilityFloorApplied = {
+            ...active.capabilityFloorApplied,
+            escalated: true,
+          };
+        }
+        void escalatedAssignment; // buildDispatchAssignment rebuilds below
+        this.emit({
+          type: "escalation_triggered",
+          payload: { runId: active.run.id, taskId: node.id, from: previousTier, to: floor.floor },
+        });
+      }
+    }
 
     this.emit({
       type: "worker_assigned",
@@ -3334,6 +3904,7 @@ export class Coordinator {
       projectRoot: active.projectRoot,
       sourceRepo: active.sourceRepo,
       recentContext,
+      implementationBrief: active.implementationBrief,
       buildAssignment: (decision, task, intent, context, upstreamResults) =>
         this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),
     });
@@ -3358,28 +3929,290 @@ export class Coordinator {
       return { node, result: failResult };
     }
 
+    const syntheticFailure = (message: string): WorkerResult => ({
+      workerType: node.workerType as WorkerType,
+      taskId: runTask.id,
+      success: false,
+      output: { kind: "scout", dependencies: [], patterns: [], riskAssessment: { level: "low", factors: [], mitigations: [] }, suggestedApproach: "" },
+      issues: [{ severity: "error", message }],
+      cost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+      confidence: 0,
+      touchedFiles: [],
+      assumptions: [],
+      durationMs: 0,
+    });
+
+    // ── Deterministic transform pre-pass ────────────────────────────
+    // For builder nodes, try a regex+brace-counter transform before
+    // calling the LLM. If the task shape is recognized AND the file
+    // matches a supported pattern, the transform applies a clean,
+    // minimal patch and we synthesize a successful BuilderResult.
+    // Otherwise we fall through to worker.execute() with the brief.
+    let deterministic: DeterministicBuilderResult | null = null;
     let result: WorkerResult;
-    try {
-      result = await worker.execute(assignment);
-      console.log(`[coordinator] dispatchNode: ${node.workerType} returned success=${result.success} confidence=${result.confidence} touchedFiles=${result.touchedFiles.length} issues=${result.issues.length}`);
-    } catch (err) {
-      const errMessage = err instanceof Error ? err.message : String(err);
-      console.error(`[coordinator] dispatchNode: ${node.workerType} EXECUTE THREW — ${errMessage}`);
-      if (err instanceof Error && err.stack) {
-        console.error(`[coordinator] dispatchNode: stack:\n${err.stack}`);
+    if (node.workerType === "builder") {
+      try {
+        deterministic = await tryDeterministicBuilder({
+          projectRoot: active.projectRoot,
+          userRequest: active.intent.userRequest ?? active.normalizedInput,
+          targetFiles: [...node.targetFiles],
+          brief: active.implementationBrief ?? null,
+          tier: routingDecision.tier,
+          generationId: runTask.id,
+        });
+      } catch (detErr) {
+        console.warn(
+          `[coordinator] deterministic transform threw: ${detErr instanceof Error ? detErr.message : String(detErr)} — falling through to LLM Builder`,
+        );
+        deterministic = null;
       }
-      result = {
-        workerType: node.workerType as WorkerType,
-        taskId: runTask.id,
-        success: false,
-        output: { kind: "scout", dependencies: [], patterns: [], riskAssessment: { level: "low", factors: [], mitigations: [] }, suggestedApproach: "" },
-        issues: [{ severity: "error", message: `Worker threw: ${errMessage}` }],
-        cost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
-        confidence: 0,
-        touchedFiles: [],
-        assumptions: [],
-        durationMs: 0,
+    }
+
+    if (deterministic && deterministic.kind === "applied") {
+      const appliedFiles = deterministic.applied;
+      const deterministicModel = appliedFiles.length === 1
+        ? `deterministic/${appliedFiles[0].transform.transformType}`
+        : `deterministic/${appliedFiles.map((a) => a.transform.transformType).join("+")}`;
+      console.log(
+        `[coordinator] deterministic builder: ${deterministic.summary} — skipping LLM Builder for this dispatch`,
+      );
+      if (deterministic.targetRoles && deterministic.targetRoles.length > 0) {
+        active.changeSet = applyFileMutationRoles(active.changeSet, deterministic.targetRoles);
+        if (active.plan) {
+          active.plan = planChangeSet(active.changeSet, active.normalizedInput);
+        }
+      }
+      // Persist a per-target builder attempt record + a transform receipt entry.
+      const attemptRecords = appliedFiles.map((a) => a.attemptRecord);
+      this.receiptStore.patchRun(active.run.id, {
+        appendBuilderAttempts: attemptRecords as unknown as readonly unknown[],
+      }).catch(() => undefined);
+      await this.persistReceiptCheckpoint(active, {
+        at: new Date().toISOString(),
+        type: "worker_step",
+        status: "EXECUTING_IN_WORKSPACE",
+        phase: run.phase,
+        summary: `deterministic transform applied: ${deterministic.summary}`,
+        details: {
+          taskShape: deterministic.taskShape,
+          applied: appliedFiles.map((a) => ({
+            file: a.file,
+            transformType: a.transform.transformType,
+            matchedPattern: a.transform.matchedPattern,
+            insertedSnippetSummary: a.transform.insertedSnippetSummary,
+            exportsBefore: a.transform.exportDiff.original,
+            exportsAfter: a.transform.exportDiff.proposed,
+            exportsMissing: a.transform.exportDiff.missing,
+            exportsAdded: a.transform.exportDiff.added,
+            notes: a.transform.notes,
+          })),
+          skippedTargets: deterministic.skipped.map((s) => ({
+            file: s.file,
+            reasonCode: s.reasonCode,
+            reason: s.reason,
+          })),
+          targetRoles: active.changeSet.filesInScope.map((file) => ({
+            file: file.path,
+            role: file.mutationRole,
+            mutationExpected: file.mutationExpected,
+            reason: file.mutationReason,
+          })),
+        },
+      });
+
+      // Synthesize a successful BuilderResult from the applied changes.
+      const changes = appliedFiles.map((a) => ({
+        path: a.file,
+        operation: "modify" as const,
+        diff: a.transform.diff,
+        originalContent: a.transform.originalContent,
+        content: a.transform.updatedContent,
+      }));
+      const summaryContract = {
+        file: appliedFiles[0]?.file ?? "",
+        scopeFiles: appliedFiles.map((a) => a.file),
+        siblingFiles: appliedFiles.slice(1).map((a) => a.file),
+        mode: appliedFiles.length > 1 ? "coordinated-multi-file" as const : "single-file" as const,
+        goal: deterministic.summary,
+        constraints: [],
+        forbiddenChanges: [],
+        interfaceRules: ["deterministic transform — no LLM was invoked"],
       };
+      const decisions = appliedFiles.map((a) => ({
+        description: `Deterministic transform: ${a.transform.transformType} on ${a.file}`,
+        rationale: a.transform.notes,
+        alternatives: ["Fall back to LLM Builder"],
+      }));
+      result = {
+        workerType: "builder",
+        taskId: runTask.id,
+        success: true,
+        output: {
+          kind: "builder",
+          changes,
+          decisions,
+          needsCriticReview: false,
+          contract: summaryContract,
+          prompt: `[deterministic transform — no model prompt]`,
+          rawModelResponse: `[deterministic transform — no model response]`,
+          providerFindings: [],
+          attemptRecords,
+        } as unknown as WorkerResult["output"],
+        issues: [],
+        cost: { model: deterministicModel, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        confidence: 0.95,
+        touchedFiles: appliedFiles.flatMap((a) => [
+          { path: a.file, operation: "read" as const },
+          { path: a.file, operation: "modify" as const },
+        ]),
+        assumptions: [],
+        durationMs: 1,
+      };
+      this.emit({
+        type: "builder_complete",
+        payload: {
+          runId: active.run.id,
+          taskId: node.id,
+          file: appliedFiles[0]?.file,
+          path: appliedFiles[0]?.file,
+          operation: "modify",
+          model: deterministicModel,
+          provider: "deterministic",
+          costUsd: 0,
+          tokensIn: 0,
+          tokensOut: 0,
+          fellBack: false,
+          sectionMode: false,
+          confidence: 0.95,
+          deterministic: true,
+          diff: changes.map((c) => c.diff).join("\n"),
+        },
+      });
+    } else {
+      if (deterministic && deterministic.kind === "skipped" && deterministic.skipped.length > 0) {
+        const skipSummary = deterministic.skipped
+          .map((s) => `${s.file}:${s.reasonCode}`)
+          .join(" | ");
+        console.log(
+          `[coordinator] deterministic transform skipped (${deterministic.reason}); skipped targets: ${skipSummary} — falling through to LLM Builder`,
+        );
+        await this.persistReceiptCheckpoint(active, {
+          at: new Date().toISOString(),
+          type: "worker_step",
+          status: "EXECUTING_IN_WORKSPACE",
+          phase: run.phase,
+          summary: `deterministic transform skipped: ${deterministic.reason}`,
+          details: {
+            taskShape: deterministic.taskShape,
+            skipped: deterministic.skipped.map((s) => ({
+              file: s.file,
+              reasonCode: s.reasonCode,
+              reason: s.reason,
+            })),
+          },
+        });
+      }
+      try {
+        result = await worker.execute(assignment);
+        console.log(`[coordinator] dispatchNode: ${node.workerType} returned success=${result.success} confidence=${result.confidence} touchedFiles=${result.touchedFiles.length} issues=${result.issues.length}`);
+      } catch (err) {
+        const errMessage = err instanceof Error ? err.message : String(err);
+        console.error(`[coordinator] dispatchNode: ${node.workerType} EXECUTE THREW — ${errMessage}`);
+        if (err instanceof Error && err.stack) {
+          console.error(`[coordinator] dispatchNode: stack:\n${err.stack}`);
+        }
+        result = syntheticFailure(`Worker threw: ${errMessage}`);
+      }
+    }
+
+    // ── Weak-output recovery ─────────────────────────────────────────
+    // Attempt 1 uses the routed tier. Attempt 2 sharpens the brief on
+    // the same tier. If that still fails and a stronger tier resolves
+    // to a distinct model, attempt 3 escalates to that stronger tier.
+    if (
+      node.workerType === "builder" &&
+      !result.success &&
+      active.implementationBrief
+    ) {
+      const builderConfig = loadModelConfigFromDisk(active.sourceRepo);
+      let currentTier = assignment.tier;
+      while (!result.success && active.weakOutputRetries < 2) {
+        const errMsg = result.issues[0]?.message ?? "";
+        const finding = classifyWeakOutput({ builderError: errMsg, changeCount: 0 });
+        if (!finding.retriable || finding.reason === "unknown") {
+          console.log(
+            `[coordinator] weak-output recovery: not retriable (reason=${finding.reason}) — surfacing failure as-is`,
+          );
+          break;
+        }
+
+        let retryTier = currentTier;
+        let retryMode = "same-model";
+        if (active.weakOutputRetries >= 1) {
+          const stronger = findNextStrongerBuilderTier(builderConfig, currentTier);
+          if (!stronger) {
+            console.log(
+              `[coordinator] weak-output recovery: attempt 3 unavailable — no stronger distinct builder tier after ${currentTier}`,
+            );
+            break;
+          }
+          retryTier = stronger.tier;
+          retryMode = `stronger-model ${stronger.identity}`;
+          node.assignedTier = stronger.tier;
+          this.emit({
+            type: "escalation_triggered",
+            payload: { runId: active.run.id, taskId: node.id, from: currentTier, to: stronger.tier },
+          });
+        }
+
+        active.weakOutputRetries += 1;
+        const retryHint = retryTier === currentTier
+          ? finding.retryHint
+          : `${finding.retryHint} Stronger model assigned for this final retry.`;
+        let retryBrief = briefWithRetryHint(active.implementationBrief, retryHint);
+        let retryContext = assignment.context;
+        const retryContextTargets = this.builderContextTargets(active, node, "retry");
+        if (retryContextTargets.length > 0) {
+          retryContext = await active.contextAssembler.assemble([...retryContextTargets]);
+          if (retryContext.rejectedCandidates.length > 0) {
+            retryBrief = briefWithRejectedCandidates(retryBrief, retryContext.rejectedCandidates);
+          }
+        }
+        active.implementationBrief = retryBrief;
+        const retryAssignment: WorkerAssignment = {
+          ...assignment,
+          tier: retryTier,
+          context: retryContext,
+          implementationBrief: retryBrief,
+        };
+        this.emit({
+          type: "system_event",
+          payload: {
+            runId: active.run.id,
+            checkpointLabel: "weak_output_retry",
+            summary:
+              `weak-output retry ${retryBrief.attempt} (${finding.reason}, ${retryMode}): ` +
+              `${errMsg.slice(0, 100)}`,
+          },
+        });
+        this.receiptStore.patchRun(active.run.id, {
+          implementationBrief: briefToReceiptJson(retryBrief),
+        }).catch(() => {});
+        try {
+          const retryResult = await worker.execute(retryAssignment);
+          console.log(
+            `[coordinator] weak-output retry attempt=${retryBrief.attempt} tier=${retryTier} ` +
+            `success=${retryResult.success} confidence=${retryResult.confidence} reason=${finding.reason}`,
+          );
+          result = retryResult;
+          currentTier = retryTier;
+        } catch (retryErr) {
+          const rmsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          console.warn(`[coordinator] weak-output retry attempt=${retryBrief.attempt} threw: ${rmsg}`);
+          result = syntheticFailure(`Retry failed: ${rmsg} (original: ${errMsg})`);
+          currentTier = retryTier;
+        }
+      }
     }
 
     const taskResult: TaskResult = {
@@ -3398,6 +4231,56 @@ export class Coordinator {
       });
     }
 
+    // Stale-result guard: if this dispatch's generation was cancelled
+    // mid-flight (typically by the stage-timeout race), discard the
+    // late result rather than applying it. Per-attempt diagnostics are
+    // still persisted (so cost / exports / patch-mode are visible in
+    // the receipt) but the records are stamped stale=true and the
+    // result does NOT join active.workerResults / active.changes.
+    const isStale = active.cancelledGenerations.has(runTask.id);
+    if (isStale) {
+      console.warn(
+        `[coordinator] dispatchNode: discarding stale result for ${node.workerType} ${node.id.slice(0, 6)} (generation ${runTask.id.slice(0, 8)} was cancelled)`,
+      );
+      const lateAttemptRecords =
+        node.workerType === "builder" && result.output && (result.output as unknown as { attemptRecords?: unknown[] }).attemptRecords;
+      if (Array.isArray(lateAttemptRecords) && lateAttemptRecords.length > 0) {
+        const stamped = lateAttemptRecords.map((r) => ({ ...(r as Record<string, unknown>), stale: true }));
+        await this.receiptStore.patchRun(active.run.id, {
+          appendBuilderAttempts: stamped,
+        }).catch(() => undefined);
+      }
+      await this.persistReceiptWorkerEvent(active, {
+        at: new Date().toISOString(),
+        workerType: node.workerType,
+        taskId: runTask.id,
+        status: "failed",
+        summary: `Late settlement after cancellation — result discarded (gen ${runTask.id.slice(0, 8)})`,
+        confidence: 0,
+        costUsd: 0,
+        filesTouched: [],
+        issues: ["stale-result: dispatch superseded by cancellation"],
+      });
+      // Synthesize a failure result so the dispatch's caller (Promise.race
+      // already exited via timeout, but the late settlement path lands here
+      // when the coordinator processes the result map late). Returning a
+      // structurally-valid failure result keeps downstream logic simple
+      // without applying the patch.
+      const stale: WorkerResult = {
+        workerType: node.workerType as WorkerType,
+        taskId: runTask.id,
+        success: false,
+        output: { kind: node.workerType } as WorkerResult["output"],
+        issues: [{ severity: "error", message: "stale-result: dispatch was cancelled before completion" }],
+        cost: { model: result.cost?.model ?? "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        confidence: 0,
+        touchedFiles: [],
+        assumptions: [],
+        durationMs: 0,
+      };
+      return { node, result: stale };
+    }
+
     active.workerResults.push(result);
     await this.persistReceiptWorkerEvent(active, {
       at: new Date().toISOString(),
@@ -3412,6 +4295,20 @@ export class Coordinator {
       filesTouched: result.touchedFiles.map((touch) => touch.path),
       issues: result.issues.map((issue) => issue.message),
     });
+    // Persist Builder per-attempt diagnostics (cost/model/exports/patch
+    // mode) so the receipt records every model call — not just the
+    // successful patches. Records survive guard rejection via
+    // BuilderAttemptError; here we just append whatever the result
+    // carried.
+    const attemptRecords =
+      node.workerType === "builder" && result.output && (result.output as unknown as { attemptRecords?: unknown[] }).attemptRecords;
+    if (Array.isArray(attemptRecords) && attemptRecords.length > 0) {
+      await this.receiptStore.patchRun(active.run.id, {
+        appendBuilderAttempts: attemptRecords as readonly unknown[],
+      }).catch((e) => {
+        console.warn(`[coordinator] receipt persist of builder attempts failed: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
     return { node, result };
   }
 
@@ -3757,6 +4654,7 @@ export class Coordinator {
         wave,
         active.changes,
         active.workerResults,
+        active.changeSet,
       );
       active.waveVerifications.push(receipt);
       console.log(
@@ -3864,6 +4762,16 @@ export class Coordinator {
         code: "git-diff:undeclared-changes",
         message: `${result.undeclaredChanges.length} file(s) changed on disk but not declared in manifest: ${result.undeclaredChanges.slice(0, 5).join(", ")}${result.undeclaredChanges.length > 5 ? "…" : ""}`,
         files: result.undeclaredChanges,
+      });
+    }
+
+    if (result.unexpectedReferenceChanges.length > 0) {
+      findings.push({
+        source: "change-set-gate",
+        severity: "critical",
+        code: "git-diff:unexpected-reference-change",
+        message: `${result.unexpectedReferenceChanges.length} reference/context file(s) changed unexpectedly: ${result.unexpectedReferenceChanges.slice(0, 5).join(", ")}${result.unexpectedReferenceChanges.length > 5 ? "…" : ""}`,
+        files: result.unexpectedReferenceChanges,
       });
     }
 
@@ -4761,6 +5669,18 @@ export class Coordinator {
       });
     }
 
+    const actualChangedForTargets = new Set(
+      active.gitDiffResult?.actualChangedFiles ??
+      active.changes.map((change) => change.path),
+    );
+    const targetRoles = active.changeSet.filesInScope.map((file) => ({
+      file: file.path,
+      role: file.mutationRole,
+      mutationExpected: file.mutationExpected,
+      actualChanged: actualChangedForTargets.has(file.path),
+      reason: file.mutationReason,
+    }));
+
     // Build the receipt without humanSummary first, then compose
     // the summary from the receipt itself (the summary generator
     // reads receipt fields like executionVerified, executionEvidence,
@@ -4801,6 +5721,7 @@ export class Coordinator {
       workspaceCleanup: active.workspaceCleanup ?? null,
       sourceRepo: active.sourceRepo ?? null,
       sourceCommitSha: active.workspace?.sourceCommitSha ?? null,
+      targetRoles,
       confidenceGate,
     };
 
@@ -4977,7 +5898,7 @@ export class Coordinator {
       gitDiffConfirmationRatio: active.gitDiffResult?.confirmationRatio,
       gitDiffResult: active.gitDiffResult,
       requiredFiles: active.changeSet.filesInScope
-        .filter((file) => file.necessity === "required")
+        .filter((file) => file.mutationExpected)
         .map((file) => file.path),
       projectRoot: active.projectRoot,
       patternWarnings: active.patternWarnings,
@@ -5144,6 +6065,98 @@ export class Coordinator {
     });
   }
 
+  private async abortWorkspaceRun(input: {
+    run: RunState;
+    intentId: string;
+    prompt: string;
+    blastRadius: BlastRadiusEstimate | null;
+    sourceRepo: string;
+    sourceRootExistsAtStart: boolean;
+    cause: string;
+    startTime: number;
+  }): Promise<RunReceipt> {
+    const abortReason =
+      `Workspace creation failed and requireWorkspace=true — run aborted ` +
+      `without mutating the source repo. Cause: ${input.cause}`;
+    failRun(input.run, abortReason);
+
+    const receiptRoot = resolve(this.receiptStore.rootDir);
+    const sourceRoot = resolve(input.sourceRepo);
+    const receiptRootTouchesMissingSource =
+      !input.sourceRootExistsAtStart &&
+      (receiptRoot === sourceRoot || receiptRoot.startsWith(`${sourceRoot}/`));
+
+    if (!receiptRootTouchesMissingSource) {
+      await this.receiptStore.patchRun(input.run.id, {
+        intentId: input.intentId,
+        prompt: input.prompt,
+        taskSummary: abortReason,
+        status: "EXECUTION_ERROR",
+        phase: input.run.phase,
+        completedAt: new Date().toISOString(),
+        appendErrors: [abortReason],
+        appendCheckpoints: [{
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "EXECUTION_ERROR",
+          phase: input.run.phase,
+          summary: "Workspace creation failed — run aborted before any repo mutation",
+          details: { cause: input.cause },
+        }],
+      });
+    } else {
+      console.warn(
+        `[coordinator] skipping abort receipt persistence because receipt root is inside missing source path: ${this.receiptStore.rootDir}`,
+      );
+    }
+
+    this.emit({
+      type: "merge_blocked",
+      payload: { runId: input.run.id, blockers: [abortReason] },
+    });
+    this.emit({
+      type: "run_complete",
+      payload: {
+        runId: input.run.id,
+        verdict: "failed",
+        executionVerified: false,
+        executionReason: abortReason,
+        classification: null,
+      },
+    });
+
+    return {
+      id: randomUUID(),
+      runId: input.run.id,
+      intentId: input.intentId,
+      timestamp: new Date().toISOString(),
+      verdict: "failed",
+      summary: getRunSummary(input.run),
+      graphSummary: getGraphSummary(createTaskGraph(input.intentId)),
+      verificationReceipt: null,
+      waveVerifications: [],
+      judgmentReport: null,
+      mergeDecision: null,
+      totalCost: { model: "", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+      commitSha: null,
+      durationMs: Date.now() - input.startTime,
+      memorySuggestions: [],
+      executionVerified: false,
+      executionGateReason: abortReason,
+      executionEvidence: [],
+      executionReceipts: [],
+      humanSummary: null,
+      blastRadius: input.blastRadius,
+      evaluation: null,
+      patchArtifact: null,
+      workspaceCleanup: null,
+      sourceRepo: input.sourceRepo,
+      sourceCommitSha: null,
+      targetRoles: [],
+      confidenceGate: null,
+    };
+  }
+
   // ─── Repo Hub Index (GAP 3) ─────────────────────────────────────────
 
   /**
@@ -5266,6 +6279,8 @@ interface ActiveRun {
    * re-reading adds up across large graphs.
    */
   projectMemory: Awaited<ReturnType<typeof loadMemory>>;
+  /** Request analysis from the charter pass. Reused when rebuilding fallback briefs. */
+  analysis: RequestAnalysis;
   /** Normalized prompt from PHASE 1. Used for wave-aware gating. */
   normalizedInput: string;
   memorySuggestions: string[];
@@ -5301,6 +6316,46 @@ interface ActiveRun {
   */
   changeSet: ChangeSet;
   plan?: Plan;
+  /**
+   * Engineer-grade work order built after charter/scope/plan exist and
+   * before Builder dispatch. Passed into every worker assignment so the
+   * Builder sees selected files + rationale, rejected candidates, staged
+   * plan, non-goals, verification commands, and (on retries) a
+   * sharpened retry hint. Mutable to allow weak-output recovery to
+   * rebuild it with an updated retryHint/attempt.
+   */
+  implementationBrief?: ImplementationBrief;
+  /**
+   * Number of weak-output retries already used this run. Capped at 2:
+   * one sharpened retry on the same tier, then one stronger-tier retry
+   * if a distinct stronger model is configured.
+   */
+  weakOutputRetries: number;
+  /**
+   * Generation IDs (=runTask.id) of dispatches that were cancelled
+   * mid-flight, typically by a stage-timeout race. dispatchNode checks
+   * this set after worker.execute returns; if its generation is here,
+   * the result is treated as stale: per-attempt diagnostics are still
+   * persisted (cost survives) but marked stale=true, and the result is
+   * not applied to workerResults / changes / graph state.
+   */
+  cancelledGenerations: Set<string>;
+  /**
+   * Active dispatches in flight, keyed by node.id. Used to drain a
+   * timed-out dispatch before a recovery retry starts on the same node.
+   * Prevents the "two dispatches racing on the same workspace" failure
+   * mode that produced ENOENT in earlier live runs.
+   */
+  pendingDispatches: Map<string, Promise<unknown>>;
+  /** Files or paths considered and dropped during planning/context selection. */
+  rejectedCandidates: RejectedCandidate[];
+  /** Tracks which capability floor we've enforced, for receipt transparency. */
+  capabilityFloorApplied?: {
+    readonly floor: "fast" | "standard" | "premium";
+    readonly reason: string;
+    readonly configured: "fast" | "standard" | "premium";
+    readonly escalated: boolean;
+  };
   /**
    * Receipts from per-wave verification (P2). One entry per wave of
    * the plan that actually had changes to verify. Empty when no plan

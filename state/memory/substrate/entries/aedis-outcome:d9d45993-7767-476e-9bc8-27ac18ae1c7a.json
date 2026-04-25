@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:d9d45993-7767-476e-9bc8-27ac18ae1c7a",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in add enabled:boolean to FeatureFlagSchema in src/types.ts",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies (original: Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies (original: Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies))\",\n    \"Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 0 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T13:41:47.222Z",
+  "updatedAt": "2026-04-25T13:41:47.224Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-type-int-chain-8F3Ugg",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d9d45993-7767-476e-9bc8-27ac18ae1c7a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "9845afcb-f69b-4b6e-9f28-a4aba79a6879",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:d9d45993-7767-476e-9bc8-27ac18ae1c7a",
+    "aedis-task:d9d45993-7767-476e-9bc8-27ac18ae1c7a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d9d45993-7767-476e-9bc8-27ac18ae1c7a"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:d9d45993-7767-476e-9bc8-27ac18ae1c7a"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

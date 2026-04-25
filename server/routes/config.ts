@@ -20,6 +20,15 @@ import type { ServerContext } from "../index.js";
 export interface ModelAssignment {
   model: string;
   provider: string;
+  label?: string;
+}
+
+export type ModelTier = "fast" | "standard" | "premium";
+
+export interface BuilderTierConfig {
+  fast?: ModelAssignment;
+  standard?: ModelAssignment;
+  premium?: ModelAssignment;
 }
 
 export interface ModelConfig {
@@ -30,6 +39,7 @@ export interface ModelConfig {
   integrator: ModelAssignment;
   escalation: ModelAssignment;
   coordinator: ModelAssignment;
+  builderTiers?: BuilderTierConfig;
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────
@@ -66,12 +76,147 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
   integrator: { model: "glm-5.1", provider: "zai" },
   escalation: { model: "glm-5.1", provider: "zai" },
   coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+  builderTiers: {},
 };
 
 const VALID_ROLES = [
   "scout", "builder", "critic", "verifier",
   "integrator", "escalation", "coordinator",
 ] as const;
+const VALID_TIERS: readonly ModelTier[] = ["fast", "standard", "premium"];
+
+function normalizeAssignment(
+  raw: unknown,
+  fallback: ModelAssignment,
+): ModelAssignment {
+  if (!raw || typeof raw !== "object") return { ...fallback };
+  const entry = raw as Partial<ModelAssignment>;
+  const model = typeof entry.model === "string" && entry.model.trim()
+    ? entry.model.trim()
+    : fallback.model;
+  const provider = typeof entry.provider === "string" && entry.provider.trim()
+    ? entry.provider.trim()
+    : fallback.provider;
+  const label = typeof entry.label === "string" && entry.label.trim()
+    ? entry.label.trim()
+    : undefined;
+  return label ? { model, provider, label } : { model, provider };
+}
+
+function normalizeBuilderTierConfig(raw: unknown): BuilderTierConfig {
+  if (!raw || typeof raw !== "object") return {};
+  const entry = raw as BuilderTierConfig;
+  const out: BuilderTierConfig = {};
+  for (const tier of VALID_TIERS) {
+    if (entry[tier]) {
+      out[tier] = normalizeAssignment(
+        entry[tier],
+        tier === "premium" ? DEFAULT_MODEL_CONFIG.escalation : DEFAULT_MODEL_CONFIG.builder,
+      );
+    }
+  }
+  return out;
+}
+
+function normalizeModelConfig(raw: unknown): ModelConfig {
+  const parsed = raw && typeof raw === "object"
+    ? raw as Partial<ModelConfig>
+    : {};
+  return {
+    scout: normalizeAssignment(parsed.scout, DEFAULT_MODEL_CONFIG.scout),
+    builder: normalizeAssignment(parsed.builder, DEFAULT_MODEL_CONFIG.builder),
+    critic: normalizeAssignment(parsed.critic, DEFAULT_MODEL_CONFIG.critic),
+    verifier: normalizeAssignment(parsed.verifier, DEFAULT_MODEL_CONFIG.verifier),
+    integrator: normalizeAssignment(parsed.integrator, DEFAULT_MODEL_CONFIG.integrator),
+    escalation: normalizeAssignment(parsed.escalation, DEFAULT_MODEL_CONFIG.escalation),
+    coordinator: normalizeAssignment(parsed.coordinator, DEFAULT_MODEL_CONFIG.coordinator),
+    builderTiers: normalizeBuilderTierConfig(parsed.builderTiers),
+  };
+}
+
+function assignmentIdentity(assignment: ModelAssignment): string {
+  return `${assignment.provider}/${assignment.model}`;
+}
+
+export interface BuilderTierResolution {
+  readonly tier: ModelTier;
+  readonly assignment: ModelAssignment;
+  readonly identity: string;
+  readonly source: "builderTiers" | "builder" | "escalation";
+}
+
+export function resolveBuilderModelForTier(
+  config: ModelConfig,
+  tier: ModelTier,
+): BuilderTierResolution {
+  const tierConfig = config.builderTiers ?? {};
+  if (tierConfig[tier]) {
+    const assignment = normalizeAssignment(
+      tierConfig[tier],
+      tier === "premium" ? config.escalation : config.builder,
+    );
+    return {
+      tier,
+      assignment,
+      identity: assignmentIdentity(assignment),
+      source: "builderTiers",
+    };
+  }
+
+  if (tier === "premium") {
+    const assignment = normalizeAssignment(config.escalation, DEFAULT_MODEL_CONFIG.escalation);
+    return {
+      tier,
+      assignment,
+      identity: assignmentIdentity(assignment),
+      source: "escalation",
+    };
+  }
+
+  const assignment = normalizeAssignment(config.builder, DEFAULT_MODEL_CONFIG.builder);
+  return {
+    tier,
+    assignment,
+    identity: assignmentIdentity(assignment),
+    source: "builder",
+  };
+}
+
+export function resolveAllBuilderTierModels(
+  config: ModelConfig,
+): Record<ModelTier, BuilderTierResolution> {
+  return {
+    fast: resolveBuilderModelForTier(config, "fast"),
+    standard: resolveBuilderModelForTier(config, "standard"),
+    premium: resolveBuilderModelForTier(config, "premium"),
+  };
+}
+
+export function builderTierCollapseWarning(config: ModelConfig): string | null {
+  const resolved = resolveAllBuilderTierModels(config);
+  const identities = new Set(
+    VALID_TIERS.map((tier) => resolved[tier].identity),
+  );
+  if (identities.size > 1) return null;
+  const collapsed = resolved.fast.identity;
+  return `Builder tier mapping collapses to one model (${collapsed}); capability floor cannot raise model strength until builderTiers or escalation are configured distinctly.`;
+}
+
+export function findNextStrongerBuilderTier(
+  config: ModelConfig,
+  currentTier: ModelTier,
+): BuilderTierResolution | null {
+  const order: readonly ModelTier[] = ["fast", "standard", "premium"];
+  const current = resolveBuilderModelForTier(config, currentTier);
+  const start = order.indexOf(currentTier);
+  for (let index = start + 1; index < order.length; index += 1) {
+    const candidate = resolveBuilderModelForTier(config, order[index]);
+    if (candidate.identity !== current.identity) {
+      return candidate;
+    }
+  }
+  return null;
+}
 
 // ─── Persistence ─────────────────────────────────────────────────────
 
@@ -108,14 +253,13 @@ export function loadModelConfig(projectRoot: string): ModelConfig {
       if (existsSync(path)) {
         const raw = readFileSync(path, "utf-8");
         const parsed = JSON.parse(raw);
-        // Merge with defaults so new roles get default values
-        return { ...DEFAULT_MODEL_CONFIG, ...parsed };
+        return normalizeModelConfig(parsed);
       }
     } catch {
       // Corrupt file — try the next candidate, or fall through to defaults.
     }
   }
-  return { ...DEFAULT_MODEL_CONFIG };
+  return normalizeModelConfig(DEFAULT_MODEL_CONFIG);
 }
 
 function saveModelConfig(projectRoot: string, config: ModelConfig): void {
@@ -150,9 +294,36 @@ function validateModelConfig(body: unknown): { valid: boolean; errors: string[] 
     }
   }
 
+  if ("builderTiers" in obj) {
+    const tiers = obj.builderTiers as any;
+    if (typeof tiers !== "object" || tiers === null) {
+      errors.push("builderTiers must be an object with fast/standard/premium entries");
+    } else {
+      for (const tier of VALID_TIERS) {
+        if (!(tier in tiers)) continue;
+        const entry = tiers[tier];
+        if (typeof entry !== "object" || entry === null) {
+          errors.push(`builderTiers.${tier} must be an object with { model, provider }`);
+          continue;
+        }
+        if (typeof entry.model !== "string" || !entry.model.trim()) {
+          errors.push(`builderTiers.${tier}.model must be a non-empty string`);
+        }
+        if (typeof entry.provider !== "string" || !entry.provider.trim()) {
+          errors.push(`builderTiers.${tier}.provider must be a non-empty string`);
+        }
+      }
+      for (const key of Object.keys(tiers)) {
+        if (!VALID_TIERS.includes(key as ModelTier)) {
+          errors.push(`Unknown builder tier "${key}" — ignored`);
+        }
+      }
+    }
+  }
+
   // Warn about unknown keys but don't fail
   for (const key of Object.keys(obj)) {
-    if (!VALID_ROLES.includes(key as any)) {
+    if (!VALID_ROLES.includes(key as any) && key !== "builderTiers") {
       errors.push(`Unknown role "${key}" — ignored`);
     }
   }
@@ -176,6 +347,7 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
         models: config,
         config_path: configPath(ctx().config.projectRoot),
         roles: VALID_ROLES,
+        builder_tiers: VALID_TIERS,
       });
     }
   );
@@ -210,14 +382,25 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
       const current = loadModelConfig(projectRoot);
 
       // Merge incoming assignments with current config
-      const updated: ModelConfig = { ...current };
+      const updated: ModelConfig = {
+        ...current,
+        builderTiers: { ...(current.builderTiers ?? {}) },
+      };
       for (const role of VALID_ROLES) {
         if (role in assignments) {
           (updated as any)[role] = (assignments as any)[role];
         }
       }
+      if ("builderTiers" in assignments) {
+        updated.builderTiers = {
+          ...(current.builderTiers ?? {}),
+          ...normalizeBuilderTierConfig((assignments as any).builderTiers),
+        };
+      }
 
-      saveModelConfig(projectRoot, updated);
+      const normalized = normalizeModelConfig(updated);
+
+      saveModelConfig(projectRoot, normalized);
 
       // Emit config change event
       ctx().eventBus.emit({
@@ -225,13 +408,16 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
         payload: {
           kind: "config_update",
           summary: "Model configuration updated",
-          models: updated,
+          models: normalized,
         },
       });
 
       reply.send({
-        models: updated,
-        updated_roles: VALID_ROLES.filter((role) => role in assignments),
+        models: normalized,
+        updated_roles: [
+          ...VALID_ROLES.filter((role) => role in assignments),
+          ...("builderTiers" in assignments ? ["builderTiers"] : []),
+        ],
         message: "Model configuration saved. Changes take effect on next run.",
         warnings: errors.filter((e) => e.includes("ignored")),
       });

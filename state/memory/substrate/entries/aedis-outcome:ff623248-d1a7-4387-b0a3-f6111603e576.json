@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:ff623248-d1a7-4387-b0a3-f6111603e576",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in modify core/util.ts to export 2",
+  "summary": "\"core/util.ts\" modified without original content or diff — cannot rollback",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/util.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.70 (keywords: modify, core, util, export)\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"1 manifest file(s) expected to change but unchanged on disk: core/util.ts\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/util.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"1 manifest file(s) expected to change but unchanged on disk: core/util.ts\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.70 (keywords: modify, core, util, export)\",\n        \"files\": [\n          \"core/util.ts\"\n        ]\n      }\n    ],\n    \"primaryBlockReason\": \"\\\"core/util.ts\\\" modified without original content or diff — cannot rollback\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 2 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T13:09:11.741Z",
+  "updatedAt": "2026-04-25T13:09:11.742Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-8qkJpX",
+  "filePaths": [
+    "core/util.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "ff623248-d1a7-4387-b0a3-f6111603e576",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "18878d5c-a25c-4a50-baa6-d7de8cd63958",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:ff623248-d1a7-4387-b0a3-f6111603e576",
+    "aedis-task:ff623248-d1a7-4387-b0a3-f6111603e576"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:ff623248-d1a7-4387-b0a3-f6111603e576"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:ff623248-d1a7-4387-b0a3-f6111603e576"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "\"core/util.ts\" modified without original content or diff — cannot rollback"
+  }
+}

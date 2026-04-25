@@ -1,0 +1,62 @@
+{
+  "id": "aedis-task:a204b11a-c4f0-4e9e-8a5b-8c98b45cf016",
+  "space": "aedis/project/mnt-ai-tmp-aedis-gauntlet-u1wd4a",
+  "kind": "aedis-task",
+  "title": "refactor auth layer across types/auth.d.ts, services/login.ts, tests/auth.test.ts, and server/index.ts",
+  "summary": "architectural · failed run · architectural scope · 4 file(s) touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"refactor auth layer across types/auth.d.ts, services/login.ts, tests/auth.test.ts, and server/index.ts\",\n  \"normalizedPrompt\": \"refactor auth layer across types/auth.d.ts, services/login.ts, tests/auth.test.ts, and server/index.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"99a54336-87d8-4989-a64c-ef9ac5eb1f56\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"01d247a9-b36b-4b15-892a-5c81b864a9a7\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"types/auth.d.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #1\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"types/auth.d.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"317dae45-b7fa-4d6d-8985-6bad675d5afd\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"services/login.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #2\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"services/login.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"1123ff16-9ef4-4a33-ad1f-a8474e3276fc\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"tests/auth.test.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #3\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"tests/auth.test.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"a925148a-d828-414e-882e-fa97a066645d\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"server/index.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #4\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"server/index.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"1454e2e6-b1b2-413c-aa9a-73d25b39caf5\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"d3daabaf-2614-4a3c-aa19-4a03f02c39fa\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"7b9df532-70e3-4b19-bc56-f71a0159db7f\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"types/auth.d.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #1\\n\"\n          },\n          {\n            \"path\": \"services/login.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #2\\n\"\n          },\n          {\n            \"path\": \"tests/auth.test.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #3\\n\"\n          },\n          {\n            \"path\": \"server/index.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"// updated #4\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"types/auth.d.ts\",\n          \"operation\": \"modify\"\n        },\n        {\n          \"path\": \"services/login.ts\",\n          \"operation\": \"modify\"\n        },\n        {\n          \"path\": \"tests/auth.test.ts\",\n          \"operation\": \"modify\"\n        },\n        {\n          \"path\": \"server/index.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:server",
+    "module:services",
+    "module:tests",
+    "module:types",
+    "scope:architectural",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T13:12:19.881Z",
+  "updatedAt": "2026-04-25T13:12:19.894Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-u1wD4a",
+  "filePaths": [
+    "server/index.ts",
+    "services/login.ts",
+    "tests/auth.test.ts",
+    "types/auth.d.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "a204b11a-c4f0-4e9e-8a5b-8c98b45cf016",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "1303e206-c0e6-40cf-9eda-1b15a5e2c0dc",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:a204b11a-c4f0-4e9e-8a5b-8c98b45cf016",
+    "aedis-run:a204b11a-c4f0-4e9e-8a5b-8c98b45cf016"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:a204b11a-c4f0-4e9e-8a5b-8c98b45cf016"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:a204b11a-c4f0-4e9e-8a5b-8c98b45cf016"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "architectural",
+    "complexityTier": "high",
+    "verificationVerdict": "not-run",
+    "filesTouched": 4
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:0ac20191-be7a-4407-b855-d7ec9223dc66",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add POST /users endpoint that calls UserService.createUser with CreateUserDto in src/user.controller.ts, src/user.servic",
+  "summary": "Missing deliverables: Modify src/user.controller.ts, Modify src/user.service.ts, Modify src/duplicate-user.service.ts, Modify src/create-user.dto.ts Repair-pass issues: src/user.controller.ts: no shared exported names with dependency src/user.service.ts | src/user.controller.ts:…",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify src/user.controller.ts, Modify src/user.service.ts, Modify src/duplicate-user.service.ts, Modify src/create-user.dto.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"src/user.controller.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/user.controller.ts); Required file \\\"src/user.service.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/user.service.ts); Required file \\\"src/duplicate-user.service.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/duplicate-user.service.ts); Required file \\\"src/create-user.dto.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/create-user.dto.ts)\",\n        \"files\": [\n          \"src/user.controller.ts\",\n          \"src/user.service.ts\",\n          \"src/duplicate-user.service.ts\",\n          \"src/create-user.dto.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"prompt requested a change but no files were modified — cannot satisfy intent\",\n        \"files\": []\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/user.service.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/create-user.dto.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/duplicate-user.service.ts: no shared exported names with dependency src/user.controller.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/duplicate-user.service.ts: no shared exported names with dependency src/create-user.dto.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.controller.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.service.ts\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Missing deliverables: Modify src/user.controller.ts, Modify src/user.service.ts, Modify src/duplicate-user.service.ts, Modify src/create-user.dto.ts\",\n        \"files\": []\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:intent-alignment\",\n        \"message\": \"Required file \\\"src/user.controller.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/user.controller.ts); Required file \\\"src/user.service.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/user.service.ts); Required file \\\"src/duplicate-user.service.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/duplicate-user.service.ts); Required file \\\"src/create-user.dto.ts\\\" declared in manifest but not changed (modify required for deliverable: Modify src/create-user.dto.ts)\",\n        \"files\": [\n          \"src/user.controller.ts\",\n          \"src/user.service.ts\",\n          \"src/duplicate-user.service.ts\",\n          \"src/create-user.dto.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"prompt requested a change but no files were modified — cannot satisfy intent\",\n        \"files\": []\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/user.service.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/create-user.dto.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/duplicate-user.service.ts: no shared exported names with dependency src/user.controller.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/duplicate-user.service.ts: no shared exported names with dependency src/create-user.dto.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.controller.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.service.ts\"\n      }\n    ],\n    \"primaryBlockReason\": \"Missing deliverables: Modify src/user.controller.ts, Modify src/user.service.ts, Modify src/duplicate-user.service.ts, Modify src/create-user.dto.ts\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 7 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 6,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"src/user.controller.ts: no shared exported names with dependency src/user.service.ts\",\n      \"src/user.controller.ts: no shared exported names with dependency src/create-user.dto.ts\",\n      \"src/duplicate-user.service.ts: no shared exported names with dependency src/user.controller.ts\",\n      \"src/duplicate-user.service.ts: no shared exported names with dependency src/create-user.dto.ts\",\n      \"src/create-user.dto.ts: no shared exported names with dependency src/user.controller.ts\",\n      \"src/create-user.dto.ts: no shared exported names with dependency src/user.service.ts\"\n    ]\n  }\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T15:25:31.143Z",
+  "updatedAt": "2026-04-25T15:25:31.144Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/portum-lifecycle-7qElH4",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "0ac20191-be7a-4407-b855-d7ec9223dc66",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "2fd6e060-c1de-41e5-8eb5-f2c184a62b0e",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:0ac20191-be7a-4407-b855-d7ec9223dc66",
+    "aedis-task:0ac20191-be7a-4407-b855-d7ec9223dc66"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:0ac20191-be7a-4407-b855-d7ec9223dc66"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:0ac20191-be7a-4407-b855-d7ec9223dc66"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "Missing deliverables: Modify src/user.controller.ts, Modify src/user.service.ts, Modify src/duplicate-user.service.ts, Modify src/create-user.dto.ts"
+  }
+}

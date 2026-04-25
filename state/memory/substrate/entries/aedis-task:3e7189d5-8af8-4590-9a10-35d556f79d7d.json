@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:3e7189d5-8af8-4590-9a10-35d556f79d7d",
+  "space": "aedis/project/mnt-ai-tmp-aedis-gauntlet-9mmojv",
+  "kind": "aedis-task",
+  "title": "modify core/util.ts",
+  "summary": "single-file · Model returned no effective file changes",
+  "raw": "{\n  \"rawInput\": \"modify core/util.ts\",\n  \"normalizedPrompt\": \"modify core/util.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"9bc2e6ba-31e5-4407-a571-77ae1ade7739\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"f9cae1aa-7ba3-4e16-a776-bcf22cc1721c\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"c50ac8d5-c423-4b45-aa35-3536f5756557\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"a090be1d-ac0d-4205-bd12-7d790fff3325\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T02:55:45.729Z",
+  "updatedAt": "2026-04-25T02:55:45.730Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-9MMoJv",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "3e7189d5-8af8-4590-9a10-35d556f79d7d",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "ad5da7cf-3671-4076-aaca-a185fc6d241e",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:3e7189d5-8af8-4590-9a10-35d556f79d7d",
+    "aedis-run:3e7189d5-8af8-4590-9a10-35d556f79d7d"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:3e7189d5-8af8-4590-9a10-35d556f79d7d"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:3e7189d5-8af8-4590-9a10-35d556f79d7d"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

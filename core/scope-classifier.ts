@@ -32,6 +32,19 @@ export interface ScopeClassification {
 
 const HIGH_IMPACT_KEYWORDS = ["rename", "refactor", "migrate", "all", "every"];
 const SWEEP_KEYWORDS = ["everywhere", "across all", "every file", "global rename", "codemod", "find and replace"];
+const BROAD_COORDINATION_KEYWORDS = [
+  "across",
+  "cross-module",
+  "cross module",
+  "error handling",
+  "provider",
+  "shared",
+  "standardize",
+  "unify",
+  "consolidate",
+  "consistency",
+  "touchpoints",
+];
 
 /**
  * Keywords that indicate a bugfix-shaped request. Conservative list —
@@ -45,16 +58,9 @@ const BUGFIX_KEYWORDS: readonly string[] = [
   "bugfix",
   "broken",
   "crash",
-  "error",
-  "exception",
-  "fail",
-  "fails",
-  "failing",
-  "fix",
   "incorrect",
   "off-by-one",
   "regression",
-  "throws",
   "wrong",
 ];
 
@@ -72,8 +78,23 @@ const BUGFIX_KEYWORDS: readonly string[] = [
 export function isBugfixLikePrompt(userRequest: string | null | undefined): boolean {
   if (!userRequest || typeof userRequest !== "string") return false;
   const normalized = userRequest.toLowerCase();
+  const hasImprovementFrame =
+    /\b(improve|refactor|cleanup|clean up|standardize|unify|consolidate|document|write|add|create|extract|rename|migrate|update)\b/.test(normalized);
+  const hasExplicitBugfixVerb =
+    /\b(fix|repair|resolve|correct)\b/.test(normalized) ||
+    /\bbugfix\b/.test(normalized);
+  const hasBugLikeFailure =
+    /\b(bug|broken|crash|incorrect|wrong|regression|off-by-one|timeout)\b/.test(normalized) ||
+    /\b(throws?|failing|fails?)\b/.test(normalized) ||
+    /\bis\s+(broken|incorrect|wrong)\b/.test(normalized);
+
+  if (hasExplicitBugfixVerb && hasBugLikeFailure) return true;
+  if (!hasImprovementFrame && /\bis\s+failing\b/.test(normalized)) return true;
+  if (!hasImprovementFrame && /\b(exception|thrown)\b/.test(normalized) && /\b(handle|throws?)\b/.test(normalized)) return true;
+  if (/\bcrash(?:es|ing)?\b/.test(normalized)) return true;
+  if (/\bregression\b/.test(normalized)) return true;
+
   return BUGFIX_KEYWORDS.some((word) => {
-    // Whole-word match so "prefix" doesn't match "fix". Escape hyphens.
     const escaped = word.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
     return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(normalized);
   });
@@ -108,9 +129,38 @@ function estimateDependencyCount(files: readonly string[]): number {
   }, 0);
 }
 
+function keywordRegex(keyword: string): RegExp {
+  const escaped = keyword
+    .trim()
+    .toLowerCase()
+    .replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`);
+}
+
 function hasKeyword(prompt: string, keywords: readonly string[]): string[] {
   const normalized = prompt.toLowerCase();
-  return keywords.filter((keyword) => normalized.includes(keyword));
+  return keywords.filter((keyword) => keywordRegex(keyword).test(normalized));
+}
+
+function moduleRoot(file: string): string {
+  const normalized = file.replace(/\\/g, "/");
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length === 0) return ".";
+  if (segments.length === 1) return segments[0];
+  return `${segments[0]}/${segments[1]}`;
+}
+
+function broadPromptScore(prompt: string): { score: number; matched: string[] } {
+  const matched = hasKeyword(prompt, BROAD_COORDINATION_KEYWORDS);
+  let score = matched.length;
+  if (/\b(refactor|improve|standardize|unify|consolidate|tighten)\b/.test(prompt.toLowerCase())) {
+    score += 1;
+  }
+  if (/\b(across|shared|common)\b/.test(prompt.toLowerCase())) {
+    score += 1;
+  }
+  return { score, matched };
 }
 
 export function classifyScope(prompt: string, files: readonly string[]): ScopeClassification {
@@ -118,8 +168,18 @@ export function classifyScope(prompt: string, files: readonly string[]): ScopeCl
   const fileCount = normalizedFiles.length;
   const matchedKeywords = hasKeyword(prompt, HIGH_IMPACT_KEYWORDS);
   const sweepKeywords = hasKeyword(prompt, SWEEP_KEYWORDS);
+  const broadPrompt = broadPromptScore(prompt);
   const dependencyCount = estimateDependencyCount(normalizedFiles);
-  const blastRadius = fileCount + dependencyCount + matchedKeywords.length * 2 + sweepKeywords.length * 3;
+  const moduleCount = new Set(normalizedFiles.map(moduleRoot)).size;
+  const crossModule = moduleCount >= 2;
+  const broadLanguage = broadPrompt.score > 0;
+  const blastRadius =
+    fileCount +
+    dependencyCount +
+    matchedKeywords.length * 2 +
+    sweepKeywords.length * 3 +
+    broadPrompt.score * 2 +
+    (crossModule ? 2 : 0);
 
   if (sweepKeywords.length > 0 || (matchedKeywords.includes("all") && matchedKeywords.includes("rename"))) {
     return {
@@ -154,7 +214,12 @@ export function classifyScope(prompt: string, files: readonly string[]): ScopeCl
   // Single target file (possibly with auto-added test) — trivial scope
   const realTargets = normalizedFiles.filter(f => !f.endsWith(".test.ts") && !f.endsWith(".spec.ts"));
   const realDependencyCount = estimateDependencyCount(realTargets);
-  if (realTargets.length <= 1 && realDependencyCount <= 3 && matchedKeywords.length === 0) {
+  if (
+    realTargets.length <= 1 &&
+    realDependencyCount <= 3 &&
+    matchedKeywords.length === 0 &&
+    !broadLanguage
+  ) {
     return {
       type: "single-file",
       blastRadius,
@@ -169,12 +234,18 @@ export function classifyScope(prompt: string, files: readonly string[]): ScopeCl
     };
   }
 
-  if (fileCount >= 8 || dependencyCount >= 10 || matchedKeywords.includes("all") || matchedKeywords.includes("every")) {
+  if (
+    fileCount >= 8 ||
+    dependencyCount >= 10 ||
+    matchedKeywords.includes("all") ||
+    matchedKeywords.includes("every") ||
+    (crossModule && broadPrompt.score >= 2 && fileCount >= 3)
+  ) {
     return {
       type: "architectural",
       blastRadius,
       recommendDecompose: true,
-      reason: `Wide change surface detected (${fileCount} file(s), dependency score ${dependencyCount}, keywords: ${matchedKeywords.join(", ") || "none"}).`,
+      reason: `Wide change surface detected (${fileCount} file(s), dependency score ${dependencyCount}, modules=${moduleCount}, broad=${broadPrompt.matched.join(", ") || "none"}).`,
       governance: {
         decompositionRequired: true,
         approvalRequired: true,
@@ -184,23 +255,31 @@ export function classifyScope(prompt: string, files: readonly string[]): ScopeCl
     };
   }
 
-  if (fileCount >= 3 || dependencyCount >= 4 || matchedKeywords.includes("rename") || matchedKeywords.includes("refactor")) {
+  if (
+    fileCount >= 3 ||
+    dependencyCount >= 4 ||
+    matchedKeywords.includes("rename") ||
+    matchedKeywords.includes("refactor") ||
+    (crossModule && fileCount >= 2) ||
+    (broadLanguage && realTargets.length >= 2) ||
+    (broadLanguage && crossModule)
+  ) {
     return {
       type: "multi-file",
       blastRadius,
       recommendDecompose: true,
-      reason: `Multi-file coordination likely (${fileCount} file(s), dependency score ${dependencyCount}, keywords: ${matchedKeywords.join(", ") || "none"}).`,
+      reason: `Multi-file coordination likely (${fileCount} file(s), dependency score ${dependencyCount}, modules=${moduleCount}, broad=${broadPrompt.matched.join(", ") || "none"}).`,
       governance: {
-        decompositionRequired: fileCount >= 5,
-        approvalRequired: fileCount >= 5 || matchedKeywords.includes("refactor"),
-        escalationRecommended: false,
-        wavesRequired: fileCount >= 4,
+        decompositionRequired: fileCount >= 4 || crossModule || broadLanguage,
+        approvalRequired: fileCount >= 5 || matchedKeywords.includes("refactor") || broadLanguage,
+        escalationRecommended: crossModule && broadLanguage,
+        wavesRequired: fileCount >= 3 || crossModule || broadLanguage,
       },
     };
   }
 
   // Small linked change: 2 files or low multi-file with no strong keywords
-  if (fileCount === 2 || (fileCount <= 3 && dependencyCount <= 3)) {
+  if (fileCount === 2 || (fileCount <= 3 && dependencyCount <= 3 && !crossModule && !broadLanguage)) {
     return {
       type: "small-linked",
       blastRadius,

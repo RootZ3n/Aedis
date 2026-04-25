@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:24fbe788-d090-4222-a5fd-22cb8b6b623a",
+  "space": "aedis/project/mnt-ai-tmp-aedis-portum-yuxztx",
+  "kind": "aedis-task",
+  "title": "modify src/router.ts to add a /v2 namespace",
+  "summary": "single-file · Model returned no effective file changes",
+  "raw": "{\n  \"rawInput\": \"modify src/router.ts to add a /v2 namespace\",\n  \"normalizedPrompt\": \"modify src/router.ts to add a /v2 namespace\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"a70ee627-b4e7-4277-a30b-dcbeb4e52e9a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"dd8ca2b4-810e-4a55-9f5d-4cd931a814a3\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"test/qwen\",\n        \"inputTokens\": 1000,\n        \"outputTokens\": 5,\n        \"estimatedCostUsd\": 0.0042\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"bd264b30-dbc4-4bf0-a8f1-4ca2d0af6380\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"test/qwen\",\n        \"inputTokens\": 1000,\n        \"outputTokens\": 5,\n        \"estimatedCostUsd\": 0.0042\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"5522b0f8-51fc-410e-aad7-23c726bf5913\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Model returned no effective file changes\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"test/qwen\",\n        \"inputTokens\": 1000,\n        \"outputTokens\": 5,\n        \"estimatedCostUsd\": 0.0042\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T12:38:12.574Z",
+  "updatedAt": "2026-04-25T12:38:12.575Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-YUXZtX",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "24fbe788-d090-4222-a5fd-22cb8b6b623a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "d65cf62a-8f55-4841-846c-385fddecc511",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:24fbe788-d090-4222-a5fd-22cb8b6b623a",
+    "aedis-run:24fbe788-d090-4222-a5fd-22cb8b6b623a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:24fbe788-d090-4222-a5fd-22cb8b6b623a"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:24fbe788-d090-4222-a5fd-22cb8b6b623a"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

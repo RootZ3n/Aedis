@@ -1,0 +1,66 @@
+{
+  "id": "aedis-task:87639fbd-bb40-46bf-9289-b6e45a079b03",
+  "space": "aedis/project/mnt-ai-tmp-aedis-det-lifecycle-pezr7k",
+  "kind": "aedis-task",
+  "title": "add email:string to User interface in src/types.ts",
+  "summary": "single-file · partial run · single-file scope · 1 file(s) touched · verification pass-with-warnings",
+  "raw": "{\n  \"rawInput\": \"add email:string to User interface in src/types.ts\",\n  \"normalizedPrompt\": \"add email:string to User interface in src/types.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"3bb548d2-6dba-4b48-bebe-bb9fafce0a8d\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"deterministic lifecycle fixture\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"97cb79fc-9435-4cdd-9921-c496d188c7bb\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -3,0 +3,1 @@\\n+  email: string;\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n  email: string;\\n}\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: interface-property-add on src/types.ts\",\n            \"rationale\": \"Added property \\\"email: string\\\" to interface User\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/types.ts\",\n          \"scopeFiles\": [\n            \"src/types.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic type-extend: User.email: string → src/types.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"f00ebe14-8c52-4b0e-b371-121282d46b5e\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"97cb79fc-9435-4cdd-9921-c496d188c7bb\",\n            \"targetFile\": \"src/types.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/interface-property-add\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"User\"\n              ],\n              \"proposed\": [\n                \"User\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/interface-property-add\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"95d2f7cc-7e56-4bae-ba09-6859ea4190ff\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.95\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"11fe8571-ba17-4b0a-a62f-e19ceec2f39c\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"bedc27a6-3084-4402-b020-b6b2ad66d829\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -3,0 +3,1 @@\\n+  email: string;\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n  email: string;\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:partial"
+  ],
+  "createdAt": "2026-04-25T15:22:19.094Z",
+  "updatedAt": "2026-04-25T15:22:19.096Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-det-lifecycle-pEZr7K",
+  "filePaths": [
+    "src/types.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "87639fbd-bb40-46bf-9289-b6e45a079b03",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "127005fb-dd09-4739-9aa8-8922d7b7a258",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "f1cace5ad0e70a68653c2d24621e84a33bd91c0e",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "c27701fb-9e57-4003-b326-028900ed694f",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:87639fbd-bb40-46bf-9289-b6e45a079b03",
+    "aedis-run:87639fbd-bb40-46bf-9289-b6e45a079b03"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:87639fbd-bb40-46bf-9289-b6e45a079b03"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:87639fbd-bb40-46bf-9289-b6e45a079b03"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "pass-with-warnings",
+    "filesTouched": 1
+  }
+}

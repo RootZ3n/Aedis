@@ -107,6 +107,7 @@ test("run summary explanation compresses manifest, verification, and consistency
       actualChangedFiles: ["src/auth.ts", "src/routes/index.ts", "src/extra.ts"],
       expectedButUnchanged: ["src/auth.test.ts"],
       undeclaredChanges: ["src/extra.ts"],
+      unexpectedReferenceChanges: [],
       confirmed: ["src/auth.ts", "src/routes/index.ts"],
       passed: false,
       confirmationRatio: 0.5,

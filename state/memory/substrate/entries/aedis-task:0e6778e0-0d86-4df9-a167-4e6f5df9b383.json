@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:0e6778e0-0d86-4df9-a167-4e6f5df9b383",
+  "space": "aedis/project/mnt-ai-tmp-aedis-portum-06zxhv",
+  "kind": "aedis-task",
+  "title": "modify src/router.ts to clean up provider names",
+  "summary": "multi-file · failed run · multi-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"modify src/router.ts to clean up provider names\",\n  \"normalizedPrompt\": \"modify src/router.ts to clean up provider names\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"a15599c0-6478-4111-b62f-09d6a2fa4bce\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"ea19ffbf-fe32-41b9-96ef-3fc0972f2eb4\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/router.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"export interface ChatRequest {\\n  model: string;\\n  messages: { role: string; content: string }[];\\n}\\nexport interface ChatResponse {\\n  id: string;\\n  model: string;\\n  text: string;\\n}\\nexport type ProviderName = \\\"openai\\\" | \\\"anthropic\\\" | \\\"minimax\\\";\\nexport interface RouteResult { response: ChatResponse; provider: ProviderName }\\n\\nexport function getAllProviders(): Record<ProviderName, string> {\\n  return { openai: \\\"x\\\", anthropic: \\\"y\\\", minimax: \\\"z\\\" } as Record<ProviderName, string>;\\n}\\nexport function getProviderForModel(model: string): ProviderName {\\n  if (model.startsWith(\\\"gpt\\\")) return \\\"openai\\\";\\n  if (model.startsWith(\\\"claude\\\")) return \\\"anthropic\\\";\\n  return \\\"minimax\\\";\\n}\\nexport async function routeRequest(req: ChatRequest): Promise<RouteResult> {\\n  const provider = getProviderForModel(req.model);\\n  return { response: { id: \\\"1\\\", model: req.model, text: \\\"ok\\\" }, provider };\\n}\\n\\nexport const fixed = true;\\n\",\n            \"originalContent\": \"export interface ChatRequest {\\n  model: string;\\n  messages: { role: string; content: string }[];\\n}\\nexport interface ChatResponse {\\n  id: string;\\n  model: string;\\n  text: string;\\n}\\nexport type ProviderName = \\\"openai\\\" | \\\"anthropic\\\" | \\\"minimax\\\";\\nexport interface RouteResult { response: ChatResponse; provider: ProviderName }\\n\\nexport function getAllProviders(): Record<ProviderName, string> {\\n  return { openai: \\\"x\\\", anthropic: \\\"y\\\", minimax: \\\"z\\\" } as Record<ProviderName, string>;\\n}\\nexport function getProviderForModel(model: string): ProviderName {\\n  if (model.startsWith(\\\"gpt\\\")) return \\\"openai\\\";\\n  if (model.startsWith(\\\"claude\\\")) return \\\"anthropic\\\";\\n  return \\\"minimax\\\";\\n}\\nexport async function routeRequest(req: ChatRequest): Promise<RouteResult> {\\n  const provider = getProviderForModel(req.model);\\n  return { response: { id: \\\"1\\\", model: req.model, text: \\\"ok\\\" }, provider };\\n}\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"test/qwen\",\n        \"inputTokens\": 1700,\n        \"outputTokens\": 200,\n        \"estimatedCostUsd\": 0.008\n      },\n      \"confidence\": 0.85,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/router.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 4\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"59681122-47ff-4d68-bf1b-53a8436a52b9\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"ed31bc46-8891-4360-b746-7814b849430f\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"57e5485c-313d-46b9-b090-4ad2d4e1399f\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/router.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"export interface ChatRequest {\\n  model: string;\\n  messages: { role: string; content: string }[];\\n}\\nexport interface ChatResponse {\\n  id: string;\\n  model: string;\\n  text: string;\\n}\\nexport type ProviderName = \\\"openai\\\" | \\\"anthropic\\\" | \\\"minimax\\\";\\nexport interface RouteResult { response: ChatResponse; provider: ProviderName }\\n\\nexport function getAllProviders(): Record<ProviderName, string> {\\n  return { openai: \\\"x\\\", anthropic: \\\"y\\\", minimax: \\\"z\\\" } as Record<ProviderName, string>;\\n}\\nexport function getProviderForModel(model: string): ProviderName {\\n  if (model.startsWith(\\\"gpt\\\")) return \\\"openai\\\";\\n  if (model.startsWith(\\\"claude\\\")) return \\\"anthropic\\\";\\n  return \\\"minimax\\\";\\n}\\nexport async function routeRequest(req: ChatRequest): Promise<RouteResult> {\\n  const provider = getProviderForModel(req.model);\\n  return { response: { id: \\\"1\\\", model: req.model, text: \\\"ok\\\" }, provider };\\n}\\n\\nexport const fixed = true;\\n\",\n            \"originalContent\": \"export interface ChatRequest {\\n  model: string;\\n  messages: { role: string; content: string }[];\\n}\\nexport interface ChatResponse {\\n  id: string;\\n  model: string;\\n  text: string;\\n}\\nexport type ProviderName = \\\"openai\\\" | \\\"anthropic\\\" | \\\"minimax\\\";\\nexport interface RouteResult { response: ChatResponse; provider: ProviderName }\\n\\nexport function getAllProviders(): Record<ProviderName, string> {\\n  return { openai: \\\"x\\\", anthropic: \\\"y\\\", minimax: \\\"z\\\" } as Record<ProviderName, string>;\\n}\\nexport function getProviderForModel(model: string): ProviderName {\\n  if (model.startsWith(\\\"gpt\\\")) return \\\"openai\\\";\\n  if (model.startsWith(\\\"claude\\\")) return \\\"anthropic\\\";\\n  return \\\"minimax\\\";\\n}\\nexport async function routeRequest(req: ChatRequest): Promise<RouteResult> {\\n  const provider = getProviderForModel(req.model);\\n  return { response: { id: \\\"1\\\", model: req.model, text: \\\"ok\\\" }, provider };\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/router.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:multi-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T13:24:28.214Z",
+  "updatedAt": "2026-04-25T13:24:28.216Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-06ZXHV",
+  "filePaths": [
+    "src/router.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "0e6778e0-0d86-4df9-a167-4e6f5df9b383",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "cf87b2e1-723c-45b5-9997-b8ba6948d67f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "8bc11513-0129-416f-8a01-27f49c4fe773",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:0e6778e0-0d86-4df9-a167-4e6f5df9b383",
+    "aedis-run:0e6778e0-0d86-4df9-a167-4e6f5df9b383"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:0e6778e0-0d86-4df9-a167-4e6f5df9b383"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:0e6778e0-0d86-4df9-a167-4e6f5df9b383"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "multi-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

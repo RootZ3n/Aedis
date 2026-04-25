@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:d4a6dffa-ac31-4466-9b1f-0164a7994fd4",
+  "space": "aedis/project/mnt-ai-tmp-aedis-class-int-cohjvy",
+  "kind": "aedis-task",
+  "title": "add private logger:Logger to DecoratedController in src/services.ts",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"add private logger:Logger to DecoratedController in src/services.ts\",\n  \"normalizedPrompt\": \"add private logger:Logger to DecoratedController in src/services.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"c95e8c24-a93d-4fce-9b17-000a2ce7c9c9\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"77e5303a-bca2-499f-85c5-12955595e5f1\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/services.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/services.ts\\n+++ b/src/services.ts\\n@@ -18,0 +18,2 @@\\n+  private logger: Logger;\\n+\\n\",\n            \"originalContent\": \"export class UserService {\\n  constructor() {}\\n\\n  getUser() {\\n    return null;\\n  }\\n}\\n\\nexport class UtilClass {\\n  doThing() {}\\n}\\n\\n// A class with member decorators — deterministic must REFUSE and\\n// fall through to the LLM Builder.\\nexport class DecoratedController {\\n  @Inject() service: UserService;\\n\\n  @Get()\\n  list() {}\\n}\\n\",\n            \"content\": \"export class UserService {\\n  constructor() {}\\n\\n  getUser() {\\n    return null;\\n  }\\n}\\n\\nexport class UtilClass {\\n  doThing() {}\\n}\\n\\n// A class with member decorators — deterministic must REFUSE and\\n// fall through to the LLM Builder.\\nexport class DecoratedController {\\n  @Inject() service: UserService;\\n\\n  private logger: Logger;\\n\\n  @Get()\\n  list() {}\\n}\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: class-field-add on src/services.ts\",\n            \"rationale\": \"Added field \\\"logger: Logger\\\" to class DecoratedController (visibility=private) — inserted before first method/constructor\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/services.ts\",\n          \"scopeFiles\": [\n            \"src/services.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic class-extend: DecoratedController.logger: Logger → src/services.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"397ea757-441c-49a3-808f-8dcb1f7f452a\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"77e5303a-bca2-499f-85c5-12955595e5f1\",\n            \"targetFile\": \"src/services.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/route-insert\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"DecoratedController\",\n                \"UserService\",\n                \"UtilClass\"\n              ],\n              \"proposed\": [\n                \"DecoratedController\",\n                \"UserService\",\n                \"UtilClass\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/route-insert\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/services.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/services.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"6230f536-d605-4c02-a2f9-81b7194e389c\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"f6e5c637-c00e-45a3-9b7d-bfedf95d9b0e\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"a004074e-f207-4708-b27a-82c89c057f3a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/services.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/services.ts\\n+++ b/src/services.ts\\n@@ -18,0 +18,2 @@\\n+  private logger: Logger;\\n+\\n\",\n            \"originalContent\": \"export class UserService {\\n  constructor() {}\\n\\n  getUser() {\\n    return null;\\n  }\\n}\\n\\nexport class UtilClass {\\n  doThing() {}\\n}\\n\\n// A class with member decorators — deterministic must REFUSE and\\n// fall through to the LLM Builder.\\nexport class DecoratedController {\\n  @Inject() service: UserService;\\n\\n  @Get()\\n  list() {}\\n}\\n\",\n            \"content\": \"export class UserService {\\n  constructor() {}\\n\\n  getUser() {\\n    return null;\\n  }\\n}\\n\\nexport class UtilClass {\\n  doThing() {}\\n}\\n\\n// A class with member decorators — deterministic must REFUSE and\\n// fall through to the LLM Builder.\\nexport class DecoratedController {\\n  @Inject() service: UserService;\\n\\n  private logger: Logger;\\n\\n  @Get()\\n  list() {}\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/services.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T14:06:05.917Z",
+  "updatedAt": "2026-04-25T14:06:05.920Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-class-int-coHJVy",
+  "filePaths": [
+    "src/services.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d4a6dffa-ac31-4466-9b1f-0164a7994fd4",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3c9088b0-b735-4db9-bb3c-51308791ef0a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "cd81af0a-ce60-4654-8d81-2491448c92c1",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:d4a6dffa-ac31-4466-9b1f-0164a7994fd4",
+    "aedis-run:d4a6dffa-ac31-4466-9b1f-0164a7994fd4"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d4a6dffa-ac31-4466-9b1f-0164a7994fd4"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:d4a6dffa-ac31-4466-9b1f-0164a7994fd4"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

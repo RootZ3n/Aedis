@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:2721e203-114f-4c39-b579-b92565e1e5ab",
+  "space": "aedis/project/mnt-ai-tmp-aedis-det-vswsyu",
+  "kind": "aedis-task",
+  "title": "add a GET /health endpoint in src/server.ts",
+  "summary": "single-file · Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies. Path bypassed the deterministic layer. (original: Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies. Path…",
+  "raw": "{\n  \"rawInput\": \"add a GET /health endpoint in src/server.ts\",\n  \"normalizedPrompt\": \"add a GET /health endpoint in src/server.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"e1e7b7d5-f8fc-4595-95fa-4c0d32074377\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"92ce0617-ebc7-454c-b0bf-f5cb6810e611\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies. Path bypassed the deterministic layer. (original: Retry failed: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies. Path bypassed the deterministic layer. (original: Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies. Path bypassed the deterministic layer.))\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"85b886d3-5625-4cf3-b4e4-51a4c6dfcace\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies. Path bypassed the deterministic layer.\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"8e8afa5b-6b21-4567-a757-ef8183778554\",\n      \"success\": false,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"\"\n      },\n      \"issues\": [\n        {\n          \"severity\": \"error\",\n          \"message\": \"Worker threw: SentinelBuilder: LLM Builder must NOT be invoked when the deterministic transform applies. Path bypassed the deterministic layer.\"\n        }\n      ],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 0\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T12:56:03.199Z",
+  "updatedAt": "2026-04-25T12:56:03.200Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-det-vswSYU",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "2721e203-114f-4c39-b579-b92565e1e5ab",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "733d712f-19bd-4b78-869d-39506fc8bfb8",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:2721e203-114f-4c39-b579-b92565e1e5ab",
+    "aedis-run:2721e203-114f-4c39-b579-b92565e1e5ab"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:2721e203-114f-4c39-b579-b92565e1e5ab"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:2721e203-114f-4c39-b579-b92565e1e5ab"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}

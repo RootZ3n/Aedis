@@ -1,0 +1,54 @@
+{
+  "id": "aedis-outcome:7a71b088-2400-4439-b30d-b2048646a49e",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add a GET /models endpoint that exposes the known provider-routing model families and update any route registration need",
+  "summary": "One or more task nodes failed and were not recovered. Repair-pass issues: src/server.ts: broken import target \"./router.js\" | src/server.ts: mismatched exports compared to dependency src/router.ts",
+  "raw": "{\n  \"issues\": [\n    \"All fallback providers failed (1 chain entries attempted, 1 skipped via blacklist, plus portum last-resort): ollama/qwen3.5:9b (timeout): Request to http://localhost:11434/api/chat timed out after 300000ms\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: broken import target \\\"./router.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: broken import target \\\"./router.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n      }\n    ],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 2 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 2,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"src/server.ts: broken import target \\\"./router.js\\\"\",\n      \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n    ]\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T11:43:53.469Z",
+  "updatedAt": "2026-04-25T11:43:53.474Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-A-broad-backend-no-paths-WRLZeo/repo",
+  "filePaths": [
+    "src/router.ts",
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "7a71b088-2400-4439-b30d-b2048646a49e",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "099f6a75-cda0-4b13-aa9d-94cdbeb860ef",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:7a71b088-2400-4439-b30d-b2048646a49e",
+    "aedis-task:7a71b088-2400-4439-b30d-b2048646a49e"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:7a71b088-2400-4439-b30d-b2048646a49e"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:7a71b088-2400-4439-b30d-b2048646a49e"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

@@ -214,7 +214,7 @@ export class IntegrationJudge {
     checks.push(this.checkImportCoherence(changes));
     checks.push(this.checkContractAdherence(changes, workerResults));
     checks.push(this.checkAssumptionCollisions(runState.assumptions, workerResults));
-    checks.push(this.checkIntentAlignment(intent, changes));
+    checks.push(this.checkIntentAlignment(intent, changes, changeSet ?? null));
     checks.push(this.checkScopeBoundary(intent, runState, changes));
     checks.push(this.checkRollbackSafety(changes));
     checks.push(this.checkCrossFileCoherence(changes));
@@ -329,9 +329,10 @@ export class IntegrationJudge {
       if (change.operation === "delete") continue;
       const content = change.content ?? change.diff ?? "";
 
-      for (const [exportFile, { removed }] of exportChanges) {
+      for (const [exportFile, { removed, added }] of exportChanges) {
         if (exportFile === change.path) continue;
         for (const name of removed) {
+          if (added.includes(name)) continue;
           const wholeWord = new RegExp(`\\b${escapeRegExp(name)}\\b`);
           if (wholeWord.test(content) && !exportChanges.get(change.path)?.added.includes(name)) {
             issues.push(`"${change.path}" references "${name}" removed from "${exportFile}"`);
@@ -507,7 +508,8 @@ export class IntegrationJudge {
    */
   private checkIntentAlignment(
     intent: IntentObject,
-    changes: readonly FileChange[]
+    changes: readonly FileChange[],
+    changeSet: ChangeSet | null,
   ): JudgmentCheck {
     const issues: string[] = [];
 
@@ -544,12 +546,24 @@ export class IntegrationJudge {
       relative(this.config.projectRoot, resolve(this.config.projectRoot, p)).replace(/\\/g, "/");
 
     const changedPaths = new Set(changes.map((c) => normalize(c.path)));
+    const mutationExpected = new Set(
+      (changeSet?.filesInScope ?? [])
+        .filter((file) => file.mutationExpected)
+        .map((file) => normalize(file.path)),
+    );
+    const scopedFiles = new Set(
+      (changeSet?.filesInScope ?? [])
+        .map((file) => normalize(file.path)),
+    );
 
     // Check each deliverable has at least one corresponding change
     const missingDeliverables: Deliverable[] = [];
     for (const deliverable of intent.charter.deliverables) {
-      const hasChange = deliverable.targetFiles.some((f) => changedPaths.has(normalize(f)));
-      if (!hasChange && deliverable.targetFiles.length > 0) {
+      const writeTargets = changeSet
+        ? deliverable.targetFiles.filter((f) => mutationExpected.has(normalize(f)))
+        : deliverable.targetFiles;
+      const hasChange = writeTargets.some((f) => changedPaths.has(normalize(f)));
+      if (!hasChange && writeTargets.length > 0) {
         missingDeliverables.push(deliverable);
       }
     }
@@ -567,7 +581,7 @@ export class IntegrationJudge {
       intent.charter.deliverables.flatMap((d) => d.targetFiles).map(normalize)
     );
     const extraFiles = changes
-      .filter((c) => !deliverableFiles.has(normalize(c.path)))
+      .filter((c) => !deliverableFiles.has(normalize(c.path)) && !scopedFiles.has(normalize(c.path)))
       .filter((c) => !(isBugfixLikePrompt(intent.userRequest) && isTestLikePath(c.path)))
       .filter((c) => !this.isIgnored(c.path))
       .map((c) => c.path);
@@ -679,18 +693,19 @@ export class IntegrationJudge {
     for (const file of changeSet.filesInScope) {
       const wasChanged = changedPaths.has(file.path);
 
-      if (file.necessity === "required") {
+      if (file.mutationExpected) {
         requiredTotal++;
         if (wasChanged) {
           requiredCompleted++;
         } else {
-          issues.push(`Required file "${file.path}" declared in manifest but not changed (${file.whyIncluded})`);
+          issues.push(`Required write file "${file.path}" declared in manifest but not changed (${file.mutationReason})`);
           affectedFiles.push(file.path);
         }
-      } else {
-        if (!wasChanged) {
-          optionalMissing++;
-        }
+      } else if (wasChanged && file.mutationRole !== "write-optional") {
+        issues.push(`Reference/context file "${file.path}" changed unexpectedly (${file.mutationReason})`);
+        affectedFiles.push(file.path);
+      } else if (!wasChanged) {
+        optionalMissing++;
       }
     }
 

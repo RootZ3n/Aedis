@@ -1,0 +1,63 @@
+{
+  "id": "aedis-outcome:251689d4-627d-4781-bd34-901492f198e2",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add email:string to User interface in src/types.ts.",
+  "summary": "PASS-WITH-WARNINGS — 5/5 stages passed, confidence 95%, 0 blockers, checks typecheck:pass, tests:pass",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.87 (keywords: email, string, user, interface)\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task 2167205e-fdc3-4982-9a74-085e27b89127) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task ab7e33d9-34ff-4565-b459-5202028444a8) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.87 (keywords: email, string, user, interface)\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.87 (keywords: email, string, user, interface)\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task 2167205e-fdc3-4982-9a74-085e27b89127) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task ab7e33d9-34ff-4565-b459-5202028444a8) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.87 (keywords: email, string, user, interface)\",\n        \"files\": [\n          \"src/types.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 1/1 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 7 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-25T16:00:43.744Z",
+  "updatedAt": "2026-04-25T16:00:43.746Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/portum-lifecycle-R6nVpq",
+  "filePaths": [
+    "src/types.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "251689d4-627d-4781-bd34-901492f198e2",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "4fc040fe-1fa8-4fe0-991b-71d93958d243",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "013297c2dec58188e33007cd2e74e8d0db723fd3",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "62e194ff-85bf-4154-a0e3-23e825218bd4",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:251689d4-627d-4781-bd34-901492f198e2",
+    "aedis-task:251689d4-627d-4781-bd34-901492f198e2"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:251689d4-627d-4781-bd34-901492f198e2"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:251689d4-627d-4781-bd34-901492f198e2"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

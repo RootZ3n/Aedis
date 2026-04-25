@@ -1,0 +1,54 @@
+{
+  "id": "aedis-outcome:675bd253-fb11-4d76-bb8f-1eb998802a9b",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Refactor the router/server split so route registration is cleaner and provider-routing helpers stay in the router layer.",
+  "summary": "One or more task nodes failed and were not recovered. Repair-pass issues: src/server.ts: broken import target \"./router.js\" | src/server.ts: mismatched exports compared to dependency src/router.ts",
+  "raw": "{\n  \"issues\": [\n    \"SAFETY: Builder output removed 8 existing export(s) (ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage, ProviderName, RouteResult, getAllProviders, getProviderForModel, routeRequest) from src/router.ts. Original had 8 export(s); updated has 0. Refusing the patch — detected unrelated-symbol corruption; the user request did not authorize removing these symbols.\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: broken import target \\\"./router.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: broken import target \\\"./router.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n      }\n    ],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 2 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 2,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"src/server.ts: broken import target \\\"./router.js\\\"\",\n      \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n    ]\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T12:05:53.229Z",
+  "updatedAt": "2026-04-25T12:05:53.234Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-B-multifile-no-full-paths-UqI2ad/repo",
+  "filePaths": [
+    "src/router.ts",
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "675bd253-fb11-4d76-bb8f-1eb998802a9b",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "cd8cb045-b39f-450c-9b2d-fbaae1c63398",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:675bd253-fb11-4d76-bb8f-1eb998802a9b",
+    "aedis-task:675bd253-fb11-4d76-bb8f-1eb998802a9b"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:675bd253-fb11-4d76-bb8f-1eb998802a9b"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:675bd253-fb11-4d76-bb8f-1eb998802a9b"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

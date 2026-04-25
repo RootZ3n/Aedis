@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:030ecb52-3bb9-47e6-b2f2-510349515ee6",
+  "space": "aedis/project/mnt-ai-tmp-aedis-portum-d-empty-diff-recovery-b1hzmr-repo",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 030ecb52-3bb9-47e6-b2f2-510349515ee6",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: One or more task nodes failed and were not recovered. Inspect repair-pass fallout: src/server.ts: broken import target \"./router.js\" | src/server.ts: m…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T12:09:21.396Z",
+  "updatedAt": "2026-04-25T12:09:21.399Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-D-empty-diff-recovery-B1HzMr/repo",
+  "filePaths": [
+    "src/router.ts",
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "030ecb52-3bb9-47e6-b2f2-510349515ee6",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "00ddd063-8d5a-46bb-a45e-fe6cf273734b",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:030ecb52-3bb9-47e6-b2f2-510349515ee6",
+    "aedis-run:030ecb52-3bb9-47e6-b2f2-510349515ee6",
+    "aedis-task:030ecb52-3bb9-47e6-b2f2-510349515ee6"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:030ecb52-3bb9-47e6-b2f2-510349515ee6"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:030ecb52-3bb9-47e6-b2f2-510349515ee6"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

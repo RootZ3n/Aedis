@@ -357,6 +357,7 @@ export class VerificationPipeline {
     wave: PlanWave,
     changes: readonly FileChange[],
     workerResults: readonly WorkerResult[],
+    changeSet?: ChangeSet | null,
   ): Promise<VerificationReceipt> {
     const waveFiles = new Set(wave.files);
     const waveChanges =
@@ -393,7 +394,7 @@ export class VerificationPipeline {
       };
     }
 
-    const receipt = await this.verify(intent, runState, waveChanges, workerResults);
+    const receipt = await this.verify(intent, runState, waveChanges, workerResults, changeSet);
     return {
       ...receipt,
       scope: {

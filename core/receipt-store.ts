@@ -145,6 +145,22 @@ export interface PersistentRunReceipt {
    * paths) or for legacy receipts written before this field existed.
    */
   workspace: PersistedWorkspaceRef | null;
+  /**
+   * Implementation Brief — engineer-grade work order built by the
+   * Coordinator before Builder dispatch. Contains selected files,
+   * rejected candidates, staged plan, non-goals, verification commands,
+   * fallback plan, and retry attempts. Stored as a plain JSON object
+   * so older tooling can read it without importing the TS types.
+   */
+  implementationBrief: unknown | null;
+  /**
+   * Per-attempt Builder diagnostics — one entry per model attempt
+   * across all Builder dispatches in the run (initial call, repair
+   * retries, weak-output retries). Carries cost/model/tokens, patch
+   * mode, export-diff for code files, guard-rejection details, and a
+   * stale flag for attempts whose results were superseded.
+   */
+  builderAttempts: unknown[];
 }
 
 /**
@@ -243,6 +259,18 @@ export interface ReceiptPatch {
    * or omit to leave the current value unchanged.
    */
   readonly workspace?: PersistedWorkspaceRef | null;
+  /**
+   * Implementation Brief payload to persist with the receipt. Pass a
+   * plain JSON object produced by briefToReceiptJson. Undefined = leave
+   * unchanged; null = clear.
+   */
+  readonly implementationBrief?: unknown | null;
+  /**
+   * Append builder attempt records produced by this dispatch. Records
+   * are concatenated to the persisted list — never replace it — so the
+   * full history of attempts across the run is preserved.
+   */
+  readonly appendBuilderAttempts?: readonly unknown[];
 }
 
 const INDEX_FILE = "index.json";
@@ -562,6 +590,11 @@ export class ReceiptStore {
       humanSummary: patch.humanSummary !== undefined ? patch.humanSummary : current.humanSummary,
       finalReceipt: patch.finalReceipt !== undefined ? patch.finalReceipt : current.finalReceipt,
       workspace: patch.workspace !== undefined ? patch.workspace : current.workspace,
+      implementationBrief:
+        patch.implementationBrief !== undefined ? patch.implementationBrief : current.implementationBrief,
+      builderAttempts: patch.appendBuilderAttempts && patch.appendBuilderAttempts.length > 0
+        ? [...(current.builderAttempts ?? []), ...patch.appendBuilderAttempts]
+        : (current.builderAttempts ?? []),
     };
     return next;
   }
@@ -598,6 +631,8 @@ export class ReceiptStore {
       humanSummary: null,
       finalReceipt: null,
       workspace: null,
+      implementationBrief: null,
+      builderAttempts: [],
     };
   }
 

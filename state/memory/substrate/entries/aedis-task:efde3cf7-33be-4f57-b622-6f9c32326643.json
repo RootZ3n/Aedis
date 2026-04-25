@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:efde3cf7-33be-4f57-b622-6f9c32326643",
+  "space": "aedis/project/mnt-ai-tmp-aedis-portum-jxdrhi",
+  "kind": "aedis-task",
+  "title": "add a GET /models endpoint in src/server.ts that returns the configured providers",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"add a GET /models endpoint in src/server.ts that returns the configured providers\",\n  \"normalizedPrompt\": \"add a GET /models endpoint in src/server.ts that returns the configured providers\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"abc55f91-cbdc-451e-b890-740732917616\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"873a22e5-a3b0-4ae3-a6d2-eb4594c5d989\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/server.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"import { routeRequest, getAllProviders } from \\\"./router.js\\\";\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  // health route already exists\\n  console.log(\\\"listening on\\\", port);\\n}\\n\\nexport function listModels() { return Object.keys(getAllProviders()); }\\n\",\n            \"originalContent\": \"import { routeRequest, getAllProviders } from \\\"./router.js\\\";\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  // health route already exists\\n  console.log(\\\"listening on\\\", port);\\n}\\n\"\n          }\n        ],\n        \"decisions\": [],\n        \"needsCriticReview\": false\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"test/qwen\",\n        \"inputTokens\": 800,\n        \"outputTokens\": 60,\n        \"estimatedCostUsd\": 0.0035\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 5\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"112022c9-6545-446f-8c92-04dbf6b66530\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"6d4d5645-eb89-4bc5-a49b-d6708c394208\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"d38b5f82-feec-4dae-bb4a-cef60494bcb1\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/server.ts\",\n            \"operation\": \"modify\",\n            \"content\": \"import { routeRequest, getAllProviders } from \\\"./router.js\\\";\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  // health route already exists\\n  console.log(\\\"listening on\\\", port);\\n}\\n\\nexport function listModels() { return Object.keys(getAllProviders()); }\\n\",\n            \"originalContent\": \"import { routeRequest, getAllProviders } from \\\"./router.js\\\";\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  // health route already exists\\n  console.log(\\\"listening on\\\", port);\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T13:46:28.262Z",
+  "updatedAt": "2026-04-25T13:46:28.267Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-JxdRhI",
+  "filePaths": [
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "efde3cf7-33be-4f57-b622-6f9c32326643",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "4d6e082e-6be7-4d14-abc0-40cd8bce5403",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "76f19f50-e094-4ad7-814a-d44567e3dab9",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:efde3cf7-33be-4f57-b622-6f9c32326643",
+    "aedis-run:efde3cf7-33be-4f57-b622-6f9c32326643"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:efde3cf7-33be-4f57-b622-6f9c32326643"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:efde3cf7-33be-4f57-b622-6f9c32326643"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

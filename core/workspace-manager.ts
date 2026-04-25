@@ -19,7 +19,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { mkdtemp, rm, writeFile, readFile, mkdir } from "fs/promises";
+import { mkdtemp, rm, writeFile, readFile, mkdir, readdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
@@ -87,6 +87,15 @@ export async function createWorkspace(
 ): Promise<WorkspaceHandle> {
   const absSource = resolve(sourceRepo);
   const createdAt = new Date().toISOString();
+  let sourceCopyableAtStart = false;
+  let sourceEmptyAtStart = false;
+  try {
+    const entries = await readdir(absSource);
+    sourceCopyableAtStart = true;
+    sourceEmptyAtStart = entries.length === 0;
+  } catch {
+    sourceCopyableAtStart = false;
+  }
 
   // Get current commit SHA from source
   let sourceCommitSha: string;
@@ -109,6 +118,12 @@ export async function createWorkspace(
   if (cloneResult) return cloneResult;
 
   // Last resort: directory copy
+  if (!sourceCopyableAtStart) {
+    throw new Error(`Source path does not exist or is not readable: ${absSource}`);
+  }
+  if (sourceEmptyAtStart) {
+    throw new Error(`Source path is empty: ${absSource}`);
+  }
   return await copyWorkspace(absSource, runId, sourceCommitSha, createdAt);
 }
 
@@ -403,12 +418,25 @@ async function copyWorkspace(
   sourceCommitSha: string,
   createdAt: string,
 ): Promise<WorkspaceHandle> {
+  if (!existsSync(sourceRepo)) {
+    throw new Error(`Source path does not exist: ${sourceRepo}`);
+  }
+  const sourceEntries = await readdir(sourceRepo);
+  if (sourceEntries.length === 0) {
+    throw new Error(`Source path is empty: ${sourceRepo}`);
+  }
+
   const workspacePath = await mkdtemp(join(WORKSPACE_ROOT, `aedis-ws-${runId.slice(0, 8)}-`));
 
-  // Use cp -a for a faithful copy
-  await exec("cp", ["-a", `${sourceRepo}/.`, workspacePath], {
-    timeout: 120_000,
-  });
+  try {
+    // Use cp -a for a faithful copy
+    await exec("cp", ["-a", `${sourceRepo}/.`, workspacePath], {
+      timeout: 120_000,
+    });
+  } catch (err) {
+    await rm(workspacePath, { recursive: true, force: true }).catch(() => undefined);
+    throw err;
+  }
 
   console.log(`[workspace] created directory copy: ${workspacePath}`);
 

@@ -1,0 +1,60 @@
+{
+  "id": "aedis-outcome:847876ca-b985-48fb-a439-6c19b6f122a1",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Refactor provider selection and error shaping so server.ts and router.ts share one source of truth for provider metadata",
+  "summary": "typecheck hook not configured — required verification cannot run [change-set] FAIL — 3/4 stages passed, confidence 72%, 1 blockers, missing required checks: typecheck, active validation 0%, 2 file(s) only structurally checked, strict mode: 2 file(s) only checked; validation dept…",
+  "raw": "{\n  \"issues\": [\n    \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n    \"intent-satisfaction score 0.94 (keywords: refactor, provider, selection, error)\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"server.ts\",\n          \"router.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: refactor, provider, selection, error)\",\n        \"files\": [\n          \"server.ts\",\n          \"router.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: refactor, provider, selection, error)\",\n        \"files\": [\n          \"server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"typecheck hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:invariants-unsatisfied\",\n        \"message\": \"Change-set coherence verdict failed.\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-4\",\n        \"message\": \"Wave 4 (integration) verification failed: [wave 4 integration] FAIL — 3/4 stages passed, confidence 72%, 1 blockers, missing required checks: typecheck, active validation 0%, 2 file(s) only structurally checked, strict mode: 2 file(s) only checked; validation depth 0%\",\n        \"files\": [\n          \"server.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 2/2 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:typecheck\",\n        \"message\": \"typecheck hook not configured — required verification cannot run\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:invariants-unsatisfied\",\n        \"message\": \"Change-set coherence verdict failed.\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"critical\",\n        \"code\": \"verification:wave-4\",\n        \"message\": \"Wave 4 (integration) verification failed: [wave 4 integration] FAIL — 3/4 stages passed, confidence 72%, 1 blockers, missing required checks: typecheck, active validation 0%, 2 file(s) only structurally checked, strict mode: 2 file(s) only checked; validation depth 0%\",\n        \"files\": [\n          \"server.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"server.ts\",\n          \"router.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: refactor, provider, selection, error)\",\n        \"files\": [\n          \"server.ts\",\n          \"router.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"server.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: refactor, provider, selection, error)\",\n        \"files\": [\n          \"server.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 2/2 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"typecheck hook not configured — required verification cannot run\",\n    \"summary\": \"MERGE BLOCKED — 3 critical, 5 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 0,\n    \"repairsApplied\": 0,\n    \"issues\": []\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:router.ts",
+    "module:server.ts",
+    "verification:fail"
+  ],
+  "createdAt": "2026-04-25T10:35:15.931Z",
+  "updatedAt": "2026-04-25T10:35:15.933Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-multi-file-refactor-VzPPdO",
+  "filePaths": [
+    "router.ts",
+    "server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "847876ca-b985-48fb-a439-6c19b6f122a1",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "2bba2ad1-289e-4d2f-8ee8-06946771e714",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "45c3e6f7-0168-40a2-a74b-b65736828e86",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:847876ca-b985-48fb-a439-6c19b6f122a1",
+    "aedis-task:847876ca-b985-48fb-a439-6c19b6f122a1"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:847876ca-b985-48fb-a439-6c19b6f122a1"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:847876ca-b985-48fb-a439-6c19b6f122a1"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "fail",
+    "primaryBlockReason": "typecheck hook not configured — required verification cannot run"
+  }
+}

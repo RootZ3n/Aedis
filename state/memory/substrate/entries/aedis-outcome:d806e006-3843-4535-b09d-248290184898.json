@@ -1,0 +1,64 @@
+{
+  "id": "aedis-outcome:d806e006-3843-4535-b09d-248290184898",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Add POST /users endpoint that calls UserService.createUser with CreateUserDto in src/user.controller.ts, src/user.servic",
+  "summary": "Repair-pass issues: src/user.controller.ts: no shared exported names with dependency src/user.service.ts | src/user.controller.ts: no shared exported names with dependency src/create-user.dto.ts [change-set] PASS-WITH-WARNINGS — 5/5 stages passed, confidence 95%, 0 blockers, che…",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"apply\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/user.controller.ts\",\n          \"src/user.service.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: post, users, endpoint, calls)\",\n        \"files\": [\n          \"src/user.controller.ts\",\n          \"src/user.service.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task 63d247c2-ea64-4925-bfbd-9dd52cae0f7f) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 83d94957-a618-4abd-88ee-ccc55f313a3f) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/user.controller.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: post, users, endpoint, calls)\",\n        \"files\": [\n          \"src/user.controller.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/user.service.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/create-user.dto.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.controller.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.service.ts\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:wave-2-warnings\",\n        \"message\": \"Wave 2 (consumers) passed with warnings: [wave 2 consumers] PASS-WITH-WARNINGS — 5/5 stages passed, confidence 95%, 0 blockers, checks typecheck:pass, tests:pass\",\n        \"files\": [\n          \"src/user.controller.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 2/2 manifest files verified on disk\"\n      }\n    ],\n    \"critical\": [],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/user.controller.ts\",\n          \"src/user.service.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: post, users, endpoint, calls)\",\n        \"files\": [\n          \"src/user.controller.ts\",\n          \"src/user.service.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"builder\\\" (task 63d247c2-ea64-4925-bfbd-9dd52cae0f7f) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:contract-check\",\n        \"message\": \"Worker \\\"critic\\\" (task 83d94957-a618-4abd-88ee-ccc55f313a3f) reported zero cost\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"builder changed 2 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"src/user.controller.ts\"\n        ]\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:cross-file-check\",\n        \"message\": \"intent-satisfaction score 0.94 (keywords: post, users, endpoint, calls)\",\n        \"files\": [\n          \"src/user.controller.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/user.service.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/user.controller.ts: no shared exported names with dependency src/create-user.dto.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.controller.ts\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/create-user.dto.ts: no shared exported names with dependency src/user.service.ts\"\n      },\n      {\n        \"source\": \"verification-pipeline\",\n        \"severity\": \"advisory\",\n        \"code\": \"verification:wave-2-warnings\",\n        \"message\": \"Wave 2 (consumers) passed with warnings: [wave 2 consumers] PASS-WITH-WARNINGS — 5/5 stages passed, confidence 95%, 0 blockers, checks typecheck:pass, tests:pass\",\n        \"files\": [\n          \"src/user.controller.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"git-diff:confirmed\",\n        \"message\": \"Git diff confirmed: 2/2 manifest files verified on disk\"\n      }\n    ],\n    \"primaryBlockReason\": \"\",\n    \"summary\": \"MERGE APPROVED — 12 advisory finding(s), 0 critical\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 4,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"src/user.controller.ts: no shared exported names with dependency src/user.service.ts\",\n      \"src/user.controller.ts: no shared exported names with dependency src/create-user.dto.ts\",\n      \"src/create-user.dto.ts: no shared exported names with dependency src/user.controller.ts\",\n      \"src/create-user.dto.ts: no shared exported names with dependency src/user.service.ts\"\n    ]\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:pass-with-warnings"
+  ],
+  "createdAt": "2026-04-25T16:12:47.280Z",
+  "updatedAt": "2026-04-25T16:12:47.282Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-det-lifecycle-SMP7dy",
+  "filePaths": [
+    "src/user.controller.ts",
+    "src/user.service.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "d806e006-3843-4535-b09d-248290184898",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "3e8ce7a1-31be-4dab-97ab-d7b46bcb44ee",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "commit",
+      "ref": "b3792ae72b8f6c8bc5948874a7cc6329ca8d2d7f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "1925270d-3ea0-49d2-b8b0-638ba1a9fb53",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:d806e006-3843-4535-b09d-248290184898",
+    "aedis-task:d806e006-3843-4535-b09d-248290184898"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:d806e006-3843-4535-b09d-248290184898"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:d806e006-3843-4535-b09d-248290184898"
+    }
+  ],
+  "confidence": 0.55,
+  "metadata": {
+    "verdict": "partial",
+    "verificationVerdict": "pass-with-warnings",
+    "primaryBlockReason": ""
+  }
+}

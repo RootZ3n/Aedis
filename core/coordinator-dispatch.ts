@@ -5,6 +5,7 @@ import type { AssembledContext } from "./context-assembler.js";
 import type { RoutingDecision } from "../router/trust-router.js";
 import type { WorkerAssignment, WorkerResult, WorkerType } from "../workers/base.js";
 import type { AedisEvent } from "../server/websocket.js";
+import type { ImplementationBrief } from "./implementation-brief.js";
 import { validateFileChangeArray } from "../workers/base.js";
 
 export function buildDispatchAssignment(input: {
@@ -19,6 +20,7 @@ export function buildDispatchAssignment(input: {
   projectRoot: string;
   sourceRepo: string;
   recentContext: GatedContext | undefined;
+  implementationBrief: ImplementationBrief | undefined;
   buildAssignment: (
     decision: RoutingDecision,
     task: RunTask,
@@ -52,6 +54,7 @@ export function buildDispatchAssignment(input: {
     projectRoot: input.projectRoot,
     sourceRepo: input.sourceRepo,
     recentContext: input.recentContext,
+    implementationBrief: input.implementationBrief,
   };
 }
 

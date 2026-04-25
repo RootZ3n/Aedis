@@ -4,7 +4,12 @@ import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadModelConfig } from "./config.js";
+import {
+  builderTierCollapseWarning,
+  findNextStrongerBuilderTier,
+  loadModelConfig,
+  resolveBuilderModelForTier,
+} from "./config.js";
 
 /**
  * End-to-end tests for the save -> execute contract on worker model config.
@@ -47,7 +52,7 @@ test("loadModelConfig falls back to defaults when no config file exists (fallbac
   try {
     const config = loadModelConfig(projectRoot);
     // Defaults from server/routes/config.ts DEFAULT_MODEL_CONFIG
-    assert.equal(config.builder.provider, "modelstudio");
+    assert.equal(config.builder.provider, "openrouter");
     assert.equal(config.critic.provider, "anthropic");
     assert.equal(config.integrator.model, "glm-5.1");
   } finally {
@@ -134,6 +139,55 @@ test("POST body envelope: also accepts flat body shape (legacy CLI callers)", as
     assert.equal(body.models.builder.provider, "openrouter");
 
     await app.close();
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("builder tier helpers resolve distinct tier assignments when configured", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-config-test-"));
+  try {
+    const aedisDir = join(projectRoot, ".aedis");
+    mkdirSync(aedisDir, { recursive: true });
+    writeFileSync(
+      join(aedisDir, "model-config.json"),
+      JSON.stringify({
+        builder: { model: "cheap-fast", provider: "openrouter" },
+        escalation: { model: "premium-fallback", provider: "anthropic" },
+        builderTiers: {
+          standard: { model: "standard-main", provider: "openrouter" },
+          premium: { model: "premium-main", provider: "anthropic" },
+        },
+      }),
+      "utf-8",
+    );
+
+    const config = loadModelConfig(projectRoot);
+    assert.equal(resolveBuilderModelForTier(config, "fast").identity, "openrouter/cheap-fast");
+    assert.equal(resolveBuilderModelForTier(config, "standard").identity, "openrouter/standard-main");
+    assert.equal(resolveBuilderModelForTier(config, "premium").identity, "anthropic/premium-main");
+    assert.equal(findNextStrongerBuilderTier(config, "standard")?.tier, "premium");
+    assert.equal(builderTierCollapseWarning(config), null);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("builder tier helpers warn when every tier collapses to the same model", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-config-test-"));
+  try {
+    const config = loadModelConfig(projectRoot);
+    const warning = builderTierCollapseWarning({
+      ...config,
+      builder: { model: "same-model", provider: "openrouter" },
+      escalation: { model: "same-model", provider: "openrouter" },
+      builderTiers: {
+        fast: { model: "same-model", provider: "openrouter" },
+        standard: { model: "same-model", provider: "openrouter" },
+        premium: { model: "same-model", provider: "openrouter" },
+      },
+    });
+    assert.match(warning ?? "", /collapses to one model/i);
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }

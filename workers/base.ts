@@ -23,6 +23,7 @@ import type { AssembledContext } from "../core/context-assembler.js";
 import type { GatedContext } from "../core/context-gate.js";
 import type { ExecutionReceipt } from "../core/execution-gate.js";
 import type { CostEntry, Issue, RunTask, RunState } from "../core/runstate.js";
+import type { ImplementationBrief } from "../core/implementation-brief.js";
 
 // ─── Worker Types ────────────────────────────────────────────────────
 
@@ -132,6 +133,15 @@ export interface WorkerAssignment {
   readonly sourceRepo?: string;
   /** Prompt-gated recent project memory, attached for Scout context. */
   readonly recentContext?: GatedContext;
+  /**
+   * Engineer-grade work order built by the Coordinator from the charter,
+   * scope classification, and multi-file plan. Carries the selected
+   * files + rationale, rejected candidates, staged plan, non-goals,
+   * verification commands, fallback plan, and (on retries) a sharpened
+   * retry hint. Optional because unit-test harnesses that bypass the
+   * Coordinator don't produce one; production dispatches always include it.
+   */
+  readonly implementationBrief?: ImplementationBrief;
 }
 
 export interface WorkerResult {

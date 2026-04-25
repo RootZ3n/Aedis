@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:937d9fb0-e2d4-4d0d-a48b-5d21052b4668",
+  "space": "aedis/project/mnt-ai-tmp-aedis-det-lifecycle-dnseum",
+  "kind": "aedis-task",
+  "title": "add email:string to User interface in src/types.ts",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"add email:string to User interface in src/types.ts\",\n  \"normalizedPrompt\": \"add email:string to User interface in src/types.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"fedf334a-93c0-4e01-ba7d-2e7417c13743\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"deterministic lifecycle fixture\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"fd0aa309-9774-48db-9217-047b1a53e795\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -3,0 +3,1 @@\\n+  email: string;\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n  email: string;\\n}\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: interface-property-add on src/types.ts\",\n            \"rationale\": \"Added property \\\"email: string\\\" to interface User\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/types.ts\",\n          \"scopeFiles\": [\n            \"src/types.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic type-extend: User.email: string → src/types.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"cb8a5731-2875-4bde-9061-eaf4be6551bc\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"fd0aa309-9774-48db-9217-047b1a53e795\",\n            \"targetFile\": \"src/types.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/interface-property-add\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"User\"\n              ],\n              \"proposed\": [\n                \"User\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/interface-property-add\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"5b0f64a7-f561-48f4-9dc3-507f6bb35929\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.95\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"5855ee6a-89af-48a3-b486-4f6477fc426a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"0a4af7b3-4732-4e4e-b08e-e0cb12c1d5fe\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -3,0 +3,1 @@\\n+  email: string;\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n  email: string;\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T16:12:47.683Z",
+  "updatedAt": "2026-04-25T16:12:47.685Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-det-lifecycle-dnSeuM",
+  "filePaths": [
+    "src/types.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "937d9fb0-e2d4-4d0d-a48b-5d21052b4668",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "93f08ef0-3b3a-41a4-9641-d2eae5c630b4",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "e5b394d9-184c-43a0-bba3-2ff18126d398",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:937d9fb0-e2d4-4d0d-a48b-5d21052b4668",
+    "aedis-run:937d9fb0-e2d4-4d0d-a48b-5d21052b4668"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:937d9fb0-e2d4-4d0d-a48b-5d21052b4668"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:937d9fb0-e2d4-4d0d-a48b-5d21052b4668"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

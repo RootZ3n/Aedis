@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:cfbd0170-bee8-4d07-a369-364bbcc1730f",
+  "space": "aedis/project/mnt-ai-tmp-aedis-type-int-kda07a",
+  "kind": "aedis-task",
+  "title": "add enabled:boolean to FeatureFlagSchema in src/types.ts",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"add enabled:boolean to FeatureFlagSchema in src/types.ts\",\n  \"normalizedPrompt\": \"add enabled:boolean to FeatureFlagSchema in src/types.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"da8952d1-c6c7-49f0-a2c3-4ed5b63c8031\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"b11912b4-f1bb-4b84-9e29-befce2df42ad\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -12,0 +12,1 @@\\n+  enabled: z.boolean(),\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n});\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n  enabled: z.boolean(),\\n});\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: zod-field-add on src/types.ts\",\n            \"rationale\": \"Added field \\\"enabled: z.boolean()\\\" to FeatureFlagSchema\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/types.ts\",\n          \"scopeFiles\": [\n            \"src/types.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic type-extend: FeatureFlagSchema.enabled: boolean → src/types.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"04fa734d-9e6d-4ad5-a148-95bae4172b5d\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"b11912b4-f1bb-4b84-9e29-befce2df42ad\",\n            \"targetFile\": \"src/types.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/route-insert\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"ApiResponse\",\n                \"FeatureFlagSchema\",\n                \"User\"\n              ],\n              \"proposed\": [\n                \"ApiResponse\",\n                \"FeatureFlagSchema\",\n                \"User\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/route-insert\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"9b8e772e-d105-4be7-a78f-fceeb7b1fbb7\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"012e37ec-7062-4d58-8504-312f670313cc\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"7002321c-8aa5-4c19-abaf-0ab26f11b430\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -12,0 +12,1 @@\\n+  enabled: z.boolean(),\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n});\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n  enabled: z.boolean(),\\n});\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T13:41:46.871Z",
+  "updatedAt": "2026-04-25T13:41:46.873Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-type-int-kda07A",
+  "filePaths": [
+    "src/types.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "cfbd0170-bee8-4d07-a369-364bbcc1730f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "e68b5fd9-f8f2-42a4-8ead-c7a16b2e9056",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "5273911a-a811-4a03-a81f-8628bbf4fad2",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:cfbd0170-bee8-4d07-a369-364bbcc1730f",
+    "aedis-run:cfbd0170-bee8-4d07-a369-364bbcc1730f"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:cfbd0170-bee8-4d07-a369-364bbcc1730f"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:cfbd0170-bee8-4d07-a369-364bbcc1730f"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

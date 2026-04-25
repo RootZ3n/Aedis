@@ -1,0 +1,49 @@
+{
+  "id": "aedis-suggestions:0fed7ef0-cc8a-4a64-84f9-e42a533f9adc",
+  "space": "aedis/project/mnt-ai-tmp-portum-lifecycle-v3tlip",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 0fed7ef0-cc8a-4a64-84f9-e42a533f9adc",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: \"src/user.controller.ts\" references \"UserService\" removed from \"src/user.service.ts\" Inspect repair-pass fallout: src/user.controller.ts: no shared exp…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T15:42:02.313Z",
+  "updatedAt": "2026-04-25T15:42:02.315Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/portum-lifecycle-V3TLiP",
+  "filePaths": [
+    "src/user.controller.ts",
+    "src/user.service.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "0fed7ef0-cc8a-4a64-84f9-e42a533f9adc",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "70bafcf8-3fb0-42dc-ae32-d3115450ae31",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:0fed7ef0-cc8a-4a64-84f9-e42a533f9adc",
+    "aedis-run:0fed7ef0-cc8a-4a64-84f9-e42a533f9adc",
+    "aedis-task:0fed7ef0-cc8a-4a64-84f9-e42a533f9adc"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:0fed7ef0-cc8a-4a64-84f9-e42a533f9adc"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:0fed7ef0-cc8a-4a64-84f9-e42a533f9adc"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

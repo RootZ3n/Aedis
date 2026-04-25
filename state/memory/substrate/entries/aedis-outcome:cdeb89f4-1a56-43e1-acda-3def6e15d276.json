@@ -1,0 +1,53 @@
+{
+  "id": "aedis-outcome:cdeb89f4-1a56-43e1-acda-3def6e15d276",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in modify core/main.ts to return 2",
+  "summary": "\"core/main.ts\" modified without original content or diff — cannot rollback",
+  "raw": "{\n  \"issues\": [],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/main.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.60 (keywords: modify, core, main, return)\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"1 manifest file(s) expected to change but unchanged on disk: core/main.ts\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"critical\",\n        \"code\": \"judge:rollback-safety\",\n        \"message\": \"\\\"core/main.ts\\\" modified without original content or diff — cannot rollback\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"git-diff:expected-unchanged\",\n        \"message\": \"1 manifest file(s) expected to change but unchanged on disk: core/main.ts\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"builder changed 1 file(s) but scout read none — no corroboration for the changes\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      },\n      {\n        \"source\": \"integration-judge\",\n        \"severity\": \"advisory\",\n        \"code\": \"judge:adversarial-guard\",\n        \"message\": \"intent-satisfaction score 0.60 (keywords: modify, core, main, return)\",\n        \"files\": [\n          \"core/main.ts\"\n        ]\n      }\n    ],\n    \"primaryBlockReason\": \"\\\"core/main.ts\\\" modified without original content or diff — cannot rollback\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 2 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:core",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T13:09:33.410Z",
+  "updatedAt": "2026-04-25T13:09:33.411Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-t7Ixyy",
+  "filePaths": [
+    "core/main.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "cdeb89f4-1a56-43e1-acda-3def6e15d276",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "7505fc2f-e91d-44bc-866a-a6c8a3b5ba4d",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:cdeb89f4-1a56-43e1-acda-3def6e15d276",
+    "aedis-task:cdeb89f4-1a56-43e1-acda-3def6e15d276"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:cdeb89f4-1a56-43e1-acda-3def6e15d276"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:cdeb89f4-1a56-43e1-acda-3def6e15d276"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "\"core/main.ts\" modified without original content or diff — cannot rollback"
+  }
+}

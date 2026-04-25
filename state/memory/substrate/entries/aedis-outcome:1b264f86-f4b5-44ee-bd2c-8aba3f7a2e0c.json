@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:1b264f86-f4b5-44ee-bd2c-8aba3f7a2e0c",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in modify core/util.ts",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"Model returned no effective file changes\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 0 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T02:07:36.209Z",
+  "updatedAt": "2026-04-25T02:07:36.211Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-mUzFFs",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "1b264f86-f4b5-44ee-bd2c-8aba3f7a2e0c",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "65f5858d-00f0-4e59-9fd5-bfc9882ea5de",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:1b264f86-f4b5-44ee-bd2c-8aba3f7a2e0c",
+    "aedis-task:1b264f86-f4b5-44ee-bd2c-8aba3f7a2e0c"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:1b264f86-f4b5-44ee-bd2c-8aba3f7a2e0c"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:1b264f86-f4b5-44ee-bd2c-8aba3f7a2e0c"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

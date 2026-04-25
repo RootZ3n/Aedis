@@ -1,0 +1,48 @@
+{
+  "id": "aedis-outcome:35538a73-8e26-43fd-87d8-9c6a82ca10f3",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in modify src/router.ts to add a /v2 namespace",
+  "summary": "One or more task nodes failed and were not recovered.",
+  "raw": "{\n  \"issues\": [\n    \"Model returned no effective file changes\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      }\n    ],\n    \"advisory\": [],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 1 critical, 0 advisory\"\n  },\n  \"repairResult\": null\n}",
+  "tags": [
+    "failure-pattern",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T13:46:28.705Z",
+  "updatedAt": "2026-04-25T13:46:28.709Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-MjawnN",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "35538a73-8e26-43fd-87d8-9c6a82ca10f3",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "cc0934c3-d0d1-4009-a784-e70267a85e37",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:35538a73-8e26-43fd-87d8-9c6a82ca10f3",
+    "aedis-task:35538a73-8e26-43fd-87d8-9c6a82ca10f3"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:35538a73-8e26-43fd-87d8-9c6a82ca10f3"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:35538a73-8e26-43fd-87d8-9c6a82ca10f3"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

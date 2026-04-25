@@ -35,6 +35,11 @@ export interface ContextFile {
   readonly tokenEstimate: number;
 }
 
+export interface ContextRejectedCandidate {
+  readonly path: string;
+  readonly reason: string;
+}
+
 export type ContextRelevance =
   | "target"          // Layer 1: the file being changed
   | "direct-dep"      // Layer 2: imported by or imports target
@@ -49,6 +54,7 @@ export interface AssembledContext {
   readonly budgetTotal: number;
   readonly truncated: boolean;
   readonly fileCount: number;
+  readonly rejectedCandidates: readonly ContextRejectedCandidate[];
 }
 
 export interface ContextAssemblerConfig {
@@ -89,64 +95,79 @@ export class ContextAssembler {
    */
   async assemble(targetFiles: string[]): Promise<AssembledContext> {
     const layers: ContextLayer[] = [];
+    const rejectedCandidates: ContextRejectedCandidate[] = [];
+    const seenRejected = new Set<string>();
+    const reject = (path: string, reason: string): void => {
+      const trimmed = path.trim();
+      if (!trimmed || !reason.trim()) return;
+      const key = `${trimmed}::${reason}`;
+      if (seenRejected.has(key)) return;
+      seenRejected.add(key);
+      rejectedCandidates.push({ path: trimmed, reason: reason.trim() });
+    };
     let remainingBudget = this.config.tokenBudget;
 
     // Layer 1: Target files (always included, highest priority)
-    const targetLayer = await this.buildTargetLayer(targetFiles);
+    const targetLayer = await this.buildTargetLayer(targetFiles, reject);
     layers.push(targetLayer);
     remainingBudget -= targetLayer.tokenEstimate;
 
     if (remainingBudget <= 0) {
-      return this.buildResult(layers, true);
+      return this.buildResult(layers, true, rejectedCandidates);
     }
 
     // Layer 2: Direct dependencies
-    const depLayer = await this.buildDependencyLayer(targetFiles, remainingBudget);
+    const depLayer = await this.buildDependencyLayer(targetFiles, remainingBudget, reject);
     layers.push(depLayer);
     remainingBudget -= depLayer.tokenEstimate;
 
     if (remainingBudget <= 0) {
-      return this.buildResult(layers, true);
+      return this.buildResult(layers, true, rejectedCandidates);
     }
 
     // Layer 3: Patterns (type definitions, interfaces used by targets)
-    const patternLayer = await this.buildPatternLayer(targetFiles, remainingBudget);
+    const patternLayer = await this.buildPatternLayer(targetFiles, remainingBudget, reject);
     layers.push(patternLayer);
     remainingBudget -= patternLayer.tokenEstimate;
 
     if (remainingBudget <= 0) {
-      return this.buildResult(layers, true);
+      return this.buildResult(layers, true, rejectedCandidates);
     }
 
     // Layer 4: Tests
-    const testLayer = await this.buildTestLayer(targetFiles, remainingBudget);
+    const testLayer = await this.buildTestLayer(targetFiles, remainingBudget, reject);
     layers.push(testLayer);
     remainingBudget -= testLayer.tokenEstimate;
 
     if (remainingBudget <= 0) {
-      return this.buildResult(layers, true);
+      return this.buildResult(layers, true, rejectedCandidates);
     }
 
     // Layer 5: Similar implementations
-    const similarLayer = await this.buildSimilarLayer(targetFiles, remainingBudget);
+    const similarLayer = await this.buildSimilarLayer(targetFiles, remainingBudget, reject);
     layers.push(similarLayer);
 
-    return this.buildResult(layers, false);
+    return this.buildResult(layers, false, rejectedCandidates);
   }
 
   // ─── Layer Builders ──────────────────────────────────────────────
 
-  private async buildTargetLayer(targetFiles: string[]): Promise<ContextLayer> {
+  private async buildTargetLayer(
+    targetFiles: string[],
+    reject: (path: string, reason: string) => void,
+  ): Promise<ContextLayer> {
     const files: ContextFile[] = [];
     for (const filePath of targetFiles) {
-      const content = await this.safeReadFile(filePath);
-      if (content !== null) {
+      const loaded = await this.readContextFile(filePath);
+      if (loaded.content !== null) {
         files.push({
           path: filePath,
-          content,
+          content: loaded.content,
           relevance: "target",
-          tokenEstimate: this.estimateTokens(content),
+          tokenEstimate: this.estimateTokens(loaded.content),
         });
+      } else if (loaded.reason) {
+        reject(filePath, loaded.reason);
       }
     }
     return {
@@ -157,13 +178,17 @@ export class ContextAssembler {
     };
   }
 
-  private async buildDependencyLayer(targetFiles: string[], budget: number): Promise<ContextLayer> {
+  private async buildDependencyLayer(
+    targetFiles: string[],
+    budget: number,
+    reject: (path: string, reason: string) => void,
+  ): Promise<ContextLayer> {
     const depPaths = new Set<string>();
 
     for (const filePath of targetFiles) {
-      const content = await this.safeReadFile(filePath);
-      if (content) {
-        const imports = this.extractImports(content, filePath);
+      const loaded = await this.readContextFile(filePath);
+      if (loaded.content) {
+        const imports = this.extractImports(loaded.content, filePath);
         imports.forEach((imp) => depPaths.add(imp));
       }
     }
@@ -174,7 +199,8 @@ export class ContextAssembler {
     const files = await this.readFilesWithBudget(
       [...depPaths],
       "direct-dep",
-      budget
+      budget,
+      reject,
     );
 
     return {
@@ -185,14 +211,18 @@ export class ContextAssembler {
     };
   }
 
-  private async buildPatternLayer(targetFiles: string[], budget: number): Promise<ContextLayer> {
+  private async buildPatternLayer(
+    targetFiles: string[],
+    budget: number,
+    reject: (path: string, reason: string) => void,
+  ): Promise<ContextLayer> {
     // Extract exported type/interface names from targets, find other files using them
     const typeNames = new Set<string>();
 
     for (const filePath of targetFiles) {
-      const content = await this.safeReadFile(filePath);
-      if (content) {
-        const matches = content.matchAll(/export\s+(?:interface|type|enum)\s+(\w+)/g);
+      const loaded = await this.readContextFile(filePath);
+      if (loaded.content) {
+        const matches = loaded.content.matchAll(/export\s+(?:interface|type|enum)\s+(\w+)/g);
         for (const match of matches) {
           typeNames.add(match[1]);
         }
@@ -210,14 +240,17 @@ export class ContextAssembler {
 
     for (const file of allSourceFiles) {
       if (targetFiles.includes(file)) continue;
-      const content = await this.safeReadFile(file);
-      if (content && new RegExp(`\\b(${pattern})\\b`).test(content)) {
+      const loaded = await this.readContextFile(file);
+      if (loaded.content && new RegExp(`\\b(${pattern})\\b`).test(loaded.content)) {
         matchingFiles.push(file);
-        if (matchingFiles.length >= 5) break; // Cap pattern matches
       }
     }
 
-    const files = await this.readFilesWithBudget(matchingFiles, "pattern", budget);
+    for (const dropped of matchingFiles.slice(5)) {
+      reject(dropped, "low relevance: pattern candidate fell below the context rank cap");
+    }
+
+    const files = await this.readFilesWithBudget(matchingFiles.slice(0, 5), "pattern", budget, reject);
 
     return {
       name: "patterns",
@@ -227,7 +260,11 @@ export class ContextAssembler {
     };
   }
 
-  private async buildTestLayer(targetFiles: string[], budget: number): Promise<ContextLayer> {
+  private async buildTestLayer(
+    targetFiles: string[],
+    budget: number,
+    reject: (path: string, reason: string) => void,
+  ): Promise<ContextLayer> {
     const testPaths: string[] = [];
 
     for (const filePath of targetFiles) {
@@ -251,7 +288,7 @@ export class ContextAssembler {
       }
     }
 
-    const files = await this.readFilesWithBudget(testPaths, "test", budget);
+    const files = await this.readFilesWithBudget(testPaths, "test", budget, reject);
 
     return {
       name: "tests",
@@ -261,7 +298,11 @@ export class ContextAssembler {
     };
   }
 
-  private async buildSimilarLayer(targetFiles: string[], budget: number): Promise<ContextLayer> {
+  private async buildSimilarLayer(
+    targetFiles: string[],
+    budget: number,
+    reject: (path: string, reason: string) => void,
+  ): Promise<ContextLayer> {
     // Find files in the same directory or sibling directories
     const dirs = new Set(targetFiles.map((f) => dirname(resolve(this.config.projectRoot, f))));
     const siblingFiles: string[] = [];
@@ -281,10 +322,15 @@ export class ContextAssembler {
       }
     }
 
+    for (const dropped of siblingFiles.slice(5)) {
+      reject(dropped, "low relevance: similar implementation candidate fell below the context rank cap");
+    }
+
     const files = await this.readFilesWithBudget(
       siblingFiles.slice(0, 5),
       "similar-impl",
-      budget
+      budget,
+      reject,
     );
 
     return {
@@ -325,37 +371,63 @@ export class ContextAssembler {
   private async readFilesWithBudget(
     paths: string[],
     relevance: ContextRelevance,
-    budget: number
+    budget: number,
+    reject: (path: string, reason: string) => void,
   ): Promise<ContextFile[]> {
     const files: ContextFile[] = [];
     let used = 0;
+    const seen = new Set<string>();
 
     for (const filePath of paths) {
-      if (used >= budget) break;
-      const content = await this.safeReadFile(filePath);
-      if (content) {
+      const normalized = filePath.replace(/\\/g, "/");
+      if (seen.has(normalized)) {
+        reject(filePath, "duplicate context candidate");
+        continue;
+      }
+      seen.add(normalized);
+      if (used >= budget) {
+        reject(filePath, `budget: context budget exhausted before including ${relevance} candidate`);
+        continue;
+      }
+      const loaded = await this.readContextFile(filePath);
+      if (loaded.content) {
         // Truncate large files before checking budget so they don't
         // consume the budget in full when they could still contribute.
-        const truncated = content.length > this.config.maxFileChars
-          ? content.slice(0, this.config.maxFileChars) + "\n// ... [truncated]"
-          : content;
+        const truncated = loaded.content.length > this.config.maxFileChars
+          ? loaded.content.slice(0, this.config.maxFileChars) + "\n// ... [truncated]"
+          : loaded.content;
         const tokens = this.estimateTokens(truncated);
         if (used + tokens <= budget) {
           files.push({ path: filePath, content: truncated, relevance, tokenEstimate: tokens });
           used += tokens;
+        } else {
+          reject(filePath, `budget: ${relevance} candidate would exceed the remaining context budget`);
         }
+      } else if (loaded.reason) {
+        reject(filePath, loaded.reason);
       }
     }
 
     return files;
   }
 
-  private async safeReadFile(filePath: string): Promise<string | null> {
+  private async readContextFile(filePath: string): Promise<{ content: string | null; reason: string | null }> {
     try {
       const absolute = resolve(this.config.projectRoot, filePath);
-      return await readFile(absolute, "utf-8");
+      const info = await stat(absolute);
+      if (info.isDirectory()) {
+        return { content: null, reason: "unsafe path: context candidate resolved to a directory" };
+      }
+      if (!info.isFile()) {
+        return { content: null, reason: "unsafe path: context candidate is not a regular file" };
+      }
+      const content = await readFile(absolute, "utf-8");
+      if (this.looksGenerated(filePath, content)) {
+        return { content: null, reason: "generated file: skipped from context" };
+      }
+      return { content, reason: null };
     } catch {
-      return null;
+      return { content: null, reason: null };
     }
   }
 
@@ -381,7 +453,18 @@ export class ContextAssembler {
     return Math.ceil(content.length / this.config.charsPerToken);
   }
 
-  private buildResult(layers: ContextLayer[], truncated: boolean): AssembledContext {
+  private looksGenerated(filePath: string, content: string): boolean {
+    return (
+      /(^|\/)(dist|build|coverage)\//.test(filePath) ||
+      /@generated|AUTO-GENERATED|generated by/i.test(content)
+    );
+  }
+
+  private buildResult(
+    layers: ContextLayer[],
+    truncated: boolean,
+    rejectedCandidates: readonly ContextRejectedCandidate[],
+  ): AssembledContext {
     const totalTokens = layers.reduce((sum, l) => sum + l.tokenEstimate, 0);
     const fileCount = layers.reduce((sum, l) => sum + l.files.length, 0);
 
@@ -392,6 +475,7 @@ export class ContextAssembler {
       budgetTotal: this.config.tokenBudget,
       truncated,
       fileCount,
+      rejectedCandidates,
     };
   }
 }

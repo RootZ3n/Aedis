@@ -30,6 +30,8 @@ export interface GitDiffResult {
   readonly expectedButUnchanged: readonly string[];
   /** Files changed on disk but NOT declared in manifest. */
   readonly undeclaredChanges: readonly string[];
+  /** Files declared as non-mutating references but changed on disk. */
+  readonly unexpectedReferenceChanges: readonly string[];
   /** Files that match between manifest and disk. */
   readonly confirmed: readonly string[];
   /** Whether the verification passed (no discrepancies). */
@@ -47,6 +49,10 @@ export interface GitDiffInput {
   readonly projectRoot: string;
   /** Files declared in the change manifest. */
   readonly manifestFiles: readonly string[];
+  /** Manifest files that are actually expected to mutate. Defaults to all manifest files. */
+  readonly expectedFiles?: readonly string[];
+  /** Manifest files included only as context/reference and not expected to mutate. */
+  readonly nonMutatingFiles?: readonly string[];
   /**
    * Optional: files that are expected to be newly created (not yet
    * tracked by git). These show up in `git status` not `git diff`.
@@ -64,7 +70,7 @@ export interface GitDiffInput {
  * but before git commit.
  */
 export async function verifyGitDiff(input: GitDiffInput): Promise<GitDiffResult> {
-  const { projectRoot, manifestFiles, createdFiles = [] } = input;
+  const { projectRoot, manifestFiles, expectedFiles = manifestFiles, nonMutatingFiles = [], createdFiles = [] } = input;
 
   try {
     // Get actual changed files from git
@@ -76,11 +82,13 @@ export async function verifyGitDiff(input: GitDiffInput): Promise<GitDiffResult>
     const actualChangedSet = new Set([...diffFiles, ...untrackedFiles]);
     const manifestSet = new Set(manifestFiles);
     const createdSet = new Set(createdFiles);
+    const nonMutatingSet = new Set(nonMutatingFiles);
 
     // Files in manifest but not actually changed
-    const expectedButUnchanged = manifestFiles.filter(
+    const expectedButUnchanged = expectedFiles.filter(
       (f) => !actualChangedSet.has(f) && !createdSet.has(f),
     );
+    const unexpectedReferenceChanges = nonMutatingFiles.filter((f) => actualChangedSet.has(f));
 
     // Files actually changed but not in manifest.
     //
@@ -99,16 +107,16 @@ export async function verifyGitDiff(input: GitDiffInput): Promise<GitDiffResult>
     );
 
     // Files confirmed — in both manifest and actual changes
-    const confirmed = manifestFiles.filter(
+    const confirmed = expectedFiles.filter(
       (f) => actualChangedSet.has(f) || createdSet.has(f),
     );
 
-    const totalExpected = manifestFiles.length;
+    const totalExpected = expectedFiles.length;
     const confirmationRatio = totalExpected > 0
       ? confirmed.length / totalExpected
       : 1;
 
-    const passed = expectedButUnchanged.length === 0 && undeclaredChanges.length === 0;
+    const passed = expectedButUnchanged.length === 0 && undeclaredChanges.length === 0 && unexpectedReferenceChanges.length === 0;
 
     const summaryParts: string[] = [];
     summaryParts.push(`${confirmed.length}/${totalExpected} manifest files confirmed on disk`);
@@ -118,11 +126,15 @@ export async function verifyGitDiff(input: GitDiffInput): Promise<GitDiffResult>
     if (undeclaredChanges.length > 0) {
       summaryParts.push(`${undeclaredChanges.length} undeclared changes`);
     }
+    if (unexpectedReferenceChanges.length > 0) {
+      summaryParts.push(`${unexpectedReferenceChanges.length} reference/context changed unexpectedly`);
+    }
 
     return {
       actualChangedFiles: [...actualChangedSet],
       expectedButUnchanged,
       undeclaredChanges,
+      unexpectedReferenceChanges,
       confirmed,
       passed,
       confirmationRatio,
@@ -137,6 +149,7 @@ export async function verifyGitDiff(input: GitDiffInput): Promise<GitDiffResult>
       actualChangedFiles: [],
       expectedButUnchanged: [...manifestFiles],
       undeclaredChanges: [],
+      unexpectedReferenceChanges: [],
       confirmed: [],
       passed: false,
       confirmationRatio: 0,

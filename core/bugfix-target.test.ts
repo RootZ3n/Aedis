@@ -39,6 +39,7 @@ const NON_BUGFIX_PROMPTS: readonly string[] = [
   "update the README",
   "create a new hook for authentication",
   "improve readability of the parser",
+  "improve provider error handling",
 ];
 
 for (const prompt of NON_BUGFIX_PROMPTS) {

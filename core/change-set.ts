@@ -15,6 +15,14 @@ export type FileNecessity = "required" | "optional";
 
 export type FileSensitivity = "normal" | "sensitive" | "critical";
 
+export type FileMutationRole =
+  | "write-required"
+  | "write-optional"
+  | "read-context"
+  | "import-reference"
+  | "type-reference"
+  | "skipped-unsupported";
+
 export interface FileInclusion {
   readonly path: string;
   readonly whyIncluded: string;
@@ -26,6 +34,14 @@ export interface FileInclusion {
    * degrade to warnings instead of blocking the run.
    */
   readonly necessity: FileNecessity;
+  /**
+   * Whether this file is expected to mutate or is present only as
+   * context/reference. `necessity` answers "is it relevant to the
+   * task"; `mutationRole` answers "must the on-disk file change".
+   */
+  readonly mutationRole: FileMutationRole;
+  readonly mutationExpected: boolean;
+  readonly mutationReason: string;
   /**
    * Execution order hint — lower numbers execute first within the
    * same wave. Derived from dependency depth and file classification.
@@ -161,6 +177,23 @@ function classifyNecessity(intent: IntentObject, file: string): FileNecessity {
   if (isDeliverable) return "required";
 
   return "required";
+}
+
+function defaultMutationRole(necessity: FileNecessity): FileMutationRole {
+  return necessity === "required" ? "write-required" : "write-optional";
+}
+
+function mutationExpectedFor(role: FileMutationRole): boolean {
+  return role === "write-required";
+}
+
+function defaultMutationReason(role: FileMutationRole, whyIncluded: string): string {
+  if (role === "write-required") return `Must change: ${whyIncluded}`;
+  if (role === "write-optional") return `Optional change: ${whyIncluded}`;
+  if (role === "read-context") return "Context-only file; mutation is not required.";
+  if (role === "import-reference") return "Import reference file; mutation is not required.";
+  if (role === "type-reference") return "Type reference file; mutation is not required.";
+  return "Skipped by deterministic planner; mutation is not required.";
 }
 
 function computeExecutionOrder(file: string, dependencyMap: Map<string, string[]>): number {
@@ -309,16 +342,24 @@ export function createChangeSet(
     ? inferDependenciesFromGraph(normalizedFiles, importGraph)
     : inferDependencies(normalizedFiles);
 
-  const filesInScope: FileInclusion[] = normalizedFiles.map((file) => ({
-    path: file,
-    whyIncluded: inferWhyIncluded(intent, file),
-    dependsOn: dependencyMap.get(file) ?? [],
-    status: "planned",
-    necessity: classifyNecessity(intent, file),
-    executionOrder: computeExecutionOrder(file, dependencyMap),
-    sensitivity: classifyFileSensitivity(file),
-    outcome: null,
-  }));
+  const filesInScope: FileInclusion[] = normalizedFiles.map((file) => {
+    const necessity = classifyNecessity(intent, file);
+    const mutationRole = defaultMutationRole(necessity);
+    const whyIncluded = inferWhyIncluded(intent, file);
+    return {
+      path: file,
+      whyIncluded,
+      dependsOn: dependencyMap.get(file) ?? [],
+      status: "planned",
+      necessity,
+      mutationRole,
+      mutationExpected: mutationExpectedFor(mutationRole),
+      mutationReason: defaultMutationReason(mutationRole, whyIncluded),
+      executionOrder: computeExecutionOrder(file, dependencyMap),
+      sensitivity: classifyFileSensitivity(file),
+      outcome: null,
+    };
+  });
 
   const dependencyRelationships = Object.freeze(
     Object.fromEntries(
@@ -341,6 +382,33 @@ export function createChangeSet(
   });
 }
 
+export interface FileMutationRoleUpdate {
+  readonly path: string;
+  readonly role: FileMutationRole;
+  readonly reason: string;
+}
+
+export function applyFileMutationRoles(
+  changeSet: ChangeSet,
+  updates: readonly FileMutationRoleUpdate[],
+): ChangeSet {
+  if (updates.length === 0) return changeSet;
+  const byPath = new Map(updates.map((entry) => [entry.path, entry]));
+  return Object.freeze({
+    ...changeSet,
+    filesInScope: Object.freeze(changeSet.filesInScope.map((entry) => {
+      const update = byPath.get(entry.path);
+      if (!update) return entry;
+      return Object.freeze({
+        ...entry,
+        mutationRole: update.role,
+        mutationExpected: mutationExpectedFor(update.role),
+        mutationReason: update.reason,
+      });
+    })),
+  });
+}
+
 // ─── Manifest Queries ───────────────────────────────────────────────
 
 /** Count files by sensitivity level. */
@@ -360,7 +428,7 @@ export function getExecutionOrder(changeSet: ChangeSet): readonly FileInclusion[
 /** Check if any required files have a terminal failure status. */
 export function hasRequiredFileFailures(changeSet: ChangeSet): boolean {
   return changeSet.filesInScope.some(
-    (f) => f.necessity === "required" && (f.status === "failed" || f.outcome?.status === "failed"),
+    (f) => f.mutationExpected && (f.status === "failed" || f.outcome?.status === "failed"),
   );
 }
 
@@ -369,6 +437,9 @@ export function summarizeFileOutcomes(changeSet: ChangeSet): readonly FileOutcom
   return changeSet.filesInScope.map((f) => ({
     path: f.path,
     necessity: f.necessity,
+    mutationRole: f.mutationRole,
+    mutationExpected: f.mutationExpected,
+    mutationReason: f.mutationReason,
     sensitivity: f.sensitivity,
     status: f.outcome?.status ?? (f.status === "verified" || f.status === "complete" ? "succeeded" : "pending"),
     reason: f.outcome?.reason ?? f.status,
@@ -379,6 +450,9 @@ export function summarizeFileOutcomes(changeSet: ChangeSet): readonly FileOutcom
 export interface FileOutcomeSummary {
   readonly path: string;
   readonly necessity: FileNecessity;
+  readonly mutationRole: FileMutationRole;
+  readonly mutationExpected: boolean;
+  readonly mutationReason: string;
   readonly sensitivity: FileSensitivity;
   readonly status: "succeeded" | "failed" | "skipped" | "rolled_back" | "pending";
   readonly reason: string;

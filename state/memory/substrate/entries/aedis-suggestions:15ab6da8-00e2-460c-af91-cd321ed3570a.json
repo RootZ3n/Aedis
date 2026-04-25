@@ -1,0 +1,53 @@
+{
+  "id": "aedis-suggestions:15ab6da8-00e2-460c-af91-cd321ed3570a",
+  "space": "aedis/project/mnt-ai-tmp-aedis-det-nopcra",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for 15ab6da8-00e2-460c-af91-cd321ed3570a",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: typecheck hook not configured — required verification cannot run Validate src/server.ts with focused verification before the next attempt.",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T13:42:16.265Z",
+  "updatedAt": "2026-04-25T13:42:16.271Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-det-NopCrA",
+  "filePaths": [
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "15ab6da8-00e2-460c-af91-cd321ed3570a",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "d065db77-b4a1-425a-b909-8c8ca4c90840",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "a79f1adc-8859-4498-8651-b7ca6bac16da",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:15ab6da8-00e2-460c-af91-cd321ed3570a",
+    "aedis-run:15ab6da8-00e2-460c-af91-cd321ed3570a",
+    "aedis-task:15ab6da8-00e2-460c-af91-cd321ed3570a"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:15ab6da8-00e2-460c-af91-cd321ed3570a"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:15ab6da8-00e2-460c-af91-cd321ed3570a"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

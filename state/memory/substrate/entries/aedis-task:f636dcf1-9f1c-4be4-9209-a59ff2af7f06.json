@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:f636dcf1-9f1c-4be4-9209-a59ff2af7f06",
+  "space": "aedis/project/mnt-ai-tmp-aedis-type-int-erxanf",
+  "kind": "aedis-task",
+  "title": "add optional metadata?:Record<string,string> to ApiResponse type in src/types.ts",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"add optional metadata?:Record<string,string> to ApiResponse type in src/types.ts\",\n  \"normalizedPrompt\": \"add optional metadata?:Record<string,string> to ApiResponse type in src/types.ts\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"a39f48fc-b947-4ebd-a1e9-094457e33d9a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"e62d6502-6115-4f9d-a910-d919881c2b0a\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -7,0 +7,1 @@\\n+  metadata?: Record<string,string>;\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n});\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n  metadata?: Record<string,string>;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n});\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: type-alias-property-add on src/types.ts\",\n            \"rationale\": \"Added property \\\"metadata: Record<string,string>\\\" to type alias ApiResponse (optional)\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/types.ts\",\n          \"scopeFiles\": [\n            \"src/types.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic type-extend: ApiResponse.metadata: Record<string,string>? → src/types.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"fac415c1-68a3-4769-8f9d-5cabbe29380f\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"e62d6502-6115-4f9d-a910-d919881c2b0a\",\n            \"targetFile\": \"src/types.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/type-alias-property-add\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"ApiResponse\",\n                \"FeatureFlagSchema\",\n                \"User\"\n              ],\n              \"proposed\": [\n                \"ApiResponse\",\n                \"FeatureFlagSchema\",\n                \"User\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/type-alias-property-add\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"ab6d6e63-e4e4-4f5b-9873-cb54390b1cbf\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"578f5747-4ade-48eb-be19-7441414552de\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"b976c91b-8911-49e5-8967-cfd4f5542ec1\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/types.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/types.ts\\n+++ b/src/types.ts\\n@@ -7,0 +7,1 @@\\n+  metadata?: Record<string,string>;\\n\",\n            \"originalContent\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n});\\n\",\n            \"content\": \"export interface User {\\n  id: string;\\n}\\n\\nexport type ApiResponse = {\\n  status: string;\\n  metadata?: Record<string,string>;\\n};\\n\\nimport { z } from \\\"zod\\\";\\nexport const FeatureFlagSchema = z.object({\\n  name: z.string(),\\n});\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/types.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T15:23:14.515Z",
+  "updatedAt": "2026-04-25T15:23:14.517Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-type-int-ErXanF",
+  "filePaths": [
+    "src/types.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "f636dcf1-9f1c-4be4-9209-a59ff2af7f06",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "b53690d1-1182-4e53-9f6e-5b11b413fd31",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "9ad7c9ef-d44e-4b5c-9f06-d0cf98184a5c",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:f636dcf1-9f1c-4be4-9209-a59ff2af7f06",
+    "aedis-run:f636dcf1-9f1c-4be4-9209-a59ff2af7f06"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:f636dcf1-9f1c-4be4-9209-a59ff2af7f06"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:f636dcf1-9f1c-4be4-9209-a59ff2af7f06"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

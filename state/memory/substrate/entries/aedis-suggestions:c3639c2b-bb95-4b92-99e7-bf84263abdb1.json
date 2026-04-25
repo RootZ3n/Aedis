@@ -1,0 +1,51 @@
+{
+  "id": "aedis-suggestions:c3639c2b-bb95-4b92-99e7-bf84263abdb1",
+  "space": "aedis/project/mnt-ai-tmp-aedis-gauntlet-crhkxz",
+  "kind": "aedis-suggestions",
+  "title": "Follow-up suggestions for c3639c2b-bb95-4b92-99e7-bf84263abdb1",
+  "summary": "Re-run the task with tighter scope around the failing files before attempting broader changes. Address the merge blocker first: \"types/auth.d.ts\" modified without original content or diff — cannot rollback; \"services/login.ts\" modified without original content or diff — cannot r…",
+  "tags": [
+    "suggestions",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T02:39:49.234Z",
+  "updatedAt": "2026-04-25T02:39:49.241Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-cRhkxz",
+  "filePaths": [
+    "server/index.ts",
+    "services/login.ts",
+    "tests/auth.test.ts",
+    "types/auth.d.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "c3639c2b-bb95-4b92-99e7-bf84263abdb1",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "1ae5f1ee-faed-49b0-bede-78ba6d855753",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:c3639c2b-bb95-4b92-99e7-bf84263abdb1",
+    "aedis-run:c3639c2b-bb95-4b92-99e7-bf84263abdb1",
+    "aedis-task:c3639c2b-bb95-4b92-99e7-bf84263abdb1"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:c3639c2b-bb95-4b92-99e7-bf84263abdb1"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:c3639c2b-bb95-4b92-99e7-bf84263abdb1"
+    }
+  ],
+  "metadata": {
+    "suggestionCount": 3
+  }
+}

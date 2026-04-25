@@ -1,0 +1,61 @@
+{
+  "id": "aedis-task:198eb680-b221-4524-8dc7-8086330f19bb",
+  "space": "aedis/project/mnt-ai-tmp-aedis-det-hgz8lg",
+  "kind": "aedis-task",
+  "title": "add a GET /models endpoint in src/server.ts that returns configured providers",
+  "summary": "single-file · failed run · single-file scope · 1 file(s) touched · verification fail",
+  "raw": "{\n  \"rawInput\": \"add a GET /models endpoint in src/server.ts that returns configured providers\",\n  \"normalizedPrompt\": \"add a GET /models endpoint in src/server.ts that returns configured providers\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"d83f877e-f4eb-4d57-810a-1c7d86c126e7\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"builder\",\n      \"taskId\": \"abe6d2f4-5693-43f7-bd74-b74dfe664890\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"builder\",\n        \"changes\": [\n          {\n            \"path\": \"src/server.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/server.ts\\n+++ b/src/server.ts\\n@@ -12,0 +12,4 @@\\n+fastify.get(\\\"/models\\\", async (_request, _reply) => {\\n+  return { ok: true };\\n+});\\n+\\n\",\n            \"originalContent\": \"import Fastify from \\\"fastify\\\";\\nimport { routeRequest } from \\\"./router.js\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async (_request, reply) => {\\n  return { ok: true };\\n});\\n\\nfastify.get(\\\"/health\\\", async () => ({ status: \\\"ok\\\" }));\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  await fastify.listen({ port });\\n}\\n\",\n            \"content\": \"import Fastify from \\\"fastify\\\";\\nimport { routeRequest } from \\\"./router.js\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async (_request, reply) => {\\n  return { ok: true };\\n});\\n\\nfastify.get(\\\"/health\\\", async () => ({ status: \\\"ok\\\" }));\\n\\nfastify.get(\\\"/models\\\", async (_request, _reply) => {\\n  return { ok: true };\\n});\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  await fastify.listen({ port });\\n}\\n\"\n          }\n        ],\n        \"decisions\": [\n          {\n            \"description\": \"Deterministic transform: route-insert on src/server.ts\",\n            \"rationale\": \"Inserted GET /models at line 11, anchored after fastify.get(\\\"/health\\\").\",\n            \"alternatives\": [\n              \"Fall back to LLM Builder\"\n            ]\n          }\n        ],\n        \"needsCriticReview\": false,\n        \"contract\": {\n          \"file\": \"src/server.ts\",\n          \"scopeFiles\": [\n            \"src/server.ts\"\n          ],\n          \"siblingFiles\": [],\n          \"mode\": \"single-file\",\n          \"goal\": \"deterministic route-add: GET /models → src/server.ts\",\n          \"constraints\": [],\n          \"forbiddenChanges\": [],\n          \"interfaceRules\": [\n            \"deterministic transform — no LLM was invoked\"\n          ]\n        },\n        \"prompt\": \"[deterministic transform — no model prompt]\",\n        \"rawModelResponse\": \"[deterministic transform — no model response]\",\n        \"providerFindings\": [],\n        \"attemptRecords\": [\n          {\n            \"attemptId\": \"6d5d4a36-6cdd-4594-a7e6-08a6a86efaf6\",\n            \"attemptIndex\": 1,\n            \"generationId\": \"abe6d2f4-5693-43f7-bd74-b74dfe664890\",\n            \"targetFile\": \"src/server.ts\",\n            \"patchMode\": \"diff-apply\",\n            \"provider\": \"deterministic\",\n            \"model\": \"deterministic/route-insert\",\n            \"tier\": \"standard\",\n            \"fellBack\": false,\n            \"inputTokens\": 0,\n            \"outputTokens\": 0,\n            \"estimatedCostUsd\": 0,\n            \"durationMs\": 0,\n            \"outcome\": \"success\",\n            \"failureReason\": null,\n            \"guardRejected\": false,\n            \"guardName\": null,\n            \"exportDiff\": {\n              \"original\": [\n                \"port\",\n                \"startServer\"\n              ],\n              \"proposed\": [\n                \"port\",\n                \"startServer\"\n              ],\n              \"missing\": [],\n              \"added\": []\n            },\n            \"stale\": false\n          }\n        ]\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"deterministic/route-insert\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.95,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"read\"\n        },\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"critic\",\n      \"taskId\": \"d924b60d-50ab-429f-9961-62ecb3c514d0\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"critic\",\n        \"verdict\": \"approve\",\n        \"comments\": [],\n        \"suggestedChanges\": [],\n        \"intentAlignment\": 0.9\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"verifier\",\n      \"taskId\": \"434db31d-17a5-4567-b699-d8c0d556bf81\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"verifier\",\n        \"testResults\": [],\n        \"typeCheckPassed\": true,\n        \"lintPassed\": true,\n        \"buildPassed\": true,\n        \"passed\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    },\n    {\n      \"workerType\": \"integrator\",\n      \"taskId\": \"5fcbf82f-5bd9-4e25-9777-1c430de0b7d1\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"integrator\",\n        \"finalChanges\": [\n          {\n            \"path\": \"src/server.ts\",\n            \"operation\": \"modify\",\n            \"diff\": \"--- a/src/server.ts\\n+++ b/src/server.ts\\n@@ -12,0 +12,4 @@\\n+fastify.get(\\\"/models\\\", async (_request, _reply) => {\\n+  return { ok: true };\\n+});\\n+\\n\",\n            \"originalContent\": \"import Fastify from \\\"fastify\\\";\\nimport { routeRequest } from \\\"./router.js\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async (_request, reply) => {\\n  return { ok: true };\\n});\\n\\nfastify.get(\\\"/health\\\", async () => ({ status: \\\"ok\\\" }));\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  await fastify.listen({ port });\\n}\\n\",\n            \"content\": \"import Fastify from \\\"fastify\\\";\\nimport { routeRequest } from \\\"./router.js\\\";\\n\\nconst fastify = Fastify({ logger: true });\\n\\nfastify.get(\\\"/\\\", async (_request, reply) => {\\n  return { ok: true };\\n});\\n\\nfastify.get(\\\"/health\\\", async () => ({ status: \\\"ok\\\" }));\\n\\nfastify.get(\\\"/models\\\", async (_request, _reply) => {\\n  return { ok: true };\\n});\\n\\nexport const port = 18797;\\n\\nexport async function startServer() {\\n  await fastify.listen({ port });\\n}\\n\"\n          }\n        ],\n        \"conflictsResolved\": [],\n        \"coherenceCheck\": {\n          \"passed\": true,\n          \"checks\": []\n        },\n        \"readyToApply\": true\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [\n        {\n          \"path\": \"src/server.ts\",\n          \"operation\": \"modify\"\n        }\n      ],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "change:modify",
+    "ext:ts",
+    "module:src",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T12:57:16.716Z",
+  "updatedAt": "2026-04-25T12:57:16.724Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-det-hGZ8LG",
+  "filePaths": [
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "198eb680-b221-4524-8dc7-8086330f19bb",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "1ff813c2-20f4-4692-a854-4f0e4790a59f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "verification",
+      "ref": "755d497e-f990-4963-8614-4da354e94607",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:198eb680-b221-4524-8dc7-8086330f19bb",
+    "aedis-run:198eb680-b221-4524-8dc7-8086330f19bb"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:198eb680-b221-4524-8dc7-8086330f19bb"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:198eb680-b221-4524-8dc7-8086330f19bb"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "fail",
+    "filesTouched": 1
+  }
+}

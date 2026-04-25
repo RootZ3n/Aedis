@@ -296,6 +296,10 @@ export function abortRun(run: RunState, reason: string): void {
   advancePhase(run, "aborted");
 }
 
+export function isTerminalPhase(phase: RunPhase): boolean {
+  return ["complete", "failed", "rejected", "commit_failed", "rolled_back", "aborted"].includes(phase);
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────
 
 export function getActiveTasks(run: RunState): RunTask[] {

@@ -1,0 +1,54 @@
+{
+  "id": "aedis-outcome:26938df0-6e53-4a66-8669-ec0321a1aa25",
+  "space": "aedis/failures",
+  "kind": "aedis-failure",
+  "title": "Failure in Refactor src/server.ts and src/router.ts so route registration is cleaner and provider-routing helpers stay in src/route",
+  "summary": "One or more task nodes failed and were not recovered. Repair-pass issues: src/server.ts: broken import target \"./router.js\" | src/server.ts: mismatched exports compared to dependency src/router.ts",
+  "raw": "{\n  \"issues\": [\n    \"SAFETY: Builder output removed 7 existing export(s) (ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage, ProviderName, RouteResult, getAllProviders, getProviderForModel) from src/router.ts. Original had 8 export(s); updated has 12. Refusing the patch — detected unrelated-symbol corruption; the user request did not authorize removing these symbols.\",\n    \"SAFETY: Builder output removed 8 existing export(s) (ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage, ProviderName, RouteResult, getAllProviders, getProviderForModel, routeRequest) from src/router.ts. Original had 8 export(s); updated has 0. Refusing the patch — detected unrelated-symbol corruption; the user request did not authorize removing these symbols.\",\n    \"SAFETY: Builder output looks like conversational prose / markdown, not code for src/server.ts. First 200 chars: The provided file `state/receipts/runs/26938df0-6e53-4a66-8669-ec0321a1aa25.json` appears to be a JSON formatted receipt that contains detailed information about a run performed by a system. This rece\"\n  ],\n  \"mergeDecision\": {\n    \"action\": \"block\",\n    \"findings\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: broken import target \\\"./router.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n      }\n    ],\n    \"critical\": [\n      {\n        \"source\": \"coordinator\",\n        \"severity\": \"critical\",\n        \"code\": \"coordinator:failed-nodes\",\n        \"message\": \"One or more task nodes failed and were not recovered.\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"critical\",\n        \"code\": \"change-set:incomplete-waves\",\n        \"message\": \"Not every wave of the change-set completed cleanly.\"\n      }\n    ],\n    \"advisory\": [\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: broken import target \\\"./router.js\\\"\"\n      },\n      {\n        \"source\": \"change-set-gate\",\n        \"severity\": \"advisory\",\n        \"code\": \"change-set:repair\",\n        \"message\": \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n      }\n    ],\n    \"primaryBlockReason\": \"One or more task nodes failed and were not recovered.\",\n    \"summary\": \"MERGE BLOCKED — 2 critical, 2 advisory\"\n  },\n  \"repairResult\": {\n    \"repairsAttempted\": 2,\n    \"repairsApplied\": 0,\n    \"issues\": [\n      \"src/server.ts: broken import target \\\"./router.js\\\"\",\n      \"src/server.ts: mismatched exports compared to dependency src/router.ts\"\n    ]\n  }\n}",
+  "tags": [
+    "ext:ts",
+    "failure-pattern",
+    "module:src",
+    "verification:not-run"
+  ],
+  "createdAt": "2026-04-25T12:08:53.171Z",
+  "updatedAt": "2026-04-25T12:08:53.175Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-portum-C-multifile-explicit-full-paths-j3u3fg/repo",
+  "filePaths": [
+    "src/router.ts",
+    "src/server.ts"
+  ],
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "26938df0-6e53-4a66-8669-ec0321a1aa25",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "dc6c5380-f29a-43bf-bf93-f00c29f7abf8",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-run:26938df0-6e53-4a66-8669-ec0321a1aa25",
+    "aedis-task:26938df0-6e53-4a66-8669-ec0321a1aa25"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:26938df0-6e53-4a66-8669-ec0321a1aa25"
+    },
+    {
+      "type": "task",
+      "targetId": "aedis-task:26938df0-6e53-4a66-8669-ec0321a1aa25"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "verdict": "failed",
+    "verificationVerdict": "not-run",
+    "primaryBlockReason": "One or more task nodes failed and were not recovered."
+  }
+}

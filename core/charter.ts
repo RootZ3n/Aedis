@@ -148,9 +148,11 @@ export class CharterGenerator {
   // ─── Private: Classification ─────────────────────────────────────
 
   private classifyCategory(lower: string): RequestCategory {
-    if (/\b(fix|bug|broken|crash|error|issue)\b/.test(lower)) return "bugfix";
-    if (/\b(refactor|clean|restructure|reorganize|extract)\b/.test(lower)) return "refactor";
-    if (/\b(scaffold|create|init|bootstrap|setup|new repo)\b/.test(lower)) return "scaffold";
+    const isDocsIntent =
+      /\b(doc(?:s|ument|umentation)?|readme|guide|explain|describe|write up)\b/.test(lower) ||
+      /\bdocument\b.*\b(setup|configuration|config|provider|api|workflow)\b/.test(lower);
+    if (isDocsIntent) return "docs";
+
     // Test category requires the user to actually be ASKING to write tests.
     // The old regex matched any occurrence of "test" — so "add // SMOKE TEST
     // comment at the top of X" was misclassified as a test-authoring task
@@ -165,9 +167,41 @@ export class CharterGenerator {
       /\bspec\s+(file|for)\b/.test(lower) ||
       /\btest\s+coverage\b/.test(lower)
     ) return "test";
-    if (/\b(config|env|setting|toggle)\b/.test(lower)) return "config";
-    if (/\b(doc|readme|explain|document)\b/.test(lower)) return "docs";
-    if (/\b(investigate|explore|understand|audit|check)\b/.test(lower)) return "investigation";
+
+    if (/\b(investigate|explore|understand|audit|diagnose|trace|inspect|analyze|check)\b/.test(lower)) {
+      return "investigation";
+    }
+
+    if (
+      /\b(config(?:ure)?|reconfig(?:ure)?|env|environment|setting|toggle|flag|option)\b/.test(lower) ||
+      (/\b(set up|setup)\b/.test(lower) && !isDocsIntent)
+    ) {
+      return "config";
+    }
+
+    if (
+      /\b(scaffold|bootstrap|boilerplate|skeleton)\b/.test(lower) ||
+      /\b(init|initialize)\b.*\b(repo|repository|project|package|service)\b/.test(lower) ||
+      /\bcreate\b.*\b(new\s+repo|new\s+project|starter|skeleton|scaffold)\b/.test(lower)
+    ) {
+      return "scaffold";
+    }
+
+    if (
+      /\b(refactor|improve|clean(?:\s+up)?|restructure|reorganize|extract|simplify|tighten|standardize|unify|consolidate|harden)\b/.test(lower)
+    ) {
+      return "refactor";
+    }
+
+    const hasBugWord =
+      /\b(bug|broken|crash|regression|incorrect|wrong|timeout)\b/.test(lower) ||
+      /\b(throws?|failing|fails?)\b/.test(lower);
+    const hasBugfixVerb = /\b(fix|repair|resolve|correct)\b/.test(lower);
+    if (hasBugfixVerb && hasBugWord) return "bugfix";
+    if (/\bbugfix\b/.test(lower)) return "bugfix";
+    if (/\bis\s+(broken|incorrect|wrong)\b/.test(lower)) return "bugfix";
+    if (/\bcrash(?:es|ing)?\b/.test(lower)) return "bugfix";
+
     return "feature";
   }
 

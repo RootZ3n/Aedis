@@ -1,0 +1,50 @@
+{
+  "id": "aedis-task:baa2e909-e1c5-47ea-81dc-51c9e4e2b56f",
+  "space": "aedis/project/mnt-ai-tmp-aedis-gauntlet-6ysdng",
+  "kind": "aedis-task",
+  "title": "modify core/util.ts to export x = 2",
+  "summary": "single-file · failed run · single-file scope · no files touched · verification not run",
+  "raw": "{\n  \"rawInput\": \"modify core/util.ts to export x = 2\",\n  \"normalizedPrompt\": \"modify core/util.ts to export x = 2\",\n  \"workerResults\": [\n    {\n      \"workerType\": \"scout\",\n      \"taskId\": \"f9d90c06-ed0c-4825-8602-ad6cf6148847\",\n      \"success\": true,\n      \"output\": {\n        \"kind\": \"scout\",\n        \"dependencies\": [],\n        \"patterns\": [],\n        \"riskAssessment\": {\n          \"level\": \"low\",\n          \"factors\": [],\n          \"mitigations\": []\n        },\n        \"suggestedApproach\": \"ok\"\n      },\n      \"issues\": [],\n      \"cost\": {\n        \"model\": \"\",\n        \"inputTokens\": 0,\n        \"outputTokens\": 0,\n        \"estimatedCostUsd\": 0\n      },\n      \"confidence\": 0.9,\n      \"touchedFiles\": [],\n      \"assumptions\": [],\n      \"durationMs\": 1\n    }\n  ]\n}",
+  "tags": [
+    "aedis-task",
+    "scope:single-file",
+    "verdict:failed"
+  ],
+  "createdAt": "2026-04-25T14:16:59.246Z",
+  "updatedAt": "2026-04-25T14:16:59.253Z",
+  "sourceSystem": "aedis",
+  "repoId": "/mnt/ai/tmp/aedis-gauntlet-6YsdNG",
+  "evidenceRefs": [
+    {
+      "kind": "run",
+      "ref": "baa2e909-e1c5-47ea-81dc-51c9e4e2b56f",
+      "sourceSystem": "aedis"
+    },
+    {
+      "kind": "intent",
+      "ref": "0878f5f4-2b15-41a0-b063-54b70de5b6e7",
+      "sourceSystem": "aedis"
+    }
+  ],
+  "relatedIds": [
+    "aedis-outcome:baa2e909-e1c5-47ea-81dc-51c9e4e2b56f",
+    "aedis-run:baa2e909-e1c5-47ea-81dc-51c9e4e2b56f"
+  ],
+  "relationships": [
+    {
+      "type": "run",
+      "targetId": "aedis-run:baa2e909-e1c5-47ea-81dc-51c9e4e2b56f"
+    },
+    {
+      "type": "outcome",
+      "targetId": "aedis-outcome:baa2e909-e1c5-47ea-81dc-51c9e4e2b56f"
+    }
+  ],
+  "confidence": 0.35,
+  "metadata": {
+    "scopeType": "single-file",
+    "complexityTier": "low",
+    "verificationVerdict": "not-run",
+    "filesTouched": 0
+  }
+}
