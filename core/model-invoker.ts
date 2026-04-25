@@ -78,6 +78,35 @@ export interface FallbackInvokeResult extends InvokeResult {
   readonly skippedDueToBlacklist: boolean;
   /** Whether a circuit-breaker skip occurred this run. */
   readonly skippedDueToCircuitBreaker: boolean;
+  /**
+   * Ordered per-attempt log including skips. Receipts persist this so
+   * trust signals (which provider failed how, how long it took, what it
+   * cost) survive past the run. Includes the successful attempt as the
+   * last "ok" entry; skipped attempts have durationMs=0 and costUsd=0.
+   */
+  readonly attempts: readonly InvokeAttempt[];
+}
+
+/**
+ * One row in the fallback log. Outcomes:
+ *   - "ok": provider returned a non-empty response and we used it
+ *   - "skipped_blacklist": skipped because provider timed out earlier this run
+ *   - "skipped_circuit_breaker": skipped because cross-run CB is open
+ *   - any InvokerErrorKind: provider was tried but failed with that kind
+ */
+export interface InvokeAttempt {
+  readonly provider: Provider;
+  readonly model: string;
+  readonly outcome:
+    | "ok"
+    | "skipped_blacklist"
+    | "skipped_circuit_breaker"
+    | InvokerErrorKind;
+  readonly durationMs: number;
+  readonly costUsd: number;
+  readonly tokensIn?: number;
+  readonly tokensOut?: number;
+  readonly errorMsg?: string;
 }
 
 /**
@@ -331,6 +360,18 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         throw new InvokerError(`Unknown provider "${provider}"`, "config");
     }
 
+    // Reject truly empty / whitespace-only responses at the provider
+    // layer. Anything richer (short prose, no code fence) is the
+    // caller's domain — they have file-path context the invoker doesn't.
+    // Treating empty as a failure here lets the existing fallback chain
+    // pick another provider instead of returning success with text="".
+    if (!result.text || result.text.trim() === "") {
+      throw new InvokerError(
+        `${provider}/${model} returned empty content`,
+        "empty_response",
+      );
+    }
+
     cbOk(provider, cbState);
     logCall({
       timestamp: new Date().toISOString(),
@@ -346,7 +387,12 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const kind = err instanceof InvokerError ? err.kind : "unknown";
-    if (kind !== "circuit_breaker") cbFail(provider, cbState);
+    // Don't penalize the circuit breaker for:
+    //   - circuit_breaker: would trivially recurse
+    //   - empty_response: the *infra* worked; the *model* gave us junk.
+    //     Penalizing the provider would close the breaker on a healthy
+    //     endpoint just because one prompt happened to be hard.
+    if (kind !== "circuit_breaker" && kind !== "empty_response") cbFail(provider, cbState);
     logCall({
       timestamp: new Date().toISOString(),
       provider, model,
@@ -389,6 +435,7 @@ export async function invokeModelWithFallback(
 
   const ctx = runContext ?? createRunInvocationContext();
   const attemptedProviders: Provider[] = [];
+  const attempts: InvokeAttempt[] = [];
   const errors: string[] = [];
   let skippedDueToBlacklist = false;
   let skippedDueToCircuitBreaker = false;
@@ -400,6 +447,13 @@ export async function invokeModelWithFallback(
         `[model-invoker] fallback: skipping ${cfg.provider}/${cfg.model} — provider is blacklisted (timed out earlier in this run)`
       );
       skippedDueToBlacklist = true;
+      attempts.push({
+        provider: cfg.provider,
+        model: cfg.model,
+        outcome: "skipped_blacklist",
+        durationMs: 0,
+        costUsd: 0,
+      });
       continue;
     }
     if (cbOpen(cfg.provider, cbState)) {
@@ -408,15 +462,32 @@ export async function invokeModelWithFallback(
       );
       ctx.circuitBreakerSkips.add(cfg.provider);
       skippedDueToCircuitBreaker = true;
+      attempts.push({
+        provider: cfg.provider,
+        model: cfg.model,
+        outcome: "skipped_circuit_breaker",
+        durationMs: 0,
+        costUsd: 0,
+      });
       continue;
     }
 
     attemptedProviders.push(cfg.provider);
     console.log(`[model-invoker] fallback: attempting ${cfg.provider}/${cfg.model}`);
+    const attemptStart = Date.now();
 
     try {
       const result = await invokeModel(cfg);
       console.log(`[model-invoker] fallback: ${cfg.provider}/${cfg.model} succeeded`);
+      attempts.push({
+        provider: cfg.provider,
+        model: cfg.model,
+        outcome: "ok",
+        durationMs: Date.now() - attemptStart,
+        costUsd: result.costUsd,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+      });
       return {
         ...result,
         usedProvider: cfg.provider,
@@ -424,17 +495,34 @@ export async function invokeModelWithFallback(
         attemptedProviders,
         skippedDueToBlacklist,
         skippedDueToCircuitBreaker,
+        attempts,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const kind = err instanceof InvokerError ? err.kind : "unknown";
       errors.push(`${cfg.provider}/${cfg.model} (${kind}): ${msg}`);
+      attempts.push({
+        provider: cfg.provider,
+        model: cfg.model,
+        outcome: kind,
+        durationMs: Date.now() - attemptStart,
+        costUsd: 0,
+        errorMsg: msg,
+      });
 
       if (kind === "timeout") {
         console.warn(
           `[model-invoker] fallback: ${cfg.provider}/${cfg.model} TIMED OUT — blacklisting provider for the rest of this run`
         );
         ctx.timedOutProviders.add(cfg.provider);
+      } else if (kind === "empty_response") {
+        // Empty content from a model is a quality issue, not an infra
+        // failure. Don't blacklist (other prompts may succeed) and don't
+        // increment the circuit breaker (already skipped in invokeModel).
+        // Just fall through to the next chain entry.
+        console.warn(
+          `[model-invoker] fallback: ${cfg.provider}/${cfg.model} returned empty content — trying next in chain`
+        );
       } else {
         console.warn(
           `[model-invoker] fallback: ${cfg.provider}/${cfg.model} failed (${kind}) — trying next in chain`
@@ -479,12 +567,22 @@ export async function invokeModelWithFallback(
     console.log(
       `[model-invoker] fallback: chain exhausted — last-resort attempt ${PORTUM_LAST_RESORT.provider}/${PORTUM_LAST_RESORT.model}`
     );
+    const portumStart = Date.now();
 
     try {
       const result = await invokeModel(portumCfg);
       console.log(
         `[model-invoker] fallback: ${PORTUM_LAST_RESORT.provider}/${PORTUM_LAST_RESORT.model} succeeded as last resort`
       );
+      attempts.push({
+        provider: PORTUM_LAST_RESORT.provider,
+        model: PORTUM_LAST_RESORT.model,
+        outcome: "ok",
+        durationMs: Date.now() - portumStart,
+        costUsd: result.costUsd,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+      });
       return {
         ...result,
         usedProvider: PORTUM_LAST_RESORT.provider,
@@ -492,11 +590,20 @@ export async function invokeModelWithFallback(
         attemptedProviders,
         skippedDueToBlacklist,
         skippedDueToCircuitBreaker,
+        attempts,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const kind = err instanceof InvokerError ? err.kind : "unknown";
       errors.push(`${PORTUM_LAST_RESORT.provider}/${PORTUM_LAST_RESORT.model} (${kind}): ${msg}`);
+      attempts.push({
+        provider: PORTUM_LAST_RESORT.provider,
+        model: PORTUM_LAST_RESORT.model,
+        outcome: kind,
+        durationMs: Date.now() - portumStart,
+        costUsd: 0,
+        errorMsg: msg,
+      });
       if (kind === "timeout") {
         ctx.timedOutProviders.add(PORTUM_LAST_RESORT.provider);
       }
@@ -514,12 +621,21 @@ export async function invokeModelWithFallback(
       "[model-invoker] fallback: chain exhausted — portum is blacklisted (timed out earlier in this run), skipping last-resort"
     );
     skippedDueToBlacklist = true;
+    attempts.push({
+      provider: PORTUM_LAST_RESORT.provider,
+      model: PORTUM_LAST_RESORT.model,
+      outcome: "skipped_blacklist",
+      durationMs: 0,
+      costUsd: 0,
+    });
   }
 
-  throw new InvokerError(
+  const finalErr = new InvokerError(
     `All fallback providers failed (${chainEntriesAttempted} chain entries attempted, ${chainEntriesSkipped} skipped via blacklist, plus portum last-resort): ${errors.join(" | ")}`,
     "unknown",
   );
+  finalErr.attempts = attempts;
+  throw finalErr;
 }
 
 // ─── Local (Mock) ────────────────────────────────────────────────────
@@ -755,10 +871,24 @@ export async function escalateOnLowConfidence(
 
 // ─── Errors ──────────────────────────────────────────────────────────
 
-export type InvokerErrorKind = "timeout" | "http" | "network" | "config" | "unknown" | "circuit_breaker";
+export type InvokerErrorKind =
+  | "timeout"
+  | "http"
+  | "network"
+  | "config"
+  | "unknown"
+  | "circuit_breaker"
+  | "empty_response";
 
 export class InvokerError extends Error {
   readonly kind: InvokerErrorKind;
+  /**
+   * Set on the final InvokerError thrown by invokeModelWithFallback when
+   * the entire chain is exhausted. Holds the per-attempt log so callers
+   * can persist it to receipts even on total failure. Single-call
+   * invokeModel errors leave this undefined.
+   */
+  attempts?: readonly InvokeAttempt[];
   constructor(message: string, kind: InvokerErrorKind = "unknown") {
     super(message);
     this.name = "InvokerError";
