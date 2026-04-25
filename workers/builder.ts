@@ -139,6 +139,7 @@ import {
   classifyProviderAnomaly,
   type GuardFinding,
 } from "../core/adversarial-guard.js";
+import { detectNoOpUpdate } from "../core/no-op-detection.js";
 import {
   formatBriefForBuilder,
   type ImplementationBrief,
@@ -1653,10 +1654,19 @@ export class BuilderWorker extends AbstractWorker {
       );
     }
 
-    if (updatedContent === fullContent) {
+    // NO_OP early detection: refuse the patch if the model output is
+    // byte-identical OR whitespace-normalized identical to the original.
+    // The latter catches the "trailing whitespace / line-ending churn"
+    // class of no-op that previously slipped past Builder, ran the
+    // Verifier and Integrator, and only got classified at the
+    // execution-gate (run d3524769 cost ~9 minutes and ~4Gi peak swap
+    // before the gate finally rejected the run as content-identical).
+    const noop = detectNoOpUpdate(fullContent, updatedContent);
+    if (noop.noOp) {
+      const msg = `Model produced no effective source change (${noop.reason})`;
       throw new BuilderAttemptError(
-        "Model returned no effective file changes",
-        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-empty-diff", "empty-diff", "Model returned no effective file changes"),
+        msg,
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-empty-diff", "empty-diff", msg),
       );
     }
     if (DiffApplier.looksLikeRawDiff(updatedContent)) {
