@@ -188,7 +188,7 @@ export function explainFailure(receipt: RunReceipt): FailureExplanation {
     code: "unknown",
     stage: "unknown",
     rootCause:
-      "The run did not reach a verified success state, but no specific blocker was captured on the receipt. This typically means a gate failed silently or a worker returned an empty result.",
+      "The run did not reach a verified success state, but no specific blocker was captured on the receipt. This typically means the provider returned an empty response and no diff was applied.",
     suggestedFix:
       "Check the worker grid and Lumen log for this run. If nothing is visible, re-run with a tighter scope or ask Loqui for a dry-run plan first.",
     evidence,
