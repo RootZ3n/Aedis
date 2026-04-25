@@ -97,6 +97,79 @@ export interface ReceiptWorkerEvent {
   readonly issues: readonly string[];
 }
 
+/**
+ * Persisted snapshot of a TrustRouter routing decision. One entry is
+ * written per dispatchNode call, with escalations appended in-place
+ * when capability-floor or weak-output retry forces a tier change.
+ *
+ * Why this lives in the receipt: TrustRouter computes complexity score,
+ * blast radius, and a rationale string per task — none of which
+ * survived past the run before. Without persistence, post-run review
+ * can't tell whether a verdict came from a fast-tier model on a
+ * "system-wide" task (likely under-resourced) or a premium-tier model
+ * on a "contained" task (likely over-billed).
+ */
+export interface ReceiptRoutingDecision {
+  readonly at: string;
+  readonly taskId: string;
+  readonly workerType: string;
+  /** "fast" | "standard" | "premium" — matches WorkerTier in router/trust-router.ts */
+  readonly tier: string;
+  readonly rationale: string;
+  /** Computed complexity 0–10 from TrustRouter.analyzeComplexity. */
+  readonly complexityScore: number;
+  /** Blast radius level: contained | local | cross-module | system-wide. */
+  readonly blastRadiusLevel: string;
+  readonly riskSignals: readonly string[];
+  readonly estimatedCostUsd: number;
+  readonly tokenBudget: number;
+  readonly criticReviewRequired: boolean;
+  /** Tier escalations applied in order (capability-floor, weak-output retry). */
+  escalations: ReceiptRoutingEscalation[];
+}
+
+export interface ReceiptRoutingEscalation {
+  readonly at: string;
+  readonly from: string;
+  readonly to: string;
+  /** "capability-floor" | "weak-output-retry" | "escalation-boundary" | other. */
+  readonly reason: string;
+  readonly detail?: string;
+}
+
+/**
+ * Per-attempt log of a provider call. Mirrors InvokeAttempt from
+ * model-invoker.ts but carries the taskId so multiple workers'
+ * attempts can be sorted/filtered in receipts. One entry per chain
+ * step (success, error, or skip).
+ */
+export interface ReceiptProviderAttempt {
+  readonly at: string;
+  readonly taskId: string;
+  readonly attemptIndex: number;
+  readonly provider: string;
+  readonly model: string;
+  /** "ok" | "skipped_blacklist" | "skipped_circuit_breaker" | InvokerErrorKind */
+  readonly outcome: string;
+  readonly durationMs: number;
+  readonly costUsd: number;
+  readonly tokensIn?: number;
+  readonly tokensOut?: number;
+  readonly errorMsg?: string;
+}
+
+/**
+ * One row per circuit-breaker skip in the run. Derivable from
+ * providerAttempts[] (outcome === "skipped_circuit_breaker") but
+ * promoted to a top-level field for fast UI scanning.
+ */
+export interface ReceiptCircuitBreakerSkip {
+  readonly at: string;
+  readonly taskId: string;
+  readonly provider: string;
+  readonly model: string;
+}
+
 export interface PersistentRunReceipt {
   readonly version: 1;
   readonly runId: string;
@@ -161,6 +234,24 @@ export interface PersistentRunReceipt {
    * stale flag for attempts whose results were superseded.
    */
   builderAttempts: unknown[];
+  /**
+   * TrustRouter routing decisions per dispatched task. Built fresh
+   * from RoutingDecision at dispatch time; escalations append in-place
+   * as the task progresses. Empty for legacy receipts.
+   */
+  routing: ReceiptRoutingDecision[];
+  /**
+   * Per-attempt provider call log. One entry per chain step (success,
+   * error, or skip) across every worker in the run. Lets post-run
+   * review see real fallback behavior, circuit-breaker skips, and
+   * empty-response retries that weren't visible before.
+   */
+  providerAttempts: ReceiptProviderAttempt[];
+  /**
+   * Promoted view: every provider call that was skipped because the
+   * cross-run circuit breaker was open. Subset of providerAttempts.
+   */
+  circuitBreakerSkips: ReceiptCircuitBreakerSkip[];
 }
 
 /**
@@ -271,6 +362,25 @@ export interface ReceiptPatch {
    * full history of attempts across the run is preserved.
    */
   readonly appendBuilderAttempts?: readonly unknown[];
+  /**
+   * Append TrustRouter routing decisions. New entries are appended; if
+   * a routing entry for the same taskId already exists, its
+   * escalations[] are merged (existing + new) so capability-floor and
+   * weak-output retries can be added incrementally.
+   */
+  readonly appendRouting?: readonly ReceiptRoutingDecision[];
+  /**
+   * Append provider-attempt records (one row per fallback-chain step,
+   * including skipped entries). Records are concatenated; the receipt
+   * is the source of truth for post-run "which providers did we
+   * actually try and why" questions.
+   */
+  readonly appendProviderAttempts?: readonly ReceiptProviderAttempt[];
+  /**
+   * Append circuit-breaker skip records. Concatenated, not deduped —
+   * a provider being skipped twice in one run is itself a signal.
+   */
+  readonly appendCircuitBreakerSkips?: readonly ReceiptCircuitBreakerSkip[];
 }
 
 const INDEX_FILE = "index.json";
@@ -595,6 +705,15 @@ export class ReceiptStore {
       builderAttempts: patch.appendBuilderAttempts && patch.appendBuilderAttempts.length > 0
         ? [...(current.builderAttempts ?? []), ...patch.appendBuilderAttempts]
         : (current.builderAttempts ?? []),
+      routing: mergeRoutingDecisions(current.routing ?? [], patch.appendRouting ?? []),
+      providerAttempts:
+        patch.appendProviderAttempts && patch.appendProviderAttempts.length > 0
+          ? [...(current.providerAttempts ?? []), ...patch.appendProviderAttempts]
+          : (current.providerAttempts ?? []),
+      circuitBreakerSkips:
+        patch.appendCircuitBreakerSkips && patch.appendCircuitBreakerSkips.length > 0
+          ? [...(current.circuitBreakerSkips ?? []), ...patch.appendCircuitBreakerSkips]
+          : (current.circuitBreakerSkips ?? []),
     };
     return next;
   }
@@ -633,6 +752,9 @@ export class ReceiptStore {
       workspace: null,
       implementationBrief: null,
       builderAttempts: [],
+      routing: [],
+      providerAttempts: [],
+      circuitBreakerSkips: [],
     };
   }
 
@@ -811,4 +933,39 @@ function dedupeWorkerEvents(events: readonly ReceiptWorkerEvent[]): ReceiptWorke
 
 function compareDesc(a: string, b: string): number {
   return a < b ? 1 : a > b ? -1 : 0;
+}
+
+/**
+ * Merge a stream of incoming routing decisions into the persisted
+ * list. Rules:
+ *   - First time we see a taskId: append the new entry.
+ *   - Subsequent times: keep the original initial decision and append
+ *     the new entry's escalations[] to the existing entry's
+ *     escalations[]. Tier on the original is left as the *initial*
+ *     tier — the latest tier is implied by the last escalation.
+ *
+ * This shape lets callers either pass a fresh decision (initial
+ * dispatch) or a partial update with only new escalations (capability
+ * floor or weak-output retry), without the receipt accumulating
+ * duplicate decision rows for the same task.
+ */
+function mergeRoutingDecisions(
+  current: readonly ReceiptRoutingDecision[],
+  incoming: readonly ReceiptRoutingDecision[],
+): ReceiptRoutingDecision[] {
+  if (incoming.length === 0) return [...current];
+  const out = current.map((d) => ({ ...d, escalations: [...d.escalations] }));
+  const indexByTask = new Map<string, number>();
+  out.forEach((d, i) => indexByTask.set(d.taskId, i));
+  for (const next of incoming) {
+    const existingIdx = indexByTask.get(next.taskId);
+    if (existingIdx === undefined) {
+      out.push({ ...next, escalations: [...next.escalations] });
+      indexByTask.set(next.taskId, out.length - 1);
+    } else {
+      const existing = out[existingIdx]!;
+      existing.escalations = [...existing.escalations, ...next.escalations];
+    }
+  }
+  return out;
 }

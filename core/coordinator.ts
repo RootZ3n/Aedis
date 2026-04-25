@@ -88,6 +88,8 @@ import {
   type ReceiptPatch,
   type ReceiptCheckpoint,
   type ReceiptWorkerEvent,
+  type ReceiptRoutingDecision,
+  type ReceiptRoutingEscalation,
 } from "./receipt-store.js";
 import {
   createTaskGraph,
@@ -3827,6 +3829,8 @@ export class Coordinator {
     let routingDecision = this.trustRouter.route(runTask, intent, context);
     node.assignedTier = routingDecision.tier;
     console.log(`[coordinator] dispatchNode: ${node.workerType} routed to tier=${routingDecision.tier}`);
+    const initialTier = routingDecision.tier;
+    const routingEscalations: ReceiptRoutingEscalation[] = [];
 
     // Capability-floor enforcement: compare the chosen tier against the
     // minimum the Implementation Brief says this task needs. On a
@@ -3862,12 +3866,44 @@ export class Coordinator {
           };
         }
         void escalatedAssignment; // buildDispatchAssignment rebuilds below
+        routingEscalations.push({
+          at: new Date().toISOString(),
+          from: previousTier,
+          to: floor.floor,
+          reason: "capability-floor",
+          detail: floor.reason,
+        });
         this.emit({
           type: "escalation_triggered",
           payload: { runId: active.run.id, taskId: node.id, from: previousTier, to: floor.floor },
         });
       }
     }
+
+    // Persist the routing decision now that capability-floor has had its say.
+    // Tier on the receipt entry is the *initial* router pick; the
+    // capability-floor escalation (if any) appears in escalations[].
+    // Subsequent weak-output retries append further escalations to the
+    // same row (mergeRoutingDecisions in receipt-store handles dedupe by
+    // taskId). Best-effort write — receipt persistence must never block
+    // the dispatch path.
+    const initialRouting: ReceiptRoutingDecision = {
+      at: new Date().toISOString(),
+      taskId: runTask.id,
+      workerType: node.workerType,
+      tier: initialTier,
+      rationale: routingDecision.rationale,
+      complexityScore: routingDecision.complexity.score,
+      blastRadiusLevel: routingDecision.blastRadius.level,
+      riskSignals: routingDecision.blastRadius.riskSignals,
+      estimatedCostUsd: routingDecision.estimatedCostUsd,
+      tokenBudget: routingDecision.tokenBudget,
+      criticReviewRequired: routingDecision.requiresCriticReview,
+      escalations: routingEscalations,
+    };
+    this.receiptStore
+      .patchRun(active.run.id, { appendRouting: [initialRouting] })
+      .catch(() => undefined);
 
     this.emit({
       type: "worker_assigned",
@@ -4163,6 +4199,36 @@ export class Coordinator {
             type: "escalation_triggered",
             payload: { runId: active.run.id, taskId: node.id, from: currentTier, to: stronger.tier },
           });
+          // Record on the persisted routing row for this task. Same-task
+          // escalations merge into the existing entry's escalations[]
+          // via mergeRoutingDecisions.
+          this.receiptStore
+            .patchRun(active.run.id, {
+              appendRouting: [{
+                at: new Date().toISOString(),
+                taskId: runTask.id,
+                workerType: node.workerType,
+                // tier and other fields here are placeholders — the
+                // merger ignores them when an entry already exists for
+                // this taskId; only escalations[] are appended.
+                tier: stronger.tier,
+                rationale: "weak-output retry escalation",
+                complexityScore: 0,
+                blastRadiusLevel: "",
+                riskSignals: [],
+                estimatedCostUsd: 0,
+                tokenBudget: 0,
+                criticReviewRequired: false,
+                escalations: [{
+                  at: new Date().toISOString(),
+                  from: currentTier,
+                  to: stronger.tier,
+                  reason: "weak-output-retry",
+                  detail: stronger.identity,
+                }],
+              }],
+            })
+            .catch(() => undefined);
         }
 
         active.weakOutputRetries += 1;
