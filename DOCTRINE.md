@@ -98,56 +98,114 @@ Every model call produces a cost entry: model name, input tokens, output tokens,
 
 ---
 
+## Routing Doctrine
+
+These rules govern how a task gets a model — and when it shouldn't get one at all.
+
+1. **Cheapest safe path first.** A task gets the lowest tier that meets the quality bar. The TrustRouter never escalates speculatively; escalation requires a concrete signal (capability floor, weak output, blast radius, risk).
+2. **Deterministic before model.** When the change is mechanically describable — route insertion, import update, decorated-class extension, multi-file scaffold of a known shape — the deterministic transform pre-pass runs first. If it applies, the LLM Builder is bypassed entirely and the task is routed → brief → transform → verify → promote → receipt with zero model calls.
+3. **Escalate on capability need or weak output, never preemptively.** Two escalation paths exist: capability-floor (the brief's minimum tier exceeds the router's pick) and weak-output retry (the builder produced empty diff, raw diff, prose, export loss, or a critic-rejected output). Both are bounded — weak-output retry caps at 2 attempts; capability-floor lifts the tier exactly once before the run.
+4. **Never hide provider failure.** Empty responses, timeouts, HTTP errors, network errors, and circuit-breaker skips all surface in the receipt's `providerAttempts[]`. Fallback succeeding does not erase the failed attempts that came before it. Operators see what was tried.
+5. **Never let fallback success bypass verifier / execution / merge gate.** A model call that succeeds via the fallback chain still produces output that goes through the same Critic → Verifier → Integrator → MergeGate → ExecutionGate pipeline as a primary success. Fallback is a routing concern, not a quality concern. The gates make their own decision.
+6. **No Anthropic hot path unless the doctrine flag says otherwise.** Builder, Critic, and Integrator must not use `provider: "anthropic"` (primary or chain) without `AEDIS_ALLOW_ANTHROPIC=1`. The Phase 3 validator warns at config-load time. Anthropic is welcome for meta-work and for deliberate experiments; it must never be the silent default in the build pipeline.
+
+---
+
+## Trust Boundaries — What Is Real Today, What Is Future Work
+
+Aedis must not let its own docs overstate its capabilities. As of the trust-routing-hardening pass (commits 44e876e through ac4b968), the following are **real**:
+
+- **Builder routing is tier-aware end-to-end.** `TrustRouter.route()` produces a tier (`fast`/`standard`/`premium`) per builder dispatch from complexity + blast radius + quality bar; capability-floor escalates when the brief demands more; weak-output retry escalates again on empty/raw/prose/critic-rejected output.
+- **Builder fallback chains are declarative.** Per-tier `chain[]` in `.aedis/model-config.json` is the source of truth; the legacy single-entry constructor fallback is appended only when no chain is declared.
+- **Provider attempts are evidence in the receipt.** Every chain step (success, error, blacklist skip, circuit-breaker skip) is recorded with timing, cost, and outcome on `PersistentRunReceipt.providerAttempts[]`. Routing decisions and escalations are recorded on `routing[]`.
+- **Empty / whitespace responses are classified as failures** at the provider layer — `InvokerError("empty_response")` advances the chain without poisoning the circuit breaker.
+- **Cancellation propagates end-to-end** for the Builder and Critic execution paths that call `invokeModelWithFallback`. `Coordinator.cancel(runId)` triggers a per-run `AbortController`; in-flight HTTP requests are dropped, not waited for. Stale-result guards remain as a backstop.
+- **Repair-audit-pass is audit-only.** It surfaces structural findings (broken imports, missing exports, stale markers) as advisory signals. It never modifies any file. The result shape carries an `auditOnly: true` literal-type invariant; no `repairsApplied` or `repairsAttempted` fields exist.
+
+The following are **not yet real** and must not be claimed as such:
+
+- **Non-Builder worker routing is not tier-aware.** Critic, Integrator, Scout, and Verifier read static `model-config[<role>]` assignments — they do not call `TrustRouter.route()`. A "standard tier" Critic does not exist; the Critic uses whatever model the config names. *Phase 6 documents this as the current state; a future phase may introduce per-worker tier routing if measured cost/quality data justifies it.*
+- **Provider fallback success ≠ task success.** A Builder call that fell back from primary to entry-3 and produced compiling code can still be wrong. Verifier and merge gate are the authorities on whether the change is correct.
+- **Audit findings ≠ repairs.** The repair-audit-pass surfaces structural smells. It does not fix them. A non-empty `findings[]` means the audit *noticed* something — nothing more.
+- **Receipts are evidence, not proof of semantic correctness.** A receipt with `providerAttempts: [ok]`, `routing: [tier:standard]`, `executionVerified: true` does not prove the change is what the user asked for. Crucibulum (when scored against this run), the diff viewer, and the user's eyes are the final authority on intent satisfaction. The receipt records what happened, not what *should* have happened.
+- **Real-world task validation is partial.** Single-file edits on TypeScript/Python/Crucible are confirmed working as of 2026-04-19. Multi-file semantic tasks, ambiguous-prompt rejection rates, bug-fix-with-hidden-failure detection, and fallback-under-real-provider-outage have not been measured in a controlled gauntlet. See [Replacement-Grade Checklist](#replacement-grade-checklist--do-not-claim-until).
+
+---
+
+## Replacement-Grade Checklist — Do Not Claim Until…
+
+Aedis aspires to be a trusted Claude Code replacement for real-world development tasks. The infrastructure is now in place. The evidence is not yet sufficient. **Do not claim replacement-grade until every item below has measured pass data:**
+
+- [ ] **Real task gauntlet passes.** A controlled run of multi-target prompts on at least three real repos (`more-input`, `absent-pianist`, `crucible`/`squidley-v2`) with verdicts, costs, times, and failure modes recorded in receipts.
+- [ ] **Multi-file semantic tasks succeed repeatedly.** Not a one-off pass — three consecutive clean runs on a non-trivial multi-file change (≥ 3 files, cross-module, real semantic edit, not a sweep) with VERIFIED_SUCCESS and zero stale-result fallbacks.
+- [ ] **Ambiguous prompt handling is measured.** A prompt set known to be under-specified is run through Loqui; the rejection rate (`clarify` vs erroneous `build`) is reported. Loqui must refuse to dispatch on the meta-prompt cases without exception.
+- [ ] **Fallback / cancellation behavior verified under real provider failure.** A run that triggers a real provider 429 / timeout / network drop, with the receipt's `providerAttempts[]` showing the chain advancing correctly. A separate run cancelled mid-flight, with the in-flight HTTP call confirmed dropped (no late settlement applied to changes).
+- [ ] **Cost / time / success / failure classifications are reported.** A summary table per repo: total runs, success rate, mean cost, mean wall time, failure-mode distribution. Not aggregated across repos — per-repo so the variance is visible.
+
+Every item above is a testable claim. Until receipts back each one, the system is **promising**, not **trusted**. *The Phase 7 gauntlet will produce these numbers; until then, every external description of Aedis must qualify the readiness claim.*
+
+---
+
 ## Model Assignments
 
-Default model assignments are defined in `server/routes/config.ts` (`DEFAULT_MODEL_CONFIG`) and overridden per-project by `.aedis/model-config.json` if present (with `.zendorium/model-config.json` read as a legacy fallback during the rename). Workers read the active assignment via `loadModelConfig()` on every execute, so configuration changes take effect on the next run without a process restart.
+Per-repo model selection lives in `.aedis/model-config.json` (with `.zendorium/model-config.json` read as a legacy fallback during the rename). Workers read the active assignment via `loadModelConfig()` on every execute, so configuration changes take effect on the next run without a process restart. The `DEFAULT_MODEL_CONFIG` in `server/routes/config.ts` is the *empty-config fallback* — it ships with the codebase but is overridden by any real `.aedis/model-config.json`.
 
-Per-role fallbacks are NOT stored in `model-config.json` — they are hardcoded in each worker's constructor (`workers/builder.ts`, `workers/critic.ts`) via the `fallbackModel` field. Both Builder and Critic use the same `invokeModelWithFallback()` mechanism in `core/model-invoker.ts`. The default request timeout is **5 minutes** (300_000 ms) — raised from 2 minutes after ModelStudio was identified as slow but functional under heavy load.
+Per-tier declarative fallback chains are supported via `ModelAssignment.chain[]` (added 2026-04-25 in `declarative-model-chains`). When a chain is declared, it is authoritative for that build. When no chain is declared, each worker's constructor-level fallback (`workers/builder.ts`, `workers/critic.ts` `fallbackModel`) is appended so single-entry configs still get *some* fallback. Both paths flow through `invokeModelWithFallback()` in `core/model-invoker.ts`. Default request timeout is **5 minutes** (300_000 ms) — see [Timeout Discipline](#timeout-discipline).
 
 ### Builder
 
-- **Primary:** `qwen3.6-plus` (ModelStudio via `MODELSTUDIO_API_KEY`)
-- **Fallback:** `claude-sonnet-4-6` (Anthropic direct via `ANTHROPIC_API_KEY`)
+- **Resolution order:** `.aedis/model-config.json` → `builderTiers[<tier>]` → `builder` → constructor fallback
+- **Constructor default:** `qwen3.6-plus` on ModelStudio, with `moonshotai/kimi-k2` on OpenRouter as the legacy single-entry fallback
+- **Real Aedis-on-Aedis config:** `xiaomi/mimo-v2.5` on OpenRouter for every role (per the in-repo `.aedis/model-config.json`)
+- **Tier resolution:** `resolveBuilderChainForTier()` returns the full ordered chain (primary first, then declared `chain[]` entries deduped by `provider/model` identity)
 
-ModelStudio's qwen3.6-plus is the Builder's workhorse. It is significantly cheaper per token than Sonnet and produces solid diff-application output for the contract scope the Builder enforces. It is also slow — calls regularly run 60–180 seconds, occasionally pushing toward the 5-minute timeout cap. That latency is acceptable; the previous 2-minute timeout was not.
-
-If ModelStudio times out, returns an HTTP error, or is otherwise unreachable, the chain promotes Anthropic Sonnet 4.6 — same model the Critic uses as primary. The fallback exists so a transient ModelStudio outage cannot stall the entire pipeline, and so quality stays high when the cheap path fails.
+Builder model defaults intentionally do *not* point at Anthropic. The doctrine is "no Anthropic in hot path" — the cheap-build promise depends on it. See [No Anthropic Hot Path](#no-anthropic-hot-path).
 
 ### Critic
 
-- **Primary:** `claude-sonnet-4-6` (Anthropic direct via `ANTHROPIC_API_KEY`)
-- **Fallback:** `qwen3.5:9b` (local Ollama, free)
+- **Resolution order:** `.aedis/model-config.json` → `critic` → constructor fallback
+- **Constructor default:** `qwen3.5:9b` on local Ollama (cheap, no API key, no rate limit)
+- **Real Aedis-on-Aedis config:** `xiaomi/mimo-v2.5` on OpenRouter (overrides the constructor default)
 
-The Critic gates the entire pipeline — its verdict decides whether work reaches Verify and Apply, or gets sent back to the Builder for rework. A stronger model here pays for itself by catching issues that would otherwise burn a verification cycle (or worse, ship a broken build). Sonnet has measurably better track record on the diff-review and contract-compliance checks the Critic runs.
+The Critic gates the pipeline — its verdict decides whether work reaches Verify and Apply, or gets sent back to the Builder for rework. The active config is the source of truth; the constructor default exists only for environments without a `.aedis/model-config.json`.
 
-If Anthropic is down, the chain falls back to the local qwen3.5:9b on Ollama. Local Ollama has no API key, no rate limit, no auth check — it is the floor. The Critic's verdicts under fallback are still better than no review at all.
+> **Known doctrine inconsistency (2026-04-25):** `DEFAULT_MODEL_CONFIG.critic` in `server/routes/config.ts` still resolves to `claude-sonnet-4-6 / anthropic` when no `.aedis/model-config.json` is present. The Phase 3 hot-path validator (`checkAnthropicHotPathDoctrine`) emits a one-time warning at load time when this resolves into a build. The default should be retired in a follow-up; for now, every active deployment overrides it via `.aedis/model-config.json`.
 
 ### Other Roles
 
-- **Scout:** `local` (mock, zero-cost — pure context assembly, no model needed)
-- **Verifier:** `local` (mock — runs deterministic tests/types/lint, not a model)
+- **Scout:** `local` (zero-cost by design — pure context assembly, no model needed)
+- **Verifier:** `local` (deterministic tests/types/lint hooks; not a model)
 - **Integrator:** `glm-5.1` (ZhipuAI — strong at multi-file conflict resolution)
-- **Escalation:** `glm-5.1` (ZhipuAI — same model used when standard tier fails)
-- **Coordinator:** `xiaomi/mimo-v2-pro` (OpenRouter — used for orchestration prompts when needed)
+- **Escalation:** `glm-5.1` (same model used when standard tier needs lifting)
+- **Coordinator:** `xiaomi/mimo-v2-pro` (OpenRouter — for orchestration prompts when needed)
 
-These roles do not currently have fallback chains. If they need that discipline later, the same `invokeModelWithFallback()` + per-run blacklist pattern from Builder/Critic can be ported in.
+Non-Builder workers are *not* tier-aware in the current implementation — they read the static `model-config[<role>]` assignment directly. See [Trust Boundaries](#trust-boundaries--what-is-real-today-what-is-future-work) for the full statement of what is and isn't routed today.
 
 ### Fallback Discipline
 
-The fallback chain is intentionally short — primary plus exactly one backup. This is by design:
+The fallback chain has evolved past "primary plus exactly one backup." Current discipline:
 
-1. **No silent escalation.** If the primary fails, exactly one fallback handles it. We do not silently chain through three paid providers and run up the bill.
-2. **No retry-the-same-thing.** A provider that times out once in a run is blacklisted for the rest of that run. The blacklist is shared across both Builder and Critic via per-run scoping (keyed by `intent.runId`), so a ModelStudio timeout in the Builder is also remembered if the Critic happens to need ModelStudio later in the same run.
-3. **Quality and local both have a place.** Builder's fallback is the Critic's primary (Sonnet) — quality backstop for the cheap path. Critic's fallback is local Ollama — availability floor for the quality path. Together they cover the two failure modes that matter: paid provider down, or local-only environment.
-4. **Cost transparency holds.** The cost entry on the receipt records the provider that *actually succeeded*, not the one that was attempted first. The `builder_complete` and `critic_review` events both carry a `fellBack: boolean` so the UI and receipt stream can flag fallback events.
+1. **Declarative chains.** Per-tier `chain[]` in `.aedis/model-config.json` lists the providers in order. The chain is data, not code; per-repo declarations are authoritative for that build. The constructor-level legacy fallback is appended only when no chain is declared.
+2. **No retry-the-same-thing.** A provider that **times out** is blacklisted for the rest of that run. The blacklist lives in the per-run `RunInvocationContext` and is shared across all workers in the run.
+3. **Empty content is a failure signal.** Empty / whitespace-only model output is classified as `InvokerError("empty_response")` at the provider layer (Phase 1). The chain advances to the next entry; the circuit breaker is *not* incremented (the infra worked; the model produced junk on this prompt) and the provider is *not* blacklisted (other prompts may succeed).
+4. **Cross-run circuit breaker.** Repeated failures on a provider trip a persistent circuit breaker (`.aedis/circuit-breaker-state.json`) with half-life decay. Skipped providers are recorded as a `circuitBreakerSkips` entry in the receipt for transparency.
+5. **Universal last-resort.** After the caller-provided chain is exhausted, the runtime makes one more attempt against the local Portum gateway (`localhost:18797`). Skipped if Portum was already in the chain or is blacklisted.
+6. **Cost transparency holds.** The cost entry records the provider that *actually succeeded*. Receipts persist a full `providerAttempts[]` log (Phase 2) — every chain step (success, error, blacklist skip, circuit-breaker skip) with timing and cost. Operators can read the receipt to see exactly which providers were tried and why.
+7. **Cancellation never blacklists or penalizes.** A user-initiated cancel (`Coordinator.cancel(runId)`) propagates an `AbortSignal` end-to-end (Phase 4). Cancelled errors (`InvokerError("cancelled")`) are *never* retried, *never* blacklisted, *never* incremented in the circuit breaker — cancellation is user intent, not provider fault.
 
-If a build run consistently falls through to the Builder fallback, that is a signal — ModelStudio is having a real outage, the API key is invalid, or rate limits are biting. The receipt stream will show it as a flood of `fellBack: true` events, and the operator can act.
+If a build run consistently falls through to a non-primary entry of the declared chain, that is a signal — the primary is having a real outage, the API key is invalid, or rate limits are biting. The receipt's `providerAttempts[]` makes the pattern obvious.
 
 ### Timeout Discipline
 
-`fetchWithTimeout` in `core/model-invoker.ts` defaults to 300_000 ms (5 minutes). This is the per-request hard cap — anything still pending at that point is aborted, the provider is blacklisted for the run, and the chain falls through to the fallback. Workers that need a tighter bound can pass an explicit `timeoutMs` to the underlying provider call, but Builder and Critic both rely on the default.
+`fetchWithRetry` in `core/model-invoker.ts` defaults to 300_000 ms (5 minutes) per request. This is the per-request hard cap — anything still pending at that point is aborted, the provider is blacklisted for the run, and the chain falls through to the next entry. The internal timeout signal is merged with any caller-supplied `AbortSignal` via `AbortSignal.any` so cancellation and timeout share the same plumbing.
 
 The previous 2-minute cap was tripping ModelStudio on essentially every Builder call. The fix was the longer cap, not a different model — ModelStudio works fine when you let it finish.
+
+### No Anthropic Hot Path
+
+The cheap-build promise depends on the *hot path* (Builder, Critic, Integrator) not reaching for Anthropic. The Phase 3 validator `checkAnthropicHotPathDoctrine()` inspects every active `.aedis/model-config.json` and logs a one-time warning per project root if any hot-path role — primary, chain entry, or per-tier builder — uses `provider: "anthropic"`. The check respects `AEDIS_ALLOW_ANTHROPIC=1` as an explicit opt-in for users who have *deliberately* chosen Anthropic for a build.
+
+Anthropic remains valid for meta-work (this very session, for example) and for deliberate quality experiments. It must never be the silent default.
 
 ---
 
@@ -167,6 +225,8 @@ The previous 2-minute cap was tripping ModelStudio on essentially every Builder 
 - **Not autonomous.** The Coordinator manages the pipeline; the user approves the intent and the final apply.
 - **Not trust-by-default.** Every worker earns its routing tier through measured performance.
 - **Not opaque.** Every decision, cost, assumption, and file touch is recorded and visible.
+- **Not a self-repair system.** The `repair-audit-pass` surfaces structural findings; it does not fix anything. Claims like "Aedis repaired the imports" are wrong — it noticed them and surfaced them; the model or the human did the repair.
+- **Not yet measured at replacement scale.** See the [Replacement-Grade Checklist](#replacement-grade-checklist--do-not-claim-until).
 
 ---
 

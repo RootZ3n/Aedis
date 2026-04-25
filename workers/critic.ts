@@ -328,7 +328,10 @@ export class CriticWorker extends AbstractWorker {
    * Build the InvokeConfig chain for a single Critic.execute() call.
    *
    * Chain order:
-   *   1. Primary (active config — usually anthropic/claude-sonnet-4-6)
+   *   1. Primary (from `.aedis/model-config.json`'s `critic` entry,
+   *      defaulting to qwen3.5:9b on Ollama via the constructor when
+   *      no config is present — not Anthropic; the doctrine bans
+   *      Anthropic in the hot path)
    *   2. Local fallback (qwen3.5:9b on Ollama) — UNLESS the primary
    *      already IS ollama, in which case the fallback is skipped to
    *      avoid pointlessly retrying the same provider.

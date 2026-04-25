@@ -40,7 +40,7 @@ All five workers reporting:
 | Multi-file feature | $0.04 | ~$2.00 |
 | Full session (10 tasks) | $0.25 | $5 -- 10 |
 
-Aedis runs Builder on ModelStudio (Qwen) with Anthropic Sonnet as fallback. Scout, Critic, Verifier, and Integrator are local or near-free. The entire orchestration layer is zero-cost — Coordinator, MergeGate, VerificationPipeline, and ContextAssembler run locally with no model calls.
+Builder model selection lives per-repo in `.aedis/model-config.json` with declarative `chain[]` fallbacks. The default in-repo configuration uses `xiaomi/mimo-v2.5` on OpenRouter for the hot-path roles. Anthropic is *not* in the hot path by default — see `DOCTRINE.md` "No Anthropic Hot Path." Scout and Verifier are local (zero-cost). Coordinator, MergeGate, VerificationPipeline, and ContextAssembler run locally with no model calls.
 
 ## Architecture
 
@@ -83,9 +83,15 @@ ProjectMemory          DiffApplier                        git commit / rollback
 
 **Vision** (`core/vision.ts`) — Optional post-build self-check. Captures a screenshot of the running UI and analyzes it for visible errors. Enabled via `AEDIS_VISION=true`.
 
-**Portum** — Universal fallback gateway. Local HTTP proxy that routes to any provider. Builder's fallback chain: ModelStudio primary, Anthropic Sonnet fallback, Portum last resort. Per-run blacklisting — if a provider times out, it's skipped for the rest of that run.
+**Portum** — Universal last-resort gateway. Local HTTP proxy at `localhost:18797`. Tried once after the caller-provided fallback chain is exhausted, skipped if Portum was already in the chain or is blacklisted. Per-run timeout blacklisting and a cross-run circuit breaker (`.aedis/circuit-breaker-state.json`) sit in front of every chain step.
 
-**TrustRouter** (`router/trust-router.ts`) — Routes tasks to worker tiers (fast/standard/premium) based on risk signals, complexity, and escalation boundaries. Failed nodes get escalated to premium on retry.
+**TrustRouter** (`router/trust-router.ts`) — Routes Builder tasks to tiers (fast/standard/premium) from complexity + blast radius + quality bar. Capability-floor and weak-output retry escalate the tier when the brief demands more or the model produced empty/raw/prose/critic-rejected output. *Non-Builder workers (Critic, Integrator, Scout, Verifier) read static `model-config[<role>]` assignments and are not yet tier-routed* — see `DOCTRINE.md` "Trust Boundaries."
+
+**Provider transparency** — Every chain step (success, error, blacklist skip, circuit-breaker skip, empty-response, cancellation) is recorded with timing and cost on `PersistentRunReceipt.providerAttempts[]`. The routing decision and any escalations are recorded on `routing[]`. Operators can see exactly which providers were tried and why without re-deriving from logs.
+
+**End-to-end cancellation** — `Coordinator.cancel(runId)` triggers a per-run `AbortController`; in-flight provider HTTP requests are dropped immediately rather than waiting to settle. Cancelled errors are never retried, never blacklisted, never penalize the circuit breaker.
+
+**Audit-only structural pass** — `repair-audit-pass` surfaces structural smells (broken imports, missing exports, stale markers) as advisory merge-gate findings. It never modifies any file. Receipts say so explicitly.
 
 ## Key Features
 
@@ -147,7 +153,7 @@ WebSocket at `ws://localhost:18796/ws` for live events. Send `{"type":"subscribe
 
 TypeScript. Fastify. WebSocket. No framework. No ORM. No build step beyond `tsc`.
 
-Models: Qwen 3.6 Plus (Builder primary), Claude Sonnet 4.6 (fallback), Qwen 3.5 4B (prompt normalization, local via Ollama).
+Models: per-repo selection via `.aedis/model-config.json` with declarative `chain[]` fallbacks. The default in-repo configuration is `xiaomi/mimo-v2.5` on OpenRouter for hot-path roles, with the local Portum gateway as the universal last-resort. Qwen 3.5 4B (local via Ollama) for prompt normalization. See `DOCTRINE.md` "Model Assignments" for the full picture, including the no-Anthropic-in-hot-path rule.
 
 ## Status
 
