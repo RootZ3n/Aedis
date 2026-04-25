@@ -206,23 +206,53 @@ export class CharterGenerator {
   }
 
   private extractTargets(request: string): string[] {
-    // Strip double-quoted content before scanning. A quoted region in
-    // a user prompt is almost always a literal value the user wants
-    // Aedis to insert verbatim — most often a comment line, a string
-    // constant, or a docstring — NOT a list of files to edit. Run
-    // d3524769 (commit 5838aad on absent-pianist, since reverted) hit
-    // this exact trap: the prompt
-    //   `add a single-line trailing comment: "# See README.md for usage details."`
-    // had `README.md` extracted as a build target because it sat
-    // inside the quoted comment text. The planner then expanded the
-    // intent to two files and produced a 4-wave decomposition for
-    // what should have been a single-file edit.
+    // Strip quoted literal content before scanning. A quoted region in
+    // a user prompt is overwhelmingly a literal value the user wants
+    // Aedis to insert verbatim — a comment line, a string constant, a
+    // docstring, or sample output — NOT a list of files to edit.
     //
-    // Single quotes are deliberately NOT stripped — they show up too
-    // often as natural-language apostrophes ("Aedis's", "doesn't") to
-    // strip safely. Backtick fences are also kept because developers
-    // commonly use them to highlight a real target like `core/foo.ts`.
-    const sanitized = request.replace(/"[^"]*"/g, "");
+    // Run d3524769 (commit 5838aad on absent-pianist, since reverted)
+    // first hit this trap with double-quoted content. Run cd373634
+    // re-hit it via single quotes, proving the original strip was
+    // incomplete. This fix covers four quoting styles in order so
+    // overlapping delimiters don't fight each other:
+    //
+    //   1. Triple-backtick fenced code blocks — markdown-style, may
+    //      span multiple lines and contain example filenames that
+    //      should never be promoted to real targets.
+    //   2. Double-quoted regions — always literal in natural prose.
+    //   3. Single backtick code spans — markdown inline code; if the
+    //      user wants a target highlighted, plain text still works.
+    //   4. Single-quoted regions, with lookbehind/lookahead so
+    //      apostrophes in contractions and possessives ("Aedis's",
+    //      "doesn't", "user's") are NEVER mistaken for delimiters.
+    //
+    // After stripping, we ALSO drop files mentioned only inside a
+    // negative directive like `Do not modify README.md` — those are
+    // explicit non-targets, not work items.
+    const stripped = request
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/"[^"]*"/g, "")
+      .replace(/`[^`]*`/g, "")
+      .replace(/(?<![A-Za-z0-9])'[^']*'(?![A-Za-z0-9])/g, "");
+    // Negative-directive sweep against the ORIGINAL request so we keep
+    // the natural-language context that flags a non-target. Captures
+    // the file in:
+    //   - "do not modify X" / "don't modify X" / "don't change X"
+    //   - "do not edit/touch/update/modify the X"
+    //   - "without modifying/changing/touching/editing X"
+    const negatedTargets = new Set<string>();
+    const negativeRe =
+      /\b(?:do(?:es)?\s+not|don['’]?t|never|without)\s+(?:modify|modifying|change|changing|edit|editing|update|updating|touch|touching)\s+(?:the\s+)?([\w\-./]+\.[A-Za-z]+)/gi;
+    let neg: RegExpExecArray | null;
+    while ((neg = negativeRe.exec(request)) !== null) {
+      const captured = neg[1];
+      if (typeof captured === "string" && captured.length > 0) {
+        negatedTargets.add(captured.replace(/[),:;]+$/g, "").replace(/\.$/, ""));
+      }
+    }
+    // Apply the strips for the actual extraction below.
+    const sanitized = stripped;
     // Supported file extensions — widen beyond TS/JS so the charter can
     // pick up targets in Python projects, Godot games, and the other
     // repos Zen actually drives Aedis on. Keep the list explicit so a
@@ -257,11 +287,13 @@ export class CharterGenerator {
           .filter((target) => target.length > 0),
       ),
     ];
-    return deduped.filter((target) =>
-      !deduped.some((other) =>
-        other !== target && (other.startsWith(`${target}/`) || other.includes(`/${target}/`)),
-      ),
-    );
+    return deduped
+      .filter((target) => !negatedTargets.has(target))
+      .filter((target) =>
+        !deduped.some((other) =>
+          other !== target && (other.startsWith(`${target}/`) || other.includes(`/${target}/`)),
+        ),
+      );
   }
 
   private estimateScope(
