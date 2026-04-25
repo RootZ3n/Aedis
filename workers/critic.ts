@@ -192,7 +192,7 @@ export class CriticWorker extends AbstractWorker {
           `[critic] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)}: ${chain.map(c => `${c.provider}/${c.model}`).join(" → ")}`
         );
 
-        const response = await invokeModelWithFallback(chain, runCtx);
+        const response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
 
         if (response.usedProvider !== primaryProvider) {
           console.warn(

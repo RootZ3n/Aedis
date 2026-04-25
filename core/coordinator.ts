@@ -1259,6 +1259,7 @@ export class Coordinator {
       cancelledGenerations: new Set<string>(),
       pendingDispatches: new Map<string, Promise<unknown>>(),
       rejectedCandidates: preparedTargets.rejected.map((entry) => ({ path: entry.path, reason: entry.reason })),
+      runAbortController: new AbortController(),
     };
     this.activeRuns.set(run.id, active);
 
@@ -2380,6 +2381,16 @@ export class Coordinator {
     const active = this.activeRuns.get(runId);
     if (!active) return false;
     active.cancelled = true;
+    // Abort any in-flight provider HTTP requests so the cancel takes
+    // effect immediately instead of after the worker call returns.
+    // Stale-result guards (cancelledGenerations) still catch late
+    // settlements as a backstop.
+    try {
+      active.runAbortController.abort("Cancelled by user");
+    } catch {
+      // AbortController.abort is synchronous and never throws in
+      // current Node, but be defensive — cancel() must never reject.
+    }
     abortRun(active.run, "Cancelled by user");
     void this.receiptStore.patchRun(runId, {
       intentId: active.intent.id,
@@ -3941,6 +3952,7 @@ export class Coordinator {
       sourceRepo: active.sourceRepo,
       recentContext,
       implementationBrief: active.implementationBrief,
+      signal: active.runAbortController.signal,
       buildAssignment: (decision, task, intent, context, upstreamResults) =>
         this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),
     });
@@ -6415,6 +6427,14 @@ interface ActiveRun {
   pendingDispatches: Map<string, Promise<unknown>>;
   /** Files or paths considered and dropped during planning/context selection. */
   rejectedCandidates: RejectedCandidate[];
+  /**
+   * Per-run AbortController. cancel(runId) calls .abort() on this so
+   * in-flight provider HTTP requests are dropped immediately instead
+   * of running to completion. Threaded into every WorkerAssignment
+   * via buildDispatchAssignment, then into invokeModelWithFallback.
+   * Stale-result guards remain as a backstop for late settlements.
+   */
+  runAbortController: AbortController;
   /** Tracks which capability floor we've enforced, for receipt transparency. */
   capabilityFloorApplied?: {
     readonly floor: "fast" | "standard" | "premium";

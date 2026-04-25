@@ -142,6 +142,22 @@ export interface WorkerAssignment {
    * Coordinator don't produce one; production dispatches always include it.
    */
   readonly implementationBrief?: ImplementationBrief;
+  /**
+   * Cancellation signal threaded from Coordinator.cancel(runId) down to
+   * provider calls. When the run is cancelled, this signal aborts —
+   * workers should pass it through to invokeModelWithFallback so any
+   * in-flight HTTP request is dropped instead of running to completion.
+   *
+   * Optional because:
+   *   - test harnesses don't always wire one
+   *   - workers that don't make external calls (deterministic transforms,
+   *     local-only Verifier) ignore it
+   *
+   * The Coordinator builds one AbortController per run; every dispatch
+   * for that run receives the same signal, so cancelling once stops
+   * every concurrent worker call.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface WorkerResult {

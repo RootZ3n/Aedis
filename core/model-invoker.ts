@@ -58,6 +58,15 @@ export interface InvokeConfig {
   maxTokens?: number;
   /** Run ID threaded through to the call log for scoped cost aggregation. */
   runId?: string;
+  /**
+   * Cancellation signal. When aborted, the in-flight HTTP request is
+   * dropped (raced against the internal timeout) and the call throws
+   * `InvokerError("...", "cancelled")`. Cancelled errors are never
+   * retried inside fetchWithRetry, never blacklist a provider, never
+   * increment the circuit breaker — cancellation is user-initiated and
+   * not a provider fault.
+   */
+  signal?: AbortSignal;
 }
 
 export interface InvokeResult {
@@ -275,8 +284,14 @@ function logCall(entry: CallLogEntry): void {
 // ─── Main Entry Point ────────────────────────────────────────────────
 
 export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
-  const { provider, model, prompt, systemPrompt, maxTokens } = config;
+  const { provider, model, prompt, systemPrompt, maxTokens, signal } = config;
   const startMs = Date.now();
+
+  // Fast cancel: don't even check the circuit breaker if the caller
+  // has already aborted.
+  if (signal?.aborted) {
+    throw new InvokerError(`${provider}/${model} cancelled before dispatch`, "cancelled");
+  }
 
   // Circuit breaker check (cross-run)
   const cbState = cbRead();
@@ -292,68 +307,68 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
         result = invokeLocal(prompt);
         break;
       case "ollama":
-        result = await invokeOllama(model, prompt, systemPrompt, maxTokens);
+        result = await invokeOllama(model, prompt, systemPrompt, maxTokens, signal);
         break;
       case "modelstudio":
         result = await invokeOpenAICompatible(
           process.env.MODELSTUDIO_BASE_URL ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
           requireEnv("MODELSTUDIO_API_KEY"),
-          model, prompt, systemPrompt, maxTokens,
+          model, prompt, systemPrompt, maxTokens, false, signal,
         );
         break;
       case "openrouter":
         result = await invokeOpenAICompatible(
           "https://openrouter.ai/api/v1",
           requireEnv("OPENROUTER_API_KEY"),
-          model, prompt, systemPrompt, maxTokens, true,
+          model, prompt, systemPrompt, maxTokens, true, signal,
         );
         break;
       case "anthropic":
         result = await invokeAnthropic(
           requireEnv("ANTHROPIC_API_KEY"),
-          model, prompt, systemPrompt, maxTokens,
+          model, prompt, systemPrompt, maxTokens, signal,
         );
         break;
       case "openai":
         result = await invokeOpenAICompatible(
           process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
           requireEnv("OPENAI_API_KEY"),
-          model, prompt, systemPrompt, maxTokens,
+          model, prompt, systemPrompt, maxTokens, false, signal,
         );
         break;
       case "minimax":
         result = await invokeOpenAICompatible(
           process.env.MINIMAX_BASE_URL ?? "https://api.minimax.chat/v1",
           requireEnv("MINIMAX_API_KEY"),
-          model, prompt, systemPrompt, maxTokens,
+          model, prompt, systemPrompt, maxTokens, false, signal,
         );
         break;
       case "zai":
         result = await invokeOpenAICompatible(
           process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4/",
           requireEnv("ZAI_API_KEY"),
-          model, prompt, systemPrompt, maxTokens,
+          model, prompt, systemPrompt, maxTokens, false, signal,
         );
         break;
       case "glm-5.1-openrouter":
         result = await invokeOpenAICompatible(
           "https://openrouter.ai/api/v1",
           requireEnv("OPENROUTER_API_KEY"),
-          "z-ai/glm-5.1", prompt, systemPrompt, maxTokens,
+          "z-ai/glm-5.1", prompt, systemPrompt, maxTokens, false, signal,
         );
         break;
       case "glm-5.1-direct":
         result = await invokeOpenAICompatible(
           "https://open.bigmodel.cn/api/paas/v4",
           requireEnv("ZAI_API_KEY"),
-          "glm-5.1", prompt, systemPrompt, maxTokens,
+          "glm-5.1", prompt, systemPrompt, maxTokens, false, signal,
         );
         break;
       case "portum":
         result = await invokeOpenAICompatible(
           "http://localhost:18797/v1",
           undefined,
-          model, prompt, systemPrompt, maxTokens,
+          model, prompt, systemPrompt, maxTokens, false, signal,
         );
         break;
       default:
@@ -392,7 +407,10 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
     //   - empty_response: the *infra* worked; the *model* gave us junk.
     //     Penalizing the provider would close the breaker on a healthy
     //     endpoint just because one prompt happened to be hard.
-    if (kind !== "circuit_breaker" && kind !== "empty_response") cbFail(provider, cbState);
+    //   - cancelled: user-initiated, not a provider fault.
+    if (kind !== "circuit_breaker" && kind !== "empty_response" && kind !== "cancelled") {
+      cbFail(provider, cbState);
+    }
     logCall({
       timestamp: new Date().toISOString(),
       provider, model,
@@ -428,6 +446,7 @@ export async function invokeModel(config: InvokeConfig): Promise<InvokeResult> {
 export async function invokeModelWithFallback(
   chain: readonly InvokeConfig[],
   runContext?: RunInvocationContext,
+  signal?: AbortSignal,
 ): Promise<FallbackInvokeResult> {
   if (chain.length === 0) {
     throw new InvokerError("invokeModelWithFallback: chain is empty", "config");
@@ -441,7 +460,31 @@ export async function invokeModelWithFallback(
   let skippedDueToCircuitBreaker = false;
   const cbState = cbRead();
 
+  // Pre-merge: if the caller passed an explicit `signal` AND any chain
+  // entry has its own per-config signal, we want either source to abort
+  // the active call. The simplest approach is to thread the explicit
+  // signal into each config below; per-config signals are preserved.
+  // Caller-supplied signal takes precedence when both are present.
+
   for (const cfg of chain) {
+    // Caller-cancelled: stop walking the chain. Record the remaining
+    // entries as skipped (so receipts show what didn't run) and throw.
+    if (signal?.aborted) {
+      attempts.push({
+        provider: cfg.provider,
+        model: cfg.model,
+        outcome: "cancelled",
+        durationMs: 0,
+        costUsd: 0,
+        errorMsg: "cancelled before dispatch",
+      });
+      const cancelErr = new InvokerError(
+        "invokeModelWithFallback: chain cancelled by caller",
+        "cancelled",
+      );
+      cancelErr.attempts = attempts;
+      throw cancelErr;
+    }
     if (ctx.timedOutProviders.has(cfg.provider)) {
       console.warn(
         `[model-invoker] fallback: skipping ${cfg.provider}/${cfg.model} — provider is blacklisted (timed out earlier in this run)`
@@ -477,7 +520,11 @@ export async function invokeModelWithFallback(
     const attemptStart = Date.now();
 
     try {
-      const result = await invokeModel(cfg);
+      // Caller-supplied signal wins over any per-config signal — the
+      // run-level abort cancels every chain entry uniformly. If both
+      // are provided, the per-config signal is ignored.
+      const cfgWithSignal: InvokeConfig = signal ? { ...cfg, signal } : cfg;
+      const result = await invokeModel(cfgWithSignal);
       console.log(`[model-invoker] fallback: ${cfg.provider}/${cfg.model} succeeded`);
       attempts.push({
         provider: cfg.provider,
@@ -523,6 +570,16 @@ export async function invokeModelWithFallback(
         console.warn(
           `[model-invoker] fallback: ${cfg.provider}/${cfg.model} returned empty content — trying next in chain`
         );
+      } else if (kind === "cancelled") {
+        // Caller cancelled. Don't try further entries, don't blacklist,
+        // don't penalize the circuit breaker. Throw immediately so the
+        // run can wind down.
+        console.warn(
+          `[model-invoker] fallback: ${cfg.provider}/${cfg.model} cancelled — abandoning chain`
+        );
+        const cancelErr = new InvokerError(msg, "cancelled");
+        cancelErr.attempts = attempts;
+        throw cancelErr;
       } else {
         console.warn(
           `[model-invoker] fallback: ${cfg.provider}/${cfg.model} failed (${kind}) — trying next in chain`
@@ -656,6 +713,7 @@ async function invokeOllama(
   prompt: string,
   systemPrompt?: string,
   _maxTokens?: number,
+  signal?: AbortSignal,
 ): Promise<InvokeResult> {
   const base = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 
@@ -667,7 +725,7 @@ async function invokeOllama(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages, stream: false }),
-  });
+  }, undefined, undefined, signal);
 
   if (!res.ok) {
     throw new InvokerError(
@@ -694,6 +752,7 @@ async function invokeOpenAICompatible(
   systemPrompt?: string,
   maxTokens?: number,
   isOpenRouter = false,
+  signal?: AbortSignal,
 ): Promise<InvokeResult> {
   const messages: Array<{ role: string; content: string }> = [];
   if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
@@ -712,7 +771,7 @@ async function invokeOpenAICompatible(
       max_tokens: maxTokens ?? 4096,
       temperature: 0.2,
     }),
-  });
+  }, undefined, undefined, signal);
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
@@ -739,6 +798,7 @@ async function invokeAnthropic(
   prompt: string,
   systemPrompt?: string,
   maxTokens?: number,
+  signal?: AbortSignal,
 ): Promise<InvokeResult> {
   const body: Record<string, unknown> = {
     model,
@@ -755,7 +815,7 @@ async function invokeAnthropic(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(body),
-  });
+  }, undefined, undefined, signal);
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
@@ -785,17 +845,37 @@ function requireEnv(name: string): string {
 }
 
 async function fetchWithRetry(
-  url: string, init: RequestInit, timeoutMs = 300_000, maxRetries = DEF_MAX_RETRIES,
+  url: string,
+  init: RequestInit,
+  timeoutMs = 300_000,
+  maxRetries = DEF_MAX_RETRIES,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
-  const ctrl = new AbortController();
+  // Fast-path: if the caller already cancelled before we get here,
+  // don't even bother attempting the request.
+  if (externalSignal?.aborted) {
+    throw new InvokerError(`Request to ${url} cancelled`, "cancelled");
+  }
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const timeoutCtrl = new AbortController();
+    const timer = setTimeout(() => timeoutCtrl.abort(), timeoutMs);
+    // Merge the timeout signal with the optional caller signal so
+    // either source can abort the in-flight fetch. AbortSignal.any
+    // is available since Node 20.
+    const signals: AbortSignal[] = [timeoutCtrl.signal];
+    if (externalSignal) signals.push(externalSignal);
+    const mergedSignal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
     try {
-      const res = await fetch(url, { ...init, signal: ctrl.signal });
+      const res = await fetch(url, { ...init, signal: mergedSignal });
       clearTimeout(timer);
       if (res.ok) return res;
       if (!RETRYABLE_HTTP.has(res.status)) return res;
+      // If a retry is on the table but the caller has cancelled, drop
+      // out immediately rather than wasting a backoff.
+      if (externalSignal?.aborted) {
+        throw new InvokerError(`Request to ${url} cancelled mid-retry`, "cancelled");
+      }
       let retryAfterSec: number | undefined;
       const ra = res.headers.get("Retry-After");
       if (ra) {
@@ -816,9 +896,20 @@ async function fetchWithRetry(
     } catch (err: any) {
       clearTimeout(timer);
       lastErr = err;
-      if (err.name === "AbortError") throw new InvokerError(`Request to ${url} timed out after ${timeoutMs}ms`, "timeout");
+      // Distinguish caller cancellation from internal timeout. Both
+      // surface as AbortError, but we know which is which by checking
+      // the external signal.
+      if (err.name === "AbortError") {
+        if (externalSignal?.aborted) {
+          throw new InvokerError(`Request to ${url} cancelled`, "cancelled");
+        }
+        throw new InvokerError(`Request to ${url} timed out after ${timeoutMs}ms`, "timeout");
+      }
       const isRetry = RETRYABLE_NET.has(err.code) || (err.message && (err.message.includes("ECONNRESET") || err.message.includes("ETIMEDOUT") || err.message.includes("ENETUNREACH") || err.message.includes("ECONNREFUSED")));
       if (!isRetry || attempt >= maxRetries) throw new InvokerError(`Network error calling ${url}: ${err.message ?? err}`, "network");
+      if (externalSignal?.aborted) {
+        throw new InvokerError(`Request to ${url} cancelled mid-retry`, "cancelled");
+      }
       const delay = retryDelay(attempt);
       console.warn(`[model-invoker] fetchWithRetry: ${url} network error (${err.code ?? err.message}) -- retry in ${Math.round(delay)}ms (attempt ${attempt+1}/${maxRetries})`);
       await sleep(delay);
@@ -878,7 +969,8 @@ export type InvokerErrorKind =
   | "config"
   | "unknown"
   | "circuit_breaker"
-  | "empty_response";
+  | "empty_response"
+  | "cancelled";
 
 export class InvokerError extends Error {
   readonly kind: InvokerErrorKind;

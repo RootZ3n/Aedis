@@ -1536,7 +1536,7 @@ export class BuilderWorker extends AbstractWorker {
 
     // Attempt 1 — initial model call.
     const attempt1Started = Date.now();
-    const response = await invokeModelWithFallback(chain, runCtx);
+    const response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
     if (response.usedProvider !== primaryProvider) {
       console.warn(
         `[builder] PRIMARY FAILED — used fallback ${response.usedProvider}/${response.usedModel} ` +
@@ -1903,7 +1903,7 @@ export class BuilderWorker extends AbstractWorker {
     const repairStarted = Date.now();
     let repairResponse;
     try {
-      repairResponse = await invokeModelWithFallback(repairChain, input.runCtx);
+      repairResponse = await invokeModelWithFallback(repairChain, input.runCtx, input.assignment.signal);
     } catch (err) {
       console.warn(
         `[builder] export-repair: model invocation failed: ${err instanceof Error ? err.message : String(err)}`,

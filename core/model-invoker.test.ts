@@ -151,6 +151,99 @@ test("attempts log includes blacklist skips for providers that timed out earlier
   );
 });
 
+test("caller-supplied AbortSignal aborts the chain immediately and does not penalize the circuit breaker", async () => {
+  process.env.OPENROUTER_API_KEY = "test";
+  process.env.MINIMAX_API_KEY = "test";
+
+  await withFreshCwd(() =>
+    withStubbedFetch(
+      async (url, init) => {
+        // Simulate a slow provider that hangs until the caller signal aborts.
+        return new Promise<Response>((_resolve, reject) => {
+          const callerSignal = init.signal as AbortSignal | undefined;
+          callerSignal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+          // Never resolve on its own — only the abort path completes.
+          void url;
+        });
+      },
+      async () => {
+        const ctrl = new AbortController();
+        const chain: InvokeConfig[] = [
+          { provider: "openrouter", model: "xiaomi/mimo-v2.5", prompt: "hi" },
+          { provider: "minimax", model: "minimax-coding", prompt: "hi" },
+        ];
+        // Abort after a short delay so the first request has actually started.
+        setTimeout(() => ctrl.abort(), 30);
+
+        await assert.rejects(
+          () =>
+            invokeModelWithFallback(
+              chain,
+              createRunInvocationContext(),
+              ctrl.signal,
+            ),
+          (err: unknown) => {
+            assert.ok(err instanceof InvokerError);
+            assert.equal((err as InvokerError).kind, "cancelled");
+            // The failed provider should NOT have been added to the
+            // persisted circuit-breaker state.
+            const cbFile = join(process.cwd(), ".aedis", "circuit-breaker-state.json");
+            if (existsSync(cbFile)) {
+              const state = JSON.parse(readFileSync(cbFile, "utf-8")) as {
+                providers: Record<string, unknown>;
+              };
+              assert.equal(
+                state.providers.openrouter,
+                undefined,
+                "openrouter should not be penalized for cancellation",
+              );
+            }
+            return true;
+          },
+        );
+      },
+    ),
+  );
+});
+
+test("pre-aborted signal short-circuits invokeModelWithFallback before any HTTP call", async () => {
+  process.env.OPENROUTER_API_KEY = "test";
+
+  await withFreshCwd(() =>
+    withStubbedFetch(
+      async () => {
+        // If we ever reach here, the test should fail — pre-aborted
+        // signals must skip the chain entirely.
+        throw new Error("fetch should not be called when signal is pre-aborted");
+      },
+      async () => {
+        const ctrl = new AbortController();
+        ctrl.abort();
+        const chain: InvokeConfig[] = [
+          { provider: "openrouter", model: "xiaomi/mimo-v2.5", prompt: "hi" },
+        ];
+        await assert.rejects(
+          () =>
+            invokeModelWithFallback(
+              chain,
+              createRunInvocationContext(),
+              ctrl.signal,
+            ),
+          (err: unknown) => {
+            assert.ok(err instanceof InvokerError);
+            assert.equal((err as InvokerError).kind, "cancelled");
+            return true;
+          },
+        );
+      },
+    ),
+  );
+});
+
 test("InvokerError on total failure carries the full attempts log", async () => {
   process.env.OPENROUTER_API_KEY = "test";
   process.env.MINIMAX_API_KEY = "test";

@@ -21,6 +21,13 @@ export function buildDispatchAssignment(input: {
   sourceRepo: string;
   recentContext: GatedContext | undefined;
   implementationBrief: ImplementationBrief | undefined;
+  /**
+   * Per-run cancellation signal. Coordinator builds one AbortController
+   * per ActiveRun and passes its signal here for every dispatch — when
+   * cancel(runId) is called, every concurrent worker call sees the
+   * abort. Optional so test harnesses without a coordinator can omit it.
+   */
+  signal?: AbortSignal;
   buildAssignment: (
     decision: RoutingDecision,
     task: RunTask,
@@ -55,6 +62,7 @@ export function buildDispatchAssignment(input: {
     sourceRepo: input.sourceRepo,
     recentContext: input.recentContext,
     implementationBrief: input.implementationBrief,
+    signal: input.signal,
   };
 }
 
