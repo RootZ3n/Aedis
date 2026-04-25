@@ -9,6 +9,9 @@ import {
   findNextStrongerBuilderTier,
   loadModelConfig,
   resolveBuilderModelForTier,
+  resolveBuilderChainForTier,
+  checkAnthropicHotPathDoctrine,
+  _resetDoctrineWarningCache,
 } from "./config.js";
 
 /**
@@ -188,6 +191,171 @@ test("builder tier helpers warn when every tier collapses to the same model", ()
       },
     });
     assert.match(warning ?? "", /collapses to one model/i);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("resolveBuilderChainForTier produces a single-entry chain for legacy single-assignment configs", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-config-chain-"));
+  try {
+    const aedisDir = join(projectRoot, ".aedis");
+    mkdirSync(aedisDir, { recursive: true });
+    writeFileSync(
+      join(aedisDir, "model-config.json"),
+      JSON.stringify({
+        builder: { model: "minimax-coding", provider: "minimax" },
+      }),
+      "utf-8",
+    );
+    const config = loadModelConfig(projectRoot);
+    const resolved = resolveBuilderChainForTier(config, "standard");
+    assert.equal(resolved.chain.length, 1);
+    assert.equal(resolved.chain[0]!.provider, "minimax");
+    assert.equal(resolved.primaryIdentity, "minimax/minimax-coding");
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("resolveBuilderChainForTier returns the declared chain in order, deduped against the primary", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-config-chain-"));
+  try {
+    const aedisDir = join(projectRoot, ".aedis");
+    mkdirSync(aedisDir, { recursive: true });
+    writeFileSync(
+      join(aedisDir, "model-config.json"),
+      JSON.stringify({
+        builder: { model: "primary-model", provider: "minimax" },
+        builderTiers: {
+          standard: {
+            model: "tier-primary",
+            provider: "minimax",
+            chain: [
+              { provider: "minimax", model: "tier-primary" }, // dup of primary, should drop
+              { provider: "openrouter", model: "z-ai/glm-5.1" },
+              { provider: "ollama", model: "qwen3.5:9b" },
+            ],
+          },
+        },
+      }),
+      "utf-8",
+    );
+    const config = loadModelConfig(projectRoot);
+    const resolved = resolveBuilderChainForTier(config, "standard");
+    assert.deepEqual(
+      resolved.chain.map((c) => `${c.provider}/${c.model}`),
+      [
+        "minimax/tier-primary",
+        "openrouter/z-ai/glm-5.1",
+        "ollama/qwen3.5:9b",
+      ],
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("checkAnthropicHotPathDoctrine flags Anthropic primary in builder/critic/integrator", () => {
+  // Be defensive about prior env state
+  const prev = process.env.AEDIS_ALLOW_ANTHROPIC;
+  delete process.env.AEDIS_ALLOW_ANTHROPIC;
+  try {
+    const violations = checkAnthropicHotPathDoctrine({
+      scout: { model: "local", provider: "local" },
+      builder: { model: "claude-sonnet-4-6", provider: "anthropic" },
+      critic: { model: "claude-sonnet-4-6", provider: "anthropic" },
+      verifier: { model: "local", provider: "local" },
+      integrator: { model: "glm-5.1", provider: "zai" },
+      escalation: { model: "glm-5.1", provider: "zai" },
+      coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      builderTiers: {},
+    });
+    const roles = violations.map((v) => v.role).sort();
+    assert.deepEqual(roles, ["builder", "critic"]);
+  } finally {
+    if (prev !== undefined) process.env.AEDIS_ALLOW_ANTHROPIC = prev;
+  }
+});
+
+test("checkAnthropicHotPathDoctrine flags Anthropic in tier chain entries", () => {
+  const prev = process.env.AEDIS_ALLOW_ANTHROPIC;
+  delete process.env.AEDIS_ALLOW_ANTHROPIC;
+  try {
+    const violations = checkAnthropicHotPathDoctrine({
+      scout: { model: "local", provider: "local" },
+      builder: { model: "minimax-coding", provider: "minimax" },
+      critic: { model: "qwen3.5:9b", provider: "ollama" },
+      verifier: { model: "local", provider: "local" },
+      integrator: { model: "glm-5.1", provider: "zai" },
+      escalation: { model: "glm-5.1", provider: "zai" },
+      coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      builderTiers: {
+        premium: {
+          model: "xiaomi/mimo-v2.5-pro",
+          provider: "openrouter",
+          chain: [
+            { provider: "minimax", model: "minimax-coding" },
+            { provider: "anthropic", model: "claude-sonnet-4-6" },
+          ],
+        },
+      },
+    });
+    assert.equal(violations.length, 1);
+    assert.equal(violations[0]!.tier, "premium");
+    assert.equal(violations[0]!.source, "chain");
+    assert.equal(violations[0]!.model, "claude-sonnet-4-6");
+  } finally {
+    if (prev !== undefined) process.env.AEDIS_ALLOW_ANTHROPIC = prev;
+  }
+});
+
+test("checkAnthropicHotPathDoctrine returns no violations when AEDIS_ALLOW_ANTHROPIC=1", () => {
+  const prev = process.env.AEDIS_ALLOW_ANTHROPIC;
+  process.env.AEDIS_ALLOW_ANTHROPIC = "1";
+  try {
+    const violations = checkAnthropicHotPathDoctrine({
+      scout: { model: "local", provider: "local" },
+      builder: { model: "claude-sonnet-4-6", provider: "anthropic" },
+      critic: { model: "claude-sonnet-4-6", provider: "anthropic" },
+      verifier: { model: "local", provider: "local" },
+      integrator: { model: "claude-sonnet-4-6", provider: "anthropic" },
+      escalation: { model: "claude-sonnet-4-6", provider: "anthropic" },
+      coordinator: { model: "claude-sonnet-4-6", provider: "anthropic" },
+      builderTiers: {},
+    });
+    assert.equal(violations.length, 0);
+  } finally {
+    if (prev === undefined) delete process.env.AEDIS_ALLOW_ANTHROPIC;
+    else process.env.AEDIS_ALLOW_ANTHROPIC = prev;
+  }
+});
+
+test("loadModelConfig accepts and persists chain entries via normalization", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-config-chain-load-"));
+  _resetDoctrineWarningCache();
+  try {
+    const aedisDir = join(projectRoot, ".aedis");
+    mkdirSync(aedisDir, { recursive: true });
+    writeFileSync(
+      join(aedisDir, "model-config.json"),
+      JSON.stringify({
+        builder: {
+          model: "minimax-coding",
+          provider: "minimax",
+          chain: [
+            { provider: "openrouter", model: "z-ai/glm-5.1" },
+            { provider: "ollama", model: "qwen3.5:9b" },
+            { provider: "", model: "drop-me" }, // malformed, should drop
+          ],
+        },
+      }),
+      "utf-8",
+    );
+    const config = loadModelConfig(projectRoot);
+    assert.equal(config.builder.chain?.length, 2);
+    assert.equal(config.builder.chain?.[0]!.provider, "openrouter");
+    assert.equal(config.builder.chain?.[1]!.provider, "ollama");
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }

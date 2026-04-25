@@ -21,6 +21,18 @@ export interface ModelAssignment {
   model: string;
   provider: string;
   label?: string;
+  /**
+   * Optional declarative fallback chain. Workers walk these in order
+   * after the primary `{provider, model}` fails. Single-entry configs
+   * (no chain field) still work — they produce a 1-entry chain at
+   * resolution time. Each entry is a plain `{provider, model}` pair;
+   * shared `label` is allowed but not used by the invoker.
+   *
+   * Declaring chains here keeps the per-repo fallback policy in data,
+   * not in worker code. Without this, the only fallback was a single
+   * hardcoded entry baked into the BuilderWorker constructor.
+   */
+  chain?: readonly { provider: string; model: string; label?: string }[];
 }
 
 export type ModelTier = "fast" | "standard" | "premium";
@@ -85,6 +97,20 @@ const VALID_ROLES = [
 ] as const;
 const VALID_TIERS: readonly ModelTier[] = ["fast", "standard", "premium"];
 
+function normalizeChainEntry(
+  raw: unknown,
+): { provider: string; model: string; label?: string } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw as { provider?: unknown; model?: unknown; label?: unknown };
+  const provider =
+    typeof entry.provider === "string" && entry.provider.trim() ? entry.provider.trim() : "";
+  const model = typeof entry.model === "string" && entry.model.trim() ? entry.model.trim() : "";
+  if (!provider || !model) return null;
+  const label =
+    typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : undefined;
+  return label ? { provider, model, label } : { provider, model };
+}
+
 function normalizeAssignment(
   raw: unknown,
   fallback: ModelAssignment,
@@ -100,7 +126,16 @@ function normalizeAssignment(
   const label = typeof entry.label === "string" && entry.label.trim()
     ? entry.label.trim()
     : undefined;
-  return label ? { model, provider, label } : { model, provider };
+  // Normalize chain entries — drop malformed rows silently rather than
+  // throwing. A chain that contains the primary again is allowed but
+  // has no effect (resolveBuilderChainForTier dedupes on identity).
+  const chainRaw = Array.isArray(entry.chain) ? entry.chain : [];
+  const chain = chainRaw
+    .map(normalizeChainEntry)
+    .filter((c): c is { provider: string; model: string; label?: string } => c !== null);
+  const out: ModelAssignment = label ? { model, provider, label } : { model, provider };
+  if (chain.length > 0) out.chain = chain;
+  return out;
 }
 
 function normalizeBuilderTierConfig(raw: unknown): BuilderTierConfig {
@@ -218,6 +253,107 @@ export function findNextStrongerBuilderTier(
   return null;
 }
 
+/**
+ * Resolve the full ordered fallback chain for the builder at a given
+ * tier: primary first, then any declared `chain[]` entries in order,
+ * deduped on `provider/model` identity. Single-entry configs (no
+ * chain field) produce a 1-entry result — backwards compatible with
+ * every existing model-config.json.
+ *
+ * Returned entries are plain `{provider, model, label?}` so callers
+ * can hand them to invokeModelWithFallback as InvokeConfig templates.
+ */
+export interface BuilderChainResolution {
+  readonly tier: ModelTier;
+  readonly source: "builderTiers" | "builder" | "escalation";
+  readonly primaryIdentity: string;
+  /** Ordered chain — primary at index 0, then declared fallbacks. */
+  readonly chain: readonly { provider: string; model: string; label?: string }[];
+}
+
+export function resolveBuilderChainForTier(
+  config: ModelConfig,
+  tier: ModelTier,
+): BuilderChainResolution {
+  const single = resolveBuilderModelForTier(config, tier);
+  const primary = single.assignment;
+  const seen = new Set<string>();
+  const chain: { provider: string; model: string; label?: string }[] = [];
+  const head: { provider: string; model: string; label?: string } = primary.label
+    ? { provider: primary.provider, model: primary.model, label: primary.label }
+    : { provider: primary.provider, model: primary.model };
+  chain.push(head);
+  seen.add(`${head.provider}/${head.model}`);
+  for (const entry of primary.chain ?? []) {
+    const id = `${entry.provider}/${entry.model}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    chain.push({ ...entry });
+  }
+  return {
+    tier,
+    source: single.source,
+    primaryIdentity: single.identity,
+    chain,
+  };
+}
+
+/**
+ * Hot-path roles for the no-Anthropic doctrine. Builder/critic/integrator
+ * are the worker types that drive real edits + reviews + merges; if
+ * they reach for Anthropic by default the cheap-build promise is gone.
+ * Scout and Verifier are local; Coordinator is meta-orchestration;
+ * Escalation is the explicit emergency tier and may opt to use a
+ * stronger model — including Anthropic if the user explicitly enables
+ * it via AEDIS_ALLOW_ANTHROPIC=1.
+ */
+const ANTHROPIC_HOT_PATH_ROLES = ["builder", "critic", "integrator"] as const;
+
+export interface DoctrineViolation {
+  readonly role: string;
+  readonly tier?: ModelTier;
+  readonly source: "primary" | "chain" | "builderTiers";
+  readonly model: string;
+  readonly index?: number;
+}
+
+/**
+ * Inspect a ModelConfig for Anthropic providers in hot-path roles.
+ * Returns one entry per violation. Respects AEDIS_ALLOW_ANTHROPIC=1
+ * (no violations reported when set). Pure — does not warn or throw;
+ * callers decide whether to log or block.
+ */
+export function checkAnthropicHotPathDoctrine(config: ModelConfig): DoctrineViolation[] {
+  if (process.env.AEDIS_ALLOW_ANTHROPIC === "1") return [];
+  const violations: DoctrineViolation[] = [];
+  for (const role of ANTHROPIC_HOT_PATH_ROLES) {
+    const assignment = config[role as keyof ModelConfig] as ModelAssignment | undefined;
+    if (!assignment) continue;
+    if (assignment.provider === "anthropic") {
+      violations.push({ role, source: "primary", model: assignment.model });
+    }
+    (assignment.chain ?? []).forEach((entry, index) => {
+      if (entry.provider === "anthropic") {
+        violations.push({ role, source: "chain", model: entry.model, index });
+      }
+    });
+  }
+  // builderTiers hot-path check — each tier-level builder is also hot.
+  for (const tier of VALID_TIERS) {
+    const t = config.builderTiers?.[tier];
+    if (!t) continue;
+    if (t.provider === "anthropic") {
+      violations.push({ role: "builder", tier, source: "builderTiers", model: t.model });
+    }
+    (t.chain ?? []).forEach((entry, index) => {
+      if (entry.provider === "anthropic") {
+        violations.push({ role: "builder", tier, source: "chain", model: entry.model, index });
+      }
+    });
+  }
+  return violations;
+}
+
 // ─── Persistence ─────────────────────────────────────────────────────
 
 /** Canonical Aedis state directory. Always used for writes. */
@@ -238,6 +374,11 @@ function legacyConfigPath(projectRoot: string): string {
   return join(legacyConfigDir(projectRoot), "model-config.json");
 }
 
+// Track which project roots we've already warned about for doctrine
+// violations. loadModelConfig is called many times per dispatch — we
+// don't want to spam the log.
+const doctrineWarnedRoots = new Set<string>();
+
 export function loadModelConfig(projectRoot: string): ModelConfig {
   // Prefer the canonical .aedis/ path. Fall back to the legacy
   // .zendorium/ path so installs that were configured before the
@@ -248,18 +389,49 @@ export function loadModelConfig(projectRoot: string): ModelConfig {
   const legacy = legacyConfigPath(projectRoot);
   const pathsToTry = [canonical, legacy];
 
+  let config: ModelConfig | null = null;
   for (const path of pathsToTry) {
     try {
       if (existsSync(path)) {
         const raw = readFileSync(path, "utf-8");
         const parsed = JSON.parse(raw);
-        return normalizeModelConfig(parsed);
+        config = normalizeModelConfig(parsed);
+        break;
       }
     } catch {
       // Corrupt file — try the next candidate, or fall through to defaults.
     }
   }
-  return normalizeModelConfig(DEFAULT_MODEL_CONFIG);
+  if (!config) config = normalizeModelConfig(DEFAULT_MODEL_CONFIG);
+
+  // No-Anthropic-in-hot-path doctrine — warn once per project root.
+  // Configurable opt-out via AEDIS_ALLOW_ANTHROPIC=1; opt-out is
+  // re-evaluated on each load so an env-var change takes effect
+  // without a process restart (the warned-roots cache is keyed by
+  // project root only, so once warned, always warned this process).
+  if (!doctrineWarnedRoots.has(projectRoot)) {
+    const violations = checkAnthropicHotPathDoctrine(config);
+    if (violations.length > 0) {
+      doctrineWarnedRoots.add(projectRoot);
+      console.warn(
+        `[model-config] DOCTRINE WARNING (${projectRoot}): Anthropic detected in hot-path role(s) — ` +
+        `${violations.map((v) => `${v.role}${v.tier ? `:${v.tier}` : ""}/${v.source}=${v.model}`).join(", ")}. ` +
+        `Aedis's economic pitch is sub-cent builds; route this role to ollama/MiniMax/GLM instead, ` +
+        `or set AEDIS_ALLOW_ANTHROPIC=1 if you've explicitly chosen Anthropic for this build.`,
+      );
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Test-only escape hatch for the doctrine-warning cache. Tests that
+ * exercise loadModelConfig with different configs need to clear the
+ * cache between runs to assert warning behavior.
+ */
+export function _resetDoctrineWarningCache(): void {
+  doctrineWarnedRoots.clear();
 }
 
 function saveModelConfig(projectRoot: string, config: ModelConfig): void {

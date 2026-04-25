@@ -19,6 +19,7 @@ import { DiffApplier } from "../core/diff-applier.js";
 import {
   loadModelConfig,
   resolveBuilderModelForTier,
+  resolveBuilderChainForTier,
 } from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
@@ -841,32 +842,79 @@ export class BuilderWorker extends AbstractWorker {
     tokenBudget: number,
     sectionMode: boolean,
     runId?: string,
+    /**
+     * Declared fallback entries from `.aedis/model-config.json`'s
+     * per-tier `chain[]`. When non-empty, these REPLACE the
+     * constructor-level legacy fallback — the per-repo declaration is
+     * authoritative for that build. When empty/missing, the legacy
+     * `this.fallbackModel` is appended (preserves existing behavior
+     * for configs that haven't migrated to declarative chains).
+     */
+    declaredChain?: readonly { provider: string; model: string }[],
   ): InvokeConfig[] {
     const systemPrompt = sectionMode
       ? "You are the Builder worker in Aedis. You are editing a SECTION of a large file. Return ONLY a unified diff with ORIGINAL file line numbers (do not restart at 1). No markdown fences. No explanations. No full file content — that would corrupt the file."
       : "You are the Builder worker in Aedis. Obey the contract exactly. Return ONLY the full final file content. No markdown fences. No explanations.";
 
-    const chain: InvokeConfig[] = [{
-      provider: primaryProvider,
-      model: primaryModel,
+    const baseTemplate = {
       prompt,
       systemPrompt,
       maxTokens: tokenBudget,
       ...(runId ? { runId } : {}),
+    };
+
+    const chain: InvokeConfig[] = [{
+      provider: primaryProvider,
+      model: primaryModel,
+      ...baseTemplate,
     }];
 
-    if (this.fallbackModel && this.fallbackModel.provider !== primaryProvider) {
+    const seen = new Set<string>([`${primaryProvider}/${primaryModel}`]);
+
+    if (declaredChain && declaredChain.length > 0) {
+      // Per-repo declared chain wins over the legacy hardcoded fallback.
+      // This is the path the user controls via .aedis/model-config.json.
+      for (const entry of declaredChain) {
+        const id = `${entry.provider}/${entry.model}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        chain.push({
+          provider: entry.provider as Provider,
+          model: entry.model,
+          ...baseTemplate,
+        });
+      }
+    } else if (this.fallbackModel && !seen.has(`${this.fallbackModel.provider}/${this.fallbackModel.model}`)) {
+      // No declared chain — preserve the existing legacy fallback so
+      // single-entry model-config.json files keep getting *some*
+      // fallback without requiring a config migration.
       chain.push({
         provider: this.fallbackModel.provider,
         model: this.fallbackModel.model,
-        prompt,
-        systemPrompt,
-        maxTokens: tokenBudget,
-        ...(runId ? { runId } : {}),
+        ...baseTemplate,
       });
     }
 
     return chain;
+  }
+
+  /**
+   * Resolve the declared fallback chain for the builder at this tier
+   * by reading .aedis/model-config.json. Returns the chain *tail*
+   * (entries after the primary) so callers can pass it into
+   * buildInvocationChain. Empty array if no chain is declared.
+   */
+  private getDeclaredFallbackChain(
+    projectRoot: string,
+    tier: WorkerAssignment["tier"] = "standard",
+  ): readonly { provider: string; model: string }[] {
+    try {
+      const config = loadModelConfig(projectRoot);
+      const resolved = resolveBuilderChainForTier(config, tier);
+      return resolved.chain.slice(1).map((e) => ({ provider: e.provider, model: e.model }));
+    } catch {
+      return [];
+    }
   }
 
   // ─── Run Context Management ─────────────────────────────────────
@@ -1469,6 +1517,7 @@ export class BuilderWorker extends AbstractWorker {
         : ""),
     );
 
+    const declaredChain = this.getDeclaredFallbackChain(configRoot, assignment.tier);
     const chain = this.buildInvocationChain(
       primaryProvider as Provider,
       primaryModel,
@@ -1476,9 +1525,10 @@ export class BuilderWorker extends AbstractWorker {
       assignment.tokenBudget,
       sectionInfo !== null,
       runId,
+      declaredChain,
     );
     console.log(
-      `[builder] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)} (projectRoot=${projectRoot}): ${chain.map((cfg) => `${cfg.provider}/${cfg.model}`).join(" → ")}`,
+      `[builder] dispatching with fallback chain (${chain.length} entries${declaredChain.length > 0 ? `, ${declaredChain.length} declared` : ", legacy fallback"}) for run ${runId.slice(0, 8)} (projectRoot=${projectRoot}): ${chain.map((cfg) => `${cfg.provider}/${cfg.model}`).join(" → ")}`,
     );
 
     const attemptRecords: BuilderAttemptRecord[] = [];
@@ -1546,6 +1596,7 @@ export class BuilderWorker extends AbstractWorker {
       fullContent,
       attempt1Content,
       attemptRecords,
+      declaredChain,
     });
     if (usedExportRepair) {
       updatedContent = usedExportRepair.updatedContent;
@@ -1808,6 +1859,7 @@ export class BuilderWorker extends AbstractWorker {
     fullContent: string;
     attempt1Content: string;
     attemptRecords: BuilderAttemptRecord[];
+    declaredChain?: readonly { provider: string; model: string }[];
   }): Promise<{ updatedContent: string; diff: string; record: BuilderAttemptRecord } | null> {
     if (!CODE_FILE_EXTENSIONS.test(input.relativePath)) return null;
     if (input.sectionInfo) return null; // section-edit mode preserves untouched code by construction
@@ -1843,6 +1895,7 @@ export class BuilderWorker extends AbstractWorker {
       input.tokenBudget,
       false,
       input.runId,
+      input.declaredChain,
     );
     console.log(
       `[builder] export-repair: ${exportDiff.missing.length} missing export(s) on ${input.relativePath} — re-invoking model`,
