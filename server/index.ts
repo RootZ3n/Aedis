@@ -65,10 +65,17 @@ export interface ServerConfig {
   allowedCidrs?: string[];
 }
 
+function readPortFromEnv(): number {
+  const raw = process.env["AEDIS_PORT"] ?? process.env["PORT"];
+  if (!raw) return 18796;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 65_535 ? parsed : 18796;
+}
+
 const DEFAULT_CONFIG: ServerConfig = {
-  port: 18796,
-  host: "0.0.0.0",
-  projectRoot: process.cwd(),
+  port: readPortFromEnv(),
+  host: process.env["AEDIS_HOST"] ?? "0.0.0.0",
+  projectRoot: process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd(),
 };
 
 // ─── Server Context (shared across routes) ───────────────────────────

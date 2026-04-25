@@ -4,14 +4,24 @@
   "description": "Build quality without token burn.",
   "main": "dist/server/index.js",
   "type": "module",
+  "files": [
+    "dist/",
+    "ui/",
+    "docs/",
+    "README.md",
+    ".env.example"
+  ],
   "bin": {
-    "aedis": "./cli/aedis.ts"
+    "aedis": "./dist/cli/aedis.js"
   },
   "scripts": {
-    "start": "npx tsx server/index.ts",
-    "build": "tsc",
+    "start": "tsx server/index.ts",
+    "start:dist": "node dist/server/index.js",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
     "dev": "npx tsx watch server/index.ts",
     "cli": "tsx cli/aedis.ts",
+    "prepack": "npm run build",
     "test": "bash -O globstar -c 'tsx --test core/**/*.test.ts server/**/*.test.ts'"
   },
   "keywords": [

@@ -1,10 +1,29 @@
-.env
-# Transient Aedis state — memory.json is tracked, everything else is
-# ephemeral (repo-index.json, model-config.json, etc).
-.aedis/repo-index.json
-.aedis/model-config.json
-.aedis/providers.json
-state/receipts/
-dist/
-.zendorium/
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local tool/agent configuration
+.claude/
+.codex
+.zendorium/
+
+# Transient Aedis runtime state
+.aedis/
+state/
+data/sessions/
+
+# Logs, caches, reports, and temp artifacts
+*.log
+*.tmp
+*.bak
+coverage/
+.nyc_output/
+.cache/
+.tsx/

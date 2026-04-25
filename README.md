@@ -110,9 +110,12 @@ ProjectMemory          DiffApplier                        git commit / rollback
 ## Quick Start
 
 ```bash
-git clone https://github.com/RootZ3n/Zendorium
-cd Zendorium && npm install
-sudo systemctl start aedis
+git clone https://github.com/RootZ3n/aedis
+cd aedis
+cp .env.example .env
+npm ci
+npm run build
+npm run start:dist
 ```
 
 Open [http://localhost:18796](http://localhost:18796).
