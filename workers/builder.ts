@@ -152,6 +152,7 @@ import {
   type PatchMode,
 } from "./builder-diagnostics.js";
 import { classifyTaskShape, routeStrategyDirective } from "../core/task-shape.js";
+import { enforcePreservedTopComment } from "../core/preserved-top-comment.js";
 import { randomUUID } from "node:crypto";
 
 // Reserved overhead for separators and the "Relevant context:" header
@@ -1636,6 +1637,19 @@ export class BuilderWorker extends AbstractWorker {
       throw new BuilderAttemptError(
         err instanceof Error ? err.message : String(err),
         this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-export-loss", "export-loss", err instanceof Error ? err.message : String(err)),
+      );
+    }
+    try {
+      enforcePreservedTopComment(
+        fullContent,
+        updatedContent,
+        relativePath,
+        assignment.intent?.userRequest,
+      );
+    } catch (err) {
+      throw new BuilderAttemptError(
+        err instanceof Error ? err.message : String(err),
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-doc-loss", "top-comment-loss", err instanceof Error ? err.message : String(err)),
       );
     }
 

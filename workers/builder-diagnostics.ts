@@ -30,6 +30,7 @@ export type AttemptOutcome =
   | "guard-prose"
   | "guard-raw-diff"
   | "guard-export-loss"
+  | "guard-doc-loss"
   | "guard-forbidden-change"
   | "guard-section-corruption"
   | "io-error"
