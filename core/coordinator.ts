@@ -2447,6 +2447,15 @@ export class Coordinator {
     return { run: active.run, graph: active.graph };
   }
 
+  /**
+   * Snapshot of all in-flight run IDs. Used by heavy/competing routes
+   * (e.g. /prove/repo) to refuse work while a build is mid-flight, so
+   * they don't compete for workers, providers, file locks, and memory.
+   */
+  listActiveRunIds(): string[] {
+    return [...this.activeRuns.keys()];
+  }
+
   // ─── Graph Construction ────────────────────────────────────────────
 
   private buildTaskGraph(active: ActiveRun, analysis: RequestAnalysis): void {

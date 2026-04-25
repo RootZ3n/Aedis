@@ -114,11 +114,31 @@ export const proveRoutes: FastifyPluginAsync = async (fastify) => {
    * Body: { repoPath: string }
    * Profiles the repo, generates appropriate test cases, runs them,
    * and persists the report.
+   *
+   * Refuses with 409 while any Aedis run is in flight. proveRepo walks
+   * a target repo, profiles it, and dispatches multiple prove cases —
+   * each of which competes with active builds for workers, providers,
+   * file locks, and the host's RAM/swap budget. Letting both run at
+   * once invites a memory pressure event that systemd would translate
+   * into a graceful SIGTERM mid-build (this was the structural risk
+   * flagged after run cd373634).
    */
   fastify.post<{ Body: { repoPath: string } }>(
     "/repo",
     async (request, reply) => {
       try {
+        const activeRunIds = fastify.ctx.coordinator.listActiveRunIds();
+        if (activeRunIds.length > 0) {
+          reply.status(409).send({
+            error: "active-run",
+            message:
+              `Refusing /prove/repo while ${activeRunIds.length} Aedis run(s) are active. ` +
+              `Wait for them to finish (or cancel them) and retry.`,
+            activeRunIds,
+          });
+          return;
+        }
+
         const repoPath = request.body.repoPath;
         if (!repoPath) {
           reply.status(400).send({ error: "repoPath is required" });
