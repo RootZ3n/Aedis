@@ -175,7 +175,14 @@ import {
 } from "./post-run-evaluator.js";
 import { type CrucibulumConfig, DEFAULT_CRUCIBULUM_CONFIG } from "./crucibulum-client.js";
 import { extractInvariants } from "./invariant-extractor.js";
-import { planChangeSet, type Plan, type PlanWave } from "./multi-file-planner.js";
+import {
+  planChangeSet,
+  haltDownstreamWaves,
+  summarizeWaveOutcomes,
+  type Plan,
+  type PlanWave,
+  type WaveOutcomeSummary,
+} from "./multi-file-planner.js";
 import {
   buildImplementationBriefOrFallback,
   buildMinimalImplementationBrief,
@@ -440,7 +447,16 @@ export interface RunReceipt {
   readonly intentId: string;
   readonly timestamp: string;
   readonly verdict: "success" | "partial" | "failed" | "aborted";
-  readonly summary: ReturnType<typeof getRunSummary>;
+  readonly summary: ReturnType<typeof getRunSummary> & {
+    /**
+     * Per-wave outcome summary on multi-step runs. Undefined for
+     * single-file runs (no plan). Populated from
+     * summarizeWaveOutcomes(active.plan) at receipt build time so
+     * consumers can read pending → passed / failed / halted /
+     * skipped per wave without re-deriving it from waveVerifications.
+     */
+    readonly waveSummary?: readonly WaveOutcomeSummary[];
+  };
   readonly graphSummary: ReturnType<typeof getGraphSummary>;
   readonly verificationReceipt: VerificationReceipt | null;
   /**
@@ -1564,6 +1580,11 @@ export class Coordinator {
       // Phase 6–7: Execute (Scout → Build → Rehearsal Loop)
       console.log(`[coordinator] PHASE 6: ExecuteGraph — entering with ${active.graph.nodes.length} node(s)`);
       await this.executeGraph(active);
+      // Reconcile wave.status from the now-terminal node statuses so
+      // downstream waves whose upstream failed end up "halted" rather
+      // than dangling at "pending", and so finalReceipt.summary.waveSummary
+      // shows an accurate per-wave outcome.
+      this.reconcileWaveStatuses(active);
       console.log(`[coordinator] PHASE 6 done — graph state: ${JSON.stringify(getGraphSummary(active.graph))}`);
       console.log(`[coordinator] PHASE 6 trace — builder nodes processed: ${active.graph.nodes.filter(n => n.workerType === 'builder').length}`);
 
@@ -3552,14 +3573,28 @@ export class Coordinator {
     const governance = active.scopeClassification?.governance;
     if (!plan || !governance?.wavesRequired) return dispatchable;
 
-    // Determine which waves are complete — a wave is complete when all
-    // builder nodes with that waveId have finished (completed or failed).
+    // Determine which waves are complete — a wave is complete only when
+    // every builder node belonging to it reached "completed". A failed
+    // node (whether recovery is in flight, exhausted, or yet to start)
+    // means the wave is NOT complete and downstream waves must wait.
+    // The previous predicate (completed || failed) leaked downstream
+    // dispatch when an upstream node briefly entered the "failed"
+    // status between recovery cycles — see core/coordinator-multi-step.test.ts
+    // Test 2 for the diagnostic that surfaced this.
+    //
+    // Waves whose status has been explicitly set to "failed" or "halted"
+    // (by reconcileWaveStatuses after executeGraph exits) are also
+    // treated as not-complete so downstream gating remains in force
+    // even if all of their nodes happen to be in the "completed" set
+    // (which can occur when reconcile runs on already-completed
+    // downstream waves whose upstream later reached a terminal failure).
     const completedWaveIds = new Set<number>();
     for (const wave of plan.waves) {
+      if (wave.status === "failed" || wave.status === "halted") continue;
       const waveBuilderNodes = active.graph.nodes.filter(
         (n) => n.workerType === "builder" && n.metadata.waveId === wave.id,
       );
-      if (waveBuilderNodes.length === 0 || waveBuilderNodes.every((n) => n.status === "completed" || n.status === "failed")) {
+      if (waveBuilderNodes.length === 0 || waveBuilderNodes.every((n) => n.status === "completed")) {
         completedWaveIds.add(wave.id);
       }
     }
@@ -3580,6 +3615,58 @@ export class Coordinator {
       }
       return true;
     });
+  }
+
+  /**
+   * Reconcile per-wave status from the graph's terminal node statuses
+   * once executeGraph has exited. Mirrors the lifecycle ladder
+   * documented in multi-file-planner: pending → passed | failed |
+   * halted | skipped.
+   *
+   *   - any builder node failed  → wave.status = "failed", downstream
+   *     waves haltDownstreamWaves'd
+   *   - all builder nodes completed → wave.status = "passed"
+   *   - waves that have already been halted (because an earlier failed
+   *     wave halted them) are left as "halted"
+   *   - waves with zero builder nodes were already marked "skipped" at
+   *     plan-creation time and are left untouched
+   *
+   * Called once after executeGraph returns. Order matters: failed
+   * waves first, halt second, passed last — so a downstream wave whose
+   * nodes happened to complete before its upstream failed still ends
+   * up "halted" rather than "passed". With applyWaveGating fixed to
+   * require every() === "completed", the downstream-completed scenario
+   * should be unreachable, but the order keeps the receipt honest if a
+   * future change relaxes that gate.
+   */
+  private reconcileWaveStatuses(active: ActiveRun): void {
+    const plan = active.plan;
+    if (!plan) return;
+
+    // Pass 1: mark waves with any failed node as failed, halt downstream.
+    for (const wave of plan.waves) {
+      if (wave.status !== "pending") continue;
+      const waveBuilderNodes = active.graph.nodes.filter(
+        (n) => n.workerType === "builder" && n.metadata.waveId === wave.id,
+      );
+      if (waveBuilderNodes.length === 0) continue;
+      if (waveBuilderNodes.some((n) => n.status === "failed")) {
+        wave.status = "failed";
+        haltDownstreamWaves(plan, wave.id);
+      }
+    }
+
+    // Pass 2: any wave still "pending" with all nodes "completed" is "passed".
+    for (const wave of plan.waves) {
+      if (wave.status !== "pending") continue;
+      const waveBuilderNodes = active.graph.nodes.filter(
+        (n) => n.workerType === "builder" && n.metadata.waveId === wave.id,
+      );
+      if (waveBuilderNodes.length === 0) continue;
+      if (waveBuilderNodes.every((n) => n.status === "completed")) {
+        wave.status = "passed";
+      }
+    }
   }
 
   private resolveWaveForFiles(
@@ -6495,7 +6582,10 @@ export class Coordinator {
       intentId: active.intent.id,
       timestamp: new Date().toISOString(),
       verdict,
-      summary: getRunSummary(active.run),
+      summary: {
+        ...getRunSummary(active.run),
+        ...(active.plan ? { waveSummary: summarizeWaveOutcomes(active.plan) } : {}),
+      },
       graphSummary: getGraphSummary(active.graph),
       verificationReceipt,
       waveVerifications: [...active.waveVerifications],

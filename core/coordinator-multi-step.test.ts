@@ -403,19 +403,42 @@ test("multi-step orchestration: 4-file plan dispatches builders wave-by-wave and
       `verdict=${persisted.finalReceipt.verdict} ` +
       `criticalFindings=${persisted.finalReceipt.mergeDecision?.critical?.length ?? 0}`,
     );
+
+    // Per-wave summary (Part B): finalReceipt.summary.waveSummary must
+    // be populated for multi-step runs even when stub-only verification
+    // makes the merge gate block. waves 1/2/3 had nodes that all
+    // completed → "passed"; wave 4 had no files → "skipped".
+    const waveSummary = persisted.finalReceipt.summary?.waveSummary;
+    assert.ok(
+      waveSummary && waveSummary.length > 0,
+      `finalReceipt.summary.waveSummary must be populated for multi-step runs; got ${JSON.stringify(waveSummary)}`,
+    );
+    const byId = new Map(waveSummary.map((w) => [w.waveId, w]));
+    for (const waveId of observedWaves) {
+      assert.equal(
+        byId.get(waveId)?.status,
+        "passed",
+        `wave ${waveId} had completed builder nodes — status must be "passed"; got ${byId.get(waveId)?.status}`,
+      );
+    }
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
 });
 
-test("multi-step upstream-failure probe: wave-1 builder fail — observe whether wave 2/3/4 still dispatch", async () => {
-  // This is the diagnostic experiment for the audit's P1 finding —
-  // applyWaveGating treats "failed" identically to "completed" when
-  // deciding whether an upstream wave is done, and the wave lifecycle
-  // helpers (haltDownstreamWaves etc) are not wired anywhere, so the
-  // hypothesis is that a wave-1 failure does NOT halt downstream
-  // waves — they will still get dispatched. This test records what
-  // actually happens so the result is unambiguous either way.
+test("multi-step upstream-failure: wave-1 fail halts downstream waves and surfaces failed/halted wave statuses", async () => {
+  // After the wave-halting fix (applyWaveGating + reconcileWaveStatuses),
+  // a wave-1 builder failure must NOT release wave 2/3 builders, and
+  // the post-run receipt must reflect wave statuses honestly:
+  //   wave 1 → failed
+  //   wave 2 → halted (it was pending and an upstream wave failed)
+  //   wave 3 → halted
+  //   wave 4 → skipped (fixture has no wave-4 files)
+  //
+  // The merge gate's safety story (no commit, no approval, source
+  // unchanged on failure) is also re-asserted here as a regression
+  // backstop — those invariants must continue to hold whether or not
+  // halting works.
   const repo = makeMultiStepRepo();
   try {
     const before = originalContents(repo);
@@ -433,33 +456,35 @@ test("multi-step upstream-failure probe: wave-1 builder fail — observe whether
     const persisted = await receiptStore.getRun(receipt.runId);
     assert.ok(persisted, "persisted receipt must exist");
 
-    // Wave-1 must have been attempted.
+    // Wave-1 must have been attempted at least once.
     const wave1Attempts = builder.dispatches.filter((d) => d.waveIds.includes(1));
     assert.ok(
       wave1Attempts.length > 0,
       `wave-1 (types) builder should have been attempted at least once; saw 0 dispatches across [${builder.dispatches.map((d) => d.targetFiles.join("+")).join(" | ")}]`,
     );
 
-    // Did downstream waves dispatch? This is the diagnostic outcome.
+    // HARD ASSERTION: downstream builders (wave >= 2) MUST NOT have run.
     const downstreamAttempts = builder.dispatches.filter((d) =>
       d.waveIds.some((w) => w >= 2),
     );
     const downstreamWavesSeen = new Set<number>();
     for (const d of downstreamAttempts) {
-      for (const w of d.waveIds) {
-        if (w >= 2) downstreamWavesSeen.add(w);
-      }
+      for (const w of d.waveIds) if (w >= 2) downstreamWavesSeen.add(w);
     }
-    // Print diagnostic so the test output records what we observed.
     console.log(
-      `[multi-step-test] DIAGNOSTIC after wave-1 failure: ` +
+      `[multi-step-test] WAVE_HALT_OBSERVED=${downstreamAttempts.length === 0} ` +
       `wave-1 attempts=${wave1Attempts.length} ` +
       `downstream attempts=${downstreamAttempts.length} ` +
       `downstream waves observed=[${[...downstreamWavesSeen].sort().join(",")}] ` +
       `total dispatches=${builder.dispatches.length}`,
     );
+    assert.equal(
+      downstreamAttempts.length,
+      0,
+      `downstream waves must NOT dispatch when upstream wave-1 fails; observed ${downstreamAttempts.length} downstream dispatch(es) on waves [${[...downstreamWavesSeen].sort().join(",")}]`,
+    );
 
-    // The run must NOT have committed.
+    // The run must NOT have committed and must NOT have paused for approval.
     assert.equal(
       persisted.commitSha ?? null,
       null,
@@ -485,15 +510,36 @@ test("multi-step upstream-failure probe: wave-1 builder fail — observe whether
       );
     }
 
-    // Record the answer to the audit question on the assertion object so
-    // a reviewer can grep for it. We do NOT assert downstream==0 because
-    // that would either confirm or hide the P1 — we want both possible
-    // outcomes to show clearly in the test output.
-    const downstreamRanAfterFailure = downstreamAttempts.length > 0;
-    console.log(
-      `[multi-step-test] WAVE_HALT_OBSERVED=${!downstreamRanAfterFailure} ` +
-      `(if false, downstream waves dispatched after upstream failure — ` +
-      `confirms haltDownstreamWaves is not wired into applyWaveGating)`,
+    // Wave summary on the persisted receipt must reflect failed/halted.
+    assert.ok(persisted.finalReceipt, "finalReceipt must be persisted");
+    const waveSummary = persisted.finalReceipt.summary?.waveSummary;
+    assert.ok(
+      waveSummary && waveSummary.length > 0,
+      `finalReceipt.summary.waveSummary must be populated for multi-step runs; got ${JSON.stringify(waveSummary)}`,
+    );
+    const byId = new Map(waveSummary.map((w) => [w.waveId, w]));
+    assert.equal(
+      byId.get(1)?.status,
+      "failed",
+      `wave 1 must be failed; got ${byId.get(1)?.status}`,
+    );
+    assert.equal(
+      byId.get(2)?.status,
+      "halted",
+      `wave 2 must be halted; got ${byId.get(2)?.status}`,
+    );
+    assert.equal(
+      byId.get(3)?.status,
+      "halted",
+      `wave 3 must be halted; got ${byId.get(3)?.status}`,
+    );
+    // Wave 4 had no files in the fixture; it was marked "skipped" at
+    // plan creation (multi-file-planner line 207). Reconcile leaves it
+    // alone.
+    assert.equal(
+      byId.get(4)?.status,
+      "skipped",
+      `wave 4 must remain skipped (fixture has no wave-4 files); got ${byId.get(4)?.status}`,
     );
   } finally {
     rmSync(repo, { recursive: true, force: true });
