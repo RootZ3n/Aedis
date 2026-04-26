@@ -379,9 +379,6 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
   const needsExplanation = classificationResult.classification !== "VERIFIED_SUCCESS";
   const failureExplanation = needsExplanation ? explainFailure(receipt) : null;
 
-  // Enhanced classification mapping for clearer failure reasons
-  const enhancedClassificationReason = mapClassificationToEnhancedReason(classificationResult, receipt);
-
   const headline = buildHeadline({
     classification: classificationResult.classification,
     whatChanged,
@@ -421,8 +418,8 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
 
   return {
     classification: classificationResult.classification,
-    classificationReason: enhancedClassificationReason.reason,
-    classificationReasonCode: enhancedClassificationReason.reasonCode,
+    classificationReason: classificationResult.reason,
+    classificationReasonCode: classificationResult.reasonCode,
     headline,
     narrative,
     whatWasAttempted: userPrompt.trim() || "(no prompt recorded)",
@@ -887,57 +884,6 @@ function applyDampening(
     reason,
     penalties: [...base.penalties, `historical overconfidence dampening (×${factor.toFixed(2)}) → -${delta.toFixed(2)}`],
     basis: [...base.basis, `learning:history dampening ×${factor.toFixed(2)} → overall ${base.overall.toFixed(2)} → ${dampened.toFixed(2)}`],
-  };
-}
-
-/**
- * Map classification result to enhanced reason codes that clearly distinguish
- * ambiguous_prompt, missing_required_deliverable, content_identical_output, and rejected/cancelled approval
- */
-function mapClassificationToEnhancedReason(
-  classificationResult: ExecutionClassificationResult,
-  receipt: RunReceipt
-): { reason: string; reasonCode: string } {
-  // Check for approval rejection/cancellation first
-  if (receipt.runOutcome === "rejected" || receipt.runOutcome === "aborted") {
-    return {
-      reason: "Task was rejected or cancelled during approval",
-      reasonCode: "rejected_cancelled_approval"
-    };
-  }
-
-  // Check for ambiguous prompt
-  if (classificationResult.reasonCode === "ambiguous_prompt" || 
-      classificationResult.reason.includes("ambiguous") ||
-      classificationResult.reason.includes("unclear")) {
-    return {
-      reason: "Prompt was ambiguous or unclear - unable to determine required changes",
-      reasonCode: "ambiguous_prompt"
-    };
-  }
-
-  // Check for missing required deliverables
-  if (classificationResult.reasonCode === "missing_required_deliverable" ||
-      classificationResult.reason.includes("missing required")) {
-    return {
-      reason: "Missing required deliverables - expected files or changes not produced",
-      reasonCode: "missing_required_deliverable"
-    };
-  }
-
-  // Check for content identical output (no-op scenarios)
-  if (classificationResult.reasonCode === "content_identical_output" ||
-      classificationResult.classification === "NO_OP") {
-    return {
-      reason: "Output was identical to existing content - no changes needed",
-      reasonCode: "content_identical_output"
-    };
-  }
-
-  // Return original classification if none of the enhanced mappings apply
-  return {
-    reason: classificationResult.reason,
-    reasonCode: classificationResult.reasonCode
   };
 }
 
