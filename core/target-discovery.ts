@@ -2,6 +2,10 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, relative, resolve } from "node:path";
 
 import type { RequestAnalysis } from "./charter.js";
+import {
+  isNegatedTarget,
+  sanitizePromptForFileExtraction,
+} from "./prompt-sanitizer.js";
 
 export interface TargetDiscoveryCandidate {
   readonly path: string;
@@ -94,11 +98,19 @@ export function prepareTargetsForPrompt(input: {
   limit?: number;
 }): PreparedTargetSet {
   const projectRoot = resolve(input.projectRoot);
+  // Run the same literal-strip + negative-directive sweep the charter
+  // applies, so target discovery cannot reintroduce a filename that
+  // charter correctly ignored. extractPromptFileMentions/StemMentions
+  // run against `sanitized`, never the raw prompt; rawTargets are
+  // filtered against `negatedTargets` before any existence check, so
+  // a "Do not modify README.md" wins even when README.md exists on
+  // disk. This closes the ffe132ed leak.
+  const { sanitized, negatedTargets } = sanitizePromptForFileExtraction(input.prompt);
   const rawTargets = uniqueStrings([
     ...input.analysis.targets,
-    ...extractPromptFileMentions(input.prompt),
-    ...extractPromptStemMentions(input.prompt),
-  ]);
+    ...extractPromptFileMentions(sanitized),
+    ...extractPromptStemMentions(sanitized),
+  ]).filter((target) => !isNegatedTarget(target, negatedTargets));
   const limit = input.limit ?? 4;
   const prompt = input.prompt;
   const promptWords = extractPromptWords(prompt);
@@ -114,6 +126,7 @@ export function prepareTargetsForPrompt(input: {
   for (const target of rawTargets) {
     const normalized = normalizeTarget(target, projectRoot);
     if (!normalized) continue;
+    if (isNegatedTarget(normalized, negatedTargets)) continue;
 
     const existingType = inspectExistingPath(projectRoot, normalized);
     if (existingType) {
@@ -206,7 +219,14 @@ export function prepareTargetsForPrompt(input: {
     }
   }
 
-  const dedupedTargets = uniqueStrings(targets);
+  // Backstop: even if a basename/stem resolution or backend discovery
+  // produced a path whose basename matches a negated entry (e.g. a
+  // bare "Do not modify README.md" pointing at docs/README.md picked
+  // by stem resolution), drop it. The early rawTargets filter catches
+  // most cases; this guards the post-resolution surface too.
+  const dedupedTargets = uniqueStrings(targets).filter(
+    (target) => !isNegatedTarget(target, negatedTargets),
+  );
   const clarification =
     dedupedTargets.length === 0 && hasAmbiguousBasenameRejection(rejected)
       ? "Multiple files matched the requested basename and the prompt did not disambiguate which one to change."
@@ -214,7 +234,9 @@ export function prepareTargetsForPrompt(input: {
 
   return {
     targets: dedupedTargets,
-    selected: dedupeCandidates(selected),
+    selected: dedupeCandidates(selected).filter(
+      (candidate) => !isNegatedTarget(candidate.path, negatedTargets),
+    ),
     rejected: dedupeRejections(rejected),
     clarification,
   };

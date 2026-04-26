@@ -167,3 +167,160 @@ test("target discovery: stem extraction does not invent noun targets from bug ph
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
+
+// ─── prompt-sanitizer integration: ffe132ed regression ─────────────
+//
+// These tests guard the boundary that actually leaked: charter
+// returned ["start.sh"], but prepareTargetsForPrompt re-extracted
+// README.md from the prompt directly and pushed it through the
+// existence check, overriding the charter's clean result. After the
+// shared-sanitizer refactor target-discovery must:
+//   - apply the same literal-strip charter applies, AND
+//   - filter explicit negations EVEN WHEN the file exists on disk.
+
+function makeRepoWithReadme(): string {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-target-negation-"));
+  writeFileSync(join(dir, "README.md"), "# Repo\nUsage: bash start.sh\n", "utf-8");
+  writeFileSync(join(dir, "start.sh"), "#!/usr/bin/env bash\necho hi\n", "utf-8");
+  return dir;
+}
+
+test("target discovery: single-quoted README.md is ignored (charter target wins)", () => {
+  const projectRoot = makeRepoWithReadme();
+  try {
+    const generator = new CharterGenerator();
+    const prompt =
+      "In start.sh, add the trailing comment '# See README.md for usage details.' to the final executable command line. Do not modify README.md.";
+    const analysis = generator.analyzeRequest(prompt);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot,
+      prompt,
+      analysis,
+    });
+
+    assert.deepEqual(
+      [...prepared.targets].sort(),
+      ["start.sh"],
+      `expected start.sh only, got ${JSON.stringify(prepared.targets)}`,
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: double-quoted README.md is ignored", () => {
+  const projectRoot = makeRepoWithReadme();
+  try {
+    const generator = new CharterGenerator();
+    const prompt =
+      'In start.sh, add "# See README.md for usage details." to the final line. Do not modify README.md.';
+    const analysis = generator.analyzeRequest(prompt);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot,
+      prompt,
+      analysis,
+    });
+
+    assert.deepEqual([...prepared.targets].sort(), ["start.sh"]);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: backtick-fenced README.md is ignored", () => {
+  const projectRoot = makeRepoWithReadme();
+  try {
+    const generator = new CharterGenerator();
+    const prompt =
+      "In start.sh, add `# See README.md for usage details.` to the final line. Do not modify README.md.";
+    const analysis = generator.analyzeRequest(prompt);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot,
+      prompt,
+      analysis,
+    });
+
+    assert.deepEqual([...prepared.targets].sort(), ["start.sh"]);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: 'Do not modify README.md' wins even when README.md exists on disk", () => {
+  // The leak's defining property: README.md exists in the repo, the
+  // raw prompt mentions it, and inspectExistingPath used to push it
+  // straight into the changeSet. The negated-target filter must run
+  // BEFORE the existence check so on-disk presence is no defense.
+  const projectRoot = makeRepoWithReadme();
+  try {
+    const generator = new CharterGenerator();
+    const prompt = "In start.sh, append a comment line. Do not modify README.md.";
+    const analysis = generator.analyzeRequest(prompt);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot,
+      prompt,
+      analysis,
+    });
+
+    assert.equal(
+      prepared.targets.includes("README.md"),
+      false,
+      `negated README.md must NOT be in prepared targets, got ${JSON.stringify(prepared.targets)}`,
+    );
+    assert.ok(prepared.targets.includes("start.sh"));
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: explicit 'Update start.sh and README.md' keeps both as targets", () => {
+  const projectRoot = makeRepoWithReadme();
+  try {
+    const generator = new CharterGenerator();
+    const prompt = "Update start.sh and README.md to mention the new env var.";
+    const analysis = generator.analyzeRequest(prompt);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot,
+      prompt,
+      analysis,
+    });
+
+    assert.deepEqual(
+      [...prepared.targets].sort(),
+      ["README.md", "start.sh"],
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: charter ['start.sh'] + quoted+negated README.md prompt yields start.sh only (boundary regression)", () => {
+  // Direct reproduction of run ffe132ed-2c34-4f66-9837-7de6c6b1f6c1:
+  // charter returned ["start.sh"] correctly, but prepareTargetsForPrompt
+  // re-derived README.md from the prompt and overrode the result. Pin
+  // the boundary contract so we'd see this fail loudly if either
+  // surface drifted.
+  const projectRoot = makeRepoWithReadme();
+  try {
+    const prompt =
+      "In start.sh, add the trailing comment '# See README.md for usage details.' to the final executable command line. Do not modify README.md.";
+    const analysis: import("./charter.js").RequestAnalysis = {
+      raw: prompt,
+      category: "docs",
+      targets: ["start.sh"],
+      scopeEstimate: "small",
+      riskSignals: [],
+      ambiguities: [],
+    };
+    const prepared = prepareTargetsForPrompt({
+      projectRoot,
+      prompt,
+      analysis,
+    });
+
+    assert.deepEqual([...prepared.targets].sort(), ["start.sh"]);
+    assert.equal(prepared.targets.includes("README.md"), false);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});

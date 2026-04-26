@@ -12,6 +12,7 @@ import type {
   Deliverable,
   QualityBar,
 } from "./intent.js";
+import { sanitizePromptForFileExtraction } from "./prompt-sanitizer.js";
 
 // ─── Analysis Types ──────────────────────────────────────────────────
 
@@ -206,53 +207,13 @@ export class CharterGenerator {
   }
 
   private extractTargets(request: string): string[] {
-    // Strip quoted literal content before scanning. A quoted region in
-    // a user prompt is overwhelmingly a literal value the user wants
-    // Aedis to insert verbatim — a comment line, a string constant, a
-    // docstring, or sample output — NOT a list of files to edit.
-    //
-    // Run d3524769 (commit 5838aad on absent-pianist, since reverted)
-    // first hit this trap with double-quoted content. Run cd373634
-    // re-hit it via single quotes, proving the original strip was
-    // incomplete. This fix covers four quoting styles in order so
-    // overlapping delimiters don't fight each other:
-    //
-    //   1. Triple-backtick fenced code blocks — markdown-style, may
-    //      span multiple lines and contain example filenames that
-    //      should never be promoted to real targets.
-    //   2. Double-quoted regions — always literal in natural prose.
-    //   3. Single backtick code spans — markdown inline code; if the
-    //      user wants a target highlighted, plain text still works.
-    //   4. Single-quoted regions, with lookbehind/lookahead so
-    //      apostrophes in contractions and possessives ("Aedis's",
-    //      "doesn't", "user's") are NEVER mistaken for delimiters.
-    //
-    // After stripping, we ALSO drop files mentioned only inside a
-    // negative directive like `Do not modify README.md` — those are
-    // explicit non-targets, not work items.
-    const stripped = request
-      .replace(/```[\s\S]*?```/g, "")
-      .replace(/"[^"]*"/g, "")
-      .replace(/`[^`]*`/g, "")
-      .replace(/(?<![A-Za-z0-9])'[^']*'(?![A-Za-z0-9])/g, "");
-    // Negative-directive sweep against the ORIGINAL request so we keep
-    // the natural-language context that flags a non-target. Captures
-    // the file in:
-    //   - "do not modify X" / "don't modify X" / "don't change X"
-    //   - "do not edit/touch/update/modify the X"
-    //   - "without modifying/changing/touching/editing X"
-    const negatedTargets = new Set<string>();
-    const negativeRe =
-      /\b(?:do(?:es)?\s+not|don['’]?t|never|without)\s+(?:modify|modifying|change|changing|edit|editing|update|updating|touch|touching)\s+(?:the\s+)?([\w\-./]+\.[A-Za-z]+)/gi;
-    let neg: RegExpExecArray | null;
-    while ((neg = negativeRe.exec(request)) !== null) {
-      const captured = neg[1];
-      if (typeof captured === "string" && captured.length > 0) {
-        negatedTargets.add(captured.replace(/[),:;]+$/g, "").replace(/\.$/, ""));
-      }
-    }
-    // Apply the strips for the actual extraction below.
-    const sanitized = stripped;
+    // Strip quoted/fenced literal content and collect explicit non-
+    // targets via the shared sanitizer. The same helper is used by
+    // core/target-discovery.ts so downstream target preparation can't
+    // re-introduce filenames the charter correctly ignored — see the
+    // header comment in core/prompt-sanitizer.ts for the full incident
+    // history (d3524769 → cd373634 → ffe132ed).
+    const { sanitized, negatedTargets } = sanitizePromptForFileExtraction(request);
     // Supported file extensions — widen beyond TS/JS so the charter can
     // pick up targets in Python projects, Godot games, and the other
     // repos Zen actually drives Aedis on. Keep the list explicit so a
