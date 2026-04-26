@@ -1944,17 +1944,21 @@ export class Coordinator {
         mergeDecision.action === "apply";
 
       // Approval gate: if requireApproval is true, pause instead of auto-committing.
+      // Also pause when auto-promote is disabled: the workspace commit would
+      // otherwise become a confusing VERIFICATION_PENDING terminal run with
+      // no pending approval and no path for the user to accept/reject it.
       // The run transitions to "awaiting_approval" — a first-class, explicit state.
       // The run is NOT complete, NOT partial, NOT failed. It is paused.
-      if (canCommit && finalRequireApproval) {
+      const shouldPauseForApproval = finalRequireApproval || !this.config.autoPromoteOnSuccess;
+      if (canCommit && shouldPauseForApproval) {
         console.log(`[coordinator] PHASE 10: APPROVAL REQUIRED — ${changeCount} change(s) ready. Pausing for external approval.`);
         advancePhase(run, "awaiting_approval");
         this.emit({ type: "system_event", payload: { runId: active.run.id, event: "approval_required", changeCount } });
         recordDecision(active.run, {
-          description: `Commit paused — requireApproval=true. ${changeCount} files ready to commit.`,
+          description: `Commit paused — ${finalRequireApproval ? "approval required" : "auto-promote disabled"}. ${changeCount} files ready to commit.`,
           madeBy: "coordinator",
           taskId: null,
-          alternatives: ["Auto-commit (requireApproval=false)", "Reject and rollback"],
+          alternatives: ["Approve and commit", "Reject and rollback"],
           rationale: "DOCTRINE: user approves final apply",
         });
         // Store the active run for later approval via approveRun()

@@ -316,7 +316,7 @@ function buildHarness(
 test("deterministic lifecycle: applied transform flows through verifier, gate, receipt, and cleanup", async () => {
   const repo = makeRepo();
   try {
-    const { coordinator, receiptStore, events, builder } = buildHarness(repo);
+    const { coordinator, receiptStore, events, builder } = buildHarness(repo, { autoPromoteOnSuccess: true });
     const receipt = await coordinator.submit({
       input: "add a GET /ready endpoint in src/server.ts that returns ok",
       projectRoot: repo,

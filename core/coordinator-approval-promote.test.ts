@@ -180,6 +180,7 @@ class StubIntegratorWorker extends AbstractWorker {
 function buildHarness(projectRoot: string, opts: {
   builder: AbstractWorker;
   requireApproval: boolean;
+  autoPromoteOnSuccess?: boolean;
   stateRoot?: string;
 }) {
   const registry = new WorkerRegistry();
@@ -212,6 +213,7 @@ function buildHarness(projectRoot: string, opts: {
       autoCommit: true,
       requireWorkspace: true,
       requireApproval: opts.requireApproval,
+      autoPromoteOnSuccess: opts.autoPromoteOnSuccess ?? false,
       // Drop required checks AND register a stub passing hook so the
       // run gets a real "verification signal." Production gates
       // typecheck/tests by default; this harness exercises the
@@ -416,6 +418,89 @@ test("approval flow: AWAITING_APPROVAL persists the full awaitReceipt into final
   }
 });
 
+test("approval flow: autoPromote=false creates pending approval after successful verification", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 7;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, {
+      builder,
+      requireApproval: false,
+      autoPromoteOnSuccess: false,
+    });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const persisted = await receiptStore.getRun(receipt.runId);
+
+    assert.equal(persisted?.status, "AWAITING_APPROVAL");
+    assert.equal(persisted?.finalReceipt?.summary.phase, "awaiting_approval");
+    assert.equal(coordinator.getPendingApprovals().length, 1);
+    assert.deepEqual(coordinator.listActiveRunIds(), [receipt.runId]);
+    assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), "export const widget = 1;\n");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("approval flow: task route exposes pending approval as active until cancel clears it", async () => {
+  const fastify = (await import("fastify")).default;
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 8;\n" },
+    ]);
+    const { coordinator, receiptStore, events } = buildHarness(repo, {
+      builder,
+      requireApproval: false,
+      autoPromoteOnSuccess: false,
+    });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    await receiptStore.registerTask({
+      taskId: "task-auto-promote-disabled",
+      runId: receipt.runId,
+      prompt: "modify widget in core",
+      submittedAt: new Date().toISOString(),
+    });
+
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator,
+      eventBus: {
+        emit: (event: AedisEvent) => { events.push(event); },
+        recentEvents: () => events,
+      },
+      config: { projectRoot: repo },
+    });
+    await app.register(taskRoutes);
+
+    const before = (await app.inject({ method: "GET", url: "/task-auto-promote-disabled" })).json();
+    assert.equal(before.status, "running");
+    assert.equal(before.active_run, true);
+    assert.equal(before.progress.phase, "awaiting_approval");
+
+    const cancel = await app.inject({ method: "POST", url: "/task-auto-promote-disabled/cancel" });
+    assert.equal(cancel.statusCode, 200);
+    assert.equal(cancel.json().status, "cancelled");
+
+    await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.phase === "aborted" ? current : null;
+    }, "approval cancellation should persist aborted phase");
+
+    const after = (await app.inject({ method: "GET", url: "/task-auto-promote-disabled" })).json();
+    assert.equal(after.active_run, false);
+    assert.equal(after.progress.phase, "aborted");
+    assert.equal(coordinator.getPendingApprovals().length, 0);
+
+    await app.close();
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("approval flow: approveRun captures patchArtifact + commitSha into finalReceipt before workspace cleanup", async () => {
   const repo = makeTempRepo();
   try {
@@ -483,7 +568,11 @@ test("approval flow: auto-promote path (requireApproval=false) still captures pa
     const builder = new RealBuilderWorker([
       { path: "core/widget.ts", content: "export const widget = 99;\n" },
     ]);
-    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: false });
+    const { coordinator, receiptStore } = buildHarness(repo, {
+      builder,
+      requireApproval: false,
+      autoPromoteOnSuccess: true,
+    });
 
     const receipt = await coordinator.submit({ input: "modify widget in core" });
 
