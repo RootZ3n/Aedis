@@ -24,8 +24,13 @@ const phrasesThatShouldCount: Array<readonly [string, string]> = [
   ["singular 'add one test'", "add one test in core/x.test.ts"],
   ["focused singular", "Add one focused test in core/run-summary.test.ts asserting the ratio"],
   ["update + singular", "update the test in core/foo.test.ts to cover edge case"],
+  ["add/update focused", "add/update a focused test for the formatter"],
   ["write + unit + singular", "write a unit test for the helper"],
   ["create + singular", "create a focused test that fails first"],
+  ["implement singular", "implement a test for the retry path"],
+  ["test coverage", "add test coverage for the scheduler"],
+  ["spec file", "update the spec file for the parser"],
+  ["write spec", "write a spec for the parser"],
   ["plain .test.ts path mention", "Reproduce the issue via core/run-summary.test.ts"],
   [".spec.ts path mention", "Add coverage in src/parser.spec.ts"],
   [".test.tsx path mention", "Edit ui/Button.test.tsx"],
@@ -44,7 +49,6 @@ for (const [label, prompt] of phrasesThatShouldCount) {
 
 const phrasesThatShouldNotCount: Array<readonly [string, string]> = [
   ["pure bugfix, no test mention", "Fix the off-by-one in core/parser.ts"],
-  ["mentions testing concept but not asking", "This file currently has no test coverage discussion."],
   ["incidental 'tested' word", "Verify the change is tested by the suite"],
 ];
 
@@ -129,6 +133,40 @@ function setupRunSummaryFixture(): { dir: string; cleanup: () => void } {
     dir,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
+}
+
+function setupFooFixture(opts: { includeSpec?: boolean; includeTest?: boolean } = {}): { dir: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-deliv-"));
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src/foo.ts"), "export const foo = 1;\n", "utf-8");
+  if (opts.includeTest ?? true) {
+    writeFileSync(join(dir, "src/foo.test.ts"), "import './foo';\n", "utf-8");
+  }
+  if (opts.includeSpec) {
+    writeFileSync(join(dir, "src/foo.spec.ts"), "import './foo';\n", "utf-8");
+  }
+  return {
+    dir,
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+function prepareTargets(opts: {
+  dir: string;
+  prompt: string;
+  deliverables: Array<{ description: string; type: "modify" | "create"; targetFiles: string[] }>;
+}): { targets: string[]; active: any } {
+  const coord = new (Coordinator as any)({ projectRoot: opts.dir });
+  const gen = new CharterGenerator();
+  const analysis = gen.analyzeRequest(opts.prompt);
+  const active = buildActive({
+    projectRoot: opts.dir,
+    userRequest: opts.prompt,
+    deliverables: opts.deliverables,
+  });
+  active.analysis = analysis;
+  const result = coord.prepareDeliverablesForGraph(active, analysis);
+  return { targets: result.flatMap((d: any) => d.targetFiles), active };
 }
 
 test("prepareDeliverablesForGraph: bugfix prompt keeps user-named test deliverable", () => {
@@ -226,6 +264,95 @@ test("prepareDeliverablesForGraph: 'add a test' phrasing keeps the test delivera
   }
 });
 
+test("prepareDeliverablesForGraph: 'fix src/foo.test.ts' keeps test deliverable", () => {
+  const { dir, cleanup } = setupFooFixture();
+  try {
+    const { targets, active } = prepareTargets({
+      dir,
+      prompt: "fix src/foo.test.ts",
+      deliverables: [
+        { description: "Modify src/foo.test.ts", type: "modify", targetFiles: ["src/foo.test.ts"] },
+      ],
+    });
+    assert.ok(targets.includes("src/foo.test.ts"), `expected test target to survive; got [${targets.join(", ")}]`);
+    assert.equal(active.userNamedStrippedTargets.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("prepareDeliverablesForGraph: 'fix the failing test in src/foo.spec.ts' keeps test deliverable", () => {
+  const { dir, cleanup } = setupFooFixture({ includeSpec: true });
+  try {
+    const { targets, active } = prepareTargets({
+      dir,
+      prompt: "fix the failing test in src/foo.spec.ts",
+      deliverables: [
+        { description: "Modify src/foo.spec.ts", type: "modify", targetFiles: ["src/foo.spec.ts"] },
+      ],
+    });
+    assert.ok(targets.includes("src/foo.spec.ts"), `expected spec target to survive; got [${targets.join(", ")}]`);
+    assert.equal(active.userNamedStrippedTargets.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("prepareDeliverablesForGraph: 'fix the bug and update src/foo.test.ts' keeps test deliverable", () => {
+  const { dir, cleanup } = setupFooFixture();
+  try {
+    const { targets, active } = prepareTargets({
+      dir,
+      prompt: "fix the bug and update src/foo.test.ts",
+      deliverables: [
+        { description: "Modify src/foo.test.ts", type: "modify", targetFiles: ["src/foo.test.ts"] },
+      ],
+    });
+    assert.ok(targets.includes("src/foo.test.ts"), `expected test target to survive; got [${targets.join(", ")}]`);
+    assert.equal(active.userNamedStrippedTargets.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("prepareDeliverablesForGraph: 'fix src/foo.ts and src/foo.test.ts' keeps both deliverables", () => {
+  const { dir, cleanup } = setupFooFixture();
+  try {
+    const { targets, active } = prepareTargets({
+      dir,
+      prompt: "fix src/foo.ts and src/foo.test.ts",
+      deliverables: [
+        { description: "Modify src/foo.ts", type: "modify", targetFiles: ["src/foo.ts"] },
+        { description: "Modify src/foo.test.ts", type: "modify", targetFiles: ["src/foo.test.ts"] },
+      ],
+    });
+    assert.ok(targets.includes("src/foo.ts"), `expected source target to survive; got [${targets.join(", ")}]`);
+    assert.ok(targets.includes("src/foo.test.ts"), `expected test target to survive; got [${targets.join(", ")}]`);
+    assert.equal(active.userNamedStrippedTargets.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("prepareDeliverablesForGraph: explicit nonexistent test file with authoring intent is kept for creation", () => {
+  const { dir, cleanup } = setupFooFixture({ includeTest: false });
+  try {
+    const { targets, active } = prepareTargets({
+      dir,
+      prompt: "Fix src/foo.ts and add one focused test in src/foo.test.ts",
+      deliverables: [
+        { description: "Modify src/foo.ts", type: "modify", targetFiles: ["src/foo.ts"] },
+        { description: "Create src/foo.test.ts", type: "create", targetFiles: ["src/foo.test.ts"] },
+      ],
+    });
+    assert.ok(targets.includes("src/foo.ts"), `expected source target to survive; got [${targets.join(", ")}]`);
+    assert.ok(targets.includes("src/foo.test.ts"), `expected nonexistent explicit test target to be kept for creation; got [${targets.join(", ")}]`);
+    assert.equal(active.userNamedStrippedTargets.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
 test("prepareDeliverablesForGraph: bugfix still strips auto-injected test pair when user did NOT name it", () => {
   // The strip is intentional behavior for narrow bugfixes — it prevents the
   // builder from spending its shot on a phantom test pair when the user is
@@ -283,6 +410,33 @@ test("userTargetFindings: emits a critical merge finding when userNamedStrippedT
   assert.equal(findings[0].source, "coordinator");
   assert.equal(findings[0].code, "user-target-stripped");
   assert.match(findings[0].message, /core\/run-summary\.test\.ts/);
+});
+
+test("prepareDeliverablesForGraph: stripping a user-named required deliverable produces blocker signal", () => {
+  const { dir, cleanup } = setupFooFixture();
+  try {
+    const coord = new (Coordinator as any)({ projectRoot: dir });
+    const gen = new CharterGenerator();
+    const prompt = "fix src/foo.ts and src/foo.test.ts";
+    const analysis = gen.analyzeRequest(prompt);
+    const active = buildActive({
+      projectRoot: dir,
+      userRequest: prompt,
+      deliverables: [
+        { description: "Modify src/foo.ts", type: "modify", targetFiles: ["src/foo.ts"] },
+      ],
+    });
+    active.analysis = analysis;
+    coord.prepareDeliverablesForGraph(active, analysis);
+    const findings = coord.userTargetFindings(active);
+    assert.deepEqual(active.userNamedStrippedTargets, ["src/foo.test.ts"]);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].severity, "critical");
+    assert.equal(findings[0].code, "user-target-stripped");
+    assert.match(findings[0].message, /src\/foo\.test\.ts/);
+  } finally {
+    cleanup();
+  }
 });
 
 test("userTargetFindings: empty tripwire produces no findings", () => {

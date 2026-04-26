@@ -2922,6 +2922,10 @@ export class Coordinator {
         explicitlyMentioned.add(trimmed.slice(active.sourceRepo.length).replace(/^[\\/]+/, ""));
       }
     }
+    for (const testPath of this.extractExplicitTestPathMentions(analysis.raw)) {
+      explicitlyMentioned.add(testPath);
+      explicitlyMentioned.add(testPath.replace(/^.*\//, ""));
+    }
     const isExplicit = (file: string): boolean =>
       explicitlyMentioned.has(file) || explicitlyMentioned.has(file.replace(/^.*\//, ""));
 
@@ -3036,6 +3040,14 @@ export class Coordinator {
             /\b(create|new file|new module|extract\s+\w+\s+into|move\s+\w+\s+to\s+a\s+new)\b/i.test(
               analysis.raw,
             );
+          const explicitMissingTestWithAuthoringIntent =
+            isTest && explicitTestRequest && this.extractExplicitTestPathMentions(analysis.raw).includes(file);
+          if (explicitMissingTestWithAuthoringIntent) {
+            decisions.push(
+              `  keep ${file} (explicit test-authoring target — will be created)`,
+            );
+            return true;
+          }
           if (isCreateDeliverable || promptHasCreateIntent) {
             decisions.push(
               `  keep ${file} (explicit new-file target — ${isCreateDeliverable ? "deliverable.type=create" : "prompt has create intent"})`,
@@ -3305,6 +3317,18 @@ export class Coordinator {
       const canonical = canonicalizePath(userTarget);
       if (!canonical) continue;
       if (finalTargets.has(canonical)) continue;
+      if (
+        this.isTestFile(canonical) &&
+        explicitTestRequest &&
+        this.extractExplicitTestPathMentions(analysis.raw).includes(canonical)
+      ) {
+        if (active.userNamedStrippedTargets.includes(canonical)) continue;
+        active.userNamedStrippedTargets.push(canonical);
+        console.warn(
+          `[coordinator] prepareDeliverablesForGraph: TRIPWIRE — explicit test-authoring target ${canonical} fell out of deliverables. Merge gate will block.`,
+        );
+        continue;
+      }
       // Skip user-named targets that don't exist on disk — Phase 2 drops
       // those intentionally, and submitWithGates already returns
       // needs_clarification for prompts whose only target is missing, so
@@ -3463,8 +3487,12 @@ export class Coordinator {
 
   private userExplicitlyAskedForTests(request: string): boolean {
     if (!request || typeof request !== "string") return false;
+    const searchable = request.replace(/[/-]+/g, " ");
     // Plural / phrase markers — original surface that was already covered.
-    if (/\b(add tests|update tests|write tests|new tests|test file|test files|tests)\b/i.test(request)) {
+    if (/\b(add tests|update tests|write tests|new tests|test file|test files|spec file|spec files|tests)\b/i.test(searchable)) {
+      return true;
+    }
+    if (/\btest\s+coverage\b/i.test(searchable)) {
       return true;
     }
     // Singular imperative variants like "add a test", "add one focused test",
@@ -3473,20 +3501,32 @@ export class Coordinator {
     // hit exactly this gap with "Add one focused test in core/run-summary.test.ts"
     // and the coordinator dropped the test deliverable because the regex
     // only matched the plural "tests".
-    if (/\b(add|write|create|implement|generate|author|update|modify|cover\s+with)\s+(?:a\s+|an\s+|one\s+|the\s+|new\s+|more\s+|additional\s+|focused\s+|narrow\s+|small\s+|unit\s+|integration\s+|e2e\s+|end-to-end\s+)*tests?\b/i.test(request)) {
+    if (/\b(add|write|create|implement|generate|author|update|modify|cover\s+with)\s+(?:a\s+|an\s+|one\s+|the\s+|new\s+|more\s+|additional\s+|focused\s+|narrow\s+|small\s+|unit\s+|integration\s+|e2e\s+|end\s+to\s+end\s+)*tests?\b/i.test(searchable)) {
+      return true;
+    }
+    if (/\b(add|write|create|implement|generate|author|update|modify)\s+(?:a\s+|an\s+|one\s+|the\s+|new\s+|more\s+|additional\s+|focused\s+|narrow\s+|small\s+|unit\s+|integration\s+|e2e\s+|end\s+to\s+end\s+)*spec\b/i.test(searchable)) {
       return true;
     }
     // Direct path mention of a test/spec file — if the user wrote a path
     // ending in .test.{ts,tsx,js,jsx,mjs,cjs} or .spec.{...}, that is an
     // explicit ask regardless of surrounding phrasing.
-    if (/\b[\w\-./]+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)\b/i.test(request)) {
+    if (this.extractExplicitTestPathMentions(request).length > 0) {
       return true;
     }
     return false;
   }
 
+  private extractExplicitTestPathMentions(request: string): string[] {
+    if (!request || typeof request !== "string") return [];
+    const matches = request.match(/(?:^|[\s"'`(])((?:\.{1,2}\/|\/)?[\w@.-][\w@./-]*\.(?:test|spec)\.[mc]?[jt]sx?)(?=$|[\s"'`),.;:!?])/gi) ?? [];
+    const paths = matches
+      .map((match) => match.trim().replace(/^["'`(]+/, "").replace(/[)"'`,.;:!?]+$/, ""))
+      .filter(Boolean);
+    return this.uniqueStrings(paths);
+  }
+
   private isTestFile(filePath: string): boolean {
-    return /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(filePath);
+    return /\.(test|spec)\.[mc]?[jt]sx?$/.test(filePath);
   }
 
   /**
