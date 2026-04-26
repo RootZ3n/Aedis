@@ -5457,7 +5457,7 @@ export class Coordinator {
       // All git commands run with cwd=active.projectRoot so they target
       // the per-task effective root rather than the API server's cwd.
       // This is the difference between committing to the right repo vs.
-      // committing to /mnt/ai/Zendorium accidentally.
+      // committing to /mnt/ai/aedis accidentally.
       // Stage only the files Aedis changed — NOT `git add -A` which would
       // sweep in unrelated uncommitted files from the working tree.
       const changedPaths = active.changes.map((c) => resolve(active.projectRoot, c.path));

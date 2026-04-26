@@ -95,7 +95,7 @@ export class CriticWorker extends AbstractWorker {
   constructor(config: CriticWorkerConfig = {}) {
     super();
     // NOTE: this.projectRoot is the constructor-time default. In production
-    // it's the API server's cwd (typically /mnt/ai/Zendorium). Per-task
+    // it's the API server's cwd (typically /mnt/ai/aedis). Per-task
     // submissions can override via assignment.projectRoot, which is what
     // execute() reads first; this field is the fallback for tests and
     // stand-alone harnesses that bypass the assignment-based wiring.
