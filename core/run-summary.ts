@@ -706,6 +706,12 @@ function summarizeGitDiff(result?: GitDiffResult | null): string {
   return `mismatch detected — ${parts.join(", ")}`;
 }
 
+export function formatVerdictBadge(status: string): string {
+  if (status === "pass") return "[PASS]";
+  if (status === "fail") return "[FAIL]";
+  return `[${status.toUpperCase()}]`;
+}
+
 function buildExplanationLines(input: {
   filesByRole: Readonly<Record<"types" | "implementation" | "integration" | "tests", readonly string[]>>;
   requiredFiles: readonly string[];
