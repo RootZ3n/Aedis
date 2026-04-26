@@ -4035,6 +4035,62 @@ export class Coordinator {
     console.log(`[coordinator] executeGraph: loop exited after ${iteration} iteration(s) — isComplete=${isGraphComplete(graph)} hasFailedNodes=${hasFailedNodes(graph)} cancelled=${active.cancelled}`);
   }
 
+  private normalizeRunPath(path: string): string {
+    return path.replace(/\\/g, "/").replace(/^\.\//, "");
+  }
+
+  private changedBuilderFiles(result: WorkerResult): string[] {
+    if (result.output.kind !== "builder") return [];
+    return [...new Set(result.output.changes.map((change) => this.normalizeRunPath(change.path)))].sort();
+  }
+
+  private requiredBuilderDeliverables(active: ActiveRun, node: TaskNode): string[] {
+    const nodeTargets = new Set(node.targetFiles.map((file) => this.normalizeRunPath(file)));
+    return active.changeSet.filesInScope
+      .filter((file) => file.mutationExpected)
+      .map((file) => this.normalizeRunPath(file.path))
+      .filter((file) => nodeTargets.size === 0 || nodeTargets.has(file))
+      .filter((file, index, files) => files.indexOf(file) === index)
+      .sort();
+  }
+
+  private missingRequiredBuilderDeliverables(
+    active: ActiveRun,
+    node: TaskNode,
+    result: WorkerResult,
+  ): string[] {
+    if (!result.success || result.output.kind !== "builder") return [];
+    const changed = new Set(this.changedBuilderFiles(result));
+    return this.requiredBuilderDeliverables(active, node)
+      .filter((file) => !changed.has(file));
+  }
+
+  private missingRequiredBuilderFailure(
+    result: WorkerResult,
+    requiredFiles: readonly string[],
+    missingRequired: readonly string[],
+  ): WorkerResult {
+    const message =
+      `missing_required_deliverable: Builder did not modify required file(s): ` +
+      `${missingRequired.join(", ")}. Required files for this dispatch: ${requiredFiles.join(", ")}.`;
+    return {
+      ...result,
+      success: false,
+      confidence: 0,
+      issues: [
+        { severity: "error" as const, message },
+        ...result.issues,
+      ],
+      output: {
+        kind: "builder" as const,
+        changes: [],
+        decisions: result.output.kind === "builder" ? result.output.decisions : [],
+        needsCriticReview: true,
+      },
+      touchedFiles: result.touchedFiles.filter((touch) => touch.operation === "read"),
+    };
+  }
+
   private async dispatchNode(
     active: ActiveRun,
     node: TaskNode
@@ -4566,6 +4622,73 @@ export class Coordinator {
           currentTier = retryTier;
         }
         await this.persistProviderAttempts(active, runTask.id, result);
+      }
+    }
+
+    // ── Required-deliverable completeness recovery ──────────────────
+    // A Builder can technically "succeed" while only editing one side of
+    // an explicitly requested source+test pair. Catch that before the
+    // partial result is accepted into active.changes, retry once with the
+    // exact missing path(s), and otherwise fail with a specific reason.
+    if (node.workerType === "builder" && active.implementationBrief) {
+      let missingRequired = this.missingRequiredBuilderDeliverables(active, node, result);
+      if (result.success && missingRequired.length > 0) {
+        const requiredFiles = this.requiredBuilderDeliverables(active, node);
+        console.warn(
+          `[coordinator] missing_required_deliverable: builder ${node.id.slice(0, 6)} missed ` +
+          `${missingRequired.join(", ")}`,
+        );
+
+        if (active.weakOutputRetries < 2) {
+          active.weakOutputRetries += 1;
+          const retryHint =
+            `The previous Builder attempt was incomplete. It changed only ` +
+            `${this.changedBuilderFiles(result).join(", ") || "no files"}, but this task requires edits to ` +
+            `${requiredFiles.join(", ")}. Retry now and modify every missing required file exactly: ` +
+            `${missingRequired.join(", ")}. Do not return a test-only or source-only patch.`;
+          const retryBrief = briefWithRetryHint(active.implementationBrief, retryHint);
+          active.implementationBrief = retryBrief;
+          this.receiptStore.patchRun(active.run.id, {
+            implementationBrief: briefToReceiptJson(retryBrief),
+          }).catch(() => {});
+          this.emit({
+            type: "system_event",
+            payload: {
+              runId: active.run.id,
+              checkpointLabel: "missing_required_deliverable_retry",
+              summary: `retry builder for missing required file(s): ${missingRequired.join(", ")}`,
+            },
+          });
+
+          try {
+            const retryResult = await worker.execute({
+              ...assignment,
+              implementationBrief: retryBrief,
+            });
+            await this.persistProviderAttempts(active, runTask.id, retryResult);
+            result = retryResult;
+            missingRequired = this.missingRequiredBuilderDeliverables(active, node, result);
+            console.log(
+              `[coordinator] missing-required retry attempt=${retryBrief.attempt} ` +
+              `success=${result.success} remaining=${missingRequired.join(", ") || "none"}`,
+            );
+          } catch (retryErr) {
+            const rmsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+            result = syntheticFailure(
+              `missing_required_deliverable: retry failed while attempting missing required file(s) ` +
+              `${missingRequired.join(", ")}: ${rmsg}`,
+            );
+            missingRequired = this.missingRequiredBuilderDeliverables(active, node, result);
+          }
+        }
+
+        if (result.success && missingRequired.length > 0) {
+          result = this.missingRequiredBuilderFailure(
+            result,
+            requiredFiles,
+            missingRequired,
+          );
+        }
       }
     }
 

@@ -17,7 +17,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -103,6 +103,36 @@ class TrackingBuilder extends AbstractWorker {
       cost: this.zeroCost(),
       confidence: 0.9,
       touchedFiles: [{ path, operation: "modify" }],
+      durationMs: 1,
+    });
+  }
+
+  successMany(assignment: WorkerAssignment, paths: readonly string[]): WorkerResult {
+    const changes = paths.map((path) => {
+      const abs = join(assignment.projectRoot ?? process.cwd(), path);
+      const originalContent = readFileSync(abs, "utf-8");
+      const content = path.endsWith("run-summary.ts")
+        ? "export function summary() { return 'new wording'; }\n"
+        : "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { summary } from './run-summary.js';\n\ntest('summary wording', () => {\n  assert.equal(summary(), 'new wording');\n});\n";
+      writeFileSync(abs, content, "utf-8");
+      return {
+        path,
+        operation: "modify" as const,
+        originalContent,
+        content,
+        diff: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@\n-${originalContent.trim()}\n+${content.trim()}\n`,
+      };
+    });
+    const output: BuilderOutput = {
+      kind: "builder",
+      changes,
+      decisions: [],
+      needsCriticReview: false,
+    };
+    return this.success(assignment, output, {
+      cost: this.zeroCost(),
+      confidence: 0.9,
+      touchedFiles: paths.map((path) => ({ path, operation: "modify" as const })),
       durationMs: 1,
     });
   }
@@ -388,6 +418,118 @@ test("gauntlet-5: weak-output retry cap is 2 extra attempts — a persistently e
       assert.ok(b.attempt <= 3, `attempt must be capped at 3 per dispatch; saw ${b.attempt}`);
     }
     assert.notEqual(receipt.verdict, "success", "run should not succeed when all attempts fail");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("missing-required-deliverable: source+test request retries when Builder returns only the test file", async () => {
+  const repo = makeRepo({
+    "core/run-summary.ts": "export function summary() { return 'old'; }\n",
+    "core/run-summary.test.ts": "import test from 'node:test';\n",
+  });
+  try {
+    let builder!: TrackingBuilder;
+    builder = new TrackingBuilder((attempt, a) =>
+      attempt === 1
+        ? builder.successMany(a, ["core/run-summary.test.ts"])
+        : builder.successMany(a, ["core/run-summary.ts", "core/run-summary.test.ts"]),
+    );
+    const { coordinator } = buildHarness(repo, builder);
+    const receipt = await coordinator.submit({
+      input:
+        "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
+    });
+
+    assert.ok(builder.attempts >= 2, `Builder should retry after test-only output; got ${builder.attempts}`);
+    assert.match(builder.seenBriefs[1].retryHint ?? "", /core\/run-summary\.ts/);
+    assert.match(builder.seenBriefs[1].retryHint ?? "", /source-only|test-only|missing required/i);
+    assert.doesNotMatch(JSON.stringify(receipt), /missing_required_deliverable/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("missing-required-deliverable: source+test request retries when Builder returns only the source file", async () => {
+  const repo = makeRepo({
+    "core/run-summary.ts": "export function summary() { return 'old'; }\n",
+    "core/run-summary.test.ts": "import test from 'node:test';\n",
+  });
+  try {
+    let returnedSourceOnlyForTestNode = false;
+    let builder!: TrackingBuilder;
+    builder = new TrackingBuilder((_attempt, a) => {
+      if (a.task.targetFiles.includes("core/run-summary.test.ts") && !returnedSourceOnlyForTestNode) {
+        returnedSourceOnlyForTestNode = true;
+        return builder.successMany(a, ["core/run-summary.ts"]);
+      }
+      return builder.successMany(a, ["core/run-summary.ts", "core/run-summary.test.ts"]);
+    });
+    const { coordinator } = buildHarness(repo, builder);
+    const receipt = await coordinator.submit({
+      input:
+        "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
+    });
+
+    assert.ok(builder.attempts >= 2, `Builder should retry after source-only output; got ${builder.attempts}`);
+    assert.ok(
+      builder.seenBriefs.some((brief) => /core\/run-summary\.test\.ts/.test(brief.retryHint ?? "")),
+      "retry prompt should name the missing test file",
+    );
+    assert.doesNotMatch(JSON.stringify(receipt), /missing_required_deliverable/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("missing-required-deliverable: persistent one-sided Builder output fails with clear classification", async () => {
+  const repo = makeRepo({
+    "core/run-summary.ts": "export function summary() { return 'old'; }\n",
+    "core/run-summary.test.ts": "import test from 'node:test';\n",
+  });
+  try {
+    let builder!: TrackingBuilder;
+    builder = new TrackingBuilder((_attempt, a) =>
+      builder.successMany(a, ["core/run-summary.test.ts"]),
+    );
+    const { coordinator, events } = buildHarness(repo, builder);
+    const receipt = await coordinator.submit({
+      input:
+        "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
+    });
+
+    assert.equal(receipt.verdict, "failed");
+    const failed = events.find((event) => event.type === "task_failed");
+    assert.match(JSON.stringify(failed?.payload ?? {}), /missing_required_deliverable/);
+    assert.match(JSON.stringify(failed?.payload ?? {}), /core\/run-summary\.ts/);
+    assert.ok(builder.attempts >= 2, "Builder should retry once before final missing-required failure");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("missing-required-deliverable: successful source+test output remains green without retry", async () => {
+  const repo = makeRepo({
+    "core/run-summary.ts": "export function summary() { return 'old'; }\n",
+    "core/run-summary.test.ts": "import test from 'node:test';\n",
+  });
+  try {
+    let builder!: TrackingBuilder;
+    builder = new TrackingBuilder((_attempt, a) =>
+      builder.successMany(a, ["core/run-summary.ts", "core/run-summary.test.ts"]),
+    );
+    const { coordinator } = buildHarness(repo, builder);
+    const receipt = await coordinator.submit({
+      input:
+        "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
+    });
+
+    assert.equal(
+      builder.seenBriefs.filter((brief) => brief.retryHint).length,
+      0,
+      "complete source+test output should not trigger missing-required retry",
+    );
+    assert.doesNotMatch(JSON.stringify(receipt), /missing_required_deliverable/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
