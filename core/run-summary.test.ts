@@ -386,6 +386,132 @@ test("summary: cost is rendered as a display-friendly dollar string", () => {
   assert.ok(r.cost.inputTokens > 0);
 });
 
+// ─── verificationChecks fallback (Aedis bugfix run 901e6da2) ───────
+//
+// Run 902a23c3 surfaced this in real receipts: when the verifier
+// produced rich StageResult[] data on `verificationReceipt.stages`
+// but no explicit lint/typecheck/tests hooks were configured (so
+// `verificationReceipt.checks` was empty), the run-summary's
+// "Checks run: …" line came up empty even though the verifier had
+// done real work. Aedis attempted to fix this in commit f2ee019 by
+// falling back to `receipt.verificationResults.final.stages`, but
+// that field only exists on PersistentRunReceipt — it's undefined
+// on the in-memory RunReceipt that generateRunSummary actually
+// receives. The fallback compiled (tsc emits despite the TS2339)
+// but was dead at runtime: verificationChecks stayed empty.
+//
+// These tests pin the corrected fallback (`verificationReceipt.stages`):
+//   1. checks-populated → existing checks are used as-is (back-compat)
+//   2. checks-empty + stages-populated → stages are mapped into the
+//      verificationChecks shape and surfaced
+//   3. both empty → empty result (graceful)
+//   4. both populated → checks WIN (preferred source preserved)
+
+interface FallbackReceiptOverrides {
+  checks?: { kind: "lint" | "typecheck" | "tests"; name: string; required: boolean; executed: boolean; passed: boolean; details: string }[];
+  stages?: { stage: "diff-check" | "contract-check" | "cross-file-check" | "lint" | "typecheck" | "custom-hook" | "confidence-scoring"; name: string; passed: boolean; score: number; issues: never[]; durationMs: number; details: string }[];
+}
+
+function receiptWithVerification(overrides: FallbackReceiptOverrides): RunReceipt {
+  // Build off the standard receipt fixture but inject our verification
+  // shape directly. The fixture's verification field gets nulled out
+  // so we can fully control checks AND stages for the assertion.
+  const base = receipt({ verdict: "success", executionVerified: true, executionGateReason: "Execution verified: 1 file modified" });
+  const v: VerificationReceipt = {
+    id: "v-fallback", runId: "run-fallback", intentId: "intent-fallback",
+    timestamp: "2026-04-26T10:00:00.000Z",
+    verdict: "pass",
+    confidenceScore: 0.9,
+    stages: overrides.stages ?? [],
+    judgmentReport: null,
+    allIssues: [], blockers: [],
+    requiredChecks: ["lint", "typecheck", "tests"],
+    checks: overrides.checks ?? [],
+    summary: "test",
+    totalDurationMs: 0,
+    fileCoverage: null, coverageRatio: null, validatedRatio: null,
+  };
+  return { ...base, verificationReceipt: v };
+}
+
+test("summary verificationChecks: checks-populated → existing checks used as-is (back-compat)", () => {
+  const r = generateRunSummary({
+    receipt: receiptWithVerification({
+      checks: [
+        { kind: "typecheck", name: "TypeScript Check", required: true, executed: true, passed: true, details: "ok" },
+        { kind: "tests", name: "npm test", required: false, executed: true, passed: false, details: "Tests failed (exit 1)" },
+      ],
+      // stages also non-empty — checks must still win
+      stages: [
+        { stage: "diff-check", name: "Diff Validation", passed: true, score: 1, issues: [], durationMs: 0, details: "ignored" },
+      ],
+    }),
+    userPrompt: "fix typo",
+    scopeClassification: scope("single-file", 1),
+  });
+  assert.equal(r.verificationChecks.length, 2, "explicit checks must be preserved when populated");
+  assert.equal(r.verificationChecks[0]!.kind, "typecheck");
+  assert.equal(r.verificationChecks[1]!.kind, "tests");
+  assert.equal(r.verificationChecks[1]!.passed, false);
+});
+
+test("summary verificationChecks: checks-empty → falls back to verificationReceipt.stages (run 901e6da2 regression)", () => {
+  // The exact bug Aedis tried to fix in f2ee019 but missed at the
+  // wrong field. Pre-fix this assertion would fail with length=0 even
+  // though stages has 3 entries — that's the operator-visible "0
+  // checks" complaint that surfaced during cancellation/multi-file
+  // runs. Post-fix the stages are surfaced into verificationChecks.
+  const r = generateRunSummary({
+    receipt: receiptWithVerification({
+      checks: [],
+      stages: [
+        { stage: "diff-check", name: "Diff Validation", passed: true, score: 1, issues: [], durationMs: 0, details: "" },
+        { stage: "typecheck", name: "TypeScript Check", passed: true, score: 1, issues: [], durationMs: 5, details: "" },
+        { stage: "custom-hook", name: "Tests", passed: false, score: 0.8, issues: [], durationMs: 30, details: "Tests failed (exit 1)" },
+      ],
+    }),
+    userPrompt: "edit a comment",
+    scopeClassification: scope("single-file", 1),
+  });
+  assert.equal(r.verificationChecks.length, 3, "stages must surface as checks when checks is empty");
+  assert.equal(r.verificationChecks[0]!.kind, "diff-check");
+  assert.equal(r.verificationChecks[1]!.kind, "typecheck");
+  assert.equal(r.verificationChecks[1]!.passed, true);
+  assert.equal(r.verificationChecks[2]!.kind, "custom-hook");
+  assert.equal(r.verificationChecks[2]!.passed, false);
+  // Every stage-derived check is "executed" — the stage produced a
+  // result, so by definition it ran.
+  assert.ok(r.verificationChecks.every((c) => c.executed === true));
+});
+
+test("summary verificationChecks: both empty → result is empty (no fabrication)", () => {
+  const r = generateRunSummary({
+    receipt: receiptWithVerification({ checks: [], stages: [] }),
+    userPrompt: "trivial",
+    scopeClassification: scope("single-file", 1),
+  });
+  assert.equal(r.verificationChecks.length, 0, "no fabrication when both sources are empty");
+});
+
+test("summary verificationChecks: stages-only narrative includes the derived checks line", () => {
+  // End-to-end check that the narrative consumes the fallback. The
+  // operator-visible string is what they actually read; if the
+  // fallback worked but the narrative ignored it, the bug would
+  // still be visible to the user.
+  const r = generateRunSummary({
+    receipt: receiptWithVerification({
+      checks: [],
+      stages: [
+        { stage: "typecheck", name: "TS", passed: true, score: 1, issues: [], durationMs: 1, details: "" },
+      ],
+    }),
+    userPrompt: "tweak",
+    scopeClassification: scope("single-file", 1),
+  });
+  assert.match(r.narrative, /Checks run:/, "narrative must mention the checks line when fallback fires");
+  assert.match(r.narrative, /typecheck=pass/, "narrative must report the stage's pass/fail mapping");
+});
+
 // ─── Fixtures ──────────────────────────────────────────────────────
 
 function scope(type: ScopeClassification["type"], radius: number, decompose = false): ScopeClassification {

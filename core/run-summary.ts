@@ -317,17 +317,34 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
   const cost = resolveCost(receipt);
   const verification = receipt.verificationReceipt?.verdict ?? "not-run";
 
-  // verificationChecks: prefer receipt.verificationReceipt.checks, but
-  // fall back to verificationResults.final.stages when checks is empty.
+  // verificationChecks: prefer receipt.verificationReceipt.checks (the
+  // rich VerificationCheckResult[] populated when explicit lint/
+  // typecheck/tests hooks ran). Fall back to a derivation from
+  // receipt.verificationReceipt.stages when checks is empty so the
+  // summary reflects passive stages too (diff-check, contract-check,
+  // cross-file-check, typecheck, custom-hook). Pre-fix the summary
+  // showed "Checks run: " for runs that had stages but no hooks
+  // configured. f2ee019 attempted this but reached for
+  // receipt.verificationResults.final.stages, which only exists on
+  // PersistentRunReceipt, not the in-memory RunReceipt — the fallback
+  // compiled (tsc emits despite TS2339) but the field was always
+  // undefined at runtime so the fallback never fired. Stages live on
+  // the same VerificationReceipt the existing `checks` field comes
+  // from, so the corrected lookup is one level shallower.
   const receiptChecks = receipt.verificationReceipt?.checks ?? [];
   const verificationChecks = receiptChecks.length > 0
     ? receiptChecks
-    : (receipt.verificationResults?.final?.stages ?? []).map((s: any) => ({
-        kind: s.kind ?? s.type ?? "unknown",
-        name: s.name ?? s.label ?? "unknown",
-        executed: Boolean(s.executed ?? s.completed),
-        passed: Boolean(s.passed ?? s.success),
-        required: Boolean(s.required),
+    : (receipt.verificationReceipt?.stages ?? []).map((stage) => ({
+        kind: stage.stage,
+        name: stage.name,
+        // A stage with a recorded result HAS run — that's the contract
+        // of StageResult. Map to the operator-visible "executed" flag.
+        executed: true,
+        passed: stage.passed,
+        // Stage-derived rows aren't part of the requiredChecks contract;
+        // VerificationReceipt.requiredChecks lives on the receipt itself
+        // (different list, indexed by VerificationCheckKind not stage).
+        required: false,
       }));
 
   // "No verification signal" is a distinct state from pass/fail: the
