@@ -1986,9 +1986,18 @@ export class Coordinator {
             "http://localhost:18796",
             "describe the current run status and any visible errors",
           );
-          console.log(
-            `[coordinator] vision check: ${visionResult.slice(0, 200)}`
-          );
+          if (visionResult.skipped) {
+            // Distinct log line so operators can tell "vision is opt-in
+            // and not configured" apart from "vision tried and threw."
+            // Pre-fix this log line was indistinguishable from a real
+            // failure — qwen3-vl:8b kept showing up in journals as a
+            // failure even though it was an unconfigured default.
+            console.warn(`[coordinator] vision check skipped: ${visionResult.reason}`);
+          } else {
+            console.log(
+              `[coordinator] vision check (${visionResult.model}): ${(visionResult.analysis ?? "").slice(0, 200)}`,
+            );
+          }
         } catch (err) {
           const visionMessage = err instanceof Error ? err.message : String(err);
           console.warn(

@@ -81,7 +81,7 @@ ProjectMemory          DiffApplier                        git commit / rollback
 
 **Loqui** (`core/loqui.ts`, `core/loqui-router.ts`) — Conversational interface for repo reasoning. Single input, intent-classified routing: build, answer, resume, dry-run, or clarify. The UI sends every message through Loqui — there's no mode to pick.
 
-**Vision** (`core/vision.ts`) — Optional post-build self-check. Captures a screenshot of the running UI and analyzes it for visible errors. Enabled via `AEDIS_VISION=true`.
+**Vision** (`core/vision.ts`) — Optional post-build self-check. Captures a screenshot of the running UI and analyzes it for visible errors. Strict opt-in: enabled via `AEDIS_VISION=true` AND a configured model via `AEDIS_VISION_MODEL=<ollama-vision-model>` (e.g. `qwen3-vl:4b`). If `AEDIS_VISION_MODEL` is unset OR the model isn't installed in Ollama, the check skips cleanly with a logged reason — no auto-pull, no implicit default.
 
 **Portum** — Universal last-resort gateway. Local HTTP proxy at `localhost:18797`. Tried once after the caller-provided fallback chain is exhausted, skipped if Portum was already in the chain or is blacklisted. Per-run timeout blacklisting and a cross-run circuit breaker (`.aedis/circuit-breaker-state.json`) sit in front of every chain step.
 
@@ -107,7 +107,7 @@ ProjectMemory          DiffApplier                        git commit / rollback
 
 **Loqui conversational reasoning.** Ask questions about the repo, plan changes before committing, resume failed runs, or get dry-run previews — all through the same input. Intent classification happens server-side.
 
-**Vision self-check.** Post-build screenshot analysis catches visual regressions that type checks miss. Optional, runs only when `AEDIS_VISION=true`.
+**Vision self-check.** Post-build screenshot analysis catches visual regressions that type checks miss. Strict opt-in: requires both `AEDIS_VISION=true` and `AEDIS_VISION_MODEL=<installed-ollama-vision-model>`. Skips cleanly when not configured or when the model is missing — never auto-pulls, never falls back to a default.
 
 **Portum universal fallback.** Never stuck on one provider. The fallback chain tries the next provider on timeout or error, with per-run blacklisting so a flaky provider doesn't slow down every task.
 
