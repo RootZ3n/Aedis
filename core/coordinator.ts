@@ -5721,10 +5721,25 @@ export class Coordinator {
       rationale: "Human rejected the run at the approval gate. All changes rolled back.",
     });
 
-    void this.receiptStore.patchRun(runId, {
+    // Persist a terminal-shaped receipt: phase, runSummary, and a merged
+    // finalReceipt with verdict="failed" so consumers reading the receipt
+    // see the rejected state instead of the stale awaiting_approval shape
+    // left behind by the await-gate persist. Mirrors the cancel flow in
+    // cancelPendingApprovalRun so cancel and reject leave consistent
+    // terminal receipts.
+    const persisted = await this.receiptStore.getRun(runId);
+    const runSummary = getRunSummary(active.run);
+    const mergedFinalReceipt = persisted?.finalReceipt
+      ? { ...persisted.finalReceipt, verdict: "failed" as const, summary: runSummary }
+      : undefined;
+
+    await this.receiptStore.patchRun(runId, {
       status: "REJECTED",
       taskSummary: "Rejected by human — all changes rolled back",
+      phase: active.run.phase,
       completedAt: new Date().toISOString(),
+      runSummary,
+      ...(mergedFinalReceipt ? { finalReceipt: mergedFinalReceipt } : {}),
       appendErrors: ["Run rejected by human during approval gate"],
     });
 

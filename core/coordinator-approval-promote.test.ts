@@ -316,6 +316,59 @@ test("approval flow: cancelling awaiting-approval clears pending/active state, a
   }
 });
 
+test("approval flow: rejecting awaiting-approval run produces consistent terminal receipt state", async () => {
+  // Symmetric with the cancel-during-approval test above. Pre-fix,
+  // rejectRun set status: "REJECTED" but did NOT update phase,
+  // runSummary, or finalReceipt — so the persisted receipt kept
+  // phase: "awaiting_approval", finalReceipt.verdict: "partial",
+  // and finalReceipt.summary.phase: "awaiting_approval" even after
+  // a clean rejection. The fix mirrors cancelPendingApprovalRun's
+  // shape so anyone reading the persisted receipt sees the rejected
+  // terminal state.
+  const repo = makeTempRepo();
+  try {
+    const original = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 600;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const awaiting = await receiptStore.getRun(receipt.runId);
+    const workspacePath = awaiting?.workspace?.workspacePath;
+    assert.ok(workspacePath, "approval run must persist workspace path before rejection");
+    assert.equal(coordinator.getPendingApprovals().length, 1);
+
+    const result = await coordinator.rejectRun(receipt.runId);
+    assert.equal(result.ok, true, `rejectRun must succeed; got error=${result.error}`);
+
+    assert.equal(coordinator.getPendingApprovals().length, 0, "pendingApproval must be cleared after rejection");
+
+    const persisted = await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.workspace?.cleanedUp === true ? current : null;
+    }, "rejection should persist workspace cleanup");
+
+    assert.equal(persisted.status, "REJECTED");
+    assert.equal(persisted.phase, "rejected", "persisted phase must be rejected, not stale awaiting_approval");
+    assert.equal((persisted.runSummary as any)?.phase, "rejected");
+    assert.equal(
+      persisted.finalReceipt?.summary.phase,
+      "rejected",
+      "finalReceipt.summary.phase must not remain awaiting_approval after rejection",
+    );
+    assert.equal(persisted.finalReceipt?.verdict, "failed");
+    assert.equal(existsSync(workspacePath), false, "approval workspace must be removed after rejection");
+    assert.equal(
+      readFileSync(join(repo, "core/widget.ts"), "utf-8"),
+      original,
+      "source repo must not be mutated by rejection",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("approval flow: task route reports active_run=false after approval-stage cancel", async () => {
   const fastify = (await import("fastify")).default;
   const repo = makeTempRepo();
