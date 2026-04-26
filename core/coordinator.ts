@@ -1279,6 +1279,7 @@ export class Coordinator {
       cancelledGenerations: new Set<string>(),
       pendingDispatches: new Map<string, Promise<unknown>>(),
       rejectedCandidates: preparedTargets.rejected.map((entry) => ({ path: entry.path, reason: entry.reason })),
+      userNamedStrippedTargets: [],
       runAbortController: new AbortController(),
     };
     this.activeRuns.set(run.id, active);
@@ -1843,7 +1844,11 @@ export class Coordinator {
         active.intent.userRequest,
         gitDiffResult,
       );
-      const extraFindings = [...waveFailures, ...gitDiffFindings, ...bugfixFindings];
+      // Tripwire: user-named targets that were dropped from deliverables
+      // before the graph was built. Should never fire after the Phase 4.5
+      // fix; kept as a defense-in-depth net for future regressions.
+      const userTargetFindings = this.userTargetFindings(active);
+      const extraFindings = [...waveFailures, ...gitDiffFindings, ...bugfixFindings, ...userTargetFindings];
       const mergeDecision: MergeDecision =
         extraFindings.length === 0
           ? baseDecision
@@ -3237,10 +3242,23 @@ export class Coordinator {
     if (isBugfix && !explicitTestRequest) {
       const before = deduped.length;
       const stripped: Deliverable[] = [];
+      const preservedUserNamed: string[] = [];
+      // A test file is eligible to be stripped ONLY when it was auto-injected
+      // (Phase 4 test-pair injection or any future inferred path). User-named
+      // test files — i.e. paths the user wrote directly into the prompt and
+      // that survived charter target extraction — are never silently dropped
+      // here. Case 1 (1efad650) was the canonical regression: the user
+      // explicitly asked for a test in core/run-summary.test.ts, the regex
+      // missed the singular phrasing, and this stripper deleted the test
+      // deliverable. The fix keeps any test file matched by `isExplicit`.
+      const isAutoStrippable = (f: string): boolean =>
+        isTestInjectionFile(f) && !isExplicit(f);
       for (const d of deduped) {
-        const nonTest = d.targetFiles.filter((f) => !isTestInjectionFile(f));
+        const nonTest = d.targetFiles.filter((f) => !isAutoStrippable(f));
+        const keptUserTests = d.targetFiles.filter((f) => isTestInjectionFile(f) && isExplicit(f));
+        preservedUserNamed.push(...keptUserTests);
         if (nonTest.length === 0) {
-          decisions.push(`  strip deliverable "${d.description}" (bugfix task: all targets were test files)`);
+          decisions.push(`  strip deliverable "${d.description}" (bugfix task: all targets were auto-injected test files; none user-named)`);
           // Remove stripped files from seenPaths so a legitimate test
           // is never blocked on a later run that DOES want tests.
           for (const f of d.targetFiles) {
@@ -3249,8 +3267,8 @@ export class Coordinator {
           continue;
         }
         if (nonTest.length < d.targetFiles.length) {
-          const dropped = d.targetFiles.filter((f) => isTestInjectionFile(f));
-          decisions.push(`  bugfix test-strip: drop ${dropped.join(", ")} from "${d.description}"`);
+          const dropped = d.targetFiles.filter((f) => isAutoStrippable(f));
+          decisions.push(`  bugfix test-strip: drop auto-injected ${dropped.join(", ")} from "${d.description}" (none user-named)`);
           for (const f of dropped) {
             seenPaths.delete(resolve(active.projectRoot, f));
           }
@@ -3258,6 +3276,11 @@ export class Coordinator {
         } else {
           stripped.push(d);
         }
+      }
+      if (preservedUserNamed.length > 0) {
+        console.log(
+          `[coordinator] prepareDeliverablesForGraph: bugfix test-strip preserved ${preservedUserNamed.length} user-named test file(s): ${this.uniqueStrings(preservedUserNamed).join(", ")}`,
+        );
       }
       if (stripped.length !== before) {
         console.log(
@@ -3267,6 +3290,32 @@ export class Coordinator {
       }
       deduped.length = 0;
       deduped.push(...stripped);
+    }
+
+    // ── PHASE 4.6 — Defense-in-depth: user-named target tripwire ────────
+    // Any path the user named in the prompt that exists on disk MUST be
+    // present in the final deliverable manifest. The Phase 4.5 fix above
+    // closes the known leak, but we treat this as an invariant: if a
+    // user-named target ever falls out of `deduped` (via this code path
+    // or any future filter) we record it on the ActiveRun so the merge
+    // gate can refuse to merge with a `coordinator:user-target-stripped`
+    // critical finding. Not having this finding fire is the success case.
+    const finalTargets = new Set(deduped.flatMap((d) => d.targetFiles));
+    for (const userTarget of analysis.targets) {
+      const canonical = canonicalizePath(userTarget);
+      if (!canonical) continue;
+      if (finalTargets.has(canonical)) continue;
+      // Skip user-named targets that don't exist on disk — Phase 2 drops
+      // those intentionally, and submitWithGates already returns
+      // needs_clarification for prompts whose only target is missing, so
+      // reaching here means it's an *additional* missing target which
+      // does not belong on the trip-wire.
+      if (!this.fileExists(canonical, active.projectRoot)) continue;
+      if (active.userNamedStrippedTargets.includes(canonical)) continue;
+      active.userNamedStrippedTargets.push(canonical);
+      console.warn(
+        `[coordinator] prepareDeliverablesForGraph: TRIPWIRE — user-named target ${canonical} fell out of deliverables. Merge gate will block.`,
+      );
     }
 
     console.log(`[coordinator] prepareDeliverablesForGraph: ${deduped.length} deliverable(s) after filter+dedup+test-inject`);
@@ -3413,7 +3462,27 @@ export class Coordinator {
   }
 
   private userExplicitlyAskedForTests(request: string): boolean {
-    return /\b(add tests|test file|test files|tests)\b/i.test(request);
+    if (!request || typeof request !== "string") return false;
+    // Plural / phrase markers — original surface that was already covered.
+    if (/\b(add tests|update tests|write tests|new tests|test file|test files|tests)\b/i.test(request)) {
+      return true;
+    }
+    // Singular imperative variants like "add a test", "add one focused test",
+    // "update the test", "write a unit test for X". The user wrote a real
+    // test request even when the noun stays singular — Case 1 (1efad650)
+    // hit exactly this gap with "Add one focused test in core/run-summary.test.ts"
+    // and the coordinator dropped the test deliverable because the regex
+    // only matched the plural "tests".
+    if (/\b(add|write|create|implement|generate|author|update|modify|cover\s+with)\s+(?:a\s+|an\s+|one\s+|the\s+|new\s+|more\s+|additional\s+|focused\s+|narrow\s+|small\s+|unit\s+|integration\s+|e2e\s+|end-to-end\s+)*tests?\b/i.test(request)) {
+      return true;
+    }
+    // Direct path mention of a test/spec file — if the user wrote a path
+    // ending in .test.{ts,tsx,js,jsx,mjs,cjs} or .spec.{...}, that is an
+    // explicit ask regardless of surrounding phrasing.
+    if (/\b[\w\-./]+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)\b/i.test(request)) {
+      return true;
+    }
+    return false;
   }
 
   private isTestFile(filePath: string): boolean {
@@ -4968,6 +5037,26 @@ export class Coordinator {
         files: [...actual],
       },
     ];
+  }
+
+  /**
+   * Defense-in-depth gate finding: any user-named target that fell out
+   * of the deliverable manifest during `prepareDeliverablesForGraph` is
+   * surfaced here as a critical merge finding. The Phase 4.5 fix in the
+   * prepare pass keeps this array empty in normal operation — this gate
+   * exists so a future regression that strips a user-named target can't
+   * silently sail past approval the way Case 1 (1efad650) did.
+   */
+  private userTargetFindings(active: ActiveRun): MergeFinding[] {
+    if (active.userNamedStrippedTargets.length === 0) return [];
+    const list = active.userNamedStrippedTargets;
+    return [{
+      source: "coordinator",
+      severity: "critical",
+      code: "user-target-stripped",
+      message: `user_target_stripped — ${list.length} user-named target(s) were dropped from deliverables before build: ${list.slice(0, 5).join(", ")}${list.length > 5 ? "…" : ""}. The user explicitly named these files; refusing to merge without them.`,
+      files: [...list],
+    }];
   }
 
   // ─── Merge Gate Helpers ────────────────────────────────────────────
@@ -6612,6 +6701,17 @@ interface ActiveRun {
   pendingDispatches: Map<string, Promise<unknown>>;
   /** Files or paths considered and dropped during planning/context selection. */
   rejectedCandidates: RejectedCandidate[];
+  /**
+   * Defense-in-depth tripwire: paths the user named in the prompt that
+   * existed on disk but fell out of the final deliverable manifest after
+   * `prepareDeliverablesForGraph`. Populated by Phase 4.6 of the prepare
+   * pass. The merge gate emits a `coordinator:user-target-stripped`
+   * critical finding for each entry, refusing to merge when the user's
+   * own target list isn't honored. The fix that motivated this field
+   * (Case 1, 1efad650) keeps the array empty in normal operation; this
+   * is a regression net for future filter changes.
+   */
+  userNamedStrippedTargets: string[];
   /**
    * Per-run AbortController. cancel(runId) calls .abort() on this so
    * in-flight provider HTTP requests are dropped immediately instead
