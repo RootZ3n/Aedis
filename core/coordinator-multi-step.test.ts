@@ -237,13 +237,15 @@ class StubIntegrator extends AbstractWorker {
 
 function buildHarness(projectRoot: string, opts: {
   builder: AbstractWorker;
+  critic?: AbstractWorker;
   requireApproval?: boolean;
   autoPromoteOnSuccess?: boolean;
+  maxStageTimeoutSec?: number;
 }) {
   const registry = new WorkerRegistry();
   registry.register(new StubScout());
   registry.register(opts.builder);
-  registry.register(new StubCritic());
+  registry.register(opts.critic ?? new StubCritic());
   registry.register(new StubVerifier());
   registry.register(new StubIntegrator());
 
@@ -271,6 +273,7 @@ function buildHarness(projectRoot: string, opts: {
       requireWorkspace: true,
       requireApproval: opts.requireApproval ?? false,
       autoPromoteOnSuccess: opts.autoPromoteOnSuccess ?? false,
+      ...(opts.maxStageTimeoutSec !== undefined ? { maxStageTimeoutSec: opts.maxStageTimeoutSec } : {}),
       verificationConfig: {
         requiredChecks: [],
         hooks: [{
@@ -631,6 +634,116 @@ test("multi-step decomposition: rejectPlan removes pendingPlan without execution
 
     // A second reject for the same id must report no-op.
     assert.equal(coordinator.rejectPlan(taskId), false, "rejectPlan must return false when no plan is present");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ─── Critic stage-timeout classification ────────────────────────────
+//
+// Production observation: a Critic dispatch timed out at 180s on a
+// valid Builder output. The fix is two-fold:
+//   - workers/critic.ts truncates oversized diffs in the prompt
+//   - the coordinator-level stage-timeout error gets a [<workerType>_timeout]
+//     classification prefix so receipts and log greps can tell critic
+//     timeouts apart from builder/scout/etc timeouts
+// Tested here with a hanging stub critic + a 1-second stage timeout.
+
+class HangingCritic extends AbstractWorker {
+  readonly type: WorkerType = "critic";
+  readonly name = "HangingCritic";
+  async execute(_a: WorkerAssignment): Promise<WorkerResult> {
+    // Hang until the coordinator's stage-timeout setTimeout fires.
+    // The Promise.race in coordinator.dispatchNode rejects with the
+    // [critic_timeout]-tagged error well before the backstop below; the
+    // backstop only exists so this dispatch promise eventually settles
+    // (rather than dangling forever) and node:test does not surface it
+    // as a cancelled subtest at process teardown. The coordinator's
+    // pendingDispatches drain attaches a .catch on this promise so the
+    // backstop rejection is swallowed cleanly.
+    return new Promise<WorkerResult>((_, reject) => {
+      setTimeout(() => reject(new Error("HangingCritic backstop reject")), 2000);
+    });
+  }
+  async estimateCost(): Promise<CostEntry> { return this.zeroCost(); }
+  protected emptyOutput(): WorkerOutput {
+    return { kind: "critic", verdict: "approve", comments: [], suggestedChanges: [], intentAlignment: 1 };
+  }
+}
+
+test("critic stage timeout: synthetic failure carries [critic_timeout] classification and preserves builder output upstream", async () => {
+  const repo = makeMultiStepRepo();
+  try {
+    const before = originalContents(repo);
+    const builder = new MultiStepBuilder(() => "succeed");
+    const { coordinator, receiptStore } = buildHarness(repo, {
+      builder,
+      critic: new HangingCritic(),
+      requireApproval: false,
+      autoPromoteOnSuccess: false,
+      // 1-second stage cap so the hanging critic times out fast.
+      maxStageTimeoutSec: 1,
+    });
+
+    const receipt = await coordinator.submit({ input: MULTI_FILE_PROMPT });
+    const persisted = await receiptStore.getRun(receipt.runId);
+    assert.ok(persisted, "persisted receipt must exist");
+
+    // The run must end without a commit and without entering approval —
+    // critic timeout is a hard failure, not a pause.
+    assert.equal(
+      persisted.commitSha ?? null,
+      null,
+      `critic-timeout run must not produce a commit SHA; got ${persisted.commitSha}`,
+    );
+    assert.notEqual(
+      persisted.status,
+      "AWAITING_APPROVAL",
+      `critic-timeout run must not pause for approval; got ${persisted.status}`,
+    );
+
+    // Classification must be visible in the persisted receipt's
+    // checkpoints — the coordinator's stage-timeout handler emits a
+    // worker_step checkpoint whose summary is prefixed with
+    // [<workerType>_timeout]. Operators / log greps / Lumen all read
+    // checkpoints, so this is the durable surface.
+    const checkpoints = persisted.checkpoints ?? [];
+    const criticTimeoutCheckpoint = checkpoints.find((c) =>
+      typeof c.summary === "string" && c.summary.includes("[critic_timeout]"),
+    );
+    assert.ok(
+      criticTimeoutCheckpoint,
+      `expected a checkpoint summary containing [critic_timeout]; got summaries: ${checkpoints.map((c) => c.summary).join(" | ")}`,
+    );
+    // details.classification must also be set so structured consumers
+    // can match without parsing the summary string.
+    assert.equal(
+      (criticTimeoutCheckpoint.details as { classification?: string } | undefined)?.classification,
+      "critic_timeout",
+      "checkpoint details must carry classification: \"critic_timeout\"",
+    );
+
+    // Builder output preservation: the workspace was rolled back by the
+    // merge gate, but the source repo bytes must still be unchanged
+    // (workspace isolation). This is the core "do not discard Builder
+    // output as a side-effect of critic timeout" invariant — Builder
+    // ran to completion against the workspace, and rollback only
+    // discards the workspace edits, never the source repo.
+    for (const [path, content] of Object.entries(before)) {
+      assert.equal(
+        readFileSync(join(repo, path), "utf-8"),
+        content,
+        `source ${path} must not be mutated by a critic-timeout run`,
+      );
+    }
+
+    // Diagnostic line so the test report records what was observed.
+    console.log(
+      `[multi-step-test] CRITIC_TIMEOUT_OBSERVED ` +
+      `status=${persisted.status} ` +
+      `verdict=${persisted.finalReceipt?.verdict ?? "n/a"} ` +
+      `criticTimeoutCheckpoint=${!!criticTimeoutCheckpoint}`,
+    );
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

@@ -3881,7 +3881,16 @@ export class Coordinator {
                 // dispatchNode at task creation) as cancelled so any late
                 // settlement of dispatchPromise will discard its result.
                 if (node.runTaskId) active.cancelledGenerations.add(node.runTaskId);
-                reject(new Error(`execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`));
+                // Worker-typed classification prefix so downstream
+                // observability (receipts, checkpoints, log greps) can
+                // tell a critic timeout apart from a builder/scout/etc
+                // timeout without parsing the rest of the message. The
+                // [<workerType>_timeout] form is grep-stable across log
+                // backends; Builder output already lives on
+                // active.changes by the time the critic dispatches, so
+                // this synthetic failure does not discard upstream work.
+                const classificationTag = `[${node.workerType}_timeout] `;
+                reject(new Error(`${classificationTag}execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`));
               },
               stageTimeoutMs,
             );
@@ -3901,12 +3910,13 @@ export class Coordinator {
                 type: "worker_step",
                 status: "EXECUTING_IN_WORKSPACE",
                 phase: run.phase,
-                summary: `stage-timeout cancelled ${node.workerType} ${node.id.slice(0, 6)}`,
+                summary: `[${node.workerType}_timeout] stage-timeout cancelled ${node.workerType} ${node.id.slice(0, 6)}`,
                 details: {
                   cancelledGenerationId: node.runTaskId ?? null,
                   workerType: node.workerType,
                   nodeId: node.id,
                   stageTimeoutSec: this.config.maxStageTimeoutSec,
+                  classification: `${node.workerType}_timeout`,
                 },
               }).catch(() => undefined);
             }

@@ -53,6 +53,70 @@ const DEFAULT_FALLBACK: { provider: Provider; model: string } = {
   model: "qwen3.5:9b",
 };
 
+// ─── Critic Prompt Truncation ────────────────────────────────────────
+//
+// The Critic model gets the full set of Builder diffs in its prompt.
+// Without a cap, a multi-file refactor (or a single big migration) can
+// produce a prompt large enough that the upstream stage timeout (180s)
+// fires while the model is still streaming. Truncating each per-file
+// diff to a head + tail slice with an explicit elision marker keeps the
+// review signal intact (Critic still sees what changed at the top and
+// bottom of each diff) while bounding the prompt to a few KB.
+//
+// These caps are deliberately conservative — bigger than any single
+// reasonable diff fragment, smaller than the prompt sizes that have
+// surfaced as 180s timeouts in production. Exported for the unit test.
+
+export const MAX_DIFF_CHARS_PER_FILE = 3000;
+export const MAX_DIFF_CHARS_TOTAL = 12000;
+
+/**
+ * Slice an oversized diff to head + tail with an elision marker. The
+ * head/tail split prefers the head (so the file/operation context near
+ * the start is preserved) but always keeps a tail tail so the closing
+ * lines are visible. Diffs at or under maxChars pass through unchanged.
+ */
+export function truncateDiffForReview(
+  diff: string | undefined | null,
+  maxChars: number,
+): string {
+  if (!diff) return "(no diff)";
+  if (maxChars <= 0) return "(diff omitted — review budget exhausted)";
+  if (diff.length <= maxChars) return diff;
+  const headBudget = Math.max(0, Math.floor(maxChars * 0.7));
+  const tailBudget = Math.max(0, Math.floor(maxChars * 0.2));
+  const head = diff.slice(0, headBudget);
+  const tail = tailBudget > 0 ? diff.slice(-tailBudget) : "";
+  const elided = diff.length - head.length - tail.length;
+  return `${head}\n... [${elided} chars truncated for critic review] ...\n${tail}`;
+}
+
+/**
+ * Build the per-change diff section for the Critic prompt under a
+ * total-prompt budget. Each file gets up to MAX_DIFF_CHARS_PER_FILE
+ * characters, and the cumulative budget is capped at
+ * MAX_DIFF_CHARS_TOTAL so a 50-file change-set can't drag the prompt
+ * past the timeout cliff.
+ */
+export function summarizeChangesForCriticReview(
+  changes: readonly { path: string; diff?: string }[],
+): string {
+  let totalUsed = 0;
+  const parts: string[] = [];
+  for (const change of changes) {
+    const remaining = MAX_DIFF_CHARS_TOTAL - totalUsed;
+    if (remaining <= 0) {
+      parts.push(`${change.path}: diff omitted — total review budget exhausted`);
+      continue;
+    }
+    const perFileBudget = Math.min(MAX_DIFF_CHARS_PER_FILE, remaining);
+    const truncated = truncateDiffForReview(change.diff, perFileBudget);
+    totalUsed += truncated.length;
+    parts.push(`${change.path}:\n${truncated}`);
+  }
+  return parts.join("\n\n");
+}
+
 // Maximum number of run contexts to keep in memory. Each entry is tiny
 // (a Set of provider strings), but we cap it to avoid unbounded growth
 // across very long-lived processes.
@@ -208,6 +272,16 @@ export class CriticWorker extends AbstractWorker {
         console.log(
           `[critic] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)}: ${chain.map(c => `${c.provider}/${c.model}`).join(" → ")}`
         );
+        // Instrumentation: emit prompt size + chain head before invocation
+        // so operators can correlate slow-critic incidents with input size
+        // without needing to reconstruct the prompt later. Logged once per
+        // dispatch; cheap to compute (single .length and .map).
+        const invokeStartedAt = Date.now();
+        console.log(
+          `[critic] invoke start model=${primaryModel} provider=${primaryProvider} ` +
+          `promptChars=${prompt.length} files=${changes.length} ` +
+          `chainEntries=${chain.length} runId=${runId.slice(0, 8)}`,
+        );
 
         // Capture attempts on BOTH paths. invokeModelWithFallback throws
         // an InvokerError with .attempts populated on chain-cancel /
@@ -217,36 +291,145 @@ export class CriticWorker extends AbstractWorker {
         // the receipt, so operators couldn't see "we tried provider X
         // and it was aborted." The catch below preserves the attempts
         // log before re-throwing into the worker's outer error handler.
-        let response: Awaited<ReturnType<typeof invokeModelWithFallback>>;
+        let response: Awaited<ReturnType<typeof invokeModelWithFallback>> | null = null;
+        let invocationError: Error | null = null;
+        let retryUsed = false;
         try {
           response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
         } catch (err) {
           if (err instanceof InvokerError && err.attempts) {
             providerAttempts = err.attempts;
           }
-          throw err;
-        }
-        providerAttempts = response.attempts;
-
-        if (response.usedProvider !== primaryProvider) {
-          console.warn(
-            `[critic] PRIMARY FAILED — used fallback ${response.usedProvider}/${response.usedModel} ` +
-            `instead of ${primaryProvider}/${primaryModel} (attempted: ${response.attemptedProviders.join(", ")})`
+          // If the run was cancelled (coordinator-level abort or stage
+          // timeout), bubble the error up — the coordinator owns that
+          // failure path and will synthesize the [critic_timeout]-tagged
+          // result. The retry-with-reduced-context path below is only
+          // useful for transient provider failures (network, 5xx,
+          // chain-exhaustion without abort) where the run is still
+          // alive and a smaller prompt may succeed.
+          if (assignment.signal?.aborted) {
+            const elapsed = Date.now() - invokeStartedAt;
+            console.warn(
+              `[critic] FAILED elapsed=${elapsed}ms cause=signal-aborted ` +
+              `reraising for coordinator-level handling`,
+            );
+            throw err;
+          }
+          // Single retry with a compact prompt — strips diff bodies and
+          // keeps just the manifest, acceptance criteria, contract
+          // surface, and heuristic summary. Uses a smaller token budget
+          // (1024 vs 2048) since the input is smaller. providerAttempts
+          // are concatenated across the primary + retry chains so the
+          // receipt records both legs honestly.
+          const primaryErr = err instanceof Error ? err : new Error(String(err));
+          const compactPrompt = this.buildCompactPrompt(contract, changes, heuristicIssues, assignment, primaryModel);
+          const compactChain = this.buildInvocationChain(
+            primaryProvider as Provider,
+            primaryModel,
+            compactPrompt,
+            1024,
+            declaredChain,
           );
+          retryUsed = true;
+          const retryStartedAt = Date.now();
+          console.log(
+            `[critic] retry-with-reduced-context promptChars=${compactPrompt.length} ` +
+            `(was ${prompt.length}) cause=${primaryErr.message}`,
+          );
+          try {
+            response = await invokeModelWithFallback(compactChain, runCtx, assignment.signal);
+            providerAttempts = [...providerAttempts, ...response.attempts];
+            const retryElapsed = Date.now() - retryStartedAt;
+            console.log(
+              `[critic] retry-with-reduced-context complete elapsed=${retryElapsed}ms ` +
+              `tokensIn=${response.tokensIn} tokensOut=${response.tokensOut} ` +
+              `usedModel=${response.usedProvider}/${response.usedModel}`,
+            );
+            this.noteDecision(
+              assignment.task.id,
+              `Critic retried with reduced context after primary failure`,
+              `Primary critic invocation failed (${primaryErr.message}); retry with compact prompt succeeded.`,
+            );
+          } catch (retryErr) {
+            if (retryErr instanceof InvokerError && retryErr.attempts) {
+              providerAttempts = [...providerAttempts, ...retryErr.attempts];
+            }
+            if (assignment.signal?.aborted) {
+              throw retryErr;
+            }
+            response = null;
+            invocationError = retryErr instanceof Error ? retryErr : new Error(String(retryErr));
+            console.warn(
+              `[critic] retry-with-reduced-context also failed: ${invocationError.message} ` +
+              `— falling back to heuristic-only review`,
+            );
+          }
+        }
+
+        if (response) {
+          const elapsed = Date.now() - invokeStartedAt;
+          console.log(
+            `[critic] invoke complete elapsed=${elapsed}ms ` +
+            `tokensIn=${response.tokensIn} tokensOut=${response.tokensOut} ` +
+            `usedModel=${response.usedProvider}/${response.usedModel} ` +
+            `attempts=${response.attempts.length}`,
+          );
+
+          // When retry-with-reduced-context produced this response, the
+          // primary leg's providerAttempts have already been
+          // concatenated into the running providerAttempts. Overwriting
+          // here would lose that history; only assign verbatim when the
+          // primary call itself succeeded.
+          if (!retryUsed) {
+            providerAttempts = response.attempts;
+          }
+
+          if (response.usedProvider !== primaryProvider) {
+            console.warn(
+              `[critic] PRIMARY FAILED — used fallback ${response.usedProvider}/${response.usedModel} ` +
+              `instead of ${primaryProvider}/${primaryModel} (attempted: ${response.attemptedProviders.join(", ")})`
+            );
+            this.noteDecision(
+              assignment.task.id,
+              `Critic fell back from ${primaryProvider}/${primaryModel} to ${response.usedProvider}/${response.usedModel}`,
+              `Primary provider failed mid-run; fallback chain promoted next entry`,
+            );
+            fellBack = true;
+          }
+          if (retryUsed) {
+            // Make the retry visible to receipts that don't surface
+            // providerAttempts directly. Distinct from "fellBack to a
+            // different provider" — same provider, smaller prompt.
+            fellBack = true;
+          }
+
+          rawModelReview = response.text;
+          modelTokensIn = response.tokensIn;
+          modelTokensOut = response.tokensOut;
+          modelCostUsd = response.costUsd;
+          usedModel = response.usedModel;
+          usedProvider = response.usedProvider;
+        } else if (invocationError) {
+          // Heuristic-only fallback: the model invocation failed for a
+          // non-cancellation reason. Builder output is preserved (it
+          // lives on Coordinator's active.changes, not on the critic's
+          // result), and the heuristic review still produced
+          // heuristicIssues that drive the status below. Marker text
+          // makes this visible in receipts.
+          const elapsed = Date.now() - invokeStartedAt;
+          console.warn(
+            `[critic] model invocation failed after ${elapsed}ms ` +
+            `(${invocationError.message}) — falling back to heuristic-only review`,
+          );
+          rawModelReview =
+            `[critic_heuristic_fallback] model invocation failed after ${elapsed}ms: ${invocationError.message}`;
           this.noteDecision(
             assignment.task.id,
-            `Critic fell back from ${primaryProvider}/${primaryModel} to ${response.usedProvider}/${response.usedModel}`,
-            `Primary provider failed mid-run; fallback chain promoted next entry`,
+            `Critic degraded to heuristic-only review`,
+            `Model invocation failed (${invocationError.message}); preserving Builder output and continuing on heuristics.`,
           );
           fellBack = true;
         }
-
-        rawModelReview = response.text;
-        modelTokensIn = response.tokensIn;
-        modelTokensOut = response.tokensOut;
-        modelCostUsd = response.costUsd;
-        usedModel = response.usedModel;
-        usedProvider = response.usedProvider;
       }
 
       const status: CriticResult["output"]["status"] = heuristicIssues.some((i) => i.severity === "critical")
@@ -564,7 +747,43 @@ export class CriticWorker extends AbstractWorker {
       `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
       `Interface rules: ${contract.interfaceRules.join(" | ")}`,
       `Heuristic issues: ${issues.map((i) => i.message).join(" | ") || "none"}`,
-      `Diffs: ${changes.map((c) => c.diff ?? `${c.path} changed`).join("\n\n")}`,
+      `Diffs:\n${summarizeChangesForCriticReview(changes)}`,
+      "Return a terse review summary and any blockers.",
+    ].join("\n\n");
+  }
+
+  /**
+   * Compact review prompt used for the retry-with-reduced-context leg.
+   * Strips diff bodies entirely and keeps just the high-signal surface:
+   * task description, contract anchor, manifest of changed files +
+   * operations, the heuristic-issue summary, and acceptance criteria
+   * pulled from the intent's charter. Sized to fit comfortably under
+   * the budgets the truncated full-prompt path bumps against on large
+   * change-sets, so a Critic that timed out on a giant prompt has a
+   * second shot with a small one before falling back to heuristic-only.
+   */
+  private buildCompactPrompt(
+    contract: TaskContract,
+    changes: readonly FileChange[],
+    issues: readonly Issue[],
+    assignment: WorkerAssignment,
+    model: string,
+  ): string {
+    const manifest = changes.length === 0
+      ? "(no changes)"
+      : changes.map((c) => `- ${c.path} (${c.operation})`).join("\n");
+    const acceptanceCriteria = assignment.intent.charter.successCriteria.length === 0
+      ? "(none declared)"
+      : assignment.intent.charter.successCriteria.map((line) => `- ${line}`).join("\n");
+    return [
+      `You are the Critic worker on model ${model} (compact retry mode).`,
+      "Review only. Do not rewrite code. Diff bodies are omitted — review against acceptance criteria, contract, and the heuristic summary below.",
+      `Task: ${assignment.task.description}`,
+      `Contract file: ${contract.file}`,
+      `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
+      `Heuristic issues: ${issues.map((i) => i.message).join(" | ") || "none"}`,
+      `Changed files:\n${manifest}`,
+      `Acceptance criteria:\n${acceptanceCriteria}`,
       "Return a terse review summary and any blockers.",
     ].join("\n\n");
   }

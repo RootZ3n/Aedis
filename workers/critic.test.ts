@@ -38,7 +38,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { CriticWorker } from "./critic.js";
+import {
+  CriticWorker,
+  truncateDiffForReview,
+  summarizeChangesForCriticReview,
+  MAX_DIFF_CHARS_PER_FILE,
+  MAX_DIFF_CHARS_TOTAL,
+} from "./critic.js";
 import type { Provider } from "../core/model-invoker.js";
 import type {
   WorkerAssignment,
@@ -389,6 +395,247 @@ test("critic getDeclaredFallbackChain: end-to-end matches run-2b2b71d9 expected 
       chain.map((c) => `${c.provider}/${c.model}`),
       ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
       "end-to-end chain must be exactly the 2 entries the user declared — no portum",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ─── Critic prompt truncation ────────────────────────────────────────
+//
+// Production observation: a Critic dispatch timed out at 180s on a
+// valid Builder output. The prompt assembler had no cap on per-file or
+// total diff size, so a multi-file refactor produced a prompt large
+// enough that the upstream stage timeout fired while the model was
+// still streaming. truncateDiffForReview / summarizeChangesForCriticReview
+// bound the prompt; these tests pin the contract so it stays bounded.
+
+test("critic truncateDiffForReview: small diffs pass through unchanged", () => {
+  const small = "diff --git a/foo.ts b/foo.ts\n@@\n-old\n+new\n";
+  const out = truncateDiffForReview(small, 1000);
+  assert.equal(out, small, "small diffs must pass through verbatim");
+});
+
+test("critic truncateDiffForReview: oversized diffs get head + tail with elision marker", () => {
+  const huge = "X".repeat(20_000);
+  const out = truncateDiffForReview(huge, 1000);
+  assert.ok(out.length < 2000, `truncated diff must be near the budget; got ${out.length}`);
+  assert.match(
+    out,
+    /chars truncated for critic review/,
+    "truncated diff must contain the elision marker so a human reviewer knows context was elided",
+  );
+  assert.ok(out.startsWith("X"), "head must be preserved");
+  assert.ok(out.endsWith("X"), "tail must be preserved");
+});
+
+test("critic truncateDiffForReview: undefined and empty inputs are handled safely", () => {
+  assert.equal(truncateDiffForReview(undefined, 1000), "(no diff)");
+  assert.equal(truncateDiffForReview(null, 1000), "(no diff)");
+  assert.equal(truncateDiffForReview("anything", 0), "(diff omitted — review budget exhausted)");
+});
+
+test("critic summarizeChangesForCriticReview: total budget is respected across many files", () => {
+  // 50 files, each with a 1000-char diff. Without a total cap the
+  // resulting prompt fragment would be ~50KB; the cap is
+  // MAX_DIFF_CHARS_TOTAL plus per-file labels and elision markers.
+  const filler = "Y".repeat(1000);
+  const changes = Array.from({ length: 50 }, (_, i) => ({
+    path: `core/file-${i}.ts`,
+    diff: filler,
+  }));
+  const summary = summarizeChangesForCriticReview(changes);
+  // Allow some overhead per entry for "path:" labels and elision text,
+  // but the sum of diff bodies must be near MAX_DIFF_CHARS_TOTAL.
+  assert.ok(
+    summary.length < MAX_DIFF_CHARS_TOTAL * 2,
+    `summary must be bounded; got ${summary.length} chars (cap=${MAX_DIFF_CHARS_TOTAL})`,
+  );
+  assert.match(
+    summary,
+    /diff omitted — total review budget exhausted/,
+    "files past the budget must be marked as omitted, not silently dropped",
+  );
+});
+
+test("critic summarizeChangesForCriticReview: per-file cap kicks in even when total budget allows more", () => {
+  // One file with a diff larger than MAX_DIFF_CHARS_PER_FILE — should
+  // be truncated even though the total budget could accommodate it.
+  const huge = "Z".repeat(MAX_DIFF_CHARS_PER_FILE * 3);
+  const summary = summarizeChangesForCriticReview([{ path: "core/big.ts", diff: huge }]);
+  assert.ok(
+    summary.length < MAX_DIFF_CHARS_PER_FILE * 2,
+    `single oversized file must be capped; got ${summary.length} chars (per-file cap=${MAX_DIFF_CHARS_PER_FILE})`,
+  );
+  assert.match(summary, /chars truncated for critic review/);
+});
+
+// ─── Critic compact-prompt retry shape ──────────────────────────────
+//
+// The retry-with-reduced-context path uses buildCompactPrompt instead
+// of buildPrompt. buildCompactPrompt strips diff bodies entirely,
+// keeps a manifest of paths + operations, and pulls the acceptance
+// criteria from the intent's charter so the model still has the
+// review surface even without the diff. Tested via a typed-any cast
+// (same pattern as buildInvocationChain above).
+
+interface CompactPromptCallable {
+  buildCompactPrompt: (
+    contract: TaskContract,
+    changes: readonly FileChange[],
+    issues: readonly { severity: string; message: string }[],
+    assignment: WorkerAssignment,
+    model: string,
+  ) => string;
+  buildPrompt: (
+    contract: TaskContract,
+    changes: readonly FileChange[],
+    issues: readonly { severity: string; message: string }[],
+    assignment: WorkerAssignment,
+    model: string,
+  ) => string;
+}
+
+function makeAssignmentWithIntent(criteria: readonly string[]): WorkerAssignment {
+  // Minimal WorkerAssignment shape — only the fields buildCompactPrompt
+  // / buildPrompt actually read. The rest stay defaulted via casts so
+  // the test does not have to fabricate an entire RunState.
+  return {
+    task: {
+      id: "t1",
+      parentTaskId: null,
+      workerType: "critic",
+      description: "Review changes for the Token alias refactor",
+      targetFiles: ["core/types.ts"],
+      status: "active",
+      assignedTo: null,
+      result: null,
+      startedAt: null,
+      completedAt: null,
+      costAccrued: null,
+    },
+    intent: {
+      id: "intent-1", runId: "run-1", version: 1, parentId: null,
+      createdAt: new Date().toISOString(),
+      userRequest: "introduce a Token alias",
+      charter: {
+        objective: "introduce a Token alias",
+        successCriteria: criteria,
+        deliverables: [],
+        qualityBar: "standard",
+      },
+      constraints: [],
+      acceptedAssumptions: [],
+      exclusions: [],
+      revisionReason: null,
+    },
+    context: { layers: [] } as unknown as WorkerAssignment["context"],
+    upstreamResults: [],
+    tier: "fast",
+    tokenBudget: 1024,
+  } as unknown as WorkerAssignment;
+}
+
+test("critic buildCompactPrompt: strips diff bodies and includes manifest + acceptance criteria", () => {
+  const worker = new CriticWorker({ defaultModel: "test", defaultProvider: "ollama" });
+  const compact = (worker as unknown as CompactPromptCallable);
+  const huge = "Z".repeat(8000);
+  const changes: FileChange[] = [
+    { path: "core/types.ts", operation: "modify", diff: huge, content: huge, originalContent: "" },
+    { path: "core/consumer.ts", operation: "modify", diff: huge, content: huge, originalContent: "" },
+  ];
+  const contract: TaskContract = {
+    file: "core/types.ts",
+    forbiddenChanges: [],
+    interfaceRules: ["public Token alias must remain exported"],
+    expectedSignatures: [],
+  } as unknown as TaskContract;
+  const assignment = makeAssignmentWithIntent([
+    "Token alias is exported from core/types.ts",
+    "core/consumer.ts imports Token from core/types.ts",
+  ]);
+  const out = compact.buildCompactPrompt(contract, changes, [], assignment, "test-model");
+  // Manifest must list both files with their operations.
+  assert.match(out, /core\/types\.ts \(modify\)/);
+  assert.match(out, /core\/consumer\.ts \(modify\)/);
+  // Acceptance criteria from the intent must be reflected.
+  assert.match(out, /Token alias is exported from core\/types\.ts/);
+  assert.match(out, /core\/consumer\.ts imports Token/);
+  // Diff bodies must NOT leak into the compact prompt.
+  assert.ok(
+    !out.includes(huge),
+    "compact prompt must NOT include raw diff bodies; that defeats the size reduction",
+  );
+});
+
+test("critic buildCompactPrompt: noticeably smaller than buildPrompt on the same changeset", () => {
+  const worker = new CriticWorker({ defaultModel: "test", defaultProvider: "ollama" });
+  const dual = (worker as unknown as CompactPromptCallable);
+  const huge = "X".repeat(20_000);
+  const changes: FileChange[] = [
+    { path: "core/a.ts", operation: "modify", diff: huge, content: huge, originalContent: "" },
+    { path: "core/b.ts", operation: "modify", diff: huge, content: huge, originalContent: "" },
+    { path: "core/c.ts", operation: "modify", diff: huge, content: huge, originalContent: "" },
+  ];
+  const contract: TaskContract = {
+    file: "core/a.ts",
+    forbiddenChanges: [],
+    interfaceRules: [],
+    expectedSignatures: [],
+  } as unknown as TaskContract;
+  const assignment = makeAssignmentWithIntent(["criterion 1"]);
+  const full = dual.buildPrompt(contract, changes, [], assignment, "m");
+  const compact = dual.buildCompactPrompt(contract, changes, [], assignment, "m");
+  assert.ok(
+    compact.length * 4 < full.length,
+    `compact prompt must be at least 4× smaller than the full prompt on a 60KB diff change-set; got compact=${compact.length} full=${full.length}`,
+  );
+});
+
+// ─── Critic model override from .aedis/model-config.json ─────────────
+//
+// The Critic resolves its primary model via getActiveModelConfig, which
+// reads .aedis/model-config.json on the source repo. This is the
+// existing routing surface — repos that want a fast/cheap model for
+// Critic just set it there; Builder is unaffected because it reads its
+// own builder.{model,provider} entry from the same config.
+
+test("critic getActiveModelConfig: per-repo override is respected for critic without affecting builder", () => {
+  const repo = mkdtempSync(join(tmpdir(), "aedis-critic-override-"));
+  mkdirSync(join(repo, ".aedis"), { recursive: true });
+  writeFileSync(
+    join(repo, ".aedis/model-config.json"),
+    JSON.stringify({
+      scout: { model: "local", provider: "local" },
+      builder: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      critic: { model: "qwen3.5:9b", provider: "ollama" },
+      verifier: { model: "local", provider: "local" },
+      integrator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      escalation: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+    }),
+    "utf-8",
+  );
+
+  try {
+    const worker = new CriticWorker({
+      defaultModel: "constructor-default",
+      defaultProvider: "openrouter",
+    });
+    // Private getActiveModelConfig is the resolution surface; cast to
+    // call directly. Mirrors the existing test pattern.
+    const resolved = (worker as unknown as {
+      getActiveModelConfig: (root: string) => { model: string; provider: string };
+    }).getActiveModelConfig(repo);
+    assert.equal(
+      resolved.model,
+      "qwen3.5:9b",
+      "critic must resolve its model from .aedis/model-config.json — not the constructor default",
+    );
+    assert.equal(
+      resolved.provider,
+      "ollama",
+      "critic provider override from model-config must be respected",
     );
   } finally {
     rmSync(repo, { recursive: true, force: true });
