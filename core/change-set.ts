@@ -1,4 +1,4 @@
-import type { IntentObject } from "./intent.js";
+import type { Deliverable, IntentObject } from "./intent.js";
 import type { Invariant } from "./invariant-extractor.js";
 import type { ImportGraph } from "./import-graph.js";
 
@@ -156,25 +156,66 @@ export function classifyFileSensitivity(filePath: string): FileSensitivity {
   return "normal";
 }
 
+function isTestLikePath(file: string): boolean {
+  const normalized = file.toLowerCase();
+  return (
+    normalized.includes("test") ||
+    normalized.includes("spec") ||
+    normalized.includes("__mocks__")
+  );
+}
+
+function isAutoInjectedTestPair(deliverable: Deliverable): boolean {
+  return /^test pairs for changed implementation files$/i.test(deliverable.description.trim());
+}
+
+function userExplicitlyAskedForTestMutation(userRequest: string): boolean {
+  return (
+    /\b(add|update|write|create|implement)\b.{0,80}\b(?:focused\s+|unit\s+|regression\s+)?tests?\b/i.test(userRequest) ||
+    /\btests?\b.{0,80}\b(add|update|write|create|implement)\b/i.test(userRequest) ||
+    /\b(?:test|spec)\s+(?:file|coverage)\b/i.test(userRequest) ||
+    /\.(?:test|spec)\.[cm]?[jt]sx?\b/i.test(userRequest)
+  );
+}
+
+function isExplicitMutableTestDeliverable(
+  intent: IntentObject,
+  deliverable: Deliverable | undefined,
+  file: string,
+): boolean {
+  if (!deliverable || !isTestLikePath(file) || isAutoInjectedTestPair(deliverable)) return false;
+  const userRequest = intent.userRequest;
+  return (
+    userRequest.toLowerCase().includes(file.toLowerCase()) ||
+    userExplicitlyAskedForTestMutation(userRequest)
+  );
+}
+
 function classifyNecessity(intent: IntentObject, file: string): FileNecessity {
   const normalized = file.toLowerCase();
+  const deliverable = intent.charter.deliverables.find((d) =>
+    d.targetFiles.some((t) => t === file),
+  );
+
+  // User-requested test authoring is a real mutation target, not a
+  // context/reference file. Auto-injected test-pair deliverables still
+  // fall through to optional below so their existing advisory behavior
+  // is preserved.
+  if (isExplicitMutableTestDeliverable(intent, deliverable, file)) {
+    return "required";
+  }
 
   // Test files and docs are optional — their failure shouldn't block
   if (
-    normalized.includes("test") ||
-    normalized.includes("spec") ||
+    isTestLikePath(normalized) ||
     normalized.endsWith(".md") ||
-    normalized.includes("docs/") ||
-    normalized.includes("__mocks__")
+    normalized.includes("docs/")
   ) {
     return "optional";
   }
 
   // Files explicitly listed in deliverables are required
-  const isDeliverable = intent.charter.deliverables.some((d) =>
-    d.targetFiles.some((t) => t === file),
-  );
-  if (isDeliverable) return "required";
+  if (deliverable) return "required";
 
   return "required";
 }
