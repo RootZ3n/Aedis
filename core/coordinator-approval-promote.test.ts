@@ -26,7 +26,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -733,6 +733,167 @@ test("approval flow: explicit source_repo body still wins over inferred sourceRe
     rmSync(coordRoot, { recursive: true, force: true });
     rmSync(inferredRepo, { recursive: true, force: true });
     rmSync(explicitRepo, { recursive: true, force: true });
+  }
+});
+
+// ─── Promote-time typecheck gate ─────────────────────────────────────
+//
+// Run b7109c0b's regression: receipt.runOutcome did not exist on
+// RunReceipt; the verifier-time typecheck hook ran in the source-repo
+// cwd (not the workspace), so the workspace modification was invisible
+// at verifier time and the merge gate let the change through with 12
+// advisory findings. Once promoted, npx tsc --noEmit failed on main.
+//
+// The fix: a hard typecheck gate at promoteToSource time. AFTER
+// `git apply` and BEFORE `git commit`, run tsc against the source
+// repo's would-be-promoted state; if any new error appeared compared
+// to the pre-apply baseline, refuse the promote and `git checkout
+// HEAD --` the candidate paths so the source repo is left clean.
+//
+// This regression test stages the exact incident shape: a TypeScript
+// source repo, a Builder that writes a property reference to a
+// non-existent field on a typed object (TS2339), then attempts the
+// full submit → approve → promote round-trip. The promote MUST refuse
+// and leave the source repo unmoved.
+//
+// Test requires the typescript binary to be resolvable via `npx tsc`
+// from the tmp repo. We symlink the host's node_modules tree so npx
+// finds it without re-installing, and skip the test when the host's
+// /mnt/ai/aedis/node_modules is missing (CI without npm install).
+
+function makeTempTypescriptRepo(): string | null {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-promote-tsc-"));
+  mkdirSync(join(dir, "core"), { recursive: true });
+  // Symlink node_modules so `npx tsc` resolves the typescript binary.
+  // process.cwd() at test time is the Aedis repo root.
+  const hostNodeModules = join(process.cwd(), "node_modules");
+  if (!existsSync(hostNodeModules)) {
+    rmSync(dir, { recursive: true, force: true });
+    return null;
+  }
+  try {
+    symlinkSync(hostNodeModules, join(dir, "node_modules"), "dir");
+  } catch {
+    rmSync(dir, { recursive: true, force: true });
+    return null;
+  }
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({ name: "promote-tsc-tmp", version: "0.0.0" }),
+    "utf-8",
+  );
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        target: "ES2022",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        strict: true,
+        skipLibCheck: true,
+      },
+      include: ["core/**/*"],
+    }),
+    "utf-8",
+  );
+  // The typed object is the pattern that the runOutcome regression
+  // shipped against — a typed interface with a fixed shape, then a
+  // function that dereferences a non-existent property. The original
+  // file compiles clean; the Builder will rewrite it to add the bad
+  // reference.
+  writeFileSync(
+    join(dir, "core/widget.ts"),
+    [
+      "export interface Widget {",
+      "  readonly id: string;",
+      "  readonly value: number;",
+      "}",
+      "",
+      "export function describe(w: Widget): string {",
+      "  return `widget ${w.id}: ${w.value}`;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "ts@aedis.local"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "PromoteTsc"], { cwd: dir });
+  // Don't commit the symlinked node_modules dir.
+  writeFileSync(join(dir, ".gitignore"), "node_modules\n", "utf-8");
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-qm", "init"], { cwd: dir });
+  return dir;
+}
+
+test("promote-time typecheck gate: refuses to commit a tsc-breaking patch and leaves the source repo unmoved", async () => {
+  const repo = makeTempTypescriptRepo();
+  if (!repo) {
+    // node_modules unavailable — skip rather than report a false failure.
+    return;
+  }
+  try {
+    const beforeSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo }).toString().trim();
+    const originalSource = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+
+    // Builder rewrites describe() to read a property that does not
+    // exist on Widget — the runOutcome incident, generalized. Compiles
+    // would fail with TS2339: Property 'runOutcome' does not exist on
+    // type 'Widget'.
+    const breakingContent = [
+      "export interface Widget {",
+      "  readonly id: string;",
+      "  readonly value: number;",
+      "}",
+      "",
+      "export function describe(w: Widget): string {",
+      "  // TS2339-shaped error — runOutcome is not on Widget.",
+      "  return `widget ${w.id}: ${w.value} ${(w as any).runOutcome ?? \"\"} ${w.runOutcome ?? \"\"}`;",
+      "}",
+      "",
+    ].join("\n");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: breakingContent },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const submitReceipt = await coordinator.submit({ input: "modify widget in core", projectRoot: repo });
+    const approve = await coordinator.approveRun(submitReceipt.runId);
+    assert.equal(approve.ok, true, `approveRun must succeed; got error=${approve.error}`);
+
+    const promote = await coordinator.promoteToSource(submitReceipt.runId);
+    assert.equal(
+      promote.ok,
+      false,
+      `promoteToSource must REFUSE a tsc-breaking patch; got ok=true commitSha=${promote.commitSha}`,
+    );
+    assert.match(
+      promote.error ?? "",
+      /Promote refused.*new TypeScript error/i,
+      `promote.error must explicitly mention new TypeScript errors; got: ${promote.error}`,
+    );
+
+    // Source repo HEAD must NOT have moved — no commit happened.
+    const afterSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo }).toString().trim();
+    assert.equal(afterSha, beforeSha, "source repo HEAD must NOT advance when the typecheck gate refuses the promote");
+
+    // Working tree must be clean — the gate's git-checkout rollback
+    // restores the candidate paths so a subsequent run is unblocked.
+    const widgetAfter = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    assert.equal(
+      widgetAfter,
+      originalSource,
+      "core/widget.ts must be reverted to the pre-apply state after the gate refuses",
+    );
+
+    // The .aedis-promote-patch.tmp file must not be left behind.
+    assert.equal(
+      existsSync(join(repo, ".aedis-promote-patch.tmp")),
+      false,
+      "promote temp patch file must be cleaned up regardless of gate outcome",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
   }
 });
 

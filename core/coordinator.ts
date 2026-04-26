@@ -124,6 +124,7 @@ import {
 import type { GuardFinding } from "./adversarial-guard.js";
 import {
   VerificationPipeline,
+  parseTscOutput,
   type VerificationPipelineConfig,
   type VerificationReceipt,
 } from "./verification-pipeline.js";
@@ -6125,6 +6126,91 @@ export class Coordinator {
    * This is the final step in the promotion workflow.
    * The source repo is NEVER mutated during execution.
    */
+  /**
+   * Run tsc against the source repo and return a Set of error
+   * signatures keyed by `<file>:<line>:<rule>:<message>`. Used by the
+   * promote-time gate to distinguish NEW typecheck errors from
+   * pre-existing ones — a tsc-breaking promote (run b7109c0b) flagged
+   * this gap when receipt.runOutcome compiled clean against the source
+   * repo at verifier time and only failed once the workspace patch
+   * landed in source.
+   *
+   * Returns null when there is no TypeScript project to check (no
+   * tsconfig.build.json AND no tsconfig.json) — non-TS source repos
+   * shouldn't trip this gate at all.
+   */
+  private async tscErrorSignatures(sourceRepo: string): Promise<Set<string> | null> {
+    const buildTsconfig = resolve(sourceRepo, "tsconfig.build.json");
+    const fallbackTsconfig = resolve(sourceRepo, "tsconfig.json");
+    let projectFlag: string[] = [];
+    if (existsSync(buildTsconfig)) {
+      projectFlag = ["-p", "tsconfig.build.json"];
+    } else if (existsSync(fallbackTsconfig)) {
+      projectFlag = ["-p", "tsconfig.json"];
+    } else {
+      return null;
+    }
+    try {
+      await exec("npx", ["tsc", "--noEmit", ...projectFlag], {
+        cwd: sourceRepo,
+        timeout: 120_000,
+      });
+      return new Set<string>();
+    } catch (err) {
+      const stdout: string = (err as { stdout?: string })?.stdout ?? "";
+      const issues = parseTscOutput(stdout);
+      return new Set(
+        issues.map((i) => `${i.file ?? "?"}:${i.line ?? "?"}:${i.rule ?? "?"}:${i.message}`),
+      );
+    }
+  }
+
+  /**
+   * Hard typecheck gate run AFTER `git apply` and BEFORE `git commit`
+   * during promoteToSource. Compares the post-apply tsc error set
+   * against `before` (captured at the start of promoteToSource) and
+   * refuses to commit if any error appears in the post set that is
+   * NOT in the before set. Reverts the working tree on refusal so
+   * promoteToSource leaves the source repo clean.
+   *
+   * Returns { ok: true } on clean / no-tsconfig / no-new-errors.
+   * Returns { ok: false, error: "..." } when at least one new error
+   * was introduced — caller should propagate the error and skip the
+   * commit step.
+   */
+  private async typecheckPromoteGate(
+    sourceRepo: string,
+    before: Set<string> | null,
+    paths: readonly string[],
+  ): Promise<{ ok: true } | { ok: false; error: string; newErrors: string[] }> {
+    if (before === null) return { ok: true };
+    const after = await this.tscErrorSignatures(sourceRepo);
+    if (after === null) return { ok: true };
+    const newErrors = [...after].filter((e) => !before.has(e));
+    if (newErrors.length === 0) return { ok: true };
+    // Revert the working-tree apply so the source repo is left clean.
+    // We checkout HEAD for the changed files only (not git reset --hard,
+    // which would clobber any unrelated unstaged work the user has).
+    const restorable = paths.filter((p) => p && p.length > 0);
+    if (restorable.length > 0) {
+      try {
+        await exec("git", ["checkout", "HEAD", "--", ...restorable], { cwd: sourceRepo });
+      } catch (err) {
+        // Best-effort rollback — surface the original gate failure
+        // even if checkout itself errored.
+        console.warn(
+          `[coordinator] promote-gate: checkout-rollback failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    const summary = newErrors.slice(0, 3).join(" | ") + (newErrors.length > 3 ? " | …" : "");
+    return {
+      ok: false,
+      newErrors,
+      error: `Promote refused: ${newErrors.length} new TypeScript error(s) introduced — ${summary}`,
+    };
+  }
+
   async promoteToSource(runId: string, sourceRepoPath?: string): Promise<{ ok: boolean; commitSha?: string; error?: string }> {
     const receipt = await this.receiptStore.getRun(runId);
     if (!receipt) return { ok: false, error: "No receipt found for run " + runId };
@@ -6153,6 +6239,12 @@ export class Coordinator {
       persistentWorkspaceSourceRepo ??
       this.config.projectRoot;
 
+    // Capture the pre-apply tsc error baseline for the promote-time
+    // gate. Snapshot is per-promote, not per-run, so two promotes
+    // against an evolving source repo each get a fresh comparison
+    // point.
+    const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
+
     // Try patch artifact first (survives workspace cleanup)
     if (patchArtifact?.diff && patchArtifact.diff.trim()) {
       try {
@@ -6165,6 +6257,27 @@ export class Coordinator {
           await exec("git", ["apply", "--3way", patchTmp], { cwd: sourceRepo });
         } finally {
           await rmTmp(patchTmp).catch(() => {});
+        }
+
+        // Promote-time typecheck gate: refuse to commit if the patch
+        // introduced any NEW tsc error compared to promoteTscBaseline.
+        // Run b7109c0b's `receipt.runOutcome` regression slipped past
+        // the verifier-time hook because that hook runs in the source
+        // repo's cwd, not the workspace's — so the workspace
+        // modification was invisible at verifier time. This gate runs
+        // tsc against the source repo AFTER the patch has been
+        // applied, so the would-be-promoted state is what gets
+        // checked.
+        const candidatePaths = filterRuntimeArtifacts(patchArtifact.changedFiles ?? [])
+          .map((f) => resolve(sourceRepo, f));
+        const gateResult = await this.typecheckPromoteGate(
+          sourceRepo,
+          promoteTscBaseline,
+          candidatePaths,
+        );
+        if (!gateResult.ok) {
+          console.error(`[coordinator] PROMOTE (patch) REFUSED for ${runId}: ${gateResult.error}`);
+          return { ok: false, error: gateResult.error };
         }
 
         // Defense-in-depth: even though generatePatch already filters
@@ -6241,6 +6354,21 @@ export class Coordinator {
         { cwd: workspacePath },
       );
       const files = filterRuntimeArtifacts(diffOut.trim().split("\n").filter(Boolean));
+
+      // Promote-time typecheck gate (workspace-fallback path). Same
+      // contract as the patch-artifact path above: refuse to commit if
+      // the apply introduced any NEW tsc error compared to baseline.
+      const candidatePaths = files.map((f) => resolve(sourceRepo, f));
+      const gateResult = await this.typecheckPromoteGate(
+        sourceRepo,
+        promoteTscBaseline,
+        candidatePaths,
+      );
+      if (!gateResult.ok) {
+        console.error(`[coordinator] PROMOTE (workspace) REFUSED for ${runId}: ${gateResult.error}`);
+        return { ok: false, error: gateResult.error };
+      }
+
       if (files.length > 0) {
         await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
       }
