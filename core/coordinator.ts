@@ -1923,16 +1923,30 @@ export class Coordinator {
         });
         // Store the active run for later approval via approveRun()
         this.pendingApproval.set(run.id, active);
-        // Patch receipt — run is paused awaiting approval (NOT "RUNNING" — truthful)
-        void this.receiptStore.patchRun(run.id, {
-          status: "AWAITING_APPROVAL",
-          taskSummary: `Awaiting approval — ${changeCount} change(s) ready to commit`,
-        });
-        // Return a receipt that reflects the awaiting_approval state truthfully.
-        // verdict is "partial" because the run is not yet complete — but the
-        // phase is "awaiting_approval" which the UI must show distinctly.
+        // Build the awaiting-approval receipt FIRST so we can persist it
+        // into finalReceipt below. Run ffe132ed/4b3ec065 surfaced the bug:
+        // without finalReceipt being populated at this gate, approveRun
+        // had no shape to merge the post-commit patchArtifact + commitSha
+        // into, and promoteToSource later failed with "No commit SHA —
+        // nothing to promote" even though the workspace commit existed.
+        // verdict is "partial" because the run is not yet complete — the
+        // phase "awaiting_approval" is what the UI must show distinctly.
         const durationMs = Date.now() - new Date(active.run.startedAt).getTime();
         const awaitReceipt = this.buildReceipt(active, verificationReceipt, judgmentReport, null, durationMs, mergeDecision, null, "partial");
+        // Patch receipt — run is paused awaiting approval (NOT "RUNNING" — truthful).
+        // Persist the full awaitReceipt into finalReceipt so approveRun can
+        // graft commit/diff data into it before workspace cleanup.
+        // AWAITED (not void) so the AWAITING_APPROVAL state is observable
+        // immediately after submit() returns — without this, callers polling
+        // /tasks/:id right after the response see stale EXECUTING_IN_WORKSPACE
+        // status until the fire-and-forget patch lands. Cost is one JSON
+        // file write; consistent with persistFinalReceipt being awaited
+        // at the auto-promote terminal a few lines later.
+        await this.receiptStore.patchRun(run.id, {
+          status: "AWAITING_APPROVAL",
+          taskSummary: `Awaiting approval — ${changeCount} change(s) ready to commit`,
+          finalReceipt: awaitReceipt,
+        });
         return awaitReceipt;
       }
 
@@ -5054,10 +5068,54 @@ export class Coordinator {
         advancePhase(active.run, "complete");
         console.log(`[coordinator] APPROVED COMMIT ${commitSha.slice(0, 8)} for run ${runId}`);
         this.emit({ type: "commit_created", payload: { runId, sha: commitSha } });
+
+        // Generate the patch artifact NOW — the workspace has the new commit
+        // and is about to be cleaned up. promoteToSource reads diff +
+        // changedFiles + commitSha off finalReceipt.patchArtifact, and the
+        // auto-promote path captures this at coordinator.ts ~2015 via
+        // generatePatch(active.workspace). The approval path was missing
+        // that capture (run 4b3ec065 surfaced it as "No commit SHA —
+        // nothing to promote"). Mirror the auto-promote pattern here so
+        // both paths produce the same artifact shape for promoteToSource.
+        let patchArtifact: PatchArtifact | null = null;
+        if (active.workspace) {
+          try {
+            patchArtifact = await generatePatch(active.workspace);
+            active.patchArtifact = patchArtifact;
+            console.log(
+              `[coordinator] approval patch artifact: ${patchArtifact.changedFiles.length} file(s), ` +
+              `${patchArtifact.diff.length} bytes, commit=${patchArtifact.commitSha?.slice(0, 8) ?? "none"}`,
+            );
+          } catch (err) {
+            console.warn(
+              `[coordinator] approval patch generation failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
+        // Merge patchArtifact + commitSha into the persisted finalReceipt
+        // BEFORE workspace cleanup. We persisted the full awaitReceipt at
+        // the awaiting_approval gate, so finalReceipt is non-null here for
+        // any run that paused at that gate. For runs that were persisted
+        // by an older Aedis version (pre-fix) finalReceipt may be null —
+        // log it and skip rather than fabricating a partial receipt that
+        // would lie about which gates ran.
+        const persisted = await this.receiptStore.getRun(runId);
+        const existingFinal = persisted?.finalReceipt ?? null;
+        const mergedFinal: RunReceipt | null = existingFinal
+          ? { ...existingFinal, patchArtifact, commitSha }
+          : null;
+        if (!mergedFinal) {
+          console.warn(
+            `[coordinator] approveRun: finalReceipt missing for run ${runId} — promotion will fall back to workspace path or fail honestly`,
+          );
+        }
+
         void this.receiptStore.patchRun(runId, {
           status: "READY_FOR_PROMOTION",
           taskSummary: `Approved and committed: ${commitSha.slice(0, 8)}`,
           completedAt: new Date().toISOString(),
+          ...(mergedFinal ? { finalReceipt: mergedFinal } : {}),
         });
         return { ok: true, commitSha };
       } else {
