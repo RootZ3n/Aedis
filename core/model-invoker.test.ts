@@ -244,6 +244,84 @@ test("pre-aborted signal short-circuits invokeModelWithFallback before any HTTP 
   );
 });
 
+test("cancellation populates InvokerError.attempts so callers can persist what was tried (run 097adb9c regression)", async () => {
+  // Run 097adb9c shipped with providerAttempts[] empty in the receipt
+  // even though invokeModelWithFallback was cancelled mid-chain. The
+  // root cause was actually in the workers (they didn't extract
+  // err.attempts), but the model-invoker side of the contract MUST
+  // also be pinned: the InvokerError it throws on cancellation has to
+  // carry a populated attempts log, otherwise the workers have nothing
+  // to extract. This test pins both halves: the cancelled outcome
+  // appears AND the entry has the right provider/model identity.
+  process.env.OPENROUTER_API_KEY = "test";
+
+  await withFreshCwd(() =>
+    withStubbedFetch(
+      async () => {
+        throw new Error("fetch should not be called when signal is pre-aborted");
+      },
+      async () => {
+        const ctrl = new AbortController();
+        ctrl.abort();
+        const chain: InvokeConfig[] = [
+          { provider: "openrouter", model: "xiaomi/mimo-v2.5", prompt: "hi" },
+          { provider: "minimax", model: "minimax-coding", prompt: "hi" },
+        ];
+        await assert.rejects(
+          () => invokeModelWithFallback(chain, createRunInvocationContext(), ctrl.signal),
+          (err: unknown) => {
+            assert.ok(err instanceof InvokerError);
+            const ie = err as InvokerError;
+            assert.equal(ie.kind, "cancelled");
+            assert.ok(Array.isArray(ie.attempts), "InvokerError.attempts must be populated for cancellation");
+            assert.ok(ie.attempts!.length >= 1, "at least one cancelled attempt must be recorded");
+            assert.equal(ie.attempts![0]!.outcome, "cancelled");
+            assert.equal(ie.attempts![0]!.provider, "openrouter");
+            assert.equal(ie.attempts![0]!.model, "xiaomi/mimo-v2.5");
+            return true;
+          },
+        );
+      },
+    ),
+  );
+});
+
+test("cancelled outcome does NOT increment circuit breaker", async () => {
+  // Cancellation is caller-initiated and must not penalize the provider.
+  // Documented in invokeModel at line 411 ("don't penalize CB for
+  // cancelled") and in the fallback-chain cancel branch (no cbFail
+  // call). Confirm the persisted CB state stays clean after a cancel.
+  process.env.OPENROUTER_API_KEY = "test";
+
+  await withFreshCwd(() =>
+    withStubbedFetch(
+      async () => {
+        throw new Error("fetch should not be called when signal is pre-aborted");
+      },
+      async () => {
+        const ctrl = new AbortController();
+        ctrl.abort();
+        const chain: InvokeConfig[] = [
+          { provider: "openrouter", model: "xiaomi/mimo-v2.5", prompt: "hi" },
+        ];
+        await assert.rejects(
+          () => invokeModelWithFallback(chain, createRunInvocationContext(), ctrl.signal),
+          (err: unknown) => err instanceof InvokerError,
+        );
+        const cbStatePath = join(process.cwd(), ".aedis/circuit-breaker-state.json");
+        if (existsSync(cbStatePath)) {
+          const state = JSON.parse(readFileSync(cbStatePath, "utf-8"));
+          assert.equal(
+            state.providers?.openrouter,
+            undefined,
+            "openrouter must not be penalized for cancellation",
+          );
+        }
+      },
+    ),
+  );
+});
+
 test("InvokerError on total failure carries the full attempts log", async () => {
   process.env.OPENROUTER_API_KEY = "test";
   process.env.MINIMAX_API_KEY = "test";

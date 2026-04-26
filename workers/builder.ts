@@ -11,6 +11,7 @@ import { recordDecision, recordFileTouch } from "../core/runstate.js";
 import {
   invokeModelWithFallback,
   createRunInvocationContext,
+  InvokerError,
   type InvokeAttempt,
   type InvokeConfig,
   type Provider,
@@ -1548,7 +1549,23 @@ export class BuilderWorker extends AbstractWorker {
 
     // Attempt 1 — initial model call.
     const attempt1Started = Date.now();
-    const response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
+    // Capture attempts on BOTH paths. invokeModelWithFallback throws an
+    // InvokerError with .attempts populated on chain-cancel or
+    // chain-exhaustion; without this catch the attempts would only be
+    // visible on the success path. Run 097adb9c surfaced the gap: a
+    // cancelled in-flight call left providerAttempts[] empty in the
+    // receipt, so operators couldn't see "we tried provider X and it
+    // was aborted." The catch below appends the attempts log before
+    // re-throwing so the outer execute() catch still owns the failure.
+    let response: Awaited<ReturnType<typeof invokeModelWithFallback>>;
+    try {
+      response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
+    } catch (err) {
+      if (err instanceof InvokerError && err.attempts) {
+        providerAttempts.push(...err.attempts);
+      }
+      throw err;
+    }
     providerAttempts.push(...response.attempts);
     if (response.usedProvider !== primaryProvider) {
       console.warn(
@@ -1942,6 +1959,15 @@ export class BuilderWorker extends AbstractWorker {
     try {
       repairResponse = await invokeModelWithFallback(repairChain, input.runCtx, input.assignment.signal);
     } catch (err) {
+      // Same pattern as the primary call site above: capture the
+      // attempts log from a cancelled / chain-exhausted InvokerError so
+      // operators can still see what was tried, then return null to
+      // signal "no repair output." The repair path swallows the error
+      // (it's an enrichment, not a hard requirement); the attempts
+      // remain in providerAttempts for the receipt.
+      if (err instanceof InvokerError && err.attempts) {
+        input.providerAttempts.push(...err.attempts);
+      }
       console.warn(
         `[builder] export-repair: model invocation failed: ${err instanceof Error ? err.message : String(err)}`,
       );

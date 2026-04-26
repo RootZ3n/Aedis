@@ -3,6 +3,7 @@ import { recordDecision } from "../core/runstate.js";
 import {
   invokeModelWithFallback,
   createRunInvocationContext,
+  InvokerError,
   type InvokeAttempt,
   type InvokeConfig,
   type Provider,
@@ -208,7 +209,23 @@ export class CriticWorker extends AbstractWorker {
           `[critic] dispatching with fallback chain (${chain.length} entries) for run ${runId.slice(0, 8)}: ${chain.map(c => `${c.provider}/${c.model}`).join(" → ")}`
         );
 
-        const response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
+        // Capture attempts on BOTH paths. invokeModelWithFallback throws
+        // an InvokerError with .attempts populated on chain-cancel /
+        // chain-exhaustion; without this catch the attempts would only
+        // be visible on the success path. Run 097adb9c surfaced the gap:
+        // a cancelled in-flight call left providerAttempts[] empty in
+        // the receipt, so operators couldn't see "we tried provider X
+        // and it was aborted." The catch below preserves the attempts
+        // log before re-throwing into the worker's outer error handler.
+        let response: Awaited<ReturnType<typeof invokeModelWithFallback>>;
+        try {
+          response = await invokeModelWithFallback(chain, runCtx, assignment.signal);
+        } catch (err) {
+          if (err instanceof InvokerError && err.attempts) {
+            providerAttempts = err.attempts;
+          }
+          throw err;
+        }
         providerAttempts = response.attempts;
 
         if (response.usedProvider !== primaryProvider) {

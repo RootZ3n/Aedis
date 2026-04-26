@@ -40,6 +40,13 @@ import { join } from "node:path";
 
 import { CriticWorker } from "./critic.js";
 import type { Provider } from "../core/model-invoker.js";
+import type {
+  WorkerAssignment,
+  WorkerResult,
+  BuilderOutput,
+  FileChange,
+} from "./base.js";
+import type { TaskContract } from "./builder.js";
 
 function makeRepoWithCriticConfig(criticAssignment: Record<string, unknown>): string {
   const dir = mkdtempSync(join(tmpdir(), "aedis-critic-chain-"));
@@ -241,6 +248,119 @@ test("critic getDeclaredFallbackChain: returns [] when configRoot is unreadable"
   const worker = new CriticWorker();
   const tail = callGetDeclaredChain(worker, "/nonexistent/path/" + Date.now());
   assert.deepEqual(tail, []);
+});
+
+// ─── Cancellation propagation: providerAttempts must surface cancel ───
+//
+// Run 097adb9c surfaced this bug: a cancelled in-flight model call left
+// providerAttempts[] empty in the receipt, so operators couldn't see
+// "we attempted provider X and it was aborted." The fix wraps the
+// invokeModelWithFallback call site in a try/catch that extracts
+// err.attempts from a thrown InvokerError before re-throwing.
+//
+// End-to-end test: pre-aborted signal → CriticWorker.execute() catches
+// the cancellation → WorkerResult.providerAttempts contains the
+// cancelled attempt(s). Without the fix, providerAttempts would be [].
+
+function buildCriticAssignmentWithBuilderUpstream(
+  projectRoot: string,
+  signal: AbortSignal,
+): WorkerAssignment {
+  const targetFile = "core/foo.ts";
+  const change: FileChange = {
+    path: targetFile,
+    operation: "modify",
+    content: "export const foo = 2;\n",
+    originalContent: "export const foo = 1;\n",
+  };
+  const contract: TaskContract = {
+    file: targetFile,
+    scopeFiles: [targetFile],
+    siblingFiles: [],
+    mode: "single-file",
+    goal: "Update foo constant",
+    constraints: [],
+    forbiddenChanges: [],
+    interfaceRules: [],
+  };
+  const builderOutput: BuilderOutput & { contract: TaskContract } = {
+    kind: "builder",
+    changes: [change],
+    decisions: [],
+    needsCriticReview: true,
+    contract,
+  };
+  const builderResult: WorkerResult = {
+    success: true,
+    workerType: "builder",
+    taskId: "task-builder-upstream",
+    output: builderOutput,
+    cost: { model: "xiaomi/mimo-v2.5", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+    confidence: 0.9,
+    touchedFiles: [{ path: targetFile, operation: "modify" }],
+    issues: [],
+    durationMs: 1,
+  };
+  return {
+    task: {
+      id: "critic-task-001",
+      description: "Critic on foo",
+      targetFiles: [targetFile],
+      type: "critic",
+      status: "pending",
+      dependencies: [],
+      result: null,
+      cost: null,
+    } as unknown as WorkerAssignment["task"],
+    intent: {
+      id: "intent-001",
+      runId: "run-cancel-test",
+      userRequest: "modify foo",
+    } as unknown as WorkerAssignment["intent"],
+    context: { layers: [] } as unknown as WorkerAssignment["context"],
+    upstreamResults: [builderResult],
+    tier: "standard",
+    tokenBudget: 1024,
+    projectRoot,
+    sourceRepo: projectRoot,
+    signal,
+  } as WorkerAssignment;
+}
+
+test("CriticWorker.execute: pre-aborted signal still surfaces cancelled attempt in WorkerResult.providerAttempts (run 097adb9c regression)", async () => {
+  const repo = makeRepoWithCriticConfig({
+    provider: "openrouter",
+    model: "xiaomi/mimo-v2.5",
+  });
+  try {
+    process.env.OPENROUTER_API_KEY = "test"; // required for chain build
+    const worker = new CriticWorker({ projectRoot: repo });
+
+    // Pre-abort BEFORE dispatch so invokeModelWithFallback short-
+    // circuits in its first chain entry and throws InvokerError with
+    // attempts populated. The worker's catch must extract those attempts
+    // and surface them in the failed WorkerResult — that's the fix.
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const assignment = buildCriticAssignmentWithBuilderUpstream(repo, ctrl.signal);
+
+    const result = await worker.execute(assignment);
+
+    assert.equal(result.success, false, "execute must fail when signal is pre-aborted");
+    assert.ok(
+      result.providerAttempts && result.providerAttempts.length > 0,
+      `providerAttempts must be populated even on cancellation; got ${JSON.stringify(result.providerAttempts)}`,
+    );
+    const cancelled = result.providerAttempts!.filter((a) => a.outcome === "cancelled");
+    assert.ok(
+      cancelled.length > 0,
+      `at least one cancelled attempt must be recorded; got outcomes=${result.providerAttempts!.map((a) => a.outcome).join(",")}`,
+    );
+    assert.equal(cancelled[0]!.provider, "openrouter");
+    assert.equal(cancelled[0]!.model, "xiaomi/mimo-v2.5");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("critic getDeclaredFallbackChain: end-to-end matches run-2b2b71d9 expected shape", () => {
