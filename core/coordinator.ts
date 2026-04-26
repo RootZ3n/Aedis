@@ -5484,7 +5484,27 @@ export class Coordinator {
 
     const finalReceipt = (receipt as any).finalReceipt;
     const patchArtifact = finalReceipt?.patchArtifact as { diff?: string; changedFiles?: string[]; commitSha?: string | null } | undefined;
-    const sourceRepo = sourceRepoPath ?? (receipt as any).sourceRepo ?? this.config.projectRoot;
+    // Source-repo resolution. The persistent receipt's TOP-LEVEL
+    // sourceRepo is null for any run currently in this codebase — only
+    // finalReceipt.sourceRepo and workspace.sourceRepo carry the value
+    // (set in buildReceipt at ~line 5898 and at workspace creation).
+    // Run 6bf45418 surfaced the gap: POST /tasks/:id/promote with no
+    // body fell straight through to this.config.projectRoot
+    // (/mnt/ai/aedis) and tried to git-apply an absent-pianist patch
+    // there, failing with "app.py: does not exist in index." Walk the
+    // chain in trust order so the explicit body wins, then anything the
+    // receipt itself recorded, and only last fall back to the
+    // coordinator's project root.
+    const persistentWorkspaceSourceRepo = (receipt as any)?.workspace?.sourceRepo;
+    const finalReceiptSourceRepo = finalReceipt?.sourceRepo;
+    const finalReceiptWorkspaceSourceRepo = finalReceipt?.workspace?.sourceRepo;
+    const sourceRepo =
+      sourceRepoPath ??
+      (receipt as any).sourceRepo ??
+      finalReceiptSourceRepo ??
+      finalReceiptWorkspaceSourceRepo ??
+      persistentWorkspaceSourceRepo ??
+      this.config.projectRoot;
 
     // Try patch artifact first (survives workspace cleanup)
     if (patchArtifact?.diff && patchArtifact.diff.trim()) {

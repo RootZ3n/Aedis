@@ -347,6 +347,102 @@ test("approval flow: auto-promote path (requireApproval=false) still captures pa
   }
 });
 
+test("approval flow: promoteToSource resolves source repo from finalReceipt when body omits source_repo (run 6bf45418 regression)", async () => {
+  // Run 6bf45418: POST /tasks/:id/promote with no body fell straight
+  // through to this.config.projectRoot (/mnt/ai/aedis) and tried to
+  // git-apply an absent-pianist patch there, failing with
+  //   error: app.py: does not exist in index
+  //   error: generate.py: does not exist in index
+  // The fix walks a longer fallback chain so finalReceipt.sourceRepo
+  // wins before this.config.projectRoot. Reproduce the shape: the
+  // coordinator's projectRoot points at a DIFFERENT repo than the
+  // one the submission targeted. Without the fix, promote applies to
+  // the wrong repo and fails.
+  const coordRoot = makeTempRepo();        // coordinator's config.projectRoot
+  const targetRepo = makeTempRepo();       // the submission's actual target
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 17; // approved\n" },
+    ]);
+    const { coordinator } = buildHarness(coordRoot, { builder, requireApproval: true });
+
+    const beforeTargetSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: targetRepo }).toString().trim();
+    const beforeCoordSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: coordRoot }).toString().trim();
+
+    const receipt = await coordinator.submit({
+      input: "modify widget in core",
+      projectRoot: targetRepo,           // submission targets a DIFFERENT repo than coordRoot
+    });
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true, `approveRun must succeed; got error=${approve.error}`);
+
+    // Promote with NO body — must NOT default to coordRoot. Pre-fix
+    // this would try `git apply` inside coordRoot and fail because the
+    // patch's files don't exist in coordRoot's index.
+    const promote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(
+      promote.ok,
+      true,
+      `promoteToSource (no body) must resolve sourceRepo from finalReceipt; got error=${promote.error}`,
+    );
+    assert.ok(promote.commitSha, "promoteToSource must return a source-repo commit SHA");
+
+    // The TARGET repo must have advanced; coordRoot must NOT have been touched.
+    const afterTargetSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: targetRepo }).toString().trim();
+    const afterCoordSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: coordRoot }).toString().trim();
+    assert.notEqual(afterTargetSha, beforeTargetSha, "target repo HEAD must move forward");
+    assert.equal(afterTargetSha, promote.commitSha, "target HEAD must equal the promote SHA");
+    assert.equal(afterCoordSha, beforeCoordSha, "coordinator's projectRoot must NOT be mutated by a promote that targets a different repo");
+
+    // Cross-check the file actually landed in the target, not coord.
+    const widgetInTarget = readFileSync(join(targetRepo, "core/widget.ts"), "utf-8");
+    assert.match(widgetInTarget, /widget = 17/, "promoted change must land in target repo");
+  } finally {
+    rmSync(coordRoot, { recursive: true, force: true });
+    rmSync(targetRepo, { recursive: true, force: true });
+  }
+});
+
+test("approval flow: explicit source_repo body still wins over inferred sourceRepo", async () => {
+  // Defense: the body override is the highest-priority resolution and
+  // must keep working. Without that, callers that explicitly pass
+  // source_repo (e.g. anyone who'd worked around the run 6bf45418 bug
+  // by always supplying it) would silently route to a different repo.
+  const coordRoot = makeTempRepo();
+  const inferredRepo = makeTempRepo();
+  const explicitRepo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 99; // explicit-route\n" },
+    ]);
+    const { coordinator } = buildHarness(coordRoot, { builder, requireApproval: true });
+
+    const beforeInferred = execFileSync("git", ["rev-parse", "HEAD"], { cwd: inferredRepo }).toString().trim();
+    const beforeExplicit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: explicitRepo }).toString().trim();
+
+    const receipt = await coordinator.submit({
+      input: "modify widget in core",
+      projectRoot: inferredRepo,         // receipt's finalReceipt.sourceRepo = inferredRepo
+    });
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true);
+
+    // Explicit body override targets explicitRepo. Body must beat inferred.
+    const promote = await coordinator.promoteToSource(receipt.runId, explicitRepo);
+    assert.equal(promote.ok, true, `promoteToSource (explicit) must succeed; got error=${promote.error}`);
+
+    const afterInferred = execFileSync("git", ["rev-parse", "HEAD"], { cwd: inferredRepo }).toString().trim();
+    const afterExplicit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: explicitRepo }).toString().trim();
+    assert.equal(afterInferred, beforeInferred, "inferred repo must NOT move when an explicit body override is supplied");
+    assert.notEqual(afterExplicit, beforeExplicit, "explicit repo must move forward");
+    assert.equal(afterExplicit, promote.commitSha, "explicit HEAD must match promote SHA");
+  } finally {
+    rmSync(coordRoot, { recursive: true, force: true });
+    rmSync(inferredRepo, { recursive: true, force: true });
+    rmSync(explicitRepo, { recursive: true, force: true });
+  }
+});
+
 test("approval flow: promoteToSource fails honestly when finalReceipt is missing (legacy receipt)", async () => {
   // Defense: if a receipt was persisted by an older Aedis version with
   // no finalReceipt, promoteToSource must NOT fabricate a commit. It
