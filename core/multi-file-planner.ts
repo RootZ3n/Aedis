@@ -1,3 +1,4 @@
+// buildIntentGraph does not exist in this file; no deletion needed.
 import type { ChangeSet } from "./change-set.js";
 import type { ImportGraph } from "./import-graph.js";
 
