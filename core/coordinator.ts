@@ -2445,6 +2445,14 @@ export class Coordinator {
       // current Node, but be defensive — cancel() must never reject.
     }
     abortRun(active.run, "Cancelled by user");
+
+    if (this.pendingApproval.has(runId)) {
+      this.pendingApproval.delete(runId);
+      this.activeRuns.delete(runId);
+      void this.cancelPendingApprovalRun(active);
+      return true;
+    }
+
     void this.receiptStore.patchRun(runId, {
       intentId: active.intent.id,
       prompt: active.rawUserPrompt,
@@ -2464,6 +2472,75 @@ export class Coordinator {
       ],
     });
     return true;
+  }
+
+  /**
+   * Cancel an approval-paused run through the same cleanup shape as
+   * rejection: roll back unapproved workspace edits, clean up the
+   * preserved workspace, and make the persisted receipt terminal.
+   */
+  private async cancelPendingApprovalRun(active: ActiveRun): Promise<void> {
+    const runId = active.run.id;
+    try {
+      await this.rollbackChanges(active, {
+        action: "block",
+        findings: [],
+        critical: [{
+          source: "coordinator",
+          severity: "critical",
+          code: "coordinator:cancelled",
+          message: "Run cancelled by user during approval",
+        }],
+        advisory: [],
+        primaryBlockReason: "Run cancelled by user during approval",
+        summary: "CANCELLED — user cancelled during approval gate",
+      });
+
+      const persisted = await this.receiptStore.getRun(runId);
+      const runSummary = getRunSummary(active.run);
+      const finalReceipt = persisted?.finalReceipt
+        ? { ...persisted.finalReceipt, verdict: "aborted" as const, summary: runSummary }
+        : undefined;
+
+      await this.receiptStore.patchRun(runId, {
+        intentId: active.intent.id,
+        prompt: active.rawUserPrompt,
+        taskSummary: "Cancelled by user during approval — changes rolled back",
+        status: "INTERRUPTED",
+        phase: active.run.phase,
+        completedAt: active.run.completedAt,
+        runSummary,
+        ...(finalReceipt ? { finalReceipt } : {}),
+        appendErrors: ["Cancelled by user during approval gate"],
+        appendCheckpoints: [
+          {
+            at: new Date().toISOString(),
+            type: "failure_occurred",
+            status: "INTERRUPTED",
+            phase: active.run.phase,
+            summary: "Run interrupted by user cancellation during approval",
+          },
+        ],
+      });
+    } catch (err) {
+      console.warn(
+        `[coordinator] approval cancellation rollback failed for ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      try {
+        await this.receiptStore.patchRun(runId, {
+          status: "INTERRUPTED",
+          phase: active.run.phase,
+          completedAt: active.run.completedAt,
+          appendErrors: [`Approval cancellation cleanup failed: ${err instanceof Error ? err.message : String(err)}`],
+        });
+      } catch { /* best-effort */ }
+    } finally {
+      await this.cleanupWorkspaceForApproval(active);
+      this.emit({
+        type: "run_complete",
+        payload: { runId, verdict: "aborted", executionVerified: false, executionReason: "Cancelled by user", classification: null },
+      });
+    }
   }
 
   /**

@@ -26,13 +26,14 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { Coordinator } from "./coordinator.js";
 import { ReceiptStore } from "./receipt-store.js";
+import { taskRoutes } from "../server/routes/tasks.js";
 import { WorkerRegistry, AbstractWorker } from "../workers/base.js";
 import type {
   WorkerAssignment,
@@ -83,6 +84,29 @@ class RealBuilderWorker extends AbstractWorker {
   async estimateCost(): Promise<CostEntry> { return this.zeroCost(); }
   protected emptyOutput(): WorkerOutput {
     return { kind: "builder", changes: [], decisions: [], needsCriticReview: false };
+  }
+}
+
+class BlockingBuilderWorker extends RealBuilderWorker {
+  private releaseBlock!: () => void;
+  readonly ready: Promise<void>;
+  private readyResolve!: () => void;
+  readonly release: Promise<void>;
+
+  constructor(writes: readonly { path: string; content: string }[]) {
+    super(writes);
+    this.ready = new Promise((resolve) => { this.readyResolve = resolve; });
+    this.release = new Promise((resolve) => { this.releaseBlock = resolve; });
+  }
+
+  override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+    this.readyResolve();
+    await this.release;
+    return super.execute(assignment);
+  }
+
+  unblock(): void {
+    this.releaseBlock();
   }
 }
 
@@ -235,7 +259,134 @@ function makeTempRepo(): string {
   return dir;
 }
 
+async function waitFor<T>(
+  probe: () => Promise<T | null> | T | null,
+  message: string,
+  timeoutMs = 3000,
+): Promise<T> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const result = await probe();
+    if (result) return result;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail(message);
+}
+
 // ─── TESTS ──────────────────────────────────────────────────────────
+
+test("approval flow: cancelling awaiting-approval clears pending/active state, aborts receipt, cleans workspace, and leaves source unchanged", async () => {
+  const repo = makeTempRepo();
+  try {
+    const original = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 500;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const awaiting = await receiptStore.getRun(receipt.runId);
+    const workspacePath = awaiting?.workspace?.workspacePath;
+    assert.ok(workspacePath, "approval run must persist workspace path before cancellation");
+    assert.equal(coordinator.getPendingApprovals().length, 1);
+    assert.deepEqual(coordinator.listActiveRunIds(), [receipt.runId]);
+
+    assert.equal(coordinator.cancel(receipt.runId), true);
+
+    assert.equal(coordinator.getPendingApprovals().length, 0, "pendingApproval must be cleared synchronously");
+    assert.deepEqual(coordinator.listActiveRunIds(), [], "activeRuns must be cleared synchronously");
+    assert.equal(coordinator.getRunStatus(receipt.runId), null, "cancelled approval run must not report active status");
+
+    const persisted = await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.workspace?.cleanedUp === true ? current : null;
+    }, "approval cancellation should persist workspace cleanup");
+
+    assert.equal(persisted.status, "INTERRUPTED");
+    assert.equal(persisted.phase, "aborted");
+    assert.equal((persisted.runSummary as any)?.phase, "aborted");
+    assert.equal(persisted.finalReceipt?.summary.phase, "aborted", "finalReceipt.summary.phase must not remain awaiting_approval");
+    assert.equal(persisted.finalReceipt?.verdict, "aborted");
+    assert.equal(existsSync(workspacePath), false, "approval workspace must be removed after cancellation");
+    assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), original, "source repo must not be mutated by approval cancellation");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("approval flow: task route reports active_run=false after approval-stage cancel", async () => {
+  const fastify = (await import("fastify")).default;
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 501;\n" },
+    ]);
+    const { coordinator, receiptStore, events } = buildHarness(repo, { builder, requireApproval: true });
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+
+    await receiptStore.registerTask({
+      taskId: "task-approval-cancel",
+      runId: receipt.runId,
+      prompt: "modify widget in core",
+      submittedAt: new Date().toISOString(),
+    });
+
+    assert.equal(coordinator.cancel(receipt.runId), true);
+    await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.status === "INTERRUPTED" ? current : null;
+    }, "approval cancellation should persist interrupted run");
+    await receiptStore.updateTask("task-approval-cancel", {
+      status: "cancelled",
+      completedAt: new Date().toISOString(),
+      error: "Cancelled by user",
+    });
+
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator,
+      eventBus: {
+        emit: (event: AedisEvent) => { events.push(event); },
+        recentEvents: () => events,
+      },
+      config: { projectRoot: repo },
+    });
+    await app.register(taskRoutes);
+
+    const res = await app.inject({ method: "GET", url: "/task-approval-cancel" });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.status, "cancelled");
+    assert.equal(body.active_run, false);
+    assert.equal(body.progress.phase, "aborted");
+
+    await app.close();
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("approval flow: normal in-flight cancellation remains active until submit unwinds", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new BlockingBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 502;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: false });
+
+    const submit = coordinator.submit({ input: "modify widget in core" });
+    const runId = await waitFor(() => coordinator.listActiveRunIds()[0] ?? null, "run should become active");
+    assert.equal(coordinator.cancel(runId), true);
+    assert.deepEqual(coordinator.listActiveRunIds(), [runId], "ordinary in-flight cancellation should remain active until finally cleanup");
+
+    builder.unblock();
+    await submit;
+    await waitFor(() => coordinator.listActiveRunIds().length === 0 ? true : null, "normal cancellation should clear active run after submit unwinds");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
 
 test("approval flow: AWAITING_APPROVAL persists the full awaitReceipt into finalReceipt", async () => {
   const repo = makeTempRepo();
