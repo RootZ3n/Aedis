@@ -10,6 +10,7 @@ import {
   loadModelConfig,
   resolveBuilderModelForTier,
   resolveBuilderChainForTier,
+  resolveAssignmentChain,
   checkAnthropicHotPathDoctrine,
   _resetDoctrineWarningCache,
 } from "./config.js";
@@ -284,6 +285,44 @@ test("resolveBuilderChainForTier returns the declared chain in order, deduped ag
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
+});
+
+test("resolveAssignmentChain returns empty when assignment is undefined", () => {
+  // Defensive: resolveAssignmentChain([]) signals "this role isn't
+  // configured at all." Callers that get [] should fall back to their
+  // own default rather than treat the role as unmapped.
+  const chain = resolveAssignmentChain(undefined);
+  assert.deepEqual(chain, []);
+});
+
+test("resolveAssignmentChain returns single-entry chain for a primary with no chain field", () => {
+  const chain = resolveAssignmentChain({ provider: "ollama", model: "qwen3.5:9b" });
+  assert.deepEqual(chain, [{ provider: "ollama", model: "qwen3.5:9b" }]);
+});
+
+test("resolveAssignmentChain returns primary first then declared chain in order, deduped", () => {
+  const chain = resolveAssignmentChain({
+    provider: "ollama",
+    model: "qwen3.5:9b",
+    chain: [
+      { provider: "ollama", model: "qwen3.5:9b" }, // dup of primary, must drop
+      { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+      { provider: "openrouter", model: "xiaomi/mimo-v2.5" }, // dup of prior chain entry, must drop
+    ],
+  });
+  assert.deepEqual(
+    chain.map((c) => `${c.provider}/${c.model}`),
+    ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
+  );
+});
+
+test("resolveAssignmentChain preserves the head's label when present", () => {
+  const chain = resolveAssignmentChain({
+    provider: "openrouter",
+    model: "xiaomi/mimo-v2.5",
+    label: "xiaomi/mimo-v2.5 via OpenRouter",
+  });
+  assert.equal(chain[0]?.label, "xiaomi/mimo-v2.5 via OpenRouter");
 });
 
 test("checkAnthropicHotPathDoctrine flags Anthropic primary in builder/critic/integrator", () => {

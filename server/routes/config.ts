@@ -280,6 +280,42 @@ export interface BuilderChainResolution {
   readonly chain: readonly { provider: string; model: string; label?: string }[];
 }
 
+/**
+ * Resolve the full invocation chain for a non-tier-aware ModelAssignment
+ * (currently used by Critic; suitable for any worker whose role-level
+ * assignment is a single ModelAssignment with optional `chain[]`). The
+ * primary `{provider, model}` is always head; declared chain entries
+ * follow in order, deduped by `provider/model` so a self-referencing
+ * declaration can't cause an invocation loop.
+ *
+ * Returns an empty array when `assignment` is undefined — callers that
+ * see [] should fall back to their constructor-level default rather
+ * than treat it as "no fallback wanted."
+ *
+ * Mirrors `resolveBuilderChainForTier` (which is tier-aware and
+ * builder-specific) so both surfaces produce the same shape for
+ * consumers like `invokeModelWithFallback`.
+ */
+export function resolveAssignmentChain(
+  assignment: ModelAssignment | undefined,
+): readonly { provider: string; model: string; label?: string }[] {
+  if (!assignment) return [];
+  const chain: { provider: string; model: string; label?: string }[] = [];
+  const seen = new Set<string>();
+  const head: { provider: string; model: string; label?: string } = assignment.label
+    ? { provider: assignment.provider, model: assignment.model, label: assignment.label }
+    : { provider: assignment.provider, model: assignment.model };
+  chain.push(head);
+  seen.add(`${head.provider}/${head.model}`);
+  for (const entry of assignment.chain ?? []) {
+    const id = `${entry.provider}/${entry.model}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    chain.push({ ...entry });
+  }
+  return chain;
+}
+
 export function resolveBuilderChainForTier(
   config: ModelConfig,
   tier: ModelTier,

@@ -1,0 +1,275 @@
+/**
+ * Critic worker — declared fallback chain regression.
+ *
+ * Run 2b2b71d9 surfaced this gap on a real provider failure:
+ *   - .aedis/model-config.json declared:
+ *       critic: {
+ *         provider: "ollama", model: "qwen3.5:9b",
+ *         chain: [
+ *           { provider: "ollama",     model: "qwen3.5:9b" },
+ *           { provider: "openrouter", model: "xiaomi/mimo-v2.5" }
+ *         ]
+ *       }
+ *   - Ollama was stopped; the primary failed.
+ *   - Critic fell back — but to portum/qwen3.6-plus (the constructor-
+ *     level legacy default), NOT the declared openrouter entry.
+ *   - Live log "[critic] dispatching with fallback chain (1 entries)"
+ *     was the smoking gun: only the primary made it through.
+ *
+ * Root cause: workers/critic.ts:buildInvocationChain only consulted
+ * `this.fallbackModel` (constructor default). It never read the
+ * declared `chain[]` from model-config.json. Builder already had this
+ * (resolveBuilderChainForTier + getDeclaredFallbackChain); critic was
+ * a copy-paste of the pre-declarative-chain pattern.
+ *
+ * Pin the post-fix invariants:
+ *   1. Declared chain wins — constructor `fallbackModel` is NOT
+ *      appended when a chain is declared.
+ *   2. No declared chain → legacy constructor `fallbackModel` is
+ *      preserved (back-compat for single-entry configs).
+ *   3. Declared chain is passed through verbatim — portum is NOT
+ *      silently appended unless portum appears in the chain.
+ *   4. Chain entries that duplicate the primary are deduped.
+ */
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { CriticWorker } from "./critic.js";
+import type { Provider } from "../core/model-invoker.js";
+
+function makeRepoWithCriticConfig(criticAssignment: Record<string, unknown>): string {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-critic-chain-"));
+  mkdirSync(join(dir, ".aedis"), { recursive: true });
+  writeFileSync(
+    join(dir, ".aedis/model-config.json"),
+    JSON.stringify({
+      scout: { model: "local", provider: "local" },
+      builder: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      critic: criticAssignment,
+      verifier: { model: "local", provider: "local" },
+      integrator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      escalation: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+      coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
+    }),
+    "utf-8",
+  );
+  return dir;
+}
+
+// Cast helper: buildInvocationChain and getDeclaredFallbackChain are
+// private, but their behavior is the regression surface this file
+// exists to pin. A typed-any cast is more honest than re-architecting
+// the worker to expose them.
+function callBuildChain(
+  worker: CriticWorker,
+  primaryProvider: Provider,
+  primaryModel: string,
+  declaredChain?: { provider: string; model: string }[],
+): Array<{ provider: string; model: string }> {
+  return (worker as unknown as {
+    buildInvocationChain: (
+      p: Provider, m: string, prompt: string, t: number,
+      d?: readonly { provider: string; model: string }[],
+    ) => Array<{ provider: string; model: string }>;
+  }).buildInvocationChain(primaryProvider, primaryModel, "test prompt", 1024, declaredChain);
+}
+
+function callGetDeclaredChain(worker: CriticWorker, configRoot: string): Array<{ provider: string; model: string }> {
+  return (worker as unknown as {
+    getDeclaredFallbackChain: (root: string) => readonly { provider: string; model: string }[];
+  }).getDeclaredFallbackChain(configRoot) as Array<{ provider: string; model: string }>;
+}
+
+// ─── buildInvocationChain: declared-vs-legacy dispatch ──────────────
+
+test("critic buildInvocationChain: declared chain wins; constructor fallbackModel is NOT appended", () => {
+  // The exact run-2b2b71d9 shape: ollama primary, declared openrouter
+  // chain entry. portum (the constructor default) must NOT appear.
+  const worker = new CriticWorker({
+    fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" },
+  });
+  const chain = callBuildChain(worker, "ollama", "qwen3.5:9b", [
+    { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  ]);
+  assert.deepEqual(
+    chain.map((c) => `${c.provider}/${c.model}`),
+    ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
+    "declared openrouter must follow primary; portum must NOT be silently appended",
+  );
+});
+
+test("critic buildInvocationChain: no declared chain → legacy fallbackModel is preserved", () => {
+  // Back-compat: configs that don't declare chain[] should still get
+  // their constructor-level fallback so single-entry model-config.json
+  // files don't regress.
+  const worker = new CriticWorker({
+    fallbackModel: { provider: "ollama" as Provider, model: "qwen3.5:9b" },
+  });
+  const chain = callBuildChain(worker, "openrouter", "xiaomi/mimo-v2.5", undefined);
+  assert.deepEqual(
+    chain.map((c) => `${c.provider}/${c.model}`),
+    ["openrouter/xiaomi/mimo-v2.5", "ollama/qwen3.5:9b"],
+    "legacy fallback must be appended when no declared chain is provided",
+  );
+});
+
+test("critic buildInvocationChain: empty declared chain ([]) also falls back to legacy fallbackModel", () => {
+  // [] from getDeclaredFallbackChain means "no chain declared OR config
+  // unreadable." Treat the same as undefined — preserve back-compat.
+  const worker = new CriticWorker({
+    fallbackModel: { provider: "ollama" as Provider, model: "qwen3.5:9b" },
+  });
+  const chain = callBuildChain(worker, "openrouter", "xiaomi/mimo-v2.5", []);
+  assert.deepEqual(
+    chain.map((c) => `${c.provider}/${c.model}`),
+    ["openrouter/xiaomi/mimo-v2.5", "ollama/qwen3.5:9b"],
+  );
+});
+
+test("critic buildInvocationChain: chain entry that duplicates the primary is deduped", () => {
+  // A self-referencing declaration (e.g. user listed primary in chain)
+  // must NOT cause an immediate retry of the same provider/model.
+  const worker = new CriticWorker({
+    fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" },
+  });
+  const chain = callBuildChain(worker, "ollama", "qwen3.5:9b", [
+    { provider: "ollama", model: "qwen3.5:9b" }, // dup of primary
+    { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  ]);
+  assert.deepEqual(
+    chain.map((c) => `${c.provider}/${c.model}`),
+    ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
+  );
+});
+
+test("critic buildInvocationChain: declared chain with multiple entries threads through in order", () => {
+  const worker = new CriticWorker();
+  const chain = callBuildChain(worker, "ollama", "qwen3.5:9b", [
+    { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+    { provider: "minimax", model: "minimax-coding" },
+    { provider: "zai", model: "glm-5.1" },
+  ]);
+  assert.deepEqual(
+    chain.map((c) => `${c.provider}/${c.model}`),
+    [
+      "ollama/qwen3.5:9b",
+      "openrouter/xiaomi/mimo-v2.5",
+      "minimax/minimax-coding",
+      "zai/glm-5.1",
+    ],
+  );
+});
+
+test("critic buildInvocationChain: portum is only present if portum is declared in the chain", () => {
+  // Defense: prove portum is data-driven, not a hidden default. The
+  // run-2b2b71d9 surprise was portum showing up despite never being
+  // declared. With the fix, portum only appears when the user puts it
+  // in the chain explicitly.
+  const worker = new CriticWorker({
+    fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" }, // legacy default
+  });
+  const chainNoPortum = callBuildChain(worker, "ollama", "qwen3.5:9b", [
+    { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  ]);
+  assert.equal(
+    chainNoPortum.some((c) => c.provider === "portum"),
+    false,
+    "portum must NOT appear when not declared (constructor default is suppressed by the declared chain)",
+  );
+
+  const chainWithPortum = callBuildChain(worker, "ollama", "qwen3.5:9b", [
+    { provider: "portum" as Provider, model: "qwen3.6-plus" },
+    { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  ]);
+  assert.equal(
+    chainWithPortum.some((c) => c.provider === "portum"),
+    true,
+    "portum must appear when explicitly declared in the chain",
+  );
+});
+
+// ─── getDeclaredFallbackChain: end-to-end via model-config.json ─────
+
+test("critic getDeclaredFallbackChain: reads declared chain tail from .aedis/model-config.json", () => {
+  // Reproduce the exact run-2b2b71d9 config shape.
+  const repo = makeRepoWithCriticConfig({
+    provider: "ollama",
+    model: "qwen3.5:9b",
+    chain: [
+      { provider: "ollama", model: "qwen3.5:9b" },
+      { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+    ],
+  });
+  try {
+    const worker = new CriticWorker();
+    const tail = callGetDeclaredChain(worker, repo);
+    // Tail = entries AFTER the primary. Primary (ollama) is the head
+    // and is added separately by buildInvocationChain.
+    assert.deepEqual(
+      tail.map((c) => `${c.provider}/${c.model}`),
+      ["openrouter/xiaomi/mimo-v2.5"],
+      "declared chain tail must be one entry: the openrouter fallback",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("critic getDeclaredFallbackChain: returns [] when no chain is declared (legacy single-assignment)", () => {
+  const repo = makeRepoWithCriticConfig({
+    provider: "openrouter",
+    model: "xiaomi/mimo-v2.5",
+  });
+  try {
+    const worker = new CriticWorker();
+    const tail = callGetDeclaredChain(worker, repo);
+    assert.deepEqual(tail, [], "single-assignment config must produce empty tail (legacy fallback path stays alive)");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("critic getDeclaredFallbackChain: returns [] when configRoot is unreadable", () => {
+  // Defensive: if the config file can't be loaded (missing dir,
+  // permissions, corrupted JSON), getDeclaredFallbackChain must NOT
+  // throw — it returns [] so buildInvocationChain falls back to the
+  // legacy constructor default.
+  const worker = new CriticWorker();
+  const tail = callGetDeclaredChain(worker, "/nonexistent/path/" + Date.now());
+  assert.deepEqual(tail, []);
+});
+
+test("critic getDeclaredFallbackChain: end-to-end matches run-2b2b71d9 expected shape", () => {
+  // Compose the two pieces: read the chain from a real config file,
+  // then thread it through buildInvocationChain. Result must be the
+  // exact 2-entry chain the run-2b2b71d9 config asked for. No portum,
+  // no surprises.
+  const repo = makeRepoWithCriticConfig({
+    provider: "ollama",
+    model: "qwen3.5:9b",
+    chain: [
+      { provider: "ollama", model: "qwen3.5:9b" },
+      { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+    ],
+  });
+  try {
+    const worker = new CriticWorker({
+      // Constructor default deliberately set to portum to prove the
+      // declared chain suppresses it (this is the fix's whole point).
+      fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" },
+    });
+    const tail = callGetDeclaredChain(worker, repo);
+    const chain = callBuildChain(worker, "ollama", "qwen3.5:9b", tail);
+    assert.deepEqual(
+      chain.map((c) => `${c.provider}/${c.model}`),
+      ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
+      "end-to-end chain must be exactly the 2 entries the user declared — no portum",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

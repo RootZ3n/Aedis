@@ -8,7 +8,7 @@ import {
   type Provider,
   type RunInvocationContext,
 } from "../core/model-invoker.js";
-import { loadModelConfig } from "../server/routes/config.js";
+import { loadModelConfig, resolveAssignmentChain } from "../server/routes/config.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
@@ -178,13 +178,25 @@ export class CriticWorker extends AbstractWorker {
       if (contract) {
         const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment, primaryModel);
 
-        // Build fallback chain: primary first, local Ollama second.
-        // If the primary IS already ollama, the fallback is skipped.
+        // Read the per-repo declared chain from .aedis/model-config.json.
+        // When present, it REPLACES the constructor-level legacy
+        // `this.fallbackModel` — see buildInvocationChain for the merge
+        // rule. Run 2b2b71d9 surfaced this gap: the declared
+        //   critic.chain = [ollama/qwen3.5:9b, openrouter/xiaomi/mimo-v2.5]
+        // was silently dropped because critic only knew about the
+        // constructor default (portum/qwen3.6-plus). Fallback fired but
+        // hit the wrong target. Mirrors workers/builder.ts:1532.
+        const declaredChain = this.getDeclaredFallbackChain(configRoot);
+
+        // Build fallback chain: primary first, then declared chain
+        // (per-repo) OR the legacy constructor fallback (single-entry
+        // configs that haven't migrated to declarative chains).
         const chain = this.buildInvocationChain(
           primaryProvider as Provider,
           primaryModel,
           prompt,
           2048,
+          declaredChain,
         );
 
         // Look up (or create) the per-run fallback context. The runId comes
@@ -353,6 +365,16 @@ export class CriticWorker extends AbstractWorker {
     primaryModel: string,
     prompt: string,
     tokenBudget: number,
+    /**
+     * Declared fallback entries from `.aedis/model-config.json`'s
+     * `critic.chain[]`. When non-empty, these REPLACE the constructor-
+     * level legacy `this.fallbackModel` — the per-repo declaration is
+     * authoritative for that build. When empty/missing, the legacy
+     * fallback is appended (preserves behavior for single-entry configs
+     * that haven't migrated to declarative chains). Mirrors the
+     * builder pattern at workers/builder.ts:864.
+     */
+    declaredChain?: readonly { provider: string; model: string }[],
   ): InvokeConfig[] {
     const systemPrompt =
       "You are the Critic worker in Aedis. Review code changes for correctness, style, and contract compliance. Be terse. Report blockers clearly.";
@@ -364,8 +386,31 @@ export class CriticWorker extends AbstractWorker {
       systemPrompt,
       maxTokens: tokenBudget,
     }];
+    const seen = new Set<string>([`${primaryProvider}/${primaryModel}`]);
 
-    if (this.fallbackModel && this.fallbackModel.provider !== primaryProvider) {
+    if (declaredChain && declaredChain.length > 0) {
+      // Per-repo declared chain wins over the legacy hardcoded fallback.
+      // Dedup against the primary so a self-referencing declaration
+      // can't cause an invocation loop.
+      for (const entry of declaredChain) {
+        const id = `${entry.provider}/${entry.model}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        chain.push({
+          provider: entry.provider as Provider,
+          model: entry.model,
+          prompt,
+          systemPrompt,
+          maxTokens: tokenBudget,
+        });
+      }
+    } else if (
+      this.fallbackModel &&
+      !seen.has(`${this.fallbackModel.provider}/${this.fallbackModel.model}`)
+    ) {
+      // No declared chain — preserve the legacy fallback so
+      // single-entry model-config.json files keep getting *some*
+      // fallback without requiring a config migration.
       chain.push({
         provider: this.fallbackModel.provider,
         model: this.fallbackModel.model,
@@ -376,6 +421,31 @@ export class CriticWorker extends AbstractWorker {
     }
 
     return chain;
+  }
+
+  /**
+   * Resolve the declared fallback chain for the critic by reading
+   * `.aedis/model-config.json`. Returns the chain *tail* (entries
+   * after the primary) so callers can pass it into
+   * buildInvocationChain. Empty array if no chain is declared or
+   * the config can't be read — buildInvocationChain treats [] as
+   * "fall back to the constructor-level default."
+   *
+   * Mirrors workers/builder.ts:getDeclaredFallbackChain. Critic has
+   * no tier system (no `criticTiers` in ModelConfig), so the
+   * resolution is a direct read of `config.critic` instead of
+   * resolveBuilderChainForTier's tier-aware path.
+   */
+  private getDeclaredFallbackChain(
+    configRoot: string,
+  ): readonly { provider: string; model: string }[] {
+    try {
+      const config = loadModelConfig(configRoot);
+      const resolved = resolveAssignmentChain(config.critic);
+      return resolved.slice(1).map((e) => ({ provider: e.provider, model: e.model }));
+    } catch {
+      return [];
+    }
   }
 
   // ─── Run Context Management ─────────────────────────────────────
