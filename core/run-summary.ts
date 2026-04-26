@@ -317,6 +317,19 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
   const cost = resolveCost(receipt);
   const verification = receipt.verificationReceipt?.verdict ?? "not-run";
 
+  // verificationChecks: prefer receipt.verificationReceipt.checks, but
+  // fall back to verificationResults.final.stages when checks is empty.
+  const receiptChecks = receipt.verificationReceipt?.checks ?? [];
+  const verificationChecks = receiptChecks.length > 0
+    ? receiptChecks
+    : (receipt.verificationResults?.final?.stages ?? []).map((s: any) => ({
+        kind: s.kind ?? s.type ?? "unknown",
+        name: s.name ?? s.label ?? "unknown",
+        executed: Boolean(s.executed ?? s.completed),
+        passed: Boolean(s.passed ?? s.success),
+        required: Boolean(s.required),
+      }));
+
   // "No verification signal" is a distinct state from pass/fail: the
   // pipeline ran but produced no real evidence — no required checks
   // were configured AND no file was actively validated. Without this
@@ -361,7 +374,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     whatChanged,
     confidence,
     verification,
-    verificationChecks: receipt.verificationReceipt?.checks ?? [],
+    verificationChecks,
     blastRadius,
     cost,
     failureExplanation,
@@ -396,7 +409,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
     whatChanged,
     filesTouchedCount: whatChanged.length,
     verification,
-    verificationChecks: receipt.verificationReceipt?.checks ?? [],
+    verificationChecks,
     explanationLines,
     explanationDetails: {
       filesByRole,
