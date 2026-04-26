@@ -298,6 +298,7 @@ function buildCriticAssignmentWithBuilderUpstream(
     cost: { model: "xiaomi/mimo-v2.5", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
     confidence: 0.9,
     touchedFiles: [{ path: targetFile, operation: "modify" }],
+    assumptions: [],
     issues: [],
     durationMs: 1,
   };
