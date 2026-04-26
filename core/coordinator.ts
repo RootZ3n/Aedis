@@ -4044,6 +4044,34 @@ export class Coordinator {
     return [...new Set(result.output.changes.map((change) => this.normalizeRunPath(change.path)))].sort();
   }
 
+  private builderChangesByPath(result: WorkerResult): Map<string, FileChange[]> {
+    const changes = new Map<string, FileChange[]>();
+    if (result.output.kind !== "builder") return changes;
+    for (const change of result.output.changes) {
+      const path = this.normalizeRunPath(change.path);
+      const existing = changes.get(path) ?? [];
+      existing.push(change);
+      changes.set(path, existing);
+    }
+    return changes;
+  }
+
+  private fileChangeHasEffectiveContent(change: FileChange): boolean {
+    if (change.operation === "create" || change.operation === "delete") return true;
+    if (typeof change.originalContent === "string" && typeof change.content === "string") {
+      return change.originalContent !== change.content;
+    }
+    if (typeof change.diff === "string" && change.diff.trim().length > 0) {
+      return change.diff
+        .split(/\r?\n/)
+        .some((line) =>
+          (line.startsWith("+") && !line.startsWith("+++")) ||
+          (line.startsWith("-") && !line.startsWith("---")),
+        );
+    }
+    return true;
+  }
+
   private requiredBuilderDeliverables(active: ActiveRun, node: TaskNode): string[] {
     const nodeTargets = new Set(node.targetFiles.map((file) => this.normalizeRunPath(file)));
     return active.changeSet.filesInScope
@@ -4065,6 +4093,41 @@ export class Coordinator {
       .filter((file) => !changed.has(file));
   }
 
+  private async noEffectiveRequiredBuilderDeliverables(
+    active: ActiveRun,
+    node: TaskNode,
+    result: WorkerResult,
+  ): Promise<string[]> {
+    if (!result.success || result.output.kind !== "builder") return [];
+    const changed = this.builderChangesByPath(result);
+    const noEffective: string[] = [];
+    for (const file of this.requiredBuilderDeliverables(active, node)) {
+      const changes = changed.get(file);
+      if (!changes || changes.length === 0) continue;
+      const structuralChange = changes.some((change) => change.operation === "create" || change.operation === "delete");
+      if (structuralChange) continue;
+      const contentLooksEffective = changes.some((change) => this.fileChangeHasEffectiveContent(change));
+
+      if (!contentLooksEffective) {
+        try {
+          await exec("git", ["diff", "--quiet", "--", file], { cwd: active.projectRoot });
+        } catch {
+          continue;
+        }
+        noEffective.push(file);
+        continue;
+      }
+
+      try {
+        await exec("git", ["diff", "--quiet", "--", file], { cwd: active.projectRoot });
+        noEffective.push(file);
+      } catch {
+        continue;
+      }
+    }
+    return noEffective.sort();
+  }
+
   private missingRequiredBuilderFailure(
     result: WorkerResult,
     requiredFiles: readonly string[],
@@ -4073,6 +4136,32 @@ export class Coordinator {
     const message =
       `missing_required_deliverable: Builder did not modify required file(s): ` +
       `${missingRequired.join(", ")}. Required files for this dispatch: ${requiredFiles.join(", ")}.`;
+    return {
+      ...result,
+      success: false,
+      confidence: 0,
+      issues: [
+        { severity: "error" as const, message },
+        ...result.issues,
+      ],
+      output: {
+        kind: "builder" as const,
+        changes: [],
+        decisions: result.output.kind === "builder" ? result.output.decisions : [],
+        needsCriticReview: true,
+      },
+      touchedFiles: result.touchedFiles.filter((touch) => touch.operation === "read"),
+    };
+  }
+
+  private noEffectiveBuilderFailure(
+    result: WorkerResult,
+    requiredFiles: readonly string[],
+    noEffectiveFiles: readonly string[],
+  ): WorkerResult {
+    const message =
+      `content_identical_output: Builder reported required file(s) but produced no effective diff: ` +
+      `${noEffectiveFiles.join(", ")}. Required files for this dispatch: ${requiredFiles.join(", ")}.`;
     return {
       ...result,
       success: false,
@@ -4688,6 +4777,79 @@ export class Coordinator {
             requiredFiles,
             missingRequired,
           );
+        }
+      }
+
+      if (result.success && missingRequired.length === 0) {
+        const requiredFiles = this.requiredBuilderDeliverables(active, node);
+        let noEffectiveFiles = await this.noEffectiveRequiredBuilderDeliverables(active, node, result);
+        if (noEffectiveFiles.length > 0) {
+          console.warn(
+            `[coordinator] content_identical_output: builder ${node.id.slice(0, 6)} produced no effective diff for ` +
+            `${noEffectiveFiles.join(", ")}`,
+          );
+
+          if (active.weakOutputRetries < 2) {
+            active.weakOutputRetries += 1;
+            const retryHint =
+              `Your previous output produced no effective diff. It reported required file(s), but the workspace ` +
+              `content did not change. Required files: ${requiredFiles.join(", ")}. Retry now with concrete ` +
+              `source and test changes in every required file: ${noEffectiveFiles.join(", ")}. Do not return ` +
+              `content-identical output.`;
+            const retryBrief = briefWithRetryHint(active.implementationBrief, retryHint);
+            active.implementationBrief = retryBrief;
+            this.receiptStore.patchRun(active.run.id, {
+              implementationBrief: briefToReceiptJson(retryBrief),
+            }).catch(() => {});
+            this.emit({
+              type: "system_event",
+              payload: {
+                runId: active.run.id,
+                checkpointLabel: "content_identical_output_retry",
+                summary: `retry builder for no-effective required file(s): ${noEffectiveFiles.join(", ")}`,
+              },
+            });
+
+            try {
+              const retryResult = await worker.execute({
+                ...assignment,
+                implementationBrief: retryBrief,
+              });
+              await this.persistProviderAttempts(active, runTask.id, retryResult);
+              result = retryResult;
+              missingRequired = this.missingRequiredBuilderDeliverables(active, node, result);
+              noEffectiveFiles = missingRequired.length === 0
+                ? await this.noEffectiveRequiredBuilderDeliverables(active, node, result)
+                : [];
+              console.log(
+                `[coordinator] content-identical retry attempt=${retryBrief.attempt} ` +
+                `success=${result.success} remaining=${noEffectiveFiles.join(", ") || "none"} ` +
+                `missing=${missingRequired.join(", ") || "none"}`,
+              );
+            } catch (retryErr) {
+              const rmsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+              result = syntheticFailure(
+                `content_identical_output: retry failed while attempting concrete required change(s) ` +
+                `${noEffectiveFiles.join(", ")}: ${rmsg}`,
+              );
+              missingRequired = this.missingRequiredBuilderDeliverables(active, node, result);
+              noEffectiveFiles = [];
+            }
+          }
+
+          if (result.success && missingRequired.length > 0) {
+            result = this.missingRequiredBuilderFailure(
+              result,
+              requiredFiles,
+              missingRequired,
+            );
+          } else if (result.success && noEffectiveFiles.length > 0) {
+            result = this.noEffectiveBuilderFailure(
+              result,
+              requiredFiles,
+              noEffectiveFiles,
+            );
+          }
         }
       }
     }

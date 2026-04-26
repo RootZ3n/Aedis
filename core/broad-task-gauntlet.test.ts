@@ -137,6 +137,33 @@ class TrackingBuilder extends AbstractWorker {
     });
   }
 
+  contentIdenticalMany(assignment: WorkerAssignment, paths: readonly string[]): WorkerResult {
+    const changes = paths.map((path) => {
+      const abs = join(assignment.projectRoot ?? process.cwd(), path);
+      const originalContent = readFileSync(abs, "utf-8");
+      writeFileSync(abs, originalContent, "utf-8");
+      return {
+        path,
+        operation: "modify" as const,
+        originalContent,
+        content: originalContent,
+        diff: "",
+      };
+    });
+    const output: BuilderOutput = {
+      kind: "builder",
+      changes,
+      decisions: [],
+      needsCriticReview: false,
+    };
+    return this.success(assignment, output, {
+      cost: this.zeroCost(),
+      confidence: 0.9,
+      touchedFiles: paths.map((path) => ({ path, operation: "modify" as const })),
+      durationMs: 1,
+    });
+  }
+
   failEmpty(assignment: WorkerAssignment): WorkerResult {
     return this.failure(
       assignment,
@@ -530,6 +557,95 @@ test("missing-required-deliverable: successful source+test output remains green 
       "complete source+test output should not trigger missing-required retry",
     );
     assert.doesNotMatch(JSON.stringify(receipt), /missing_required_deliverable/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("content-identical-required: source+test request retries when Builder returns no effective diff", async () => {
+  const repo = makeRepo({
+    "core/run-summary.ts": "export function summary() { return 'old'; }\n",
+    "core/run-summary.test.ts": "import test from 'node:test';\n",
+  });
+  try {
+    let returnedNoEffective = false;
+    let builder!: TrackingBuilder;
+    builder = new TrackingBuilder((_attempt, a) => {
+      if (!returnedNoEffective) {
+        returnedNoEffective = true;
+        return builder.contentIdenticalMany(a, a.task.targetFiles);
+      }
+      return builder.successMany(a, ["core/run-summary.ts", "core/run-summary.test.ts"]);
+    });
+    const { coordinator } = buildHarness(repo, builder);
+    const receipt = await coordinator.submit({
+      input:
+        "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
+    });
+
+    assert.ok(builder.attempts >= 2, `Builder should retry after content-identical output; got ${builder.attempts}`);
+    const retryHint = builder.seenBriefs.find((brief) => /no effective diff/i.test(brief.retryHint ?? ""))?.retryHint ?? "";
+    assert.match(retryHint, /no effective diff/i);
+    assert.match(retryHint, /Required files/i);
+    assert.match(retryHint, /core\/run-summary\.(test\.)?ts/);
+    assert.doesNotMatch(JSON.stringify(receipt), /content_identical_output/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("content-identical-required: retry succeeds with real source+test diff", async () => {
+  const repo = makeRepo({
+    "core/run-summary.ts": "export function summary() { return 'old'; }\n",
+    "core/run-summary.test.ts": "import test from 'node:test';\n",
+  });
+  try {
+    let builder!: TrackingBuilder;
+    builder = new TrackingBuilder((attempt, a) =>
+      attempt === 1
+        ? builder.contentIdenticalMany(a, a.task.targetFiles)
+        : builder.successMany(a, ["core/run-summary.ts", "core/run-summary.test.ts"]),
+    );
+    const { coordinator, events } = buildHarness(repo, builder);
+    const receipt = await coordinator.submit({
+      input:
+        "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
+    });
+
+    assert.ok(builder.attempts >= 2, "content-identical output should be retried");
+    assert.ok(
+      events.some((event) =>
+        event.type === "system_event" &&
+        event.payload.checkpointLabel === "content_identical_output_retry"),
+      "retry event should record content-identical recovery",
+    );
+    assert.doesNotMatch(JSON.stringify(receipt), /content_identical_output/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("content-identical-required: persistent no-effective Builder output fails clearly", async () => {
+  const repo = makeRepo({
+    "core/run-summary.ts": "export function summary() { return 'old'; }\n",
+    "core/run-summary.test.ts": "import test from 'node:test';\n",
+  });
+  try {
+    let builder!: TrackingBuilder;
+    builder = new TrackingBuilder((_attempt, a) =>
+      builder.contentIdenticalMany(a, a.task.targetFiles),
+    );
+    const { coordinator, events } = buildHarness(repo, builder);
+    const receipt = await coordinator.submit({
+      input:
+        "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
+    });
+
+    assert.equal(receipt.verdict, "failed");
+    const failed = events.find((event) => event.type === "task_failed");
+    assert.match(JSON.stringify(failed?.payload ?? {}), /content_identical_output/);
+    assert.match(JSON.stringify(failed?.payload ?? {}), /core\/run-summary\.(test\.)?ts/);
+    assert.ok(builder.attempts >= 2, "Builder should retry once before final content-identical failure");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
