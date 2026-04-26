@@ -344,6 +344,30 @@ function detectAmbiguity(input: string): boolean {
   return true;
 }
 
+function hasConcreteCodeTarget(input: string): boolean {
+  const trimmed = input.trim();
+  const hasFilePath = /[A-Za-z0-9_-]+\/[A-Za-z0-9._/-]+/.test(trimmed) ||
+    /[A-Za-z0-9_-]+\.[tj]sx?$/.test(trimmed) ||
+    /[A-Za-z0-9_-]+\.(?:py|pyi|rs|go|java|kt|swift|c|cc|cpp|h|hpp|cs|rb|php|scala|lua|sh|bash|gd|tscn|tres|gdshader|vue|svelte|css|scss|sass|less|html|json|yaml|yml|toml|md)/.test(trimmed);
+  if (hasFilePath) return true;
+
+  return (
+    /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b/.test(trimmed) ||
+    /\b[a-z]+_[a-z]+\b/.test(trimmed)
+  );
+}
+
+export function needsBroadCleanupClarification(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) return false;
+  if (hasConcreteCodeTarget(input)) return false;
+
+  const hasBroadCleanupVerb = /\b(clean\s+up|cleanup|refactor|improve|simplify|standardize|consolidate)\b/.test(normalized);
+  if (!hasBroadCleanupVerb) return false;
+
+  return /\b(config|configuration|settings|options|handling|error handling|auth|routing|routes?|state|storage|providers?)\b/.test(normalized);
+}
+
 /**
  * Result of a task submission — may be immediate execution, a
  * clarification request, or a decomposition plan requiring approval.
@@ -731,6 +755,13 @@ export class Coordinator {
       return {
         kind: "needs_clarification",
         question: "Which file or function should I modify? Be specific.",
+      };
+    }
+    if (needsBroadCleanupClarification(input)) {
+      console.log(`[coordinator] broad cleanup prompt needs clarification before target inference: "${input}"`);
+      return {
+        kind: "needs_clarification",
+        question: "Which config file, function, or route should I clean up? Please name the target path or symbol.",
       };
     }
 

@@ -7,7 +7,7 @@ import { CharterGenerator } from "./charter.js";
 import { classifyScope } from "./scope-classifier.js";
 import { createChangeSet } from "./change-set.js";
 import { createIntent } from "./intent.js";
-import { Coordinator } from "./coordinator.js";
+import { Coordinator, needsBroadCleanupClarification } from "./coordinator.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 
 // These tests lock in the fix for "Scope drift" false-positives that blocked
@@ -96,6 +96,53 @@ test("submitWithGates: missing emitter path → needs_clarification instead of r
     if (result.kind === "needs_clarification") {
       assert.match(result.question, /does not exist|check the path|correct file/i);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("needsBroadCleanupClarification: broad config cleanup requires a concrete target", () => {
+  assert.equal(needsBroadCleanupClarification("Clean up the config handling."), true);
+});
+
+test("needsBroadCleanupClarification: specific config path prompts remain actionable", () => {
+  assert.equal(
+    needsBroadCleanupClarification("Clean up the config handling in server/routes/config.ts"),
+    false,
+  );
+  assert.equal(
+    needsBroadCleanupClarification("Fix config validation error in server/routes/config.ts and add a focused test"),
+    false,
+  );
+});
+
+test("needsBroadCleanupClarification: specific function prompt remains actionable", () => {
+  assert.equal(
+    needsBroadCleanupClarification("Refactor loadModelConfig in server/routes/config.ts"),
+    false,
+  );
+  assert.equal(
+    needsBroadCleanupClarification("Refactor loadModelConfig"),
+    false,
+  );
+});
+
+test("submitWithGates: broad config cleanup asks for clarification before target inference", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-broad-cleanup-"));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "t" }), "utf-8");
+  try {
+    const CoordinatorAny = Coordinator as any;
+    const coord = new CoordinatorAny({ projectRoot: dir });
+    const result = await coord.submitWithGates({
+      input: "Clean up the config handling.",
+      projectRoot: dir,
+    } as any);
+    assert.equal(result.kind, "needs_clarification",
+      `expected needs_clarification, got ${result.kind}`);
+    if (result.kind === "needs_clarification") {
+      assert.match(result.question, /config file|function|route|target/i);
+    }
+    assert.deepEqual(coord.listActiveRunIds(), [], "broad cleanup prompt must not create an active run/workspace");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
