@@ -5,6 +5,7 @@ import {
   buildBurnIn01Prompt,
   buildScenarios,
   defaultBurnInRunTag,
+  formatServerIdentity,
 } from "./test-burn-in.js";
 
 test("buildBurnIn01Prompt embeds the tag inline in the marker comment", () => {
@@ -117,5 +118,71 @@ test("buildScenarios returns fresh arrays — callers can't mutate cached state"
   assert.deepEqual(
     a.map((s) => s.id),
     b.map((s) => s.id),
+  );
+});
+
+// ─── Burn-in server identity (stale-dist / duplicate detection) ─────
+
+test("formatServerIdentity: prints pid/port/commit/buildTime/uptime when /health is complete", () => {
+  const r = formatServerIdentity({
+    pid: 4242,
+    port: 18796,
+    uptime_human: "5m 49s",
+    startedAt: "2026-04-27T22:00:00.000Z",
+    build: {
+      version: "1.0.0",
+      commit: "abcdef0123456789abcdef0123456789abcdef01",
+      commitShort: "abcdef01",
+      buildTime: "2026-04-27T22:00:00.000Z",
+      source: "build-info",
+    },
+  });
+  assert.match(r.identityLine, /pid=4242/);
+  assert.match(r.identityLine, /port=18796/);
+  assert.match(r.identityLine, /commit=abcdef01/);
+  assert.match(r.identityLine, /buildTime=2026-04-27T22:00:00\.000Z/);
+  assert.match(r.identityLine, /uptime=5m 49s/);
+  assert.equal(r.warnings.length, 0, `no warnings when metadata complete; got ${JSON.stringify(r.warnings)}`);
+});
+
+test("formatServerIdentity: warns and degrades gracefully when /health has no pid/build (stale dist)", () => {
+  const r = formatServerIdentity({
+    workers: { scout: { available: true } },
+    all_workers_available: true,
+  });
+  // Identity line still renders — just with sentinels — so the harness
+  // never throws on a pre-build-metadata server.
+  assert.match(r.identityLine, /pid=unknown/);
+  assert.match(r.identityLine, /commit=unknown/);
+  assert.match(r.identityLine, /buildTime=unknown/);
+  assert.ok(
+    r.warnings.some((w) => /missing pid\/build/i.test(w)),
+    `expected stale-dist warning; got ${JSON.stringify(r.warnings)}`,
+  );
+});
+
+test("formatServerIdentity: warns when build metadata source is not the dist file", () => {
+  const r = formatServerIdentity({
+    pid: 1,
+    port: 18796,
+    uptime_human: "1m",
+    build: {
+      version: "1.0.0",
+      commit: "abcdef0123456789abcdef0123456789abcdef01",
+      commitShort: "abcdef01",
+      buildTime: "2026-04-27T22:00:00.000Z",
+      source: "git-runtime",
+    },
+  });
+  // pid/commit are present, so the missing-fields warning should NOT fire,
+  // but the source-of-truth warning should — the operator is running
+  // against tsx, not a built dist.
+  assert.ok(
+    r.warnings.some((w) => /git-runtime/.test(w)),
+    `expected git-runtime warning; got ${JSON.stringify(r.warnings)}`,
+  );
+  assert.ok(
+    !r.warnings.some((w) => /missing pid\/build/i.test(w)),
+    `did not expect missing-fields warning; got ${JSON.stringify(r.warnings)}`,
   );
 });

@@ -9,6 +9,7 @@
  *   aedis sessions                          List active sessions
  *   aedis workers                           Worker pool status
  *   aedis health                            Server health
+ *   aedis doctor                            Diagnose stale dist / duplicate process / unreachable server
  *   aedis reliability run <tasks.json>      Run a reliability trial
  *   aedis reliability list                  List recorded trials
  *   aedis reliability show [<trial-id>]     Print trial JSON (latest if omitted)
@@ -23,6 +24,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import {
+  detectSourceNewerThanDist,
+  getBuildMetadata,
+  type BuildMetadata,
+} from "../core/build-metadata.js";
 import {
   detectRegressions,
   loadLatestTrial,
@@ -112,6 +118,97 @@ function fmtTask(data: any): string {
   return lines.join("\n");
 }
 
+// ─── Doctor (build + duplicate + freshness) ─────────────────────────
+
+export interface DoctorHealthShape {
+  pid?: number;
+  port?: number;
+  uptime_human?: string;
+  startedAt?: string;
+  build?: Partial<BuildMetadata>;
+}
+
+export interface DoctorInput {
+  apiBase: string;
+  /** /health response, or null if unreachable. */
+  health: DoctorHealthShape | null;
+  /** Reason the request failed (only when health is null). */
+  fetchError?: string | null;
+  /** Local build metadata read from this CLI's vantage point. */
+  localBuild: BuildMetadata;
+  /** Source-vs-dist freshness check, or null when not detectable. */
+  freshness:
+    | {
+        sourceNewerThanDist: boolean;
+        newestSourcePath: string;
+        newestSourceMtime: number;
+        distBuildTime: number;
+      }
+    | null;
+}
+
+export function formatDoctorReport(input: DoctorInput): string {
+  const lines: string[] = [];
+  const reachable = input.health !== null;
+  lines.push(`reachable:        ${reachable ? "yes" : "no"}  (${input.apiBase})`);
+  if (!reachable) {
+    if (input.fetchError) lines.push(`fetch_error:      ${input.fetchError}`);
+  } else {
+    const h = input.health!;
+    lines.push(`pid:              ${h.pid ?? "unknown"}`);
+    lines.push(`port:             ${h.port ?? "unknown"}`);
+    lines.push(`uptime:           ${h.uptime_human ?? "unknown"}`);
+    lines.push(`started_at:       ${h.startedAt ?? "unknown"}`);
+    const b = h.build ?? {};
+    lines.push(`server_version:   ${b.version ?? "unknown"}`);
+    lines.push(`server_commit:    ${b.commitShort ?? "unknown"}`);
+    lines.push(`server_built:     ${b.buildTime ?? "unknown"}`);
+    lines.push(`server_metadata:  ${b.source ?? "unknown"}`);
+    if (!b.commit || b.commit === "unknown") {
+      lines.push(`⚠ server has no build metadata — likely running stale dist or unbuilt source`);
+    }
+    if (b.commit && input.localBuild.commit !== "unknown" && b.commit !== input.localBuild.commit) {
+      lines.push(
+        `⚠ server commit ${b.commitShort} differs from local ${input.localBuild.commitShort} — ` +
+        `the running server is not built from this checkout`,
+      );
+    }
+  }
+
+  lines.push("");
+  lines.push(`local_version:    ${input.localBuild.version}`);
+  lines.push(`local_commit:     ${input.localBuild.commitShort}`);
+  lines.push(`local_built:      ${input.localBuild.buildTime}`);
+  lines.push(`local_metadata:   ${input.localBuild.source}`);
+
+  if (input.freshness) {
+    const f = input.freshness;
+    if (f.sourceNewerThanDist) {
+      const lagSec = Math.max(0, Math.round((f.newestSourceMtime - f.distBuildTime) / 1000));
+      lines.push("");
+      lines.push(
+        `⚠ source newer than dist: ${f.newestSourcePath} is ${lagSec}s ahead of dist/build-info.json — run \`npm run build\` and restart`,
+      );
+    }
+  } else if (input.localBuild.source !== "build-info") {
+    lines.push("");
+    lines.push("ℹ no dist/build-info.json — running from source (tsx) or no build has been produced");
+  }
+
+  return lines.join("\n");
+}
+
+async function fetchHealthSafe(apiBase: string): Promise<{ health: DoctorHealthShape | null; error: string | null }> {
+  try {
+    const res = await fetch(`${apiBase}/health`);
+    if (!res.ok) return { health: null, error: `${res.status} ${res.statusText}` };
+    const data = (await res.json()) as DoctorHealthShape;
+    return { health: data, error: null };
+  } catch (err: any) {
+    return { health: null, error: err?.message ?? String(err) };
+  }
+}
+
 // ─── Commands ────────────────────────────────────────────────────────
 
 const COMMANDS = {
@@ -145,6 +242,21 @@ const COMMANDS = {
     console.log(`port:     ${data.port ?? "?"}`);
     console.log(`version:  ${data.version ?? "?"}`);
     if (data.websocket) console.log(`ws:       ${data.websocket.connected_clients} client(s)`);
+  },
+
+  async doctor(_args: string[]) {
+    const { health, error } = await fetchHealthSafe(API_BASE);
+    const localBuild = getBuildMetadata({ projectRoot: PROJECT_ROOT, fresh: true });
+    const freshness = detectSourceNewerThanDist(PROJECT_ROOT);
+    const report = formatDoctorReport({
+      apiBase: API_BASE,
+      health,
+      fetchError: error,
+      localBuild,
+      freshness,
+    });
+    console.log(report);
+    if (!health) process.exitCode = 1;
   },
 
   async status(args: string[]) {
@@ -294,7 +406,7 @@ async function main(): Promise<void> {
 
   if (!cmd) {
     console.error("Usage: aedis <command> [args]");
-    console.error("Commands: submit, status, metrics, sessions, workers, health, reliability, tui");
+    console.error("Commands: submit, status, metrics, sessions, workers, health, doctor, reliability, tui");
     process.exitCode = 1;
     return;
   }
@@ -302,7 +414,7 @@ async function main(): Promise<void> {
   const fn: ((args: string[]) => Promise<void>) | undefined = (COMMANDS as any)[cmd];
   if (!fn) {
     console.error(`Unknown command: ${cmd}`);
-    console.error("Commands: submit, status, metrics, sessions, workers, health, reliability, tui");
+    console.error("Commands: submit, status, metrics, sessions, workers, health, doctor, reliability, tui");
     process.exitCode = 1;
     return;
   }
@@ -315,4 +427,13 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// Guard against import-time execution. The doctor-report formatter is
+// exported and unit-tested; importing the module to call it must NOT
+// kick off `main()` against process.argv.
+import { fileURLToPath as _fileURLToPath } from "node:url";
+const _isMain =
+  typeof process.argv[1] === "string" &&
+  process.argv[1] === _fileURLToPath(import.meta.url);
+if (_isMain) {
+  main();
+}

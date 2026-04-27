@@ -51,6 +51,71 @@ export interface Scenario {
   };
 }
 
+// ─── Server identity (build / duplicate / stale-dist warning) ───────
+
+export interface HealthResponse {
+  workers?: Record<string, { available: boolean }>;
+  all_workers_available?: boolean;
+  pid?: number;
+  port?: number;
+  uptime_human?: string;
+  startedAt?: string;
+  build?: {
+    version?: string;
+    commit?: string;
+    commitShort?: string;
+    buildTime?: string;
+    source?: string;
+  };
+}
+
+export interface ServerIdentitySummary {
+  /** One-line status: pid + commit + uptime when present, sentinels otherwise. */
+  identityLine: string;
+  /** Operator-facing warnings — empty when everything is identifiable. */
+  warnings: readonly string[];
+}
+
+/**
+ * Render a one-liner that matches a running aedis process to a known
+ * dist (and flags the cases where it can't). Pure function so the test
+ * suite can pin the exact strings — that's the contract the burn-in
+ * preamble depends on for stale-dist detection.
+ */
+export function formatServerIdentity(health: HealthResponse): ServerIdentitySummary {
+  const pid = typeof health.pid === "number" && health.pid > 0 ? String(health.pid) : "unknown";
+  const build = health.build ?? {};
+  const commit = typeof build.commitShort === "string" && build.commitShort.length > 0
+    ? build.commitShort
+    : "unknown";
+  const buildTime = typeof build.buildTime === "string" && build.buildTime.length > 0
+    ? build.buildTime
+    : "unknown";
+  const uptime = typeof health.uptime_human === "string" ? health.uptime_human : "unknown";
+  const port = typeof health.port === "number" ? health.port : "unknown";
+
+  const warnings: string[] = [];
+  if (health.pid === undefined || health.build === undefined) {
+    warnings.push(
+      "server /health is missing pid/build fields — likely a stale dist (pre-build-metadata). " +
+      "Restart with a fresh `npm run build && npm run start:dist` to re-enable identity checks.",
+    );
+  }
+  if (build.commit === undefined || build.commit === "unknown") {
+    warnings.push("server has no commit hash — cannot verify which dist is running");
+  }
+  if (build.source && build.source !== "build-info") {
+    warnings.push(
+      `server build metadata source is "${build.source}" — running from source (tsx) or fallback, not a built dist`,
+    );
+  }
+
+  return {
+    identityLine: `pid=${pid} port=${port} commit=${commit} buildTime=${buildTime} uptime=${uptime}`,
+    warnings,
+  };
+}
+
 /**
  * Produce a short, filename-safe tag unique per harness invocation.
  * Format: `<base36 ms>-<base36 rand>` (e.g. `l8mh2c-x9q`). Tags are
@@ -284,12 +349,21 @@ async function main(): Promise<void> {
   const http = createFetchClient(AEDIS_BASE);
 
   // Health check — fail fast rather than time out N×timeout later.
+  // Also surface pid/build metadata so a stale-dist or duplicate-process
+  // server is obvious BEFORE the suite spends ~10 minutes against it.
+  // Older servers without metadata still pass this check (warn, don't
+  // fail) so the harness keeps working through the rollout window.
   try {
-    const res = await http.getJson<{ workers?: Record<string, { available: boolean }>; all_workers_available?: boolean }>(`/health`);
+    const res = await http.getJson<HealthResponse>(`/health`);
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+    const summary = formatServerIdentity(res.body);
+    console.log(`Server:  ${summary.identityLine}`);
+    if (summary.warnings.length > 0) {
+      for (const w of summary.warnings) console.log(`         ⚠️ ${w}`);
+    }
     const allUp = res.body.all_workers_available
       ?? Object.values(res.body.workers ?? {}).every((w) => w.available);
-    console.log(`Health: ${allUp ? "✅ All workers available" : "⚠️ Some workers down"}`);
+    console.log(`Health:  ${allUp ? "✅ All workers available" : "⚠️ Some workers down"}`);
     if (!allUp) {
       console.log(`Workers: ${JSON.stringify(res.body.workers ?? {})}`);
       process.exit(1);

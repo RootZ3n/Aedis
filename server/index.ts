@@ -23,6 +23,7 @@ import { createTailscaleAuth } from "./middleware/auth.js";
 import { createEventBus, type EventBus } from "./websocket.js";
 import { Coordinator, type CoordinatorConfig } from "../core/coordinator.js";
 import { ReceiptStore } from "../core/receipt-store.js";
+import { getBuildMetadata, type BuildMetadata } from "../core/build-metadata.js";
 import {
   createCustomHook,
   createTypecheckHook,
@@ -117,6 +118,8 @@ export interface ServerContext {
   workerRegistry: WorkerRegistry;
   config: ServerConfig;
   startedAt: string;
+  build: BuildMetadata;
+  pid: number;
 }
 
 // ─── Defaults for standalone boot ────────────────────────────────────
@@ -372,6 +375,8 @@ export async function createServer(
     workerRegistry: registry,
     config: cfg,
     startedAt: new Date().toISOString(),
+    build: getBuildMetadata({ projectRoot: cfg.projectRoot }),
+    pid: process.pid,
   };
 
   // ─── Fastify instance ──────────────────────────────────────────
@@ -570,6 +575,16 @@ export async function startServer(
     server.log.info(`Aedis server listening on ${address}`);
     server.log.info(`WebSocket available at ws://${cfg.host}:${cfg.port}/ws`);
     server.log.info(`UI available at http://${cfg.host}:${cfg.port}/`);
+    // Stale-dist / duplicate-process detection starts here. Print a
+    // single, grep-friendly line with pid + port + build so the
+    // operator can match a running process to the dist that produced
+    // it. `aedis doctor` reads the same shape via /health.
+    const build = server.ctx.build;
+    server.log.info(
+      `[server] boot pid=${process.pid} port=${cfg.port} ` +
+      `version=${build.version} commit=${build.commitShort} ` +
+      `buildTime=${build.buildTime} buildSource=${build.source}`,
+    );
   } catch (err) {
     server.log.error(err);
     process.exit(1);

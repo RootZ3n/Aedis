@@ -58,6 +58,19 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
         uptime_seconds: Math.floor(uptimeMs / 1000),
         uptime_human: formatUptime(uptimeMs),
         port: context.config.port,
+        // pid + startedAt + build let operators distinguish a stale
+        // process from a fresh one (and `aedis doctor` from a duplicate
+        // listener). Without these, the burn-in BLOCKED race could not
+        // be diagnosed from /health alone.
+        pid: context.pid,
+        startedAt: context.startedAt,
+        build: {
+          version: context.build.version,
+          commit: context.build.commit,
+          commitShort: context.build.commitShort,
+          buildTime: context.build.buildTime,
+          source: context.build.source,
+        },
         workers: workerStatus,
         all_workers_available: allWorkersAvailable,
         websocket: {
@@ -68,7 +81,9 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
           connected: false, // TODO: wire up when Crucibulum is integrated
           last_sync: null,
         },
-        version: "0.1.0",
+        // Legacy field — kept for back-compat with old burn-in / TUI
+        // readers that pluck `version` directly. Mirrors `build.version`.
+        version: context.build.version,
       });
     }
   );
