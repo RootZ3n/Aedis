@@ -1,3 +1,4 @@
+// AEDIS_ALREADY_SATISFIED: The requested comment already exists above CharterGenerator class.
 /**
  * CharterGenerator — Turns a one-sentence user request into a structured build objective.
  *
