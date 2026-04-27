@@ -6452,6 +6452,14 @@ export class Coordinator {
     opts: {
       builder?: BaseWorker;
       assignmentOverride?: Partial<WorkerAssignment>;
+      // Lane metadata — recorded onto the resulting Candidate so the
+      // local-vs-cloud selection policy and operator-facing receipts
+      // can attribute the candidate to a lane/provider/model. Optional
+      // for backward compat: callers who don't care about lane
+      // metadata still get a working shadow candidate (no lane tag).
+      lane?: import("./candidate.js").Lane;
+      provider?: string;
+      model?: string;
     } = {},
   ): Promise<Candidate> {
     const active = this.activeRuns.get(runId);
@@ -6519,12 +6527,21 @@ export class Coordinator {
       latencyMs,
       status,
       reason,
+      // Lane metadata — only populated when the caller passed it.
+      // Selection policy treats undefined as "lane unknown" and
+      // doesn't penalize the candidate; tagged lanes participate in
+      // the local-on-tie tiebreaker.
+      ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+      ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
     };
     active.candidates.push(candidate);
     console.log(
       `[coordinator] shadow candidate recorded: workspaceId=${candidate.workspaceId} ` +
       `status=${candidate.status} cost=$${costUsd.toFixed(4)} latency=${latencyMs}ms ` +
-      `patchBytes=${patchArtifact?.diff?.length ?? 0}`,
+      `patchBytes=${patchArtifact?.diff?.length ?? 0}` +
+      (opts.lane ? ` lane=${opts.lane}` : "") +
+      (opts.provider && opts.model ? ` ${opts.provider}/${opts.model}` : ""),
     );
     return candidate;
   }

@@ -709,6 +709,214 @@ test("losing candidate workspace cleanup: cleanupLosingCandidates discards non-s
   }
 });
 
+// ─── Lane metadata recording ────────────────────────────────────────
+
+test("runShadowBuilder records lane/provider/model on the candidate when caller passes them", async () => {
+  // Without lane metadata on the actual candidate (not just the
+  // hand-built test fixtures), the local-vs-cloud selection policy
+  // can't tell which candidate ran on which model — production
+  // candidates would always tie at the lane tier.
+  const repo = makeTempRepo();
+  try {
+    let resolveBlock!: () => void;
+    const block = new Promise<void>((r) => { resolveBlock = r; });
+    let candidatePromise: Promise<Candidate> | null = null;
+
+    class ProbeBuilder extends RealBuilderWorker {
+      override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+        const runs = (coordinator as unknown as { activeRuns: Map<string, unknown> }).activeRuns;
+        const runId = [...runs.keys()][0] as string;
+        const shadowBuilder = new RealBuilderWorker([
+          { path: "core/widget.ts", content: "export const widget = 42; // local lane\n" },
+        ]);
+        candidatePromise = coordinator.runShadowBuilder(runId, {
+          builder: shadowBuilder,
+          lane: "local",
+          provider: "ollama",
+          model: "qwen3.5:9b",
+        });
+        await candidatePromise;
+        await block;
+        return super.execute(assignment);
+      }
+    }
+
+    const builder = new ProbeBuilder([
+      { path: "core/widget.ts", content: "export const widget = 2;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const submitPromise = coordinator.submit({ input: "modify widget in core" });
+    while (!candidatePromise) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const candidate = await (candidatePromise as Promise<Candidate>);
+    resolveBlock();
+    await submitPromise;
+
+    assert.equal(candidate.lane, "local", "lane must be recorded on the candidate");
+    assert.equal(candidate.provider, "ollama", "provider must be recorded");
+    assert.equal(candidate.model, "qwen3.5:9b", "model must be recorded");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("runShadowBuilder omits lane/provider/model when caller does not pass them (back-compat)", async () => {
+  // The minimal-shadow path (no lane info) must keep working — older
+  // tests and any Coordinator caller that doesn't care about lanes
+  // should not be forced to declare them.
+  const repo = makeTempRepo();
+  try {
+    let resolveBlock!: () => void;
+    const block = new Promise<void>((r) => { resolveBlock = r; });
+    let candidatePromise: Promise<Candidate> | null = null;
+
+    class ProbeBuilder extends RealBuilderWorker {
+      override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+        const runs = (coordinator as unknown as { activeRuns: Map<string, unknown> }).activeRuns;
+        const runId = [...runs.keys()][0] as string;
+        const shadowBuilder = new RealBuilderWorker([
+          { path: "core/widget.ts", content: "export const widget = 7;\n" },
+        ]);
+        candidatePromise = coordinator.runShadowBuilder(runId, { builder: shadowBuilder });
+        await candidatePromise;
+        await block;
+        return super.execute(assignment);
+      }
+    }
+
+    const builder = new ProbeBuilder([
+      { path: "core/widget.ts", content: "export const widget = 2;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const submitPromise = coordinator.submit({ input: "modify widget in core" });
+    while (!candidatePromise) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const candidate = await (candidatePromise as Promise<Candidate>);
+    resolveBlock();
+    await submitPromise;
+
+    assert.equal(candidate.lane, undefined, "lane must be undefined when caller didn't pass it");
+    assert.equal(candidate.provider, undefined);
+    assert.equal(candidate.model, undefined);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ─── Approval gate sees a single selected candidate ─────────────────
+
+test("approval gate: only the selected candidate is the one whose receipt enters AWAITING_APPROVAL", async () => {
+  // Even with a shadow workspace registered, the approval gate
+  // currently runs on the primary path. The receipt that pauses for
+  // approval MUST point at the primary workspace — never a shadow —
+  // and selectBestRunCandidate must agree (primary wins on full tie).
+  const repo = makeTempRepo();
+  try {
+    let resolveBlock!: () => void;
+    const block = new Promise<void>((r) => { resolveBlock = r; });
+    let primaryWorkspacePath = "";
+    let shadowEntryPromise: Promise<{ workspaceId: string; handle: { workspacePath: string } }> | null = null;
+
+    class ProbeBuilder extends RealBuilderWorker {
+      override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+        primaryWorkspacePath = assignment.projectRoot ?? "";
+        const runs = (coordinator as unknown as { activeRuns: Map<string, unknown> }).activeRuns;
+        const runId = [...runs.keys()][0] as string;
+        // Run a shadow builder alongside the primary so the active
+        // run has a candidate to compare against.
+        const shadowBuilder = new RealBuilderWorker([
+          { path: "core/widget.ts", content: "export const widget = 99; // shadow\n" },
+        ]);
+        shadowEntryPromise = coordinator.runShadowBuilder(runId, {
+          builder: shadowBuilder,
+          lane: "local",
+        }).then((c) => ({
+          workspaceId: c.workspaceId,
+          handle: { workspacePath: c.workspacePath },
+        }));
+        await shadowEntryPromise;
+        await block;
+        return super.execute(assignment);
+      }
+    }
+
+    const builder = new ProbeBuilder([
+      { path: "core/widget.ts", content: "export const widget = 5;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, {
+      builder,
+      requireApproval: false,
+      autoPromoteOnSuccess: false,
+    });
+
+    const submitPromise = coordinator.submit({ input: "modify widget in core" });
+    while (!shadowEntryPromise) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    // Cast: TS narrows shadowEntryPromise to `never` after the polling
+    // loop because the loop body never reassigns it — the assignment
+    // lives in the ProbeBuilder.execute closure that flow analysis
+    // can't track. Same pattern as runShadowBuilder/cleanup tests above.
+    const shadowEntry = await (shadowEntryPromise as Promise<{
+      workspaceId: string;
+      handle: { workspacePath: string };
+    }>);
+    resolveBlock();
+    const receipt = await submitPromise;
+
+    // The persisted receipt's workspace must be the primary, NOT the shadow.
+    const persisted = await receiptStore.getRun(receipt.runId);
+    assert.equal(persisted?.status, "AWAITING_APPROVAL", `expected AWAITING_APPROVAL; got ${persisted?.status}`);
+    const persistedWorkspacePath = (persisted as any)?.workspace?.workspacePath
+      ?? (persisted as any)?.finalReceipt?.workspace?.workspacePath;
+    assert.equal(
+      persistedWorkspacePath,
+      primaryWorkspacePath,
+      "approval gate's receipt must point at the primary workspace, NEVER a shadow",
+    );
+    assert.notEqual(persistedWorkspacePath, shadowEntry.handle.workspacePath);
+
+    // Independent assertion: selectBestRunCandidate would NOT pick the
+    // shadow over the (winning) primary. The active run is gone after
+    // submit() resolves, but we can synthesize the same input shape and
+    // re-check via selectBestCandidate to lock in the policy contract.
+    const policyChoice = selectBestCandidate([
+      // Stand-in for the primary candidate the approval gate sees:
+      {
+        workspaceId: "primary",
+        role: "primary",
+        workspacePath: primaryWorkspacePath,
+        patchArtifact: null,
+        verifierVerdict: "pass",
+        criticalFindings: 0,
+        costUsd: 0,
+        latencyMs: 1,
+        status: "passed",
+        reason: "ok",
+      },
+      {
+        workspaceId: shadowEntry.workspaceId,
+        role: "shadow",
+        workspacePath: shadowEntry.handle.workspacePath,
+        patchArtifact: null,
+        verifierVerdict: null,
+        criticalFindings: 0,
+        costUsd: 0,
+        latencyMs: 1,
+        status: "passed",
+        reason: "ok",
+      },
+    ]);
+    assert.equal(policyChoice?.role, "primary", "policy must pick primary on full tie");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("losing candidate workspace cleanup: selectedWorkspaceId is preserved while other shadows are discarded", async () => {
   const repo = makeTempRepo();
   try {
