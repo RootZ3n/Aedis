@@ -13,6 +13,11 @@
  * server.
  */
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
 // ─── Status sets ─────────────────────────────────────────────────────
 
 /**
@@ -50,8 +55,7 @@ export const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   "CANCELLED",
 ]);
 
-const PASS_STATUSES: ReadonlySet<string> = new Set([
-  "PROMOTED",
+const SAFE_PASS_STATUSES: ReadonlySet<string> = new Set([
   "VERIFIED_PASS",
   "COMPLETE",
   "COMPLETED",
@@ -148,6 +152,10 @@ export interface OutcomeClassification {
   readonly note: string | null;
 }
 
+export interface ClassifyOptions {
+  readonly allowPromote?: boolean;
+}
+
 /**
  * Map a final run detail to a burn-in verdict. The key non-obvious
  * call is EXECUTION_ERROR with zero changed files: the run failed to
@@ -156,24 +164,34 @@ export interface OutcomeClassification {
  * surface that as SAFE_FAILURE so the dashboard doesn't lump it in
  * with hard failures.
  */
-export function classifyOutcome(detail: RunDetail | null): OutcomeClassification {
+export function classifyOutcome(detail: RunDetail | null, opts: ClassifyOptions = {}): OutcomeClassification {
   if (!detail) {
     return { verdict: "ERROR", cleanup: "none", note: "no run detail available" };
   }
   const snap = summariseDetail(detail);
   const status = snap.status;
 
-  if (PASS_STATUSES.has(status)) {
+  if (status === "PROMOTED") {
+    if (opts.allowPromote) {
+      return { verdict: "PASS", cleanup: "none", note: "--allow-promote enabled; PROMOTED accepted" };
+    }
+    return {
+      verdict: "FAIL",
+      cleanup: "reject",
+      note: "Run reached PROMOTED — rejecting/cancelling and restoring source repo",
+    };
+  }
+
+  if (SAFE_PASS_STATUSES.has(status)) {
     return { verdict: "PASS", cleanup: "none", note: null };
   }
 
   if (PENDING_APPROVAL_STATUSES.has(status)) {
     // Verifier passed and the run is now sitting waiting for a human
-    // to merge. The harness must NOT merge — reject for
-    // AWAITING_APPROVAL (clears the pending entry cleanly), cancel
-    // for READY_FOR_PROMOTION (no dedicated reject endpoint exists
-    // for that state).
-    const cleanup = status === "AWAITING_APPROVAL" ? "reject" : "cancel";
+    // to merge. The harness must NOT merge — reject first for
+    // clarity; applyCleanup falls back to cancel if no pending
+    // approval exists for that state.
+    const cleanup = "reject";
     return {
       verdict: "PENDING_APPROVAL",
       cleanup,
@@ -269,8 +287,8 @@ export async function cancelRun(
   idOrRunId: string,
 ): Promise<boolean> {
   if (!idOrRunId) return false;
-  const res = await http.postJson(`/tasks/${encodeURIComponent(idOrRunId)}/cancel`);
-  return res.ok;
+  const res = await http.postJson<{ ok?: boolean }>(`/tasks/${encodeURIComponent(idOrRunId)}/cancel`);
+  return res.ok && res.body?.ok !== false;
 }
 
 /**
@@ -283,8 +301,8 @@ export async function rejectAwaitingApproval(
   runId: string,
 ): Promise<boolean> {
   if (!runId) return false;
-  const res = await http.postJson(`/approvals/${encodeURIComponent(runId)}/reject`);
-  return res.ok;
+  const res = await http.postJson<{ ok?: boolean }>(`/approvals/${encodeURIComponent(runId)}/reject`);
+  return res.ok && res.body?.ok !== false;
 }
 
 export async function applyCleanup(
@@ -294,12 +312,127 @@ export async function applyCleanup(
 ): Promise<boolean> {
   if (cleanup === "none") return true;
   if (cleanup === "reject" && ids.runId) {
-    return rejectAwaitingApproval(http, ids.runId);
+    const rejected = await rejectAwaitingApproval(http, ids.runId);
+    if (rejected) return true;
   }
   // Either explicit cancel or fallback for reject without runId.
   const target = ids.runId ?? ids.taskId ?? "";
   return cancelRun(http, target);
 }
+
+export interface CleanupVerification {
+  readonly activeRun: boolean | null;
+  readonly pendingApproval: boolean | null;
+  readonly ok: boolean;
+  readonly error: string | null;
+}
+
+export async function verifyCleanupState(
+  http: BurnHttpClient,
+  ids: { runId?: string | null; taskId?: string | null },
+): Promise<CleanupVerification> {
+  let activeRun: boolean | null = null;
+  let pendingApproval: boolean | null = null;
+  const errors: string[] = [];
+  const taskTarget = ids.taskId ?? ids.runId ?? "";
+
+  if (taskTarget) {
+    try {
+      const taskRes = await http.getJson<{ active_run?: boolean }>(`/tasks/${encodeURIComponent(taskTarget)}`);
+      if (taskRes.ok && taskRes.body && typeof taskRes.body.active_run === "boolean") {
+        activeRun = taskRes.body.active_run;
+      } else if (!taskRes.ok) {
+        errors.push(`task status HTTP ${taskRes.status}`);
+      }
+    } catch (err) {
+      errors.push(`task status: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  try {
+    const pendingRes = await http.getJson<{ pending?: ReadonlyArray<{ runId?: string }> }>("/approvals/pending");
+    if (pendingRes.ok && pendingRes.body && Array.isArray(pendingRes.body.pending)) {
+      pendingApproval = pendingRes.body.pending.some((p) => p.runId === ids.runId);
+    } else if (!pendingRes.ok) {
+      errors.push(`pending approvals HTTP ${pendingRes.status}`);
+    }
+  } catch (err) {
+    errors.push(`pending approvals: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  const ok = activeRun === false && pendingApproval === false && errors.length === 0;
+  return { activeRun, pendingApproval, ok, error: errors.length > 0 ? errors.join("; ") : null };
+}
+
+export interface SourceRepoSnapshot {
+  readonly head: string;
+  readonly status: string;
+}
+
+export interface SourceRepoVerification {
+  readonly headUnchanged: boolean;
+  readonly clean: boolean;
+  readonly ok: boolean;
+  readonly restored: boolean;
+  readonly error: string | null;
+}
+
+export interface SourceRepoGuard {
+  snapshot(repoPath: string): Promise<SourceRepoSnapshot>;
+  restoreAndVerify(repoPath: string, before: SourceRepoSnapshot): Promise<SourceRepoVerification>;
+}
+
+async function git(repoPath: string, args: readonly string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-C", repoPath, ...args], {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return stdout.trim();
+}
+
+export async function snapshotSourceRepo(repoPath: string): Promise<SourceRepoSnapshot> {
+  return {
+    head: await git(repoPath, ["rev-parse", "HEAD"]),
+    status: await git(repoPath, ["status", "--porcelain"]),
+  };
+}
+
+export async function restoreAndVerifySourceRepo(
+  repoPath: string,
+  before: SourceRepoSnapshot,
+): Promise<SourceRepoVerification> {
+  let restored = false;
+  let error: string | null = null;
+  try {
+    const currentHead = await git(repoPath, ["rev-parse", "HEAD"]);
+    if (currentHead !== before.head) {
+      await git(repoPath, ["reset", "--hard", before.head]);
+      restored = true;
+    }
+    const statusAfterReset = await git(repoPath, ["status", "--porcelain"]);
+    if (statusAfterReset !== before.status && before.status === "") {
+      await git(repoPath, ["clean", "-fd"]);
+      restored = true;
+    }
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  }
+
+  try {
+    const finalHead = await git(repoPath, ["rev-parse", "HEAD"]);
+    const finalStatus = await git(repoPath, ["status", "--porcelain"]);
+    const headUnchanged = finalHead === before.head;
+    const clean = finalStatus === "";
+    return { headUnchanged, clean, ok: headUnchanged && clean && !error, restored, error };
+  } catch (err) {
+    const finalError = err instanceof Error ? err.message : String(err);
+    return { headUnchanged: false, clean: false, ok: false, restored, error: error ? `${error}; ${finalError}` : finalError };
+  }
+}
+
+export const gitSourceRepoGuard: SourceRepoGuard = {
+  snapshot: snapshotSourceRepo,
+  restoreAndVerify: restoreAndVerifySourceRepo,
+};
 
 // ─── Polling loop ────────────────────────────────────────────────────
 
@@ -505,6 +638,8 @@ export interface RunOnceOptions {
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly extraNotes?: string[];
+  readonly allowPromote?: boolean;
+  readonly sourceRepoGuard?: SourceRepoGuard;
 }
 
 interface SubmitResponse {
@@ -532,6 +667,8 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
     now = Date.now,
     sleep,
     extraNotes = [],
+    allowPromote = false,
+    sourceRepoGuard = gitSourceRepoGuard,
   } = opts;
 
   let submitted = false;
@@ -539,6 +676,43 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
   let runId = "";
   let error: string | null = null;
   let cleanupOk: boolean | null = null;
+  let repoSnapshot: SourceRepoSnapshot | null = null;
+  const notes = [...extraNotes];
+
+  try {
+    repoSnapshot = await sourceRepoGuard.snapshot(repoPath);
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+    return buildResultRow({
+      scenarioId,
+      prompt,
+      repo: repoPath,
+      taskId,
+      runId,
+      submitted: false,
+      poll: { detail: null, timedOut: false, elapsedMs: 0, lastFetchError: "source repo snapshot failed" },
+      outcome: { verdict: "ERROR", cleanup: "none", note: "source repo snapshot failed" },
+      cleanupOk: null,
+      notes,
+      error,
+    });
+  }
+
+  if (!allowPromote && repoSnapshot.status !== "") {
+    return buildResultRow({
+      scenarioId,
+      prompt,
+      repo: repoPath,
+      taskId,
+      runId,
+      submitted: false,
+      poll: { detail: null, timedOut: false, elapsedMs: 0, lastFetchError: "source repo dirty before burn-in" },
+      outcome: { verdict: "ERROR", cleanup: "none", note: "source repo dirty before burn-in; refusing to run" },
+      cleanupOk: null,
+      notes,
+      error: "source repo dirty before burn-in",
+    });
+  }
 
   // ── Submit ────────────────────────────────────────────────────────
   const submitRes = await http.postJson<SubmitResponse>("/tasks", { prompt, repoPath });
@@ -558,7 +732,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
       },
       outcome: { verdict: "ERROR", cleanup: "none", note: "POST /tasks failed" },
       cleanupOk: null,
-      notes: extraNotes,
+      notes,
       error: `submit failed HTTP ${submitRes.status}`,
     });
   }
@@ -577,7 +751,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
       poll: { detail: null, timedOut: false, elapsedMs: 0, lastFetchError: "no run_id in submit response" },
       outcome: { verdict: "ERROR", cleanup: "none", note: "submit returned no run_id" },
       cleanupOk: null,
-      notes: extraNotes,
+      notes,
       error: "no run_id in submit response",
     });
   }
@@ -612,7 +786,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
   // ── Classify ──────────────────────────────────────────────────────
   const outcome: OutcomeClassification = pollWithFinal.timedOut
     ? { verdict: "TIMEOUT", cleanup: "cancel", note: `timed out after ${timeoutMs}ms` }
-    : classifyOutcome(pollWithFinal.detail);
+    : classifyOutcome(pollWithFinal.detail, { allowPromote });
 
   // ── Cleanup ───────────────────────────────────────────────────────
   if (outcome.cleanup !== "none") {
@@ -621,6 +795,23 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
     } catch (err) {
       cleanupOk = false;
       error = error ?? (err as Error).message;
+    }
+  }
+
+  if (!allowPromote && (outcome.cleanup !== "none" || normaliseStatus(pollWithFinal.detail?.status) === "PROMOTED")) {
+    const verification = await verifyCleanupState(http, { runId, taskId });
+    notes.push(`cleanup verification: active_run=${verification.activeRun} pending_approval=${verification.pendingApproval}`);
+    if (!verification.ok) {
+      cleanupOk = false;
+      error = error ?? verification.error ?? "cleanup verification failed";
+    }
+  }
+
+  if (!allowPromote && repoSnapshot) {
+    const source = await sourceRepoGuard.restoreAndVerify(repoPath, repoSnapshot);
+    notes.push(`source repo verification: head_unchanged=${source.headUnchanged} clean=${source.clean}${source.restored ? " restored=true" : ""}`);
+    if (!source.ok) {
+      error = error ?? source.error ?? "source repo verification failed";
     }
   }
 
@@ -634,7 +825,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
     poll: pollWithFinal,
     outcome,
     cleanupOk,
-    notes: extraNotes,
+    notes,
     error,
   });
 }

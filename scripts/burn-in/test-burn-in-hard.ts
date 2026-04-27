@@ -7,6 +7,7 @@
  *
  *   cd /mnt/ai/aedis && npx tsx scripts/burn-in/test-burn-in-hard.ts
  *   AEDIS_BURN_TIMEOUT_MS=1200000 npx tsx scripts/burn-in/test-burn-in-hard.ts
+ *   npx tsx scripts/burn-in/test-burn-in-hard.ts --allow-promote
  */
 
 import { writeFileSync } from "node:fs";
@@ -170,11 +171,13 @@ const SCENARIOS = [
 ] as const;
 
 async function main(): Promise<void> {
+  const allowPromote = process.argv.includes("--allow-promote");
   const activeScenarios = filterScenarios(SCENARIOS);
 
   console.log(`🔥 AEDIS HARD BURN-IN — ${activeScenarios.length} scenarios`);
   console.log(`Target:  ${TARGET}`);
   console.log(`Timeout: ${TIMEOUT_MS}ms${process.env["AEDIS_BURN_TIMEOUT_MS"] ? " (env override)" : " (default)"}`);
+  console.log(`Allow promote: ${allowPromote ? "yes" : "no"}`);
   console.log(`Results: ${RESULTS_FILE}\n`);
 
   const http = createFetchClient(TARGET);
@@ -209,6 +212,7 @@ async function main(): Promise<void> {
       timeoutMs: TIMEOUT_MS,
       onProgress: (line) => console.log(`\n     ${line}`),
       extraNotes: [s.description],
+      allowPromote,
     });
     results.push(r);
     const cost = r.costUsd != null ? ` $${r.costUsd.toFixed(4)}` : "";

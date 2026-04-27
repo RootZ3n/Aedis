@@ -6,6 +6,7 @@ import {
   type BurnResultRow,
   type JsonResponse,
   type RunDetail,
+  type SourceRepoGuard,
   classifyOutcome,
   computeSummary,
   filterScenarios,
@@ -53,6 +54,14 @@ function mockHttp(opts: MockOptions): {
 
 const ok = <T,>(body: T): JsonResponse<T> => ({ ok: true, status: 200, body });
 const notFound = (): JsonResponse<null> => ({ ok: false, status: 404, body: null });
+const cleanRepoGuard: SourceRepoGuard = {
+  async snapshot() {
+    return { head: "base-head", status: "" };
+  },
+  async restoreAndVerify() {
+    return { headUnchanged: true, clean: true, ok: true, restored: false, error: null };
+  },
+};
 
 // ─── Status / classification helpers ─────────────────────────────────
 
@@ -86,10 +95,10 @@ test("classifyOutcome: AWAITING_APPROVAL → PENDING_APPROVAL with cleanup=rejec
   assert.match(o.note ?? "", /AWAITING_APPROVAL/);
 });
 
-test("classifyOutcome: READY_FOR_PROMOTION → PENDING_APPROVAL with cleanup=cancel", () => {
+test("classifyOutcome: READY_FOR_PROMOTION → PENDING_APPROVAL with cleanup=reject", () => {
   const o = classifyOutcome({ status: "READY_FOR_PROMOTION" });
   assert.equal(o.verdict, "PENDING_APPROVAL");
-  assert.equal(o.cleanup, "cancel");
+  assert.equal(o.cleanup, "reject");
 });
 
 test("classifyOutcome: EXECUTION_ERROR with no files changed → SAFE_FAILURE (source untouched)", () => {
@@ -111,8 +120,18 @@ test("classifyOutcome: EXECUTION_ERROR with files changed → FAIL", () => {
   assert.match(o.note ?? "", /2 file/);
 });
 
-test("classifyOutcome: PROMOTED / VERIFIED_PASS / COMPLETE → PASS", () => {
-  for (const status of ["PROMOTED", "VERIFIED_PASS", "COMPLETE", "COMPLETED"] as const) {
+test("classifyOutcome: PROMOTED is unsafe unless --allow-promote is enabled", () => {
+  const unsafe = classifyOutcome({ status: "PROMOTED" });
+  assert.equal(unsafe.verdict, "FAIL");
+  assert.equal(unsafe.cleanup, "reject");
+
+  const allowed = classifyOutcome({ status: "PROMOTED" }, { allowPromote: true });
+  assert.equal(allowed.verdict, "PASS");
+  assert.equal(allowed.cleanup, "none");
+});
+
+test("classifyOutcome: VERIFIED_PASS / COMPLETE → PASS", () => {
+  for (const status of ["VERIFIED_PASS", "COMPLETE", "COMPLETED"] as const) {
     assert.equal(classifyOutcome({ status }).verdict, "PASS", `${status} should be PASS`);
   }
 });
@@ -226,7 +245,9 @@ test("runScenarioOnce: AWAITING_APPROVAL is handled and rejected via /approvals/
     summary: { changes: [{ path: "core/run-summary.ts" }], headline: "Verifier passed" },
   };
   let getCount = 0;
-  const get: Handler = () => {
+  const get: Handler = (path) => {
+    if (path === "/tasks/task_abc") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
     getCount += 1;
     return ok<RunDetail>(detail);
   };
@@ -246,6 +267,7 @@ test("runScenarioOnce: AWAITING_APPROVAL is handled and rejected via /approvals/
     pollIntervalMs: 1000,
     now: fakeNow.now,
     sleep: fakeNow.sleep,
+    sourceRepoGuard: cleanRepoGuard,
   });
   assert.equal(row.verdict, "PENDING_APPROVAL");
   assert.equal(row.cleanup, "reject");
@@ -260,6 +282,95 @@ test("runScenarioOnce: AWAITING_APPROVAL is handled and rejected via /approvals/
   const oldApproveCall = calls.find((c) => c.path.includes("/api/runs/") && c.path.endsWith("/approve"));
   assert.equal(oldApproveCall, undefined, "must NEVER POST /api/runs/:runId/approve");
   assert.ok(getCount >= 1, "polled at least once");
+});
+
+test("runScenarioOnce: PROMOTED is rejected, cancelled as fallback, and source repo is restored", async () => {
+  let restored = false;
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify(_repoPath, before) {
+      assert.equal(before.head, "before");
+      restored = true;
+      return { headUnchanged: true, clean: true, ok: true, restored: true, error: null };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-promoted", run_id: "run-promoted" });
+    if (path === "/approvals/run-promoted/reject") return notFound();
+    if (path === "/tasks/run-promoted/cancel") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-promoted") return ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-promoted") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http, calls } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.status, "PROMOTED");
+  assert.equal(row.verdict, "FAIL");
+  assert.equal(row.cleanup, "reject");
+  assert.equal(row.cleanupOk, true);
+  assert.equal(restored, true, "source repo must be restored after unsafe PROMOTED state");
+  assert.ok(calls.find((c) => c.path === "/approvals/run-promoted/reject"), "must attempt reject first");
+  assert.ok(calls.find((c) => c.path === "/tasks/run-promoted/cancel"), "must fall back to cancel");
+  assert.match(row.notes.join("\n"), /active_run=false pending_approval=false/);
+  assert.match(row.notes.join("\n"), /head_unchanged=true clean=true restored=true/);
+});
+
+test("runScenarioOnce: --allow-promote accepts PROMOTED and skips cleanup/restore", async () => {
+  let restoreCalls = 0;
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      restoreCalls += 1;
+      return { headUnchanged: true, clean: true, ok: true, restored: false, error: null };
+    },
+  };
+  const post: Handler = (path) => path === "/tasks" ? ok({ task_id: "task-ok", run_id: "run-ok" }) : notFound();
+  const get: Handler = (path) =>
+    path === "/api/runs/run-ok"
+      ? ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } })
+      : notFound();
+  const fakeNow = mkClock();
+  const { http, calls } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted-allowed",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    allowPromote: true,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "PASS");
+  assert.equal(row.cleanup, "none");
+  assert.equal(row.cleanupOk, null);
+  assert.equal(restoreCalls, 0);
+  assert.equal(calls.some((c) => c.path.includes("/reject") || c.path.includes("/cancel")), false);
 });
 
 test("runScenarioOnce: EXECUTION_ERROR with no files changed → SAFE_FAILURE, no cleanup attempted", async () => {
@@ -288,6 +399,7 @@ test("runScenarioOnce: EXECUTION_ERROR with no files changed → SAFE_FAILURE, n
     pollIntervalMs: 1000,
     now: fakeNow.now,
     sleep: fakeNow.sleep,
+    sourceRepoGuard: cleanRepoGuard,
   });
   assert.equal(row.verdict, "SAFE_FAILURE");
   assert.equal(row.cleanup, "none");
@@ -311,7 +423,9 @@ test("runScenarioOnce: timeout fetches one final detail and attempts cancel via 
     }
     return notFound();
   };
-  const get: Handler = () => {
+  const get: Handler = (path) => {
+    if (path === "/tasks/t-99") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
     polls += 1;
     return ok<RunDetail>({ status: "running", runState: { phase: "building" }, totalCostUsd: 0.02 });
   };
@@ -326,6 +440,7 @@ test("runScenarioOnce: timeout fetches one final detail and attempts cancel via 
     pollIntervalMs: 1_000,
     now: fakeNow.now,
     sleep: fakeNow.sleep,
+    sourceRepoGuard: cleanRepoGuard,
   });
   assert.equal(row.verdict, "TIMEOUT");
   assert.equal(row.timedOut, true);
@@ -351,8 +466,11 @@ test("runScenarioOnce: timeout preserves last known state in JSONL row", async (
     if (path === "/tasks") return ok({ task_id: "t-t", run_id: "r-t" });
     return ok({ ok: true });
   };
-  const get: Handler = () =>
-    ok<RunDetail>({ status: "running", runState: { phase: "scouting" }, totalCostUsd: 0.07 });
+  const get: Handler = (path) => {
+    if (path === "/tasks/t-t") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return ok<RunDetail>({ status: "running", runState: { phase: "scouting" }, totalCostUsd: 0.07 });
+  };
   const fakeNow = mkClock();
   const { http } = mockHttp({ get, post });
   const row = await runScenarioOnce({
@@ -364,6 +482,7 @@ test("runScenarioOnce: timeout preserves last known state in JSONL row", async (
     pollIntervalMs: 1_000,
     now: fakeNow.now,
     sleep: fakeNow.sleep,
+    sourceRepoGuard: cleanRepoGuard,
   });
   assert.equal(row.verdict, "TIMEOUT");
   assert.equal(row.status_, "TIMEOUT");
@@ -383,7 +502,9 @@ test("runScenarioOnce: never auto-approves — no POST to /approvals/:runId/appr
     if (path === "/tasks") return ok({ task_id: "t", run_id: "r" });
     return ok({ ok: true });
   };
-  const get: Handler = () => {
+  const get: Handler = (path) => {
+    if (path === "/tasks/t") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
     polls += 1;
     return ok<RunDetail>({ status: polls < 2 ? "running" : "AWAITING_APPROVAL", summary: { changes: [] } });
   };
@@ -398,6 +519,7 @@ test("runScenarioOnce: never auto-approves — no POST to /approvals/:runId/appr
     pollIntervalMs: 1000,
     now: fakeNow.now,
     sleep: fakeNow.sleep,
+    sourceRepoGuard: cleanRepoGuard,
   });
   const approveCall = calls.find((c) => c.path.endsWith("/approve"));
   assert.equal(approveCall, undefined, "harness must never call any /approve endpoint");
@@ -431,6 +553,7 @@ test("runScenarioOnce: JSONL row carries status, phase, failureCode, narrative, 
     pollIntervalMs: 1000,
     now: fakeNow.now,
     sleep: fakeNow.sleep,
+    sourceRepoGuard: cleanRepoGuard,
   });
   assert.equal(row.verdict, "FAIL");
   assert.equal(row.status, "VERIFIED_FAIL");

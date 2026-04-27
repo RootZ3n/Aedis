@@ -12,6 +12,7 @@
  *
  * Each row is appended to /mnt/ai/tmp/aedis-burn-in-results.jsonl
  * Run with --summary to print accumulated results without re-running.
+ * Run with --allow-promote only when intentionally permitting source commits.
  */
 
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
@@ -181,6 +182,7 @@ function summariseResults(): void {
 
 async function main(): Promise<void> {
   const summaryOnly = process.argv.includes("--summary");
+  const allowPromote = process.argv.includes("--allow-promote");
   if (summaryOnly) {
     summariseResults();
     return;
@@ -192,6 +194,7 @@ async function main(): Promise<void> {
   console.log(`Target:  ${AEDIS_BASE}`);
   console.log(`Project: ${PROJECT_ROOT}`);
   console.log(`Timeout: ${TIMEOUT_MS}ms${process.env["AEDIS_BURN_TIMEOUT_MS"] ? " (env override)" : " (default)"}`);
+  console.log(`Allow promote: ${allowPromote ? "yes" : "no"}`);
   console.log(`Results: ${RESULTS_FILE}`);
   console.log(`Scenarios: ${activeScenarios.length}\n`);
 
@@ -230,6 +233,7 @@ async function main(): Promise<void> {
       timeoutMs: TIMEOUT_MS,
       onProgress: (line) => console.log(`  ${line}`),
       extraNotes,
+      allowPromote,
     });
 
     // Scenario-level expectation checks (logged into notes).
