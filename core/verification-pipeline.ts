@@ -302,6 +302,11 @@ export class VerificationPipeline {
     this.judge = new IntegrationJudge(this.config.judgeConfig);
   }
 
+  /** Expose resolved config so callers can clone with filtered hooks. */
+  getConfig(): Readonly<VerificationPipelineConfig> {
+    return this.config;
+  }
+
   /**
    * Verify the full accepted ChangeSet before final apply/commit.
    *

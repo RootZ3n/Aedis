@@ -119,7 +119,19 @@ export class VerifierWorker extends AbstractWorker {
         );
       }
 
-      const receipt = await this.pipeline.verify(
+      // Fast-path trivial edits: skip the broad test hook (npm test) but
+      // keep typecheck, lint, and structural checks. Constructing a
+      // lightweight pipeline clone is cheap (no I/O in the constructor).
+      const pipeline = assignment.fastPath
+        ? new VerificationPipeline({
+            ...(this.pipeline.getConfig()),
+            hooks: this.pipeline.getConfig().hooks.filter(
+              (h) => h.kind !== "tests",
+            ),
+          })
+        : this.pipeline;
+
+      const receipt = await pipeline.verify(
         assignment.intent,
         runState,
         changes,

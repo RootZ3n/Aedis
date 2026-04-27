@@ -577,6 +577,12 @@ export interface RunReceipt {
    * the gate inputs aren't available.
    */
   readonly confidenceGate: ConfidenceResult | null;
+  /**
+   * True when this run used the fast execution path for trivial
+   * single-file edits (no integrator, heuristic-only critic, test
+   * hook skipped in verifier).
+   */
+  readonly fastPath?: boolean;
 }
 
 export interface TargetRoleReceipt {
@@ -7223,6 +7229,7 @@ export class Coordinator {
       sourceCommitSha: active.workspace?.sourceCommitSha ?? null,
       targetRoles,
       confidenceGate,
+      fastPath: active.fastPath || undefined,
     };
 
     // Compose the human-readable summary from the receipt we just

@@ -1081,6 +1081,107 @@ test("filterByInvocation: mixed rows with/without invocationId filters by latest
   assert.deepEqual(filtered.map((r) => r.scenarioId), ["s1", "s2"]);
 });
 
+// ─── Adaptive polling ────────────────────────────────────────────────
+
+test("pollUntilTerminal: uses shorter interval once cost > 0 (adaptive polling)", async () => {
+  let pollCount = 0;
+  const sleepDurations: number[] = [];
+  const clock = mkClock();
+
+  const { http } = mockHttp({
+    get: () => {
+      pollCount++;
+      if (pollCount <= 2) {
+        // First 2 polls: no cost, no files — should use default 5000ms
+        return {
+          ok: true, status: 200,
+          body: { status: "RUNNING", totalCostUsd: 0, filesChanged: [] } as unknown as RunDetail,
+        };
+      }
+      if (pollCount <= 4) {
+        // Polls 3-4: cost tracked — should use adaptive 2000ms
+        return {
+          ok: true, status: 200,
+          body: { status: "RUNNING", totalCostUsd: 0.01, filesChanged: [] } as unknown as RunDetail,
+        };
+      }
+      // Poll 5: terminal
+      return {
+        ok: true, status: 200,
+        body: { status: "PROMOTED", totalCostUsd: 0.02 } as unknown as RunDetail,
+      };
+    },
+  });
+
+  const result = await pollUntilTerminal({
+    http,
+    runId: "test-run",
+    timeoutMs: 300_000,
+    pollIntervalMs: 5000,
+    now: clock.now,
+    sleep: async (ms) => {
+      sleepDurations.push(ms);
+      await clock.sleep(ms);
+    },
+  });
+
+  assert.equal(result.timedOut, false);
+  assert.equal(pollCount, 5);
+  // First 2 sleeps should be 5000ms (no cost/files yet)
+  assert.equal(sleepDurations[0], 5000, "pre-cost poll should use default interval");
+  assert.equal(sleepDurations[1], 5000, "pre-cost poll should use default interval");
+  // Sleeps 3-4 should be 2000ms (cost tracked → adaptive)
+  assert.equal(sleepDurations[2], 2000, "post-cost poll should use adaptive 2000ms");
+  assert.equal(sleepDurations[3], 2000, "post-cost poll should use adaptive 2000ms");
+});
+
+test("pollUntilTerminal: uses shorter interval once filesChanged > 0 (adaptive polling)", async () => {
+  let pollCount = 0;
+  const sleepDurations: number[] = [];
+  const clock = mkClock();
+
+  const { http } = mockHttp({
+    get: () => {
+      pollCount++;
+      if (pollCount === 1) {
+        return {
+          ok: true, status: 200,
+          body: { status: "RUNNING", totalCostUsd: 0 } as unknown as RunDetail,
+        };
+      }
+      if (pollCount === 2) {
+        return {
+          ok: true, status: 200,
+          body: {
+            status: "RUNNING", totalCostUsd: 0,
+            summary: { changes: [{ path: "test.ts" }] },
+          } as unknown as RunDetail,
+        };
+      }
+      return {
+        ok: true, status: 200,
+        body: { status: "PROMOTED" } as unknown as RunDetail,
+      };
+    },
+  });
+
+  const result = await pollUntilTerminal({
+    http,
+    runId: "test-run",
+    timeoutMs: 300_000,
+    pollIntervalMs: 5000,
+    now: clock.now,
+    sleep: async (ms) => {
+      sleepDurations.push(ms);
+      await clock.sleep(ms);
+    },
+  });
+
+  assert.equal(result.timedOut, false);
+  assert.equal(sleepDurations[0], 5000, "pre-files poll uses default");
+  assert.equal(sleepDurations[1], 2000, "post-files poll uses adaptive 2000ms");
+});
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function mkClock(): { now: () => number; sleep: (ms: number) => Promise<void> } {

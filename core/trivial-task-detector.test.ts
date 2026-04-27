@@ -135,6 +135,22 @@ test("trivial-task-detector: large scope disqualifies", () => {
   assert.match(result.reason, /scope too large/);
 });
 
+// ─── burn-in-01 prompt is classified as trivial ─────────────────────
+
+test("trivial-task-detector: burn-in-01 comment-swap prompt is classified fastPath=true", () => {
+  const prompt =
+    "In core/run-summary.ts, find the existing top-of-file comment block. " +
+    "At the very end of that block, add a single new comment line that reads exactly: " +
+    "'// burn-in: comment-swap probe test-tag.' Do not modify anything else.";
+  const result = isTrivialTask({
+    targets: ["core/run-summary.ts"],
+    prompt,
+    scopeEstimate: "small",
+    riskSignals: [],
+  });
+  assert.equal(result.isTrivial, true, `expected trivial, got: ${result.reason}`);
+});
+
 // ─── Scope lock enforcement: fast path does NOT bypass scope lock ───
 
 test("trivial-task-detector: scope lock is orthogonal — trivial detection does not override it", () => {

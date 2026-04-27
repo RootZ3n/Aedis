@@ -511,7 +511,12 @@ export async function pollUntilTerminal(opts: PollOptions): Promise<PollResult> 
       return { detail, timedOut: false, elapsedMs: now() - start, lastFetchError: null };
     }
 
-    await sleep(pollIntervalMs);
+    // Adaptive polling: once files have changed or cost is tracked,
+    // the run is past the slow planning phase — poll faster to catch
+    // terminal status sooner and reduce post-completion latency.
+    const snap = summariseDetail(detail ?? lastDetail);
+    const adaptive = snap.filesChanged > 0 || (snap.costUsd !== null && snap.costUsd > 0);
+    await sleep(adaptive ? Math.min(pollIntervalMs, 2000) : pollIntervalMs);
   }
 
   return {
