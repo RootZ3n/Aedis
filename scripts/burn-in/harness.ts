@@ -862,6 +862,39 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
     };
   }
 
+  // ── Upgrade approval-required runs after successful cleanup ───
+  // Same pattern as PROMOTED: if auto-reject executed and both
+  // cleanup verification and source repo verification pass, the run
+  // produced a valid change but the harness correctly rejected it —
+  // that's a safe outcome, not a pending one.
+  // Only AWAITING_APPROVAL — READY_FOR_PROMOTION is already handled
+  // by the PROMOTED/READY_FOR_PROMOTION block above.
+  if (
+    !allowPromote &&
+    finalStatus === "AWAITING_APPROVAL" &&
+    cleanupVerified &&
+    sourceVerified
+  ) {
+    outcome = {
+      verdict: "SAFE_FAILURE",
+      cleanup: outcome.cleanup,
+      note: outcome.note,
+      classification: "approval_required_restored",
+      narrative: "Valid change produced; burn-in rejected it to preserve source.",
+    };
+  } else if (
+    !allowPromote &&
+    finalStatus === "AWAITING_APPROVAL" &&
+    (!cleanupVerified || !sourceVerified)
+  ) {
+    outcome = {
+      verdict: "FAIL",
+      cleanup: outcome.cleanup,
+      note: outcome.note,
+      classification: "cleanup_failed",
+    };
+  }
+
   return buildResultRow({
     scenarioId,
     prompt,

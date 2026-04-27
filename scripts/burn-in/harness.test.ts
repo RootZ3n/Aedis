@@ -270,7 +270,9 @@ test("runScenarioOnce: AWAITING_APPROVAL is handled and rejected via /approvals/
     sleep: fakeNow.sleep,
     sourceRepoGuard: cleanRepoGuard,
   });
-  assert.equal(row.verdict, "PENDING_APPROVAL");
+  // After cleanup passes, AWAITING_APPROVAL upgrades to SAFE_FAILURE.
+  assert.equal(row.verdict, "SAFE_FAILURE");
+  assert.equal(row.classification, "approval_required_restored");
   assert.equal(row.cleanup, "reject");
   assert.equal(row.cleanupOk, true);
   assert.equal(row.status, "AWAITING_APPROVAL");
@@ -675,6 +677,94 @@ test("computeSummary: counts promote_blocked_restored (SAFE_FAILURE) in safeFail
   assert.equal(s.pass, 1);
   assert.equal(s.fail, 1);
   assert.equal(s.safeFail, 1);
+});
+
+test("runScenarioOnce: AWAITING_APPROVAL + cleanup ok → SAFE_FAILURE approval_required_restored", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: true, ok: true, restored: false, error: null };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-aa", run_id: "run-aa" });
+    if (path === "/approvals/run-aa/reject") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-aa") return ok<RunDetail>({ status: "AWAITING_APPROVAL", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-aa") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "awaiting-cleanup-ok",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "SAFE_FAILURE");
+  assert.equal(row.classification, "approval_required_restored");
+  assert.equal(row.narrative, "Valid change produced; burn-in rejected it to preserve source.");
+  assert.equal(row.cleanupOk, true, "reject succeeded at API level");
+});
+
+test("runScenarioOnce: AWAITING_APPROVAL + cleanup verification fails → FAIL cleanup_failed", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: false, ok: false, restored: false, error: "working tree dirty" };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-af", run_id: "run-af" });
+    if (path === "/approvals/run-af/reject") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-af") return ok<RunDetail>({ status: "AWAITING_APPROVAL", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-af") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "awaiting-cleanup-fail",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "FAIL");
+  assert.equal(row.classification, "cleanup_failed");
+  assert.ok(row.error, "must surface the dirty repo error");
+});
+
+test("classifyOutcome: AWAITING_APPROVAL without cleanup stays PENDING_APPROVAL", () => {
+  const detail: RunDetail = { status: "AWAITING_APPROVAL", summary: { changes: [{ path: "x.ts" }] } };
+  const result = classifyOutcome(detail);
+  assert.equal(result.verdict, "PENDING_APPROVAL");
+  assert.equal(result.cleanup, "reject");
 });
 
 test("runScenarioOnce: EXECUTION_ERROR with no files changed → SAFE_FAILURE, no cleanup attempted", async () => {
