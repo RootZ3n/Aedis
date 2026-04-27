@@ -22,7 +22,8 @@
     "dev": "npx tsx watch server/index.ts",
     "cli": "tsx cli/aedis.ts",
     "prepack": "npm run build",
-    "test": "bash -O globstar -c 'tsx --test core/**/*.test.ts server/**/*.test.ts workers/**/*.test.ts'",
+    "test": "bash -O globstar -c 'tsx --test core/**/*.test.ts server/**/*.test.ts workers/**/*.test.ts cli/**/*.test.ts'",
+    "tui": "tsx cli/tui/index.tsx",
     "security:secrets": "bash scripts/check-secrets.sh",
     "check": "npm run security:secrets && npm test && npm run build && npx tsc -p tsconfig.build.json --noEmit",
     "burn:soft": "npx tsx scripts/burn-in/test-burn-in.ts",
@@ -38,8 +39,10 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
     "@types/ws": "^8.18.1",
     "glob": "^13.0.6",
+    "ink-testing-library": "^4.0.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   },
@@ -49,6 +52,8 @@
     "@fastify/websocket": "^11.2.0",
     "dotenv": "^16.6.1",
     "fastify": "^5.8.4",
-    "puppeteer": "^24.40.0"
+    "ink": "^7.0.1",
+    "puppeteer": "^24.40.0",
+    "react": "^19.2.5"
   }
 }

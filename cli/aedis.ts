@@ -13,6 +13,7 @@
  *   aedis reliability list                  List recorded trials
  *   aedis reliability show [<trial-id>]     Print trial JSON (latest if omitted)
  *   aedis reliability diff <prev> <curr>    Regression report between two trials
+ *   aedis tui                               Open the interactive TUI dashboard
  *
  * Environment:
  *   AEDIS_API_BASE      HTTP base URL (default: http://localhost:18796)
@@ -249,6 +250,12 @@ const COMMANDS = {
     process.exitCode = 1;
   },
 
+  async tui(_args: string[]) {
+    // Side-effect import: the TUI entry calls render() at module top
+    // level and keeps the process alive via the Ink event loop.
+    await import("./tui/index.js");
+  },
+
   async submit(args: string[]) {
     const input = args.join(" ").trim();
     if (!input) { console.error("submit <prompt>"); process.exitCode = 1; return; }
@@ -287,7 +294,7 @@ async function main(): Promise<void> {
 
   if (!cmd) {
     console.error("Usage: aedis <command> [args]");
-    console.error("Commands: submit, status, metrics, sessions, workers, health, reliability");
+    console.error("Commands: submit, status, metrics, sessions, workers, health, reliability, tui");
     process.exitCode = 1;
     return;
   }
@@ -295,7 +302,7 @@ async function main(): Promise<void> {
   const fn: ((args: string[]) => Promise<void>) | undefined = (COMMANDS as any)[cmd];
   if (!fn) {
     console.error(`Unknown command: ${cmd}`);
-    console.error("Commands: submit, status, metrics, sessions, workers, health, reliability");
+    console.error("Commands: submit, status, metrics, sessions, workers, health, reliability, tui");
     process.exitCode = 1;
     return;
   }
