@@ -104,7 +104,7 @@ export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
   {
     id: "burn-in-02-two-file-refactor",
     prompt:
-      "In core/change-set.ts, rename the variable 'mutationEx' to 'expectedMutation' throughout the getMutationExpected function. Keep the edit minimal.",
+      "In core/change-set.ts, rename the function 'computeExecutionOrder' to 'calculateExecutionOrder' at its definition and its call site. Only modify core/change-set.ts — do not change logic or touch any other file.",
     expected: {
       classification: ["PARTIAL_SUCCESS", "SUCCESS", "NO_OP", "EXECUTION_ERROR"],
       minFilesChanged: 1,
