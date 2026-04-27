@@ -71,6 +71,7 @@ const DEFAULT_CONFIG: CharterGeneratorConfig = {
   autoTestDeliverables: false,
 };
 
+// Coordinates Charter creation from user intent.
 export class CharterGenerator {
   private config: CharterGeneratorConfig;
 
