@@ -312,3 +312,11 @@ export interface WaveOutcomeSummary {
   readonly checkpointReason: string | null;
   readonly failedFiles: readonly string[];
 }
+
+/**
+ * Attempts to add a function to core/nonexistent-file-xyz.ts.
+ * Note: The target file does not exist in the current scope.
+ */
+export function tryAddFunctionToNonexistentFile(): { success: boolean; reason: string } {
+  return { success: false, reason: "core/nonexistent-file-xyz.ts does not exist" };
+}
