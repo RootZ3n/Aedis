@@ -900,8 +900,85 @@ export const SECTION_PADDING_LINES = 100;
 
 export const TOP_OF_FILE_LINE_COUNT = 50;
 export const BOTTOM_OF_FILE_LINE_COUNT = 80;
-const TOP_OF_FILE_PATTERN = /(?:top of (?:the )?file|(?:at|to) the top|file header|beginning of (?:the )?file)\b/i;
-const BOTTOM_OF_FILE_PATTERN = /\b(?:bottom of (?:the )?file|(?:at|to) the bottom|end of (?:the )?file|(?:at|to) the end|append to (?:the )?bottom|append to (?:the )?end)\b/i;
+
+// Anchors for the file head. Accepts both spaced ("top of file") and
+// hyphenated ("top-of-file") forms — the latter slipped past the
+// original pattern, dropping prompts onto the longest-function
+// fallback (run 95180956 windowed lines 428–577 of run-summary.ts and
+// the model correctly refused). Also matches header-comment phrasing
+// like "header docblock", "leading comment block", "topmost JSDoc".
+// NOTE: the original literal in this file had a stray 0x08 byte where
+// \b was intended, which made TOP_OF_FILE_PATTERN match nothing for
+// real prompts — fixed here.
+const TOP_OF_FILE_PATTERN =
+  /(?:\btop[-\s]of[-\s](?:the[-\s])?file\b|(?:at|to)\s+the\s+top\b|\bfile[-\s]header\b|\bbeginning\s+of\s+(?:the\s+)?file\b)/i;
+const HEADER_COMMENT_PATTERN =
+  /\b(?:(?:top[-\s]of[-\s]file|topmost|header|leading|opening|first|preceding)[-\s]+(?:doc[-\s]?)?(?:comment|jsdoc|docstring|docblock|block|banner)|(?:doc[-\s]?)?(?:comment|jsdoc|docstring|docblock)[-\s]+block(?:[^.\n]*\b(?:top|head|start|beginning|file)\b)?)/i;
+const BOTTOM_OF_FILE_PATTERN =
+  /\b(?:bottom[-\s]of[-\s](?:the[-\s])?file|(?:at|to)\s+the\s+bottom|end[-\s]of[-\s](?:the[-\s])?file|(?:at|to)\s+the\s+end|append\s+to\s+(?:the\s+)?bottom|append\s+to\s+(?:the\s+)?end|file[-\s]footer)\b/i;
+
+/**
+ * Heuristic test: does this prompt fragment describe the head of a
+ * file? True for explicit position phrases (top of file, top-of-file,
+ * file header, beginning of file) or header-comment phrasing (header
+ * docblock, leading comment block, top-of-file comment, etc.).
+ * Exported for test coverage and for the Builder's outside-section
+ * refusal recovery path.
+ */
+export function describesTopOfFile(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return TOP_OF_FILE_PATTERN.test(text) || HEADER_COMMENT_PATTERN.test(text);
+}
+
+/** Symmetric helper for the file-tail anchor. */
+export function describesBottomOfFile(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return BOTTOM_OF_FILE_PATTERN.test(text);
+}
+
+/**
+ * Detect a model response that says "I cannot make the requested
+ * edit because the target lies outside the provided section." Used
+ * by the Builder to trigger a one-shot full-file retry instead of
+ * letting the SECTION-MODE non-diff guard burn three coordinator-
+ * level Builder attempts. Patterns observed in run 95180956
+ * (deepseek-v4-flash):
+ *   "Blocker: ... outside the editable range."
+ *   "the provided section is limited to lines X–Y"
+ *   "designated edit section (lines X-Y) does not include ..."
+ *   "exists before line X, outside ..."
+ */
+export function looksLikeOutsideSectionRefusal(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  // "outside the editable range / provided section / this window".
+  // Allows multiple modifier words ("the provided", "this editable")
+  // before the section noun.
+  if (
+    /\boutside\s+(?:(?:the|this|that|its|provided|designated|editable|current|specified)\s+)*(?:edit[\s-]+)?(?:section|range|window|view|block|excerpt)\b/.test(t)
+  ) return true;
+  // "cannot be applied within the provided section" — "within ... section" + refusal verb
+  if (
+    /\bwithin\s+(?:the\s+)?(?:provided|designated|editable|current|specified)?\s*(?:edit\s+)?section\b/.test(t) &&
+    /\b(?:cannot|can'?t|unable|refus|not\s+(?:include|in|within|able|possible|allowed|permitted))/.test(t)
+  ) return true;
+  // "designated edit section (lines X-Y) does not include ..."
+  if (
+    /\b(?:provided|designated|editable|edit|current|specified)\s+(?:edit\s+)?section\b[^.]*?(?:does\s+not|doesn'?t)\s+(?:include|cover|contain)\b/.test(t)
+  ) return true;
+  // "section is limited to lines X-Y"
+  if (/\bsection\s+(?:is\s+)?limited\s+to\s+lines?\b/.test(t)) return true;
+  // "exists before line X" + section context
+  if (
+    /\b(?:exists|lives|resides|sits|appears|is)\s+(?:before|after|outside)\s+lines?\s*\d+/.test(t) &&
+    /\b(?:section|window|range|excerpt)\b/.test(t)
+  ) return true;
+  // "Blocker:" preamble + section + line callout — strong refusal signal.
+  if (/\bblocker\b/.test(t) && /\b(?:section|window|range)\b/.test(t) && /\blines?\s*\d+/.test(t)) {
+    return true;
+  }
+  return false;
+}
 
 const SECTION_STOP_WORDS = new Set([
   "the", "a", "an", "to", "in", "on", "at", "of", "for", "with", "and", "or",
@@ -943,7 +1020,7 @@ export function extractRelevantSection(
   }
 
   // ─── STEP 0: TOP-OF-FILE PRE-CHECK ─────────────────────────────────
-  if (TOP_OF_FILE_PATTERN.test(taskDescription)) {
+  if (describesTopOfFile(taskDescription)) {
     const endLineZeroIdx = Math.min(TOP_OF_FILE_LINE_COUNT - 1, totalLines - 1);
     const sectionLines = lines.slice(0, endLineZeroIdx + 1);
     const endLineOneIdx = endLineZeroIdx + 1;
@@ -961,7 +1038,7 @@ export function extractRelevantSection(
   }
 
   // ─── STEP 0b: BOTTOM-OF-FILE PRE-CHECK ─────────────────────────────
-  if (BOTTOM_OF_FILE_PATTERN.test(taskDescription)) {
+  if (describesBottomOfFile(taskDescription)) {
     const startLineZeroIdx = Math.max(0, totalLines - BOTTOM_OF_FILE_LINE_COUNT);
     const sectionLines = lines.slice(startLineZeroIdx);
     return {

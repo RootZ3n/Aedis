@@ -33,7 +33,23 @@ import {
   type WorkerAssignment,
   type WorkerResult,
 } from "./base.js";
-import { extractRelevantSection, type SectionExtraction } from "./scout.js";
+import {
+  extractRelevantSection,
+  looksLikeOutsideSectionRefusal,
+  type SectionExtraction,
+} from "./scout.js";
+
+/**
+ * Upper bound on `fullContent.length` for the section-refusal retry.
+ * If the file is bigger than this, we don't try a full-file second
+ * pass — the prompt would risk exceeding PROMPT_CHAR_CAP. For files
+ * under this cap, the cost of one redundant model call is preferable
+ * to letting three coordinator-level Builder retries fail the same
+ * way (run 95180956: 3 attempts × ~$0.02 each on a refusal that
+ * never had a chance of succeeding because the section window was
+ * misaimed).
+ */
+const SECTION_REFUSAL_FULL_FILE_RETRY_MAX_CHARS = 60_000;
 
 // ─── Contract Types (exported for Critic) ────────────────────────────
 
@@ -1545,7 +1561,7 @@ export class BuilderWorker extends AbstractWorker {
     );
 
     const attemptRecords: BuilderAttemptRecord[] = [];
-    const patchMode: PatchMode = sectionInfo ? "section-edit" : "full-file";
+    let patchMode: PatchMode = sectionInfo ? "section-edit" : "full-file";
 
     // Attempt 1 — initial model call.
     const attempt1Started = Date.now();
@@ -1576,6 +1592,66 @@ export class BuilderWorker extends AbstractWorker {
         taskId,
         `Builder fell back from ${primaryProvider}/${primaryModel} to ${response.usedProvider}/${response.usedModel}`,
         `Primary provider failed mid-run; fallback chain promoted next entry`,
+      );
+    }
+
+    // ── Section-refusal recovery ──────────────────────────────────────
+    // When the model in section-edit mode tells us the requested edit
+    // lies outside the section we sent, retry once with the full file.
+    // This is the recovery for prompts whose head/tail anchor the
+    // section selector missed (e.g. hyphenated "top-of-file" before
+    // the regex was widened, or any phrasing the heuristic doesn't
+    // cover yet). We cap on file size to avoid blowing PROMPT_CHAR_CAP.
+    if (
+      sectionInfo !== null &&
+      looksLikeOutsideSectionRefusal(response.text) &&
+      fullContent.length <= SECTION_REFUSAL_FULL_FILE_RETRY_MAX_CHARS
+    ) {
+      console.warn(
+        `[builder] Section-edit model refused with outside-section signal; ` +
+        `retrying once with full file (${fullContent.length} chars). ` +
+        `First 200 chars of refusal: ${response.text.slice(0, 200).replace(/\s+/g, " ")}`,
+      );
+      this.noteDecision(
+        taskId,
+        `Section-edit refusal detected; retrying with full-file context`,
+        `Original section was lines ${sectionInfo.startLine}-${sectionInfo.endLine} ` +
+        `of ${sectionInfo.totalLines} (method=${sectionInfo.extractionMethod}); ` +
+        `model said the target lay outside the window.`,
+      );
+      promptContent = fullContent;
+      sectionInfo = null;
+      const retryBuilt = this.buildPrompt(contract, assignment, promptContent, primaryModel, sectionInfo);
+      const retryChain = this.buildInvocationChain(
+        primaryProvider as Provider,
+        primaryModel,
+        retryBuilt.prompt,
+        assignment.tokenBudget,
+        false,
+        runId,
+        declaredChain,
+      );
+      try {
+        response = await invokeModelWithFallback(retryChain, runCtx, assignment.signal);
+      } catch (err) {
+        if (err instanceof InvokerError && err.attempts) {
+          providerAttempts.push(...err.attempts);
+        }
+        throw err;
+      }
+      providerAttempts.push(...response.attempts);
+      patchMode = "full-file";
+    } else if (
+      sectionInfo !== null &&
+      looksLikeOutsideSectionRefusal(response.text)
+    ) {
+      // File too large for a full-file retry — surface a clearer note
+      // rather than silently letting the SECTION-MODE non-diff guard
+      // throw a generic "model returned non-diff content" error.
+      console.warn(
+        `[builder] Section-edit model refused with outside-section signal but ` +
+        `file is ${fullContent.length} chars > ${SECTION_REFUSAL_FULL_FILE_RETRY_MAX_CHARS} ` +
+        `cap; skipping full-file retry. The SECTION-MODE guard will fail this attempt.`,
       );
     }
 
