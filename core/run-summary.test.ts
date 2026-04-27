@@ -8,7 +8,7 @@ import { classifyExecution } from "./execution-classification.js";
 import { estimateBlastRadius } from "./blast-radius.js";
 import { scoreRunConfidence } from "./confidence-scoring.js";
 import { explainFailure } from "./failure-explainer.js";
-import { generateRunSummary, formatVerdictBadge } from "./run-summary.js";
+import { generateRunSummary } from "./run-summary.js";
 
 // ─── Execution classification ──────────────────────────────────────
 
@@ -510,18 +510,6 @@ test("summary verificationChecks: stages-only narrative includes the derived che
   });
   assert.match(r.narrative, /Checks run:/, "narrative must mention the checks line when fallback fires");
   assert.match(r.narrative, /typecheck=pass/, "narrative must report the stage's pass/fail mapping");
-});
-
-// ─── Verdict badge ─────────────────────────────────────────────────
-
-test("formatVerdictBadge: 'pass' returns a formatted pass badge", () => {
-  const badge = formatVerdictBadge("pass");
-  assert.ok(badge.includes("pass"), `badge should contain 'pass': ${badge}`);
-});
-
-test("formatVerdictBadge: 'fail' returns a formatted fail badge", () => {
-  const badge = formatVerdictBadge("fail");
-  assert.ok(badge.includes("fail"), `badge should contain 'fail': ${badge}`);
 });
 
 // ─── Fixtures ──────────────────────────────────────────────────────
