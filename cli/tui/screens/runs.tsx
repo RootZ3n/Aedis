@@ -92,11 +92,13 @@ interface ActionMessage {
 export interface RunsScreenProps {
   readonly api?: ApiSurface;
   readonly pollMs?: number;
+  readonly onOpenBurnIn?: () => void;
 }
 
 export function RunsScreen({
   api = defaultApi,
   pollMs = DEFAULT_POLL_MS,
+  onOpenBurnIn,
 }: RunsScreenProps = {}) {
   const { exit } = useApp();
   const [allRuns, setAllRuns] = useState<readonly RunListEntry[]>([]);
@@ -251,6 +253,14 @@ export function RunsScreen({
       setAction({ kind: "info", text: "type prompt, [enter] to send, [esc] to cancel" });
       return;
     }
+    if (char === "b") {
+      if (onOpenBurnIn) {
+        onOpenBurnIn();
+      } else {
+        setAction({ kind: "info", text: "burn-in screen unavailable" });
+      }
+      return;
+    }
     if (char === "t") {
       setShowHistory((v) => {
         const next = !v;
@@ -368,7 +378,7 @@ export function RunsScreen({
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>
           {mode === "dashboard"
-            ? "[s] submit  [a] approve  [r] reject  [t] toggle history  [↑/↓] select  [enter] detail  [q] quit"
+            ? "[s] submit  [a] approve  [r] reject  [b] burn-in  [t] toggle history  [↑/↓] select  [enter] detail  [q] quit"
             : mode === "submit"
               ? "[type] prompt  [enter] send  [esc] cancel"
               : "[esc] back"}
