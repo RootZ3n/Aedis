@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { render } from "ink-testing-library";
 
-import { Splash } from "./components/Splash.js";
+import { Splash, isMeaningfulInput } from "./components/Splash.js";
 
 const okChecks = async () => ({ apiOk: true, workersReady: true });
 
@@ -14,6 +14,7 @@ test("tui splash: renders spaced A E D I S title and copy", () => {
       onDone: () => { done = true; },
       durationMs: 99_999,
       runChecks: okChecks,
+      inputGraceMs: 0,
     }),
   );
   try {
@@ -27,18 +28,18 @@ test("tui splash: renders spaced A E D I S title and copy", () => {
   }
 });
 
-test("tui splash: any keystroke calls onDone immediately", async () => {
+test("tui splash: any keystroke calls onDone immediately (after grace)", async () => {
   let done = false;
   const { stdin, unmount } = render(
     createElement(Splash, {
       onDone: () => { done = true; },
       durationMs: 99_999,
       runChecks: okChecks,
+      inputGraceMs: 0,
     }),
   );
   try {
     stdin.write("x");
-    // Allow Ink's input loop one tick to deliver the keystroke.
     await new Promise((r) => setTimeout(r, 80));
     assert.equal(done, true, "onDone must fire on a keystroke");
   } finally {
@@ -54,6 +55,7 @@ test("tui splash: failing checks do not block onDone — timer still fires", asy
       onDone: () => { done = true; },
       durationMs: 60,
       runChecks: failingChecks,
+      inputGraceMs: 0,
     }),
   );
   try {
@@ -71,6 +73,7 @@ test("tui splash: onDone fires at most once across timer + keystroke race", asyn
       onDone: () => { count += 1; },
       durationMs: 50,
       runChecks: okChecks,
+      inputGraceMs: 0,
     }),
   );
   try {
@@ -80,4 +83,51 @@ test("tui splash: onDone fires at most once across timer + keystroke race", asyn
   } finally {
     unmount();
   }
+});
+
+test("tui splash: input during grace window is ignored, accepted after", async () => {
+  let done = false;
+  const { stdin, unmount } = render(
+    createElement(Splash, {
+      onDone: () => { done = true; },
+      durationMs: 99_999,
+      runChecks: okChecks,
+      inputGraceMs: 100,
+    }),
+  );
+  try {
+    // Within grace — must NOT skip (mirrors the raw-mode startup
+    // noise that was dismissing the live splash).
+    stdin.write("x");
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(done, false, "input within grace window must be ignored");
+
+    // Past grace — same key now fires.
+    await new Promise((r) => setTimeout(r, 120));
+    stdin.write("x");
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(done, true, "input after grace window must fire onDone");
+  } finally {
+    unmount();
+  }
+});
+
+test("isMeaningfulInput: empty input with no key flags is treated as noise", () => {
+  // The exact shape Ink produces for terminal probe responses /
+  // unparseable escape fragments — see use-input.js lines 91-99.
+  assert.equal(isMeaningfulInput("", {}), false, "empty input with no flags is noise");
+  assert.equal(isMeaningfulInput("", { ctrl: false }), false, "explicit-false flags are noise");
+});
+
+test("isMeaningfulInput: any printable input is meaningful", () => {
+  assert.equal(isMeaningfulInput("x", {}), true);
+  assert.equal(isMeaningfulInput(" ", {}), true);
+  assert.equal(isMeaningfulInput("abc", {}), true, "pasted strings are meaningful");
+});
+
+test("isMeaningfulInput: explicit key flags are meaningful even with empty input", () => {
+  assert.equal(isMeaningfulInput("", { return: true }), true);
+  assert.equal(isMeaningfulInput("", { escape: true }), true);
+  assert.equal(isMeaningfulInput("", { upArrow: true }), true);
+  assert.equal(isMeaningfulInput("", { ctrl: true }), true);
 });

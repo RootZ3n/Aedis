@@ -20,6 +20,7 @@ import { Box, Text, useInput } from "ink";
 
 const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://localhost:18796";
 const DEFAULT_DURATION_MS = 1000;
+const INPUT_GRACE_MS = 150;
 
 const TITLE = "A   E   D   I   S";
 const TAGLINE = "governed AI build orchestration";
@@ -36,6 +37,32 @@ export interface SplashProps {
   readonly durationMs?: number;
   /** Override the live readiness probe — used by tests. */
   readonly runChecks?: () => Promise<SplashChecks>;
+  /**
+   * How long after mount input is ignored. Absorbs raw-mode startup
+   * noise (terminal probe responses, escape-prefixed fragments)
+   * which otherwise dismiss the splash before it visibly renders.
+   * Tests override this to 0 when they want immediate input.
+   */
+  readonly inputGraceMs?: number;
+}
+
+/**
+ * Ink fires `useInput` for every parsed keypress, including ones
+ * with empty `input` and no key flag — see node_modules/ink/build/
+ * hooks/use-input.js where `input` is set to '' for non-alphanumeric
+ * keys and stripped escape fragments. Treat those as noise so the
+ * splash isn't dismissed by terminal startup probes.
+ */
+export function isMeaningfulInput(
+  input: string,
+  key: { return?: boolean; escape?: boolean; tab?: boolean; backspace?: boolean; delete?: boolean; upArrow?: boolean; downArrow?: boolean; leftArrow?: boolean; rightArrow?: boolean; pageUp?: boolean; pageDown?: boolean; ctrl?: boolean; meta?: boolean },
+): boolean {
+  if (input && input.length > 0) return true;
+  return Boolean(
+    key.return || key.escape || key.tab || key.backspace || key.delete ||
+    key.upArrow || key.downArrow || key.leftArrow || key.rightArrow ||
+    key.pageUp || key.pageDown || key.ctrl || key.meta,
+  );
 }
 
 async function liveChecks(): Promise<SplashChecks> {
@@ -68,9 +95,11 @@ export function Splash({
   onDone,
   durationMs = DEFAULT_DURATION_MS,
   runChecks = liveChecks,
+  inputGraceMs = INPUT_GRACE_MS,
 }: SplashProps) {
   const [checks, setChecks] = useState<SplashChecks>({ apiOk: null, workersReady: null });
   const finishedRef = useRef(false);
+  const mountedAtRef = useRef<number>(Date.now());
 
   const finish = (): void => {
     if (finishedRef.current) return;
@@ -79,6 +108,7 @@ export function Splash({
   };
 
   useEffect(() => {
+    mountedAtRef.current = Date.now();
     let alive = true;
     runChecks()
       .then((c) => { if (alive) setChecks(c); })
@@ -89,7 +119,11 @@ export function Splash({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useInput(() => { finish(); });
+  useInput((input, key) => {
+    if (Date.now() - mountedAtRef.current < inputGraceMs) return;
+    if (!isMeaningfulInput(input, key)) return;
+    finish();
+  });
 
   const apiLabel = checks.apiOk === null ? "checking…" : checks.apiOk ? "connected" : "disconnected";
   const apiColor = checks.apiOk === null ? undefined : checks.apiOk ? "green" : "red";

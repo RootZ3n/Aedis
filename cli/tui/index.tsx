@@ -1,14 +1,6 @@
-import { useState } from "react";
 import { render } from "ink";
 
-import { RunsScreen } from "./screens/runs.js";
-import { Splash } from "./components/Splash.js";
-
-function App({ noSplash }: { noSplash: boolean }) {
-  const [showSplash, setShowSplash] = useState(!noSplash);
-  if (showSplash) return <Splash onDone={() => setShowSplash(false)} />;
-  return <RunsScreen />;
-}
+import { App } from "./app.js";
 
 const noSplash = process.argv.includes("--no-splash");
 const instance = render(<App noSplash={noSplash} />);
