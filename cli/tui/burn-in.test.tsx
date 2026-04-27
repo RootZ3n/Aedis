@@ -24,6 +24,64 @@ const emptySummary = (path: string): BurnSuiteSummary =>
 
 const noopRunner: BurnRunner = () => ({ stop: () => {} });
 
+// ─── Summary banner ─────────────────────────────────────────────────
+
+test("burn-in: summary banner shows combined totals + avg cost + top failure", () => {
+  const sample: BurnSuiteSummary = summariseRows(
+    SOFT_RESULTS_PATH,
+    [
+      { scenarioId: "s1", verdict: "PASS",  status: null, classification: null, costUsd: 0.10, durationMs: 1000, timestamp: null, failureCode: null, failureReason: null },
+      { scenarioId: "s2", verdict: "FAIL",  status: null, classification: null, costUsd: 0.05, durationMs: 2000, timestamp: null, failureCode: "EXECUTION_ERROR", failureReason: null },
+      { scenarioId: "s3", verdict: "FAIL",  status: null, classification: null, costUsd: 0.05, durationMs: 2000, timestamp: null, failureCode: "EXECUTION_ERROR", failureReason: null },
+      { scenarioId: "s4", verdict: "TIMEOUT", status: null, classification: null, costUsd: null, durationMs: 8000, timestamp: null, failureCode: "timeout", failureReason: null },
+    ],
+    true,
+    "2026-04-27T03:00:00.000Z",
+    0,
+  );
+  const loadSummary = (p: string): BurnSuiteSummary =>
+    p === SOFT_RESULTS_PATH ? sample : emptySummary(p);
+  const { lastFrame, unmount } = render(
+    createElement(BurnInScreen, {
+      onExit: () => {},
+      runner: noopRunner,
+      loadSummary,
+      tickMs: 0,
+    }),
+  );
+  try {
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /Burn-in:.*4 scenarios/, "banner shows total scenario count");
+    assert.match(frame, /1 pass/);
+    assert.match(frame, /2 fail/);
+    assert.match(frame, /1 timeout/);
+    // avg = 0.20 / 4 = 0.05
+    assert.match(frame, /avg \$0\.0500\/scenario/);
+    assert.match(frame, /top failure:/);
+    assert.match(frame, /EXECUTION_ERROR/);
+    assert.match(frame, /\(2×\)/, "top-failure count must render");
+  } finally {
+    unmount();
+  }
+});
+
+test("burn-in: summary banner degrades gracefully when there are no scenarios", () => {
+  const { lastFrame, unmount } = render(
+    createElement(BurnInScreen, {
+      onExit: () => {},
+      runner: noopRunner,
+      loadSummary: emptySummary,
+      tickMs: 0,
+    }),
+  );
+  try {
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /Burn-in: no scenarios recorded yet/);
+  } finally {
+    unmount();
+  }
+});
+
 // ─── Empty state ────────────────────────────────────────────────────
 
 test("burn-in: empty state shows 'No results yet' for both suites", () => {
@@ -65,6 +123,8 @@ test("burn-in: renders parsed summary stats from injected loader", () => {
         costUsd: 0.0123,
         durationMs: 10_000,
         timestamp: "2026-04-27T02:28:14.682Z",
+        failureCode: null,
+        failureReason: null,
       },
       {
         scenarioId: "burn-in-02",
@@ -74,6 +134,8 @@ test("burn-in: renders parsed summary stats from injected loader", () => {
         costUsd: 0.05,
         durationMs: 5_000,
         timestamp: "2026-04-27T02:30:00.000Z",
+        failureCode: "EXECUTION_ERROR",
+        failureReason: null,
       },
     ],
     true,

@@ -22,7 +22,9 @@ import { spawn } from "node:child_process";
 import {
   HARD_RESULTS_PATH,
   SOFT_RESULTS_PATH,
+  type BurnCombinedSummary,
   type BurnSuiteSummary,
+  combineSummaries,
   formatDurationMs,
   readSuite,
 } from "../burn-results.js";
@@ -219,10 +221,19 @@ export function BurnInScreen({
   const hardConfirmActive =
     hardConfirmAt !== null && Date.now() - hardConfirmAt < HARD_CONFIRM_MS;
 
+  const combined = useMemo(
+    () => combineSummaries(softSummary, hardSummary),
+    [softSummary, hardSummary],
+  );
+
   return (
     <Box flexDirection="column">
       <Box>
         <Text bold color="cyan">Aedis TUI — Burn-in</Text>
+      </Box>
+
+      <Box marginTop={1}>
+        <CombinedSummaryBanner combined={combined} />
       </Box>
 
       <Box marginTop={1} flexDirection="row">
@@ -266,6 +277,35 @@ export function BurnInScreen({
 function runColor(running: RunningState): string {
   if (running.finishedAt === null) return "cyan";
   return running.exitCode === 0 ? "green" : "red";
+}
+
+function CombinedSummaryBanner({ combined }: { combined: BurnCombinedSummary }) {
+  if (combined.total === 0) {
+    return <Text dimColor>Burn-in: no scenarios recorded yet.</Text>;
+  }
+  const { total, pass, fail, error, timeout, avgCostUsd, topFailureReason } = combined;
+  return (
+    <Box flexDirection="column">
+      <Text>
+        <Text bold>Burn-in: </Text>
+        {total} scenarios  •{" "}
+        <Text color="green">{pass} pass</Text>{" "}/
+        {" "}<Text color="red">{fail} fail</Text>{" "}/
+        {" "}<Text color="magenta">{error} err</Text>{" "}/
+        {" "}<Text color="yellow">{timeout} timeout</Text>{" "}•{" "}
+        avg ${avgCostUsd.toFixed(4)}/scenario
+      </Text>
+      <Text>
+        <Text dimColor>top failure: </Text>
+        {topFailureReason
+          ? <>
+              <Text color="red">{topFailureReason.reason}</Text>
+              <Text dimColor> ({topFailureReason.count}×)</Text>
+            </>
+          : <Text dimColor>none</Text>}
+      </Text>
+    </Box>
+  );
 }
 
 function SuiteSummaryView({ summary }: { summary: BurnSuiteSummary }) {

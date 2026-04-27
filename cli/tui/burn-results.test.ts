@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  combineSummaries,
   formatDurationMs,
   parseJsonl,
   parseRow,
   readSuite,
   summariseRows,
+  topFailureReason,
   type BurnSuiteSummary,
 } from "./burn-results.js";
 
@@ -110,6 +112,98 @@ test("formatDurationMs renders compact human strings", () => {
   assert.equal(formatDurationMs(75_000), "1m15s");
   assert.equal(formatDurationMs(3_600_000), "1h");
   assert.equal(formatDurationMs(3_660_000), "1h1m");
+});
+
+test("parseRow extracts failureCode and falls back through error fields for reason", () => {
+  // Hard harness: errors[] array
+  const hardRow = parseRow({
+    scenarioId: "h-1",
+    status_: "FAIL",
+    failureCode: "EXECUTION_ERROR",
+    errors: ["builder timed out after 8m"],
+  });
+  assert.ok(hardRow);
+  assert.equal(hardRow.failureCode, "EXECUTION_ERROR");
+  assert.equal(hardRow.failureReason, "builder timed out after 8m");
+
+  // Soft harness: error string + failureRootCause
+  const softRow = parseRow({
+    scenarioId: "s-1",
+    status_: "ERROR",
+    failureRootCause: "Timeout waiting for run",
+    error: "Error: ECONNREFUSED",
+  });
+  assert.ok(softRow);
+  // failureRootCause must win over the raw error string.
+  assert.equal(softRow.failureReason, "Timeout waiting for run");
+});
+
+test("topFailureReason ignores PASS/BLOCKED rows and prefers failureCode", () => {
+  const rows = [
+    { scenarioId: "a", verdict: "FAIL" as const, status: null, classification: null, costUsd: null, durationMs: null, timestamp: null, failureCode: "EXECUTION_ERROR", failureReason: "x" },
+    { scenarioId: "b", verdict: "FAIL" as const, status: null, classification: null, costUsd: null, durationMs: null, timestamp: null, failureCode: "EXECUTION_ERROR", failureReason: "y" },
+    { scenarioId: "c", verdict: "TIMEOUT" as const, status: null, classification: null, costUsd: null, durationMs: null, timestamp: null, failureCode: "timeout", failureReason: null },
+    { scenarioId: "d", verdict: "PASS" as const, status: null, classification: null, costUsd: null, durationMs: null, timestamp: null, failureCode: "EXECUTION_ERROR", failureReason: "should-not-count" },
+    { scenarioId: "e", verdict: "BLOCKED" as const, status: null, classification: null, costUsd: null, durationMs: null, timestamp: null, failureCode: "BLOCKED", failureReason: "ambiguous" },
+  ];
+  const top = topFailureReason(rows);
+  assert.deepEqual(top, { reason: "EXECUTION_ERROR", count: 2 });
+});
+
+test("topFailureReason returns null when no failure rows have a reason", () => {
+  assert.equal(topFailureReason([]), null);
+  assert.equal(
+    topFailureReason([
+      { scenarioId: "a", verdict: "PASS", status: null, classification: null, costUsd: null, durationMs: null, timestamp: null, failureCode: null, failureReason: null },
+    ]),
+    null,
+  );
+});
+
+test("topFailureReason falls back to failureReason first line when failureCode is missing", () => {
+  const top = topFailureReason([
+    { scenarioId: "a", verdict: "ERROR", status: null, classification: null, costUsd: null, durationMs: null, timestamp: null, failureCode: null, failureReason: "ECONNREFUSED localhost:18796\nstack..." },
+  ]);
+  assert.ok(top);
+  assert.equal(top.reason, "ECONNREFUSED localhost:18796");
+});
+
+test("combineSummaries aggregates totals, computes avg cost, surfaces top failure", () => {
+  const soft = readSuite("/x", {
+    fileExists: () => true,
+    readFile: () =>
+      [
+        JSON.stringify({ scenarioId: "s1", status_: "PASS", costUsd: 0.10, durationMs: 1000 }),
+        JSON.stringify({ scenarioId: "s2", status_: "FAIL", failureCode: "EXECUTION_ERROR", costUsd: 0.05, durationMs: 2000 }),
+      ].join("\n"),
+    fileMtime: () => null,
+  });
+  const hard = readSuite("/y", {
+    fileExists: () => true,
+    readFile: () =>
+      [
+        JSON.stringify({ scenarioId: "h1", status_: "FAIL", failureCode: "EXECUTION_ERROR", costUsd: 0.15 }),
+        JSON.stringify({ scenarioId: "h2", status_: "TIMEOUT", failureCode: "timeout", costUsd: null }),
+      ].join("\n"),
+    fileMtime: () => null,
+  });
+  const combined = combineSummaries(soft, hard);
+  assert.equal(combined.total, 4);
+  assert.equal(combined.pass, 1);
+  assert.equal(combined.fail, 2);
+  assert.equal(combined.timeout, 1);
+  assert.ok(Math.abs(combined.totalCostUsd - 0.30) < 1e-9);
+  // avg = 0.30 / 4 = 0.075
+  assert.ok(Math.abs(combined.avgCostUsd - 0.075) < 1e-9);
+  assert.deepEqual(combined.topFailureReason, { reason: "EXECUTION_ERROR", count: 2 });
+});
+
+test("combineSummaries returns zero-everything for empty suites", () => {
+  const empty = summariseRows("/x", [], false, null, 0);
+  const combined = combineSummaries(empty, empty);
+  assert.equal(combined.total, 0);
+  assert.equal(combined.avgCostUsd, 0);
+  assert.equal(combined.topFailureReason, null);
 });
 
 test("summariseRows: empty rows produce zero-everything summary", () => {
