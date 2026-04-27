@@ -13,11 +13,14 @@ import { writeFileSync } from "node:fs";
 
 import {
   type BurnResultRow,
+  computeSummary,
   createFetchClient,
   DEFAULT_BURN_TIMEOUT_MS,
   filterScenarios,
+  formatSummaryBlock,
   resolveTimeoutMs,
   runScenarioOnce,
+  safeStr,
 } from "./harness.js";
 
 const TARGET = process.env["AEDIS_BASE"] ?? "http://localhost:18796";
@@ -209,28 +212,18 @@ async function main(): Promise<void> {
     });
     results.push(r);
     const cost = r.costUsd != null ? ` $${r.costUsd.toFixed(4)}` : "";
-    const cleanup = r.cleanup === "none" ? "" : ` cleanup=${r.cleanup}(${r.cleanupOk ? "ok" : "fail"})`;
+    const cleanup = r.cleanup === "none" ? "" : ` cleanup=${safeStr(r.cleanup)}(${r.cleanupOk ? "ok" : "fail"})`;
     console.log(
-      `${r.verdict} | ${r.status ?? "?"} | phase=${r.phase ?? "—"} | ${r.filesChanged} files | ${r.durationMs}ms${cost}${cleanup}`,
+      `${safeStr(r.verdict)} | ${safeStr(r.status, "?")} | phase=${safeStr(r.phase)} | ${r.filesChanged ?? 0} files | ${r.durationMs ?? 0}ms${cost}${cleanup}`,
     );
-    if (r.errors.length > 0) console.log(`       ↳ ${r.errors[0].slice(0, 120)}`);
+    const errors = Array.isArray(r.errors) ? r.errors : [];
+    if (errors.length > 0) console.log(`       ↳ ${safeStr(errors[0]).slice(0, 120)}`);
     writeFileSync(RESULTS_FILE, JSON.stringify(r) + "\n", { flag: "a" });
     await new Promise((res) => setTimeout(res, 2000));
   }
 
-  const totalCost = results.reduce((s, r) => s + (r.costUsd ?? 0), 0);
-  const buckets = { PASS: 0, FAIL: 0, ERROR: 0, TIMEOUT: 0, SAFE_FAILURE: 0, PENDING_APPROVAL: 0, BLOCKED: 0 };
-  for (const r of results) {
-    buckets[r.verdict as keyof typeof buckets] = (buckets[r.verdict as keyof typeof buckets] ?? 0) + 1;
-  }
-
-  console.log(`\n─────────────────────────────────────────────────────────────`);
-  console.log(
-    `🔥 BURN-IN DONE: ${activeScenarios.length} scenarios | pass=${buckets.PASS} fail=${buckets.FAIL} ` +
-      `err=${buckets.ERROR} timeout=${buckets.TIMEOUT} safe=${buckets.SAFE_FAILURE} ` +
-      `pending=${buckets.PENDING_APPROVAL} blocked=${buckets.BLOCKED} | $${totalCost.toFixed(4)}`,
-  );
-  console.log(`─────────────────────────────────────────────────────────────`);
+  const summary = computeSummary(results);
+  console.log(formatSummaryBlock(summary));
   console.log(`Results: ${RESULTS_FILE}`);
 }
 

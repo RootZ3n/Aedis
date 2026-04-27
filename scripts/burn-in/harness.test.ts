@@ -3,15 +3,22 @@ import assert from "node:assert/strict";
 
 import {
   type BurnHttpClient,
+  type BurnResultRow,
   type JsonResponse,
   type RunDetail,
   classifyOutcome,
+  computeSummary,
   filterScenarios,
   formatProgressLine,
+  formatSummaryBlock,
   isTerminal,
+  normaliseBurnRow,
+  parseJsonlRows,
   pollUntilTerminal,
   resolveTimeoutMs,
   runScenarioOnce,
+  safePad,
+  safeStr,
   summariseDetail,
 } from "./harness.js";
 
@@ -445,6 +452,115 @@ test("filterScenarios: unknown scenario exits nonzero", () => {
 test("filterScenarios: no --scenario flag returns all scenarios", () => {
   const result = filterScenarios(SAMPLE_SCENARIOS, ["node", "test.ts"]);
   assert.equal(result.length, SAMPLE_SCENARIOS.length);
+});
+
+// ─── safePad / safeStr never throw ───────────────────────────────────
+
+test("safePad never throws on undefined/null/number", () => {
+  assert.equal(safePad(undefined, 10), "—         ");
+  assert.equal(safePad(null, 10), "—         ");
+  assert.equal(safePad(42, 10), "42        ");
+  assert.equal(safePad("PASS", 10), "PASS      ");
+});
+
+test("safeStr returns fallback for null/undefined", () => {
+  assert.equal(safeStr(undefined), "—");
+  assert.equal(safeStr(null, "n/a"), "n/a");
+  assert.equal(safeStr("hello"), "hello");
+  assert.equal(safeStr(0), "0");
+});
+
+// ─── parseJsonlRows — defensive JSONL parsing ───────────────────────
+
+test("parseJsonlRows: skips malformed lines without crashing", () => {
+  const text = [
+    '{"scenarioId":"s1","verdict":"PASS","costUsd":0.05,"durationMs":1000}',
+    "this is not json",
+    '{"broken',
+    "",
+    '{"scenarioId":"s2","verdict":"FAIL","costUsd":0.10,"durationMs":2000}',
+  ].join("\n");
+  const { rows, parseErrors } = parseJsonlRows(text);
+  assert.equal(rows.length, 2);
+  assert.equal(parseErrors, 2);
+  assert.equal(rows[0].scenarioId, "s1");
+  assert.equal(rows[1].scenarioId, "s2");
+});
+
+test("parseJsonlRows: empty text returns empty rows, zero errors", () => {
+  const { rows, parseErrors } = parseJsonlRows("");
+  assert.equal(rows.length, 0);
+  assert.equal(parseErrors, 0);
+});
+
+// ─── normaliseBurnRow — missing fields get safe defaults ─────────────
+
+test("normaliseBurnRow: missing fields get safe defaults", () => {
+  const row = normaliseBurnRow({});
+  assert.equal(row.scenarioId, "unknown");
+  assert.equal(row.verdict, "ERROR");
+  assert.equal(row.costUsd, 0);
+  assert.equal(row.durationMs, 0);
+  assert.equal(row.filesChanged, 0);
+  assert.equal(row.status, null);
+  assert.equal(row.classification, null);
+  assert.deepEqual(row.errors, []);
+  assert.deepEqual(row.notes, []);
+});
+
+test("normaliseBurnRow: preserves valid fields", () => {
+  const row = normaliseBurnRow({
+    scenarioId: "s1",
+    verdict: "PASS",
+    costUsd: 0.05,
+    durationMs: 3000,
+    filesChanged: 2,
+    status: "PROMOTED",
+    classification: "SUCCESS",
+    notes: ["note1"],
+    errors: ["err1"],
+  });
+  assert.equal(row.scenarioId, "s1");
+  assert.equal(row.verdict, "PASS");
+  assert.equal(row.costUsd, 0.05);
+  assert.equal(row.durationMs, 3000);
+  assert.equal(row.filesChanged, 2);
+  assert.equal(row.status, "PROMOTED");
+  assert.deepEqual(row.notes, ["note1"]);
+});
+
+// ─── computeSummary + formatSummaryBlock ─────────────────────────────
+
+test("computeSummary: counts are correct", () => {
+  const rows: BurnResultRow[] = [
+    normaliseBurnRow({ verdict: "PASS", costUsd: 0.10, durationMs: 5000 }),
+    normaliseBurnRow({ verdict: "PASS", costUsd: 0.20, durationMs: 3000 }),
+    normaliseBurnRow({ verdict: "FAIL", costUsd: 0.05, durationMs: 2000 }),
+    normaliseBurnRow({ verdict: "SAFE_FAILURE", costUsd: 0, durationMs: 1000 }),
+    normaliseBurnRow({ verdict: "TIMEOUT", costUsd: 0.15, durationMs: 900000 }),
+    normaliseBurnRow({ verdict: "ERROR", costUsd: 0, durationMs: 500 }),
+  ];
+  const s = computeSummary(rows, 1);
+  assert.equal(s.total, 6);
+  assert.equal(s.pass, 2);
+  assert.equal(s.fail, 1);
+  assert.equal(s.safeFail, 1);
+  assert.equal(s.timeout, 1);
+  assert.equal(s.error, 1);
+  assert.equal(s.parseErrors, 1);
+  assert.ok(s.avgCostUsd > 0);
+  assert.ok(s.avgDurationSec > 0);
+});
+
+test("formatSummaryBlock: contains expected labels", () => {
+  const s = computeSummary([
+    normaliseBurnRow({ verdict: "PASS", costUsd: 0.10, durationMs: 5000 }),
+  ]);
+  const block = formatSummaryBlock(s);
+  assert.match(block, /Total:\s+1 scenarios/);
+  assert.match(block, /PASS:\s+1/);
+  assert.match(block, /Avg cost:/);
+  assert.match(block, /Avg duration:/);
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────

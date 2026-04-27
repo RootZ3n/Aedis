@@ -18,11 +18,16 @@ import { readFileSync, appendFileSync, existsSync } from "node:fs";
 
 import {
   type BurnResultRow,
+  computeSummary,
   createFetchClient,
   DEFAULT_BURN_TIMEOUT_MS,
   filterScenarios,
+  formatSummaryBlock,
+  parseJsonlRows,
   resolveTimeoutMs,
   runScenarioOnce,
+  safePad,
+  safeStr,
 } from "./harness.js";
 
 const AEDIS_BASE = process.env["AEDIS_BASE"] ?? "http://localhost:18796";
@@ -159,29 +164,19 @@ function summariseResults(): void {
     console.log("\nNo results yet.\n");
     return;
   }
-  const lines = readFileSync(RESULTS_FILE, "utf-8").split("\n").filter(Boolean);
-  const results: BurnResultRow[] = lines.map((l) => JSON.parse(l) as BurnResultRow);
-  const buckets = { PASS: 0, FAIL: 0, ERROR: 0, TIMEOUT: 0, SAFE_FAILURE: 0, PENDING_APPROVAL: 0, BLOCKED: 0 };
-  let totalCost = 0;
+  const text = readFileSync(RESULTS_FILE, "utf-8");
+  const { rows: results, parseErrors } = parseJsonlRows(text);
+  const summary = computeSummary(results, parseErrors);
+  console.log(formatSummaryBlock(summary));
   for (const r of results) {
-    buckets[r.verdict as keyof typeof buckets] = (buckets[r.verdict as keyof typeof buckets] ?? 0) + 1;
-    totalCost += r.costUsd ?? 0;
-  }
-  console.log(`\n${"─".repeat(70)}`);
-  console.log(
-    `BURN-IN SUMMARY: ${results.length} scenarios | pass=${buckets.PASS} fail=${buckets.FAIL} ` +
-      `err=${buckets.ERROR} timeout=${buckets.TIMEOUT} safe=${buckets.SAFE_FAILURE} ` +
-      `pending=${buckets.PENDING_APPROVAL} blocked=${buckets.BLOCKED} | $${totalCost.toFixed(4)}`,
-  );
-  console.log(`${"─".repeat(70)}`);
-  for (const r of results) {
-    const cost = r.costUsd?.toFixed(4) ?? "?.????";
+    const cost = typeof r.costUsd === "number" ? r.costUsd.toFixed(4) : "?.????";
     console.log(
-      `  ${r.verdict.padEnd(16)} ${r.scenarioId.padEnd(38)} ${(r.status ?? "?").padEnd(22)} $${cost}`,
+      `  ${safePad(r.verdict, 16)} ${safePad(r.scenarioId, 38)} ${safePad(r.status, 22)} $${cost}`,
     );
-    if (r.notes.length > 0) for (const n of r.notes) console.log(`     └─ ${n}`);
+    const notes = Array.isArray(r.notes) ? r.notes : [];
+    if (notes.length > 0) for (const n of notes) console.log(`     └─ ${n}`);
   }
-  console.log(`${"─".repeat(70)}\n`);
+  console.log(`${"─".repeat(50)}\n`);
 }
 
 async function main(): Promise<void> {

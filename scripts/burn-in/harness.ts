@@ -626,6 +626,147 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
   });
 }
 
+// ─── Safe string formatting ──────────────────────────────────────────
+
+/** Convert any value to a display string — never throws. */
+export function safeStr(v: unknown, fallback = "—"): string {
+  if (v === null || v === undefined) return fallback;
+  return String(v);
+}
+
+/** Safe padEnd — converts to string first, never throws. */
+export function safePad(v: unknown, width: number, fallback = "—"): string {
+  return safeStr(v, fallback).padEnd(width);
+}
+
+// ─── JSONL parsing ───────────────────────────────────────────────────
+
+export interface ParsedJsonl<T> {
+  readonly rows: T[];
+  readonly parseErrors: number;
+}
+
+/**
+ * Parse JSONL text into rows. Never throws — malformed lines are
+ * counted as parseErrors and skipped.
+ */
+export function parseJsonlRows(text: string): ParsedJsonl<BurnResultRow> {
+  const rows: BurnResultRow[] = [];
+  let parseErrors = 0;
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    try {
+      const obj = JSON.parse(line) as Record<string, unknown>;
+      rows.push(normaliseBurnRow(obj));
+    } catch {
+      parseErrors += 1;
+    }
+  }
+  return { rows, parseErrors };
+}
+
+/** Ensure all expected BurnResultRow fields have safe defaults. */
+export function normaliseBurnRow(raw: Record<string, unknown>): BurnResultRow {
+  return {
+    scenarioId: safeStr(raw["scenarioId"], "unknown"),
+    timestamp: safeStr(raw["timestamp"], new Date().toISOString()),
+    prompt: safeStr(raw["prompt"], ""),
+    repo: safeStr(raw["repo"], ""),
+    submitted: Boolean(raw["submitted"]),
+    taskId: safeStr(raw["taskId"], ""),
+    runId: safeStr(raw["runId"], ""),
+    status: typeof raw["status"] === "string" ? raw["status"] : null,
+    phase: typeof raw["phase"] === "string" ? raw["phase"] : null,
+    classification: typeof raw["classification"] === "string" ? raw["classification"] : null,
+    verdict: (safeStr(raw["verdict"], "ERROR") as BurnVerdict | "TIMEOUT"),
+    status_: (safeStr(raw["status_"] ?? raw["verdict"], "ERROR") as BurnVerdict | "TIMEOUT"),
+    costUsd: typeof raw["costUsd"] === "number" ? raw["costUsd"] : 0,
+    durationMs: typeof raw["durationMs"] === "number" ? raw["durationMs"] : 0,
+    filesChanged: typeof raw["filesChanged"] === "number" ? raw["filesChanged"] : 0,
+    failureCode: typeof raw["failureCode"] === "string" ? raw["failureCode"] : null,
+    failureRootCause: typeof raw["failureRootCause"] === "string" ? raw["failureRootCause"] : null,
+    narrative: typeof raw["narrative"] === "string" ? raw["narrative"] : null,
+    errors: Array.isArray(raw["errors"]) ? raw["errors"].filter((e): e is string => typeof e === "string") : [],
+    cleanup: (safeStr(raw["cleanup"], "none") as BurnResultRow["cleanup"]),
+    cleanupOk: typeof raw["cleanupOk"] === "boolean" ? raw["cleanupOk"] : null,
+    timedOut: Boolean(raw["timedOut"]),
+    fetchError: typeof raw["fetchError"] === "string" ? raw["fetchError"] : null,
+    notes: Array.isArray(raw["notes"]) ? raw["notes"].filter((n): n is string => typeof n === "string") : [],
+    error: typeof raw["error"] === "string" ? raw["error"] : null,
+  };
+}
+
+// ─── Summary formatting ─────────────────────────────────────────────
+
+export interface BurnSummaryBlock {
+  total: number;
+  pass: number;
+  fail: number;
+  safeFail: number;
+  timeout: number;
+  error: number;
+  blocked: number;
+  pendingApproval: number;
+  avgCostUsd: number;
+  avgDurationSec: number;
+  parseErrors: number;
+}
+
+export function computeSummary(rows: readonly BurnResultRow[], parseErrors = 0): BurnSummaryBlock {
+  const buckets: Record<string, number> = {
+    PASS: 0, FAIL: 0, SAFE_FAILURE: 0, TIMEOUT: 0, ERROR: 0, BLOCKED: 0, PENDING_APPROVAL: 0,
+  };
+  let totalCost = 0;
+  let totalDuration = 0;
+  for (const r of rows) {
+    const v = safeStr(r.verdict, "ERROR");
+    buckets[v] = (buckets[v] ?? 0) + 1;
+    totalCost += r.costUsd ?? 0;
+    totalDuration += r.durationMs ?? 0;
+  }
+  const n = rows.length || 1;
+  return {
+    total: rows.length,
+    pass: buckets["PASS"] ?? 0,
+    fail: buckets["FAIL"] ?? 0,
+    safeFail: buckets["SAFE_FAILURE"] ?? 0,
+    timeout: buckets["TIMEOUT"] ?? 0,
+    error: buckets["ERROR"] ?? 0,
+    blocked: buckets["BLOCKED"] ?? 0,
+    pendingApproval: buckets["PENDING_APPROVAL"] ?? 0,
+    avgCostUsd: totalCost / n,
+    avgDurationSec: totalDuration / n / 1000,
+    parseErrors,
+  };
+}
+
+export function formatSummaryBlock(s: BurnSummaryBlock): string {
+  const lines: string[] = [
+    "",
+    "─".repeat(50),
+    "BURN-IN SUMMARY",
+    "─".repeat(50),
+    `Total:        ${s.total} scenarios`,
+    `PASS:         ${s.pass}`,
+    `FAIL:         ${s.fail}`,
+    `SAFE_FAILURE: ${s.safeFail}`,
+    `TIMEOUT:      ${s.timeout}`,
+    `ERROR:        ${s.error}`,
+    `BLOCKED:      ${s.blocked}`,
+    `PENDING:      ${s.pendingApproval}`,
+    "",
+    `Avg cost:     $${s.avgCostUsd.toFixed(2)}`,
+    `Avg duration: ${s.avgDurationSec.toFixed(1)}s`,
+  ];
+  if (s.parseErrors > 0) {
+    lines.push(`Parse errors: ${s.parseErrors}`);
+  }
+  lines.push("─".repeat(50));
+  lines.push("");
+  return lines.join("\n");
+}
+
 // ─── Config helpers ──────────────────────────────────────────────────
 
 export const DEFAULT_BURN_TIMEOUT_MS = 900_000; // 15 min
