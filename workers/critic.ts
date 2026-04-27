@@ -230,8 +230,10 @@ export class CriticWorker extends AbstractWorker {
       const heuristicComments = this.toComments(heuristicIssues, changes[0]?.path ?? assignment.task.targetFiles[0] ?? "unknown");
 
       // Model review via fallback-aware invoker.
-      // The model call only runs when there's a contract — heuristic-only
-      // reviews skip the model entirely (and report zero model cost).
+      // The model call only runs when there's a contract AND this is not
+      // a fast-path trivial edit. Fast-path runs skip the model entirely
+      // (heuristic-only critic) to reduce pipeline cost while still
+      // enforcing scope drift, forbidden changes, and other safety checks.
       let rawModelReview: string | undefined;
       let modelTokensIn = 0;
       let modelTokensOut = 0;
@@ -240,7 +242,10 @@ export class CriticWorker extends AbstractWorker {
       let usedProvider: Provider = primaryProvider as Provider;
       let fellBack = false;
 
-      if (contract) {
+      if (assignment.fastPath) {
+        console.log(`[critic] fast-path: skipping model review, heuristic-only`);
+        rawModelReview = "[critic_fast_path] heuristic-only review — trivial single-file edit";
+      } else if (contract) {
         const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment, primaryModel);
 
         // Read the per-repo declared chain from .aedis/model-config.json.

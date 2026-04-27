@@ -28,6 +28,7 @@ export function buildDispatchAssignment(input: {
    * abort. Optional so test harnesses without a coordinator can omit it.
    */
   signal?: AbortSignal;
+  fastPath?: boolean;
   buildAssignment: (
     decision: RoutingDecision,
     task: RunTask,
@@ -63,6 +64,7 @@ export function buildDispatchAssignment(input: {
     recentContext: input.recentContext,
     implementationBrief: input.implementationBrief,
     signal: input.signal,
+    ...(input.fastPath ? { fastPath: true } : {}),
   };
 }
 

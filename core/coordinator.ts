@@ -197,6 +197,7 @@ import {
 } from "./implementation-brief.js";
 import { tryDeterministicBuilder, type DeterministicBuilderResult } from "./code-transforms/deterministic-builder.js";
 import { runRepairAuditPass, type RepairAuditResult } from "./repair-audit-pass.js";
+import { isTrivialTask, type TrivialCheckResult } from "./trivial-task-detector.js";
 import { prepareTargetsForPrompt } from "./target-discovery.js";
 import {
   decideMerge,
@@ -1050,6 +1051,20 @@ export class Coordinator {
       console.warn("[coordinator] WARN: large scope detected — consider decomposing this task.");
     }
 
+    // ── Trivial Task Detection ──────────────────────────────────────
+    // Fast path for single-file comment/whitespace edits: skips
+    // decomposition overhead, limits scout scope, uses heuristic-only
+    // critic, drops integrator — but keeps verifier + typecheck.
+    const trivialCheck = isTrivialTask({
+      targets: charterTargets,
+      prompt: normalizedInput,
+      scopeEstimate: analysis.scopeEstimate,
+      riskSignals: analysis.riskSignals,
+    });
+    console.log(
+      `[coordinator] trivial-task-detector: isTrivial=${trivialCheck.isTrivial} reason="${trivialCheck.reason}"`,
+    );
+
     // GAP 3 — Architectural context gate: when scope is architectural,
     // build a repo-wide hub-file index and merge it into the gated
     // context so workers see the most-connected files regardless of
@@ -1347,9 +1362,15 @@ export class Coordinator {
       pendingDispatches: new Map<string, Promise<unknown>>(),
       rejectedCandidates: preparedTargets.rejected.map((entry) => ({ path: entry.path, reason: entry.reason })),
       userNamedStrippedTargets: [],
+      fastPath: false,
       runAbortController: new AbortController(),
     };
     this.activeRuns.set(run.id, active);
+
+    if (trivialCheck.isTrivial) {
+      active.fastPath = true;
+      console.log(`[coordinator] FAST PATH enabled — skipping integrator, heuristic-only critic`);
+    }
 
     if (active.confidenceDampening < 1.0) {
       console.log(`[coordinator] LEARNING: confidence dampening ${active.confidenceDampening.toFixed(2)} applied for task type (historical overconfidence)`);
@@ -2653,6 +2674,51 @@ export class Coordinator {
     const targetFiles = deliverables.flatMap((d) => d.targetFiles);
     console.log(`[coordinator] buildTaskGraph: total target files across deliverables = ${targetFiles.length}`);
 
+    // ── Fast Path Graph ─────────────────────────────────────────────
+    // Trivial single-file edits get a minimal graph:
+    //   Scout (limited) → Builder → Critic (heuristic-only) → Verifier
+    // No integrator, no escalation boundaries. Scope lock still
+    // enforced via critic heuristics + merge gate.
+    if (active.fastPath) {
+      console.log(`[coordinator] buildTaskGraph: FAST PATH — building minimal graph`);
+      const scoutNode = addNode(graph, {
+        label: "Scout: gather context (fast-path)",
+        workerType: "scout",
+        targetFiles,
+        metadata: { category: analysis.category, scopeEstimate: analysis.scopeEstimate, fastPath: true },
+      });
+
+      const deliverable = deliverables[0]!;
+      const builderNode = addNode(graph, {
+        label: `Build: ${deliverable.description}`,
+        workerType: "builder",
+        targetFiles: deliverable.targetFiles,
+        metadata: { deliverableType: deliverable.type, fastPath: true },
+      });
+      addEdge(graph, scoutNode.id, builderNode.id, "data");
+
+      const criticNode = addNode(graph, {
+        label: "Critic: heuristic review (fast-path)",
+        workerType: "critic",
+        targetFiles,
+        metadata: { fastPath: true },
+      });
+      addEdge(graph, builderNode.id, criticNode.id, "data");
+
+      const verifierNode = addNode(graph, {
+        label: "Verifier: tests, types, lint",
+        workerType: "verifier",
+        targetFiles,
+        metadata: { fastPath: true },
+      });
+      addEdge(graph, criticNode.id, verifierNode.id, "data");
+
+      markReady(graph, scoutNode.id);
+      console.log(`[coordinator] buildTaskGraph: FAST PATH complete — ${graph.nodes.length} node(s), ${graph.edges.length} edge(s)`);
+      return;
+    }
+
+    // ── Standard Graph ──────────────────────────────────────────────
     const scoutNode = addNode(graph, {
       label: "Scout: gather context and assess risk",
       workerType: "scout",
@@ -4566,6 +4632,7 @@ export class Coordinator {
       recentContext,
       implementationBrief: active.implementationBrief,
       signal: active.runAbortController.signal,
+      fastPath: active.fastPath || undefined,
       buildAssignment: (decision, task, intent, context, upstreamResults) =>
         this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),
     });
@@ -7813,6 +7880,12 @@ interface ActiveRun {
    * is a regression net for future filter changes.
    */
   userNamedStrippedTargets: string[];
+  /**
+   * When true, this run was detected as a trivial single-file edit and
+   * uses the fast execution path: no integrator, heuristic-only critic,
+   * limited scout scope. Verifier + typecheck still run.
+   */
+  fastPath: boolean;
   /**
    * Per-run AbortController. cancel(runId) calls .abort() on this so
    * in-flight provider HTTP requests are dropped immediately instead

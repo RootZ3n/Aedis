@@ -159,6 +159,12 @@ export interface WorkerAssignment {
    * every concurrent worker call.
    */
   readonly signal?: AbortSignal;
+  /**
+   * When true, this dispatch is part of a fast-path trivial edit run.
+   * Workers may reduce their work: Critic skips model review (heuristic-
+   * only), Scout limits scope. Verifier + typecheck still run fully.
+   */
+  readonly fastPath?: boolean;
 }
 
 export interface WorkerResult {
