@@ -16,6 +16,45 @@
 
 const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://localhost:18796";
 
+/**
+ * Lane id and workspace role mirror the server-side `Lane` and
+ * `WorkspaceRole` types in core/candidate.ts. Kept loose at the TUI
+ * boundary so an unknown future value (server adds a third role)
+ * still renders rather than crashing the dashboard.
+ */
+export type CandidateLane = "local" | "cloud";
+export type CandidateRole = "primary" | "shadow" | string;
+export type CandidateLaneMode =
+  | "primary_only"
+  | "local_then_cloud"
+  | "local_vs_cloud"
+  | "cloud_with_local_check"
+  | string;
+
+/**
+ * Per-candidate row exposed on the run detail. Mirrors the server's
+ * CandidateManifestEntry minus the workspace path and patch artifact.
+ * All fields besides `workspaceId / role / status` are optional so a
+ * legacy receipt (no candidates manifest) round-trips as `undefined`.
+ */
+export interface CandidateManifestRow {
+  readonly workspaceId: string;
+  readonly role: CandidateRole;
+  readonly lane?: CandidateLane;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly status: string;
+  readonly disqualification?: string | null;
+  readonly costUsd?: number;
+  readonly latencyMs?: number;
+  readonly verifierVerdict?: string | null;
+  readonly reason?: string;
+  readonly criticalFindings?: number;
+  readonly advisoryFindings?: number;
+  readonly testsPassed?: boolean;
+  readonly typecheckPassed?: boolean;
+}
+
 export interface RunListEntry {
   readonly id: string;
   readonly runId: string;
@@ -27,6 +66,15 @@ export interface RunListEntry {
   readonly confidence: number;
   readonly timestamp: string;
   readonly completedAt: string | null;
+  // ── Phase C additive fields ────────────────────────────────────────
+  // Surfaced when the server starts including them on /runs list
+  // entries. The TUI treats `undefined` as "single-lane / not
+  // applicable" and renders nothing extra, so legacy server responses
+  // keep working unchanged.
+  readonly laneMode?: CandidateLaneMode;
+  readonly candidatesCount?: number;
+  readonly selectedCandidateWorkspaceId?: string | null;
+  readonly selectedCandidateLane?: CandidateLane;
 }
 
 export interface SubmitResponse {
@@ -89,10 +137,55 @@ export interface RunDetailData {
   readonly confidence: unknown;
   readonly errors: readonly { source: string; message: string; suggestedFix?: string }[];
   readonly totalCostUsd: number;
+  // ── Phase C additive fields ────────────────────────────────────────
+  // Lifted from `receipt.{candidates, selectedCandidateWorkspaceId,
+  // laneMode}` by getRunDetail so screens can read them at the top
+  // level without poking at the raw receipt. Always optional —
+  // primary_only runs (and pre-Phase-B receipts) leave them undefined.
+  readonly laneMode?: CandidateLaneMode;
+  readonly candidates?: readonly CandidateManifestRow[];
+  readonly selectedCandidateWorkspaceId?: string | null;
+}
+
+interface ReceiptWithCandidates {
+  readonly candidates?: readonly CandidateManifestRow[];
+  readonly selectedCandidateWorkspaceId?: string | null;
+  readonly laneMode?: CandidateLaneMode;
+}
+
+interface RunDetailWire extends Omit<RunDetailData, "laneMode" | "candidates" | "selectedCandidateWorkspaceId"> {
+  readonly receipt?: unknown;
+  readonly laneMode?: CandidateLaneMode;
+  readonly candidates?: readonly CandidateManifestRow[];
+  readonly selectedCandidateWorkspaceId?: string | null;
+}
+
+/**
+ * Promote `receipt.candidates / receipt.selectedCandidateWorkspaceId /
+ * receipt.laneMode` to the top level so screens can stay decoupled
+ * from the raw finalReceipt shape. Defensive — accepts top-level
+ * fields too in case the server ever surfaces them directly.
+ */
+function liftCandidateFields(wire: RunDetailWire): RunDetailData {
+  const receipt = wire.receipt as ReceiptWithCandidates | null | undefined;
+  const candidates = wire.candidates ?? receipt?.candidates;
+  const selectedCandidateWorkspaceId =
+    wire.selectedCandidateWorkspaceId ?? receipt?.selectedCandidateWorkspaceId;
+  const laneMode = wire.laneMode ?? receipt?.laneMode;
+  // Strip the raw `receipt` field on the way out — RunDetailData
+  // doesn't expose it and screens never read it directly.
+  const { receipt: _drop, ...rest } = wire as RunDetailWire & { receipt?: unknown };
+  return {
+    ...(rest as RunDetailData),
+    ...(laneMode !== undefined ? { laneMode } : {}),
+    ...(candidates !== undefined ? { candidates } : {}),
+    ...(selectedCandidateWorkspaceId !== undefined ? { selectedCandidateWorkspaceId } : {}),
+  };
 }
 
 export async function getRunDetail(runId: string): Promise<RunDetailData> {
-  return fetchJson<RunDetailData>(`/runs/${encodeURIComponent(runId)}`);
+  const wire = await fetchJson<RunDetailWire>(`/runs/${encodeURIComponent(runId)}`);
+  return liftCandidateFields(wire);
 }
 
 export async function approveRun(runId: string): Promise<unknown> {

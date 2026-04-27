@@ -46,6 +46,41 @@ export function isApprovableStatus(status: string): boolean {
 }
 
 /**
+ * Compact dashboard lane tag for runs that exposed candidate
+ * metadata. Returns `null` for legacy / single-lane runs so the row
+ * stays unchanged. Pure / exported so the test suite can pin the
+ * exact strings rendered next to each run.
+ *
+ * Shape:
+ *   primary_only         → null (no extra signal)
+ *   local_then_cloud     → `[L→C 2c sel:shadow-1]`
+ *   local_vs_cloud       → `[L|C 2c sel:primary]`
+ *   cloud_with_local_check → `[C+L 2c sel:primary]`
+ *   any other lane mode  → `[<mode> Nc]`
+ */
+export function formatLaneIndicator(r: RunListEntry): string | null {
+  const mode = r.laneMode;
+  if (!mode || mode === "primary_only") return null;
+  // Any non-primary mode is interesting only when at least one
+  // candidate showed up. `candidatesCount === 0` means the policy
+  // never produced an outcome (e.g. early exit) — render as a
+  // neutral mode-only tag rather than a misleading count.
+  const count = typeof r.candidatesCount === "number" && r.candidatesCount > 0
+    ? `${r.candidatesCount}c`
+    : "";
+  const sel = r.selectedCandidateWorkspaceId
+    ? `sel:${r.selectedCandidateWorkspaceId}`
+    : "";
+  const modeShort =
+    mode === "local_then_cloud" ? "L→C"
+    : mode === "local_vs_cloud" ? "L|C"
+    : mode === "cloud_with_local_check" ? "C+L"
+    : mode;
+  const parts = [modeShort, count, sel].filter((s) => s.length > 0);
+  return `[${parts.join(" ")}]`;
+}
+
+/**
  * Default filter: all non-terminal runs + the most recent
  * `terminalLimit` terminal runs. Order is preserved from the API,
  * which returns newest-first.
@@ -328,12 +363,14 @@ export function RunsScreen({
                   : isTerminalStatus(r.status)
                     ? "gray"
                     : "cyan";
+            const laneTag = formatLaneIndicator(r);
             const row =
               `${marker} ` +
               `${r.status.padEnd(22).slice(0, 22)}  ` +
               `${r.runId.slice(0, 8)}  ` +
               `$${r.costUsd.toFixed(4)}  ` +
               `${(r.classification ?? "—").padEnd(18).slice(0, 18)}  ` +
+              `${laneTag ? laneTag + "  " : ""}` +
               `${(r.prompt ?? "").replace(/\s+/g, " ").slice(0, 60)}`;
             return (
               <Text
