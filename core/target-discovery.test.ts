@@ -324,3 +324,73 @@ test("target discovery: charter ['start.sh'] + quoted+negated README.md prompt y
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
+
+test("target discovery: 'create <path>' accepts a non-existent file as a valid target (burn-in-09 fix)", () => {
+  // The prompt explicitly asks to CREATE a file that doesn't exist yet.
+  // Target discovery must not reject it — the builder needs it as a
+  // dispatch target to produce the new file.
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-create-intent-"));
+  try {
+    mkdirSync(join(projectRoot, "core"), { recursive: true });
+    writeFileSync(join(projectRoot, "core", "retry-utils.ts"), "export function delay() {}\n", "utf-8");
+    // NOTE: core/retry-utils.test.ts intentionally does NOT exist.
+
+    const prompt =
+      "In core/retry-utils.ts, add a small exported function clampDelay. " +
+      "Then create core/retry-utils.test.ts with three focused tests.";
+    const analysis: import("./charter.js").RequestAnalysis = {
+      raw: prompt,
+      category: "feature",
+      targets: ["core/retry-utils.ts", "core/retry-utils.test.ts"],
+      scopeEstimate: "small",
+      riskSignals: [],
+      ambiguities: [],
+    };
+    const prepared = prepareTargetsForPrompt({ projectRoot, prompt, analysis });
+
+    assert.deepEqual(
+      [...prepared.targets].sort(),
+      ["core/retry-utils.test.ts", "core/retry-utils.ts"],
+      "both the existing and to-be-created file must be accepted",
+    );
+    assert.equal(prepared.rejected.length, 0, "nothing should be rejected");
+    const createSelected = prepared.selected.find((s) => s.path === "core/retry-utils.test.ts");
+    assert.ok(createSelected, "the created file must appear in selected");
+    assert.ok(
+      createSelected.reasons.some((r) => /creation/i.test(r)),
+      "selection reason must mention creation intent",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: non-existent file WITHOUT creation verb is still rejected", () => {
+  // Guard against the fix being too permissive — a file mentioned
+  // without a creation verb must still be rejected when absent.
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-no-create-"));
+  try {
+    mkdirSync(join(projectRoot, "core"), { recursive: true });
+    writeFileSync(join(projectRoot, "core", "foo.ts"), "// stub\n", "utf-8");
+
+    const prompt = "In core/foo.ts, fix the bug. Also check core/bar.test.ts for regressions.";
+    const analysis: import("./charter.js").RequestAnalysis = {
+      raw: prompt,
+      category: "bugfix",
+      targets: ["core/foo.ts", "core/bar.test.ts"],
+      scopeEstimate: "small",
+      riskSignals: [],
+      ambiguities: [],
+    };
+    const prepared = prepareTargetsForPrompt({ projectRoot, prompt, analysis });
+
+    assert.ok(prepared.targets.includes("core/foo.ts"), "existing file accepted");
+    assert.ok(!prepared.targets.includes("core/bar.test.ts"), "non-existent file without create verb must be rejected");
+    assert.ok(
+      prepared.rejected.some((r) => r.path === "core/bar.test.ts"),
+      "rejection must be recorded",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});

@@ -151,6 +151,20 @@ export function prepareTargetsForPrompt(input: {
       continue;
     }
 
+    // Creation intent: the prompt explicitly says to create this file
+    // (e.g. "Then create core/retry-utils.test.ts with …"). Accept the
+    // non-existent path so the builder can produce it. Without this,
+    // the target gets rejected and the builder never receives the task.
+    if (hasCreationIntent(sanitized, normalized)) {
+      targets.push(normalized);
+      selected.push({
+        path: normalized,
+        score: 0.9,
+        reasons: ["prompt explicitly requests file creation"],
+      });
+      continue;
+    }
+
     rejected.push({
       path: normalized,
       reason: "target path does not exist in the repo and could not be resolved to a real file",
@@ -639,4 +653,30 @@ function dedupeRejections(
     out.push(rejection);
   }
   return out;
+}
+
+/**
+ * Detect whether `sanitized` contains a creation verb immediately
+ * preceding (or closely surrounding) `target`. Matches patterns like
+ * "create core/foo.ts", "Then create core/foo.test.ts with …",
+ * "add a new core/bar.ts". The check runs against the SANITIZED
+ * prompt so quoted examples don't false-positive.
+ */
+const CREATION_VERBS = "create|scaffold|generate|write|introduce|add";
+
+function hasCreationIntent(sanitized: string, target: string): boolean {
+  // Escape dots/slashes in the path for regex safety.
+  const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // "create <target>", "Then create <target>", "add a new <target>"
+  const before = new RegExp(
+    `\\b(?:${CREATION_VERBS})\\s+(?:a\\s+)?(?:new\\s+)?(?:file\\s+)?${escaped}\\b`,
+    "i",
+  );
+  if (before.test(sanitized)) return true;
+  // "<target> (should be|needs to be) created"
+  const after = new RegExp(
+    `\\b${escaped}\\s+(?:should|needs?\\s+to|must|will)\\s+be\\s+(?:created|generated|added)\\b`,
+    "i",
+  );
+  return after.test(sanitized);
 }
