@@ -93,12 +93,14 @@ export interface RunsScreenProps {
   readonly api?: ApiSurface;
   readonly pollMs?: number;
   readonly onOpenBurnIn?: () => void;
+  readonly onOpenDetail?: (runId: string) => void;
 }
 
 export function RunsScreen({
   api = defaultApi,
   pollMs = DEFAULT_POLL_MS,
   onOpenBurnIn,
+  onOpenDetail,
 }: RunsScreenProps = {}) {
   const { exit } = useApp();
   const [allRuns, setAllRuns] = useState<readonly RunListEntry[]>([]);
@@ -281,7 +283,14 @@ export function RunsScreen({
       return;
     }
     if (key.return) {
-      if (filteredRuns[selected]) setMode("detail");
+      const target2 = filteredRuns[selected];
+      if (target2) {
+        if (onOpenDetail) {
+          onOpenDetail(target2.runId);
+        } else {
+          setMode("detail");
+        }
+      }
       return;
     }
     const target = filteredRuns[selected];

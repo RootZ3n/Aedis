@@ -8,6 +8,7 @@
  *
  * Endpoints used (all already exist):
  *   GET  /runs?limit=N                   → list recent runs
+ *   GET  /runs/:id                       → full run detail
  *   POST /tasks                          → submit a new task
  *   POST /approvals/:runId/approve       → approve an awaiting run
  *   POST /approvals/:runId/reject        → reject an awaiting run
@@ -57,6 +58,41 @@ export async function submitRun(prompt: string, repoPath: string): Promise<Submi
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, repoPath }),
   });
+}
+
+export interface RunDetailData {
+  readonly id: string;
+  readonly runId: string;
+  readonly status: string;
+  readonly prompt: string;
+  readonly submittedAt: string;
+  readonly completedAt: string | null;
+  readonly filesChanged: readonly { path: string; operation: string }[];
+  readonly summary: {
+    readonly classification: string | null;
+    readonly headline: string;
+    readonly narrative: string;
+    readonly verification: string;
+    readonly verificationChecks?: readonly {
+      kind: string;
+      name: string;
+      executed: boolean;
+      passed: boolean;
+    }[];
+    readonly failureExplanation?: {
+      code: string;
+      rootCause: string;
+      stage: string;
+      suggestedFix: string;
+    } | null;
+  };
+  readonly confidence: unknown;
+  readonly errors: readonly { source: string; message: string; suggestedFix?: string }[];
+  readonly totalCostUsd: number;
+}
+
+export async function getRunDetail(runId: string): Promise<RunDetailData> {
+  return fetchJson<RunDetailData>(`/runs/${encodeURIComponent(runId)}`);
 }
 
 export async function approveRun(runId: string): Promise<unknown> {
