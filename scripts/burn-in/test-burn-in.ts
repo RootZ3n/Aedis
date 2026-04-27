@@ -16,6 +16,7 @@
  */
 
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   type BurnResultRow,
@@ -36,7 +37,7 @@ const RESULTS_FILE = "/mnt/ai/tmp/aedis-burn-in-results.jsonl";
 const PROJECT_ROOT = "/mnt/ai/aedis";
 const TIMEOUT_MS = resolveTimeoutMs(process.env["AEDIS_BURN_TIMEOUT_MS"], DEFAULT_BURN_TIMEOUT_MS);
 
-interface Scenario {
+export interface Scenario {
   id: string;
   prompt: string;
   repo?: string;
@@ -48,15 +49,48 @@ interface Scenario {
   };
 }
 
-const SCENARIOS: Scenario[] = [
+/**
+ * Produce a short, filename-safe tag unique per harness invocation.
+ * Format: `<base36 ms>-<base36 rand>` (e.g. `l8mh2c-x9q`). Tags are
+ * embedded into burn-in-01's marker so re-running the suite never
+ * collides with marker comments left behind by prior PROMOTED runs
+ * — the burn-in source repo itself accumulates real commits when
+ * the harness was previously run with --allow-promote.
+ */
+export function defaultBurnInRunTag(
+  now: () => number = Date.now,
+  rand: () => number = Math.random,
+): string {
+  const ms = Math.floor(now()).toString(36);
+  const r = Math.floor(rand() * 1e9).toString(36);
+  return `${ms}-${r}`;
+}
+
+/**
+ * Compose burn-in-01's prompt with a unique marker. Exported so the
+ * test suite can pin the tag and assert the rendered prompt.
+ */
+export function buildBurnIn01Prompt(tag: string): string {
+  return (
+    `In core/run-summary.ts, find the existing top-of-file comment block. ` +
+    `At the very end of that block, add a single new comment line that ` +
+    `reads exactly: '// burn-in: comment-swap probe ${tag}.' ` +
+    `Do not modify anything else.`
+  );
+}
+
+export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
+  const tag = opts.tag ?? defaultBurnInRunTag();
+  return [
   // ── 1. Tiny single-line comment swap ─────────────────────────────────
   {
     id: "burn-in-01-comment-swap-tiny",
     // Kept deliberately small so the first scenario doesn't
     // accidentally exercise multi-wave behaviour. One file, one
-    // comment, no neighbours.
-    prompt:
-      "In core/run-summary.ts, find the existing top-of-file comment block. At the very end of that block, add a single new comment line that reads exactly: '// burn-in: comment-swap probe.' Do not modify anything else.",
+    // comment, no neighbours. Marker carries a per-invocation tag so
+    // re-runs always require a real edit even when the source repo
+    // already contains markers from prior PROMOTED runs.
+    prompt: buildBurnIn01Prompt(tag),
     expected: {
       classification: ["PARTIAL_SUCCESS", "SUCCESS", "NO_OP", "EXECUTION_ERROR"],
       minFilesChanged: 1,
@@ -146,7 +180,8 @@ const SCENARIOS: Scenario[] = [
       maxCostUsd: 0.15,
     },
   },
-];
+  ];
+}
 
 function logResult(result: BurnResultRow): void {
   appendFileSync(RESULTS_FILE, JSON.stringify(result) + "\n", "utf-8");
@@ -188,7 +223,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const activeScenarios = filterScenarios(SCENARIOS);
+  const activeScenarios = filterScenarios(buildScenarios());
 
   console.log(`\n🔬 AEDIS BURN-IN HARNESS (soft)`);
   console.log(`Target:  ${AEDIS_BASE}`);
@@ -261,7 +296,17 @@ async function main(): Promise<void> {
   summariseResults();
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+// Only run when invoked directly — guarded so the test suite can
+// import buildScenarios / buildBurnIn01Prompt without triggering the
+// full polling main().
+const isMain =
+  typeof process.argv[1] === "string" &&
+  process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}
+
+export { main };
