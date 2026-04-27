@@ -8,6 +8,8 @@ import { Coordinator } from "./coordinator.js";
 import { CharterGenerator } from "./charter.js";
 import { createIntent } from "./intent.js";
 import { createRunState } from "./runstate.js";
+import { prepareTargetsForPrompt } from "./target-discovery.js";
+import { createChangeSet } from "./change-set.js";
 
 // These tests pin down the Phase 4.5 "bugfix test-file stripper" regression
 // from Case 1 (run 1efad650). The user explicitly asked for a test in
@@ -443,4 +445,203 @@ test("userTargetFindings: empty tripwire produces no findings", () => {
   const coord = new (Coordinator as any)({ projectRoot: process.cwd() });
   const findings = coord.userTargetFindings({ userNamedStrippedTargets: [] });
   assert.equal(findings.length, 0);
+});
+
+// ─── burn-in-09: explicit creation target survives every planning stage ─────
+// The burn-in-09 prompt asks Aedis to modify core/retry-utils.ts AND create a
+// new core/retry-utils.test.ts under a "do not touch any other file" scope
+// lock. The test file does NOT exist on disk. Past failures dropped the test
+// file at one stage or another (target-discovery rejecting a non-existent
+// path, charter under-generating deliverables, scope-lock allowlist excluding
+// it, change-set classifying it as optional, etc.) — leaving the run with
+// only the source file changed and AWAITING_APPROVAL with filesChanged=1.
+// Pin the invariant: every planning stage must keep the test file as a
+// required mutation target.
+
+const BURN_IN_09_PROMPT =
+  "In core/retry-utils.ts, add a small exported function " +
+  "'clampDelay(delayMs: number, maxMs: number): number' that returns " +
+  "Math.min(delayMs, maxMs). Then create core/retry-utils.test.ts " +
+  "with three focused tests for clampDelay: (1) returns the delay " +
+  "when below max, (2) returns max when delay exceeds max, (3) returns " +
+  "max when delay equals max. After making the changes, run: " +
+  "npm run security:secrets, npm test, npm run build, npx tsc --noEmit. " +
+  "If any command fails, inspect the output, fix the issue, and rerun " +
+  "the failing command. Only modify core/retry-utils.ts and " +
+  "core/retry-utils.test.ts — do not touch any other file.";
+
+function setupBurnIn09Repo(): { dir: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-burn-in-09-"));
+  mkdirSync(join(dir, "core"), { recursive: true });
+  // Source exists; test file intentionally does NOT exist — it must be
+  // created by the run.
+  writeFileSync(
+    join(dir, "core/retry-utils.ts"),
+    "export function delay(ms: number) { return ms; }\n",
+    "utf-8",
+  );
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+test("burn-in-09: charter produces both deliverables and locks scope to both files", () => {
+  const { dir, cleanup } = setupBurnIn09Repo();
+  try {
+    const gen = new CharterGenerator();
+    const baseAnalysis = gen.analyzeRequest(BURN_IN_09_PROMPT);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot: dir,
+      prompt: BURN_IN_09_PROMPT,
+      analysis: baseAnalysis,
+    });
+    const analysis = {
+      ...baseAnalysis,
+      targets:
+        prepared.targets.length > 0
+          ? [...prepared.targets]
+          : [...baseAnalysis.targets],
+    };
+    const charter = gen.generateCharter(analysis);
+
+    const deliverableTargets = charter.deliverables.flatMap((d) => [...d.targetFiles]);
+    assert.ok(
+      deliverableTargets.includes("core/retry-utils.ts"),
+      `source must be a deliverable; got [${deliverableTargets.join(", ")}]`,
+    );
+    assert.ok(
+      deliverableTargets.includes("core/retry-utils.test.ts"),
+      `explicit creation target must be a deliverable; got [${deliverableTargets.join(", ")}]`,
+    );
+
+    assert.ok(charter.scopeLock, "scopeLock must be set when prompt locks scope");
+    assert.deepEqual(
+      [...(charter.scopeLock?.allowedFiles ?? [])].sort(),
+      ["core/retry-utils.test.ts", "core/retry-utils.ts"],
+      "scopeLock.allowedFiles must include both explicit targets",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("burn-in-09: prepareDeliverablesForGraph keeps the explicit creation target end-to-end", () => {
+  const { dir, cleanup } = setupBurnIn09Repo();
+  try {
+    const gen = new CharterGenerator();
+    const baseAnalysis = gen.analyzeRequest(BURN_IN_09_PROMPT);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot: dir,
+      prompt: BURN_IN_09_PROMPT,
+      analysis: baseAnalysis,
+    });
+    const analysis = {
+      ...baseAnalysis,
+      targets:
+        prepared.targets.length > 0
+          ? [...prepared.targets]
+          : [...baseAnalysis.targets],
+    };
+    const charter = gen.generateCharter(analysis);
+    const intent = createIntent({
+      runId: "burn-in-09-run",
+      userRequest: BURN_IN_09_PROMPT,
+      charter,
+      constraints: [],
+    });
+    const allFiles = charter.deliverables.flatMap((d) => [...d.targetFiles]);
+    const changeSet = createChangeSet(intent, allFiles, null, dir);
+
+    const coord = new (Coordinator as any)({ projectRoot: dir });
+    const active: any = {
+      intent,
+      run: createRunState(intent.id, "burn-in-09-run"),
+      projectRoot: dir,
+      sourceRepo: dir,
+      normalizedInput: BURN_IN_09_PROMPT,
+      rejectedCandidates: [],
+      userNamedStrippedTargets: [],
+      analysis,
+      changeSet,
+      plan: undefined,
+      changes: [],
+      workerResults: [],
+      cancelled: false,
+    };
+    const result = coord.prepareDeliverablesForGraph(active, analysis);
+    const allTargets = result.flatMap((d: any) => d.targetFiles);
+
+    assert.ok(
+      allTargets.includes("core/retry-utils.ts"),
+      `source target must survive prepareDeliverablesForGraph; got [${allTargets.join(", ")}]`,
+    );
+    assert.ok(
+      allTargets.includes("core/retry-utils.test.ts"),
+      `explicit creation target must survive prepareDeliverablesForGraph; got [${allTargets.join(", ")}]`,
+    );
+    assert.equal(
+      active.userNamedStrippedTargets.length,
+      0,
+      `tripwire must stay empty; got ${JSON.stringify(active.userNamedStrippedTargets)}`,
+    );
+
+    // groupBuilderDeliverables is the next stage — it must also preserve
+    // both files (no silent dedup or filter on non-existent paths).
+    const grouped = coord.groupBuilderDeliverables(active, result);
+    const groupedTargets = grouped.flatMap((d: any) => d.targetFiles);
+    assert.ok(
+      groupedTargets.includes("core/retry-utils.test.ts"),
+      `explicit creation target must survive groupBuilderDeliverables; got [${groupedTargets.join(", ")}]`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("burn-in-09: changeSet flags both files as required mutations (gates missing-required retry)", () => {
+  const { dir, cleanup } = setupBurnIn09Repo();
+  try {
+    const gen = new CharterGenerator();
+    const baseAnalysis = gen.analyzeRequest(BURN_IN_09_PROMPT);
+    const prepared = prepareTargetsForPrompt({
+      projectRoot: dir,
+      prompt: BURN_IN_09_PROMPT,
+      analysis: baseAnalysis,
+    });
+    const analysis = {
+      ...baseAnalysis,
+      targets:
+        prepared.targets.length > 0
+          ? [...prepared.targets]
+          : [...baseAnalysis.targets],
+    };
+    const charter = gen.generateCharter(analysis);
+    const intent = createIntent({
+      runId: "burn-in-09-run",
+      userRequest: BURN_IN_09_PROMPT,
+      charter,
+      constraints: [],
+    });
+    const allFiles = charter.deliverables.flatMap((d) => [...d.targetFiles]);
+    const changeSet = createChangeSet(intent, allFiles, null, dir);
+
+    const sourceEntry = changeSet.filesInScope.find(
+      (f) => f.path === "core/retry-utils.ts",
+    );
+    const testEntry = changeSet.filesInScope.find(
+      (f) => f.path === "core/retry-utils.test.ts",
+    );
+    assert.ok(sourceEntry, "source must appear in changeSet.filesInScope");
+    assert.ok(testEntry, "test creation target must appear in changeSet.filesInScope");
+    assert.equal(
+      sourceEntry?.mutationExpected,
+      true,
+      "source must be marked mutationExpected so missing-required gate fires",
+    );
+    assert.equal(
+      testEntry?.mutationExpected,
+      true,
+      "explicit creation test must be marked mutationExpected so a source-only Builder run is caught and retried before AWAITING_APPROVAL",
+    );
+  } finally {
+    cleanup();
+  }
 });
