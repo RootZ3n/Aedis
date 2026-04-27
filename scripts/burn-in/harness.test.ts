@@ -456,6 +456,213 @@ test("runScenarioOnce: READY_FOR_PROMOTION + cleanup ok → SAFE_FAILURE with pr
   assert.match(row.narrative ?? "", /restored source repo as designed/);
 });
 
+test("runScenarioOnce: PROMOTED + reject fails + cancel fails but verification passes → SAFE_FAILURE", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: true, ok: true, restored: true, error: null };
+    },
+  };
+  // Both reject and cancel fail (run already completed)
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-p2", run_id: "run-p2" });
+    if (path === "/approvals/run-p2/reject") return notFound();
+    if (path === "/tasks/run-p2/cancel") return notFound();
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-p2") return ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-p2") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted-reject-fail-safe",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "SAFE_FAILURE", "must be SAFE_FAILURE when final state is safe despite reject/cancel failing");
+  assert.equal(row.classification, "promote_blocked_restored");
+  assert.equal(row.cleanupOk, false, "API-level cleanup failed");
+  assert.match(row.narrative ?? "", /restored source repo as designed/);
+  assert.match(row.notes.join("\n"), /active_run=false pending_approval=false/);
+  assert.match(row.notes.join("\n"), /head_unchanged=true clean=true restored=true/);
+});
+
+test("runScenarioOnce: PROMOTED + pending approval remains → FAIL cleanup_failed", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: true, ok: true, restored: false, error: null };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-pa", run_id: "run-pa" });
+    if (path === "/approvals/run-pa/reject") return notFound();
+    if (path === "/tasks/run-pa/cancel") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-pa") return ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-pa") return ok({ active_run: false });
+    // Pending approval still present
+    if (path === "/approvals/pending") return ok({ pending: [{ runId: "run-pa" }] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted-pending-remains",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "FAIL");
+  assert.equal(row.classification, "cleanup_failed");
+});
+
+test("runScenarioOnce: PROMOTED + active run remains → FAIL cleanup_failed", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: true, ok: true, restored: false, error: null };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-ar", run_id: "run-ar" });
+    if (path === "/approvals/run-ar/reject") return notFound();
+    if (path === "/tasks/run-ar/cancel") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-ar") return ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } });
+    // Active run still present
+    if (path === "/tasks/task-ar") return ok({ active_run: true });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted-active-remains",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "FAIL");
+  assert.equal(row.classification, "cleanup_failed");
+});
+
+test("runScenarioOnce: PROMOTED + source repo dirty after restore → FAIL cleanup_failed", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: false, ok: false, restored: false, error: "working tree dirty" };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-d", run_id: "run-d" });
+    if (path === "/approvals/run-d/reject") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-d") return ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-d") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted-dirty",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "FAIL");
+  assert.equal(row.classification, "cleanup_failed");
+  assert.ok(row.error, "must surface the dirty repo error");
+});
+
+test("runScenarioOnce: PROMOTED + reject succeeds → SAFE_FAILURE", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: true, ok: true, restored: false, error: null };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-rs", run_id: "run-rs" });
+    if (path === "/approvals/run-rs/reject") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-rs") return ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-rs") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted-reject-ok",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "SAFE_FAILURE");
+  assert.equal(row.classification, "promote_blocked_restored");
+  assert.equal(row.cleanupOk, true, "reject succeeded at API level");
+});
+
 test("computeSummary: counts promote_blocked_restored (SAFE_FAILURE) in safeFail bucket, not fail", () => {
   const rows: BurnResultRow[] = [
     normaliseBurnRow({ verdict: "SAFE_FAILURE", classification: "promote_blocked_restored", costUsd: 0.02, durationMs: 5000 }),

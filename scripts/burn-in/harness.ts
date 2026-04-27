@@ -793,6 +793,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
     : classifyOutcome(pollWithFinal.detail, { allowPromote });
 
   // ── Cleanup ───────────────────────────────────────────────────────
+  // Track API action result separately from final safety verification.
   if (outcome.cleanup !== "none") {
     try {
       cleanupOk = await applyCleanup(http, outcome.cleanup, { runId, taskId });
@@ -802,30 +803,37 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
     }
   }
 
+  let cleanupVerified = true;
   if (!allowPromote && (outcome.cleanup !== "none" || normaliseStatus(pollWithFinal.detail?.status) === "PROMOTED")) {
     const verification = await verifyCleanupState(http, { runId, taskId });
     notes.push(`cleanup verification: active_run=${verification.activeRun} pending_approval=${verification.pendingApproval}`);
     if (!verification.ok) {
-      cleanupOk = false;
+      cleanupVerified = false;
       error = error ?? verification.error ?? "cleanup verification failed";
     }
   }
 
+  let sourceVerified = true;
   if (!allowPromote && repoSnapshot) {
     const source = await sourceRepoGuard.restoreAndVerify(repoPath, repoSnapshot);
     notes.push(`source repo verification: head_unchanged=${source.headUnchanged} clean=${source.clean}${source.restored ? " restored=true" : ""}`);
     if (!source.ok) {
+      sourceVerified = false;
       error = error ?? source.error ?? "source repo verification failed";
     }
   }
 
   // ── Upgrade promoted-then-restored runs ─────────────────────────
+  // Score by final safety state, not by whether the reject/cancel API
+  // call succeeded. A PROMOTED run where reject(404) + cancel(404)
+  // both fail but the source repo is restored and no active run /
+  // pending approval remains is safe.
   const finalStatus = normaliseStatus(pollWithFinal.detail?.status);
   if (
     !allowPromote &&
     (finalStatus === "PROMOTED" || finalStatus === "READY_FOR_PROMOTION") &&
-    !error &&
-    cleanupOk !== false
+    cleanupVerified &&
+    sourceVerified
   ) {
     outcome = {
       verdict: "SAFE_FAILURE",
@@ -837,7 +845,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
   } else if (
     !allowPromote &&
     (finalStatus === "PROMOTED" || finalStatus === "READY_FOR_PROMOTION") &&
-    (error || cleanupOk === false)
+    (!cleanupVerified || !sourceVerified)
   ) {
     outcome = {
       verdict: "FAIL",
