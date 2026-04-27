@@ -24,6 +24,7 @@
  * conversational inputs (prompt, blast radius). It is attached
  * to the RunReceipt as `summary` so receipts remain the single
  * source of truth.
+// burn-in: comment-swap probe.
  */
 
 import type { RunReceipt } from "./coordinator.js";
