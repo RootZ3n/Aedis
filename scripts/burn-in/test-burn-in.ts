@@ -11,7 +11,8 @@
  *   AEDIS_BURN_TIMEOUT_MS=600000 npx tsx scripts/burn-in/test-burn-in.ts
  *
  * Each row is appended to /mnt/ai/tmp/aedis-burn-in-results.jsonl
- * Run with --summary to print accumulated results without re-running.
+ * Run with --summary to print latest invocation results without re-running.
+ * Run with --history to include all accumulated JSONL rows in the summary.
  * Run with --allow-promote only when intentionally permitting source commits.
  */
 
@@ -23,6 +24,7 @@ import {
   computeSummary,
   createFetchClient,
   DEFAULT_BURN_TIMEOUT_MS,
+  filterByInvocation,
   filterScenarios,
   formatSummaryBlock,
   parseJsonlRows,
@@ -183,7 +185,8 @@ export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
   ];
 }
 
-function logResult(result: BurnResultRow): void {
+function logResult(result: BurnResultRow, invocationId?: string): void {
+  if (invocationId) result.invocationId = invocationId;
   appendFileSync(RESULTS_FILE, JSON.stringify(result) + "\n", "utf-8");
   const cost = result.costUsd?.toFixed(4) ?? "?.????";
   const cleanup = result.cleanup === "none" ? "" : ` cleanup=${result.cleanup}(${result.cleanupOk ? "ok" : "fail"})`;
@@ -195,13 +198,32 @@ function logResult(result: BurnResultRow): void {
   }
 }
 
-function summariseResults(): void {
-  if (!existsSync(RESULTS_FILE)) {
-    console.log("\nNo results yet.\n");
-    return;
+/**
+ * Print a formatted summary table. When `rows` is provided, uses those
+ * directly (current-invocation mode). Otherwise reads from the JSONL
+ * file — filtering to the latest invocation unless `showHistory` is set.
+ */
+function summariseResults(rows?: readonly BurnResultRow[], showHistory = false): void {
+  let results: readonly BurnResultRow[];
+  let parseErrors = 0;
+
+  if (rows) {
+    results = rows;
+  } else {
+    if (!existsSync(RESULTS_FILE)) {
+      console.log("\nNo results yet.\n");
+      return;
+    }
+    const text = readFileSync(RESULTS_FILE, "utf-8");
+    const parsed = parseJsonlRows(text);
+    parseErrors = parsed.parseErrors;
+    results = showHistory ? parsed.rows : filterByInvocation(parsed.rows);
   }
-  const text = readFileSync(RESULTS_FILE, "utf-8");
-  const { rows: results, parseErrors } = parseJsonlRows(text);
+
+  if (!showHistory && !rows) {
+    console.log("(showing latest invocation — use --history for all)\n");
+  }
+
   const summary = computeSummary(results, parseErrors);
   console.log(formatSummaryBlock(summary));
   for (const r of results) {
@@ -218,12 +240,14 @@ function summariseResults(): void {
 async function main(): Promise<void> {
   const summaryOnly = process.argv.includes("--summary");
   const allowPromote = process.argv.includes("--allow-promote");
+  const showHistory = process.argv.includes("--history");
   if (summaryOnly) {
-    summariseResults();
+    summariseResults(undefined, showHistory);
     return;
   }
 
   const activeScenarios = filterScenarios(buildScenarios());
+  const invocationId = defaultBurnInRunTag();
 
   console.log(`\n🔬 AEDIS BURN-IN HARNESS (soft)`);
   console.log(`Target:  ${AEDIS_BASE}`);
@@ -250,6 +274,8 @@ async function main(): Promise<void> {
     console.error(`❌ Cannot reach Aedis at ${AEDIS_BASE}: ${(err as Error).message}`);
     process.exit(1);
   }
+
+  const currentResults: BurnResultRow[] = [];
 
   for (const scenario of activeScenarios) {
     const repo = scenario.repo ?? PROJECT_ROOT;
@@ -289,11 +315,12 @@ async function main(): Promise<void> {
       result.notes.push(`⚠️ Only ${result.filesChanged} files changed, expected ≥ ${scenario.expected.minFilesChanged}`);
     }
 
-    logResult(result);
+    logResult(result, invocationId);
+    currentResults.push(result);
     await new Promise((r) => setTimeout(r, 3000));
   }
 
-  summariseResults();
+  summariseResults(showHistory ? undefined : currentResults, showHistory);
 }
 
 // Only run when invoked directly — guarded so the test suite can

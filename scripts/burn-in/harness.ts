@@ -575,6 +575,8 @@ export interface BurnResultRow {
   fetchError: string | null;
   notes: string[];
   error: string | null;
+  /** Unique per harness invocation — used to separate current-run rows from history. */
+  invocationId?: string;
 }
 
 export function buildResultRow(input: ResultRowInput): BurnResultRow {
@@ -938,6 +940,7 @@ export function normaliseBurnRow(raw: Record<string, unknown>): BurnResultRow {
     fetchError: typeof raw["fetchError"] === "string" ? raw["fetchError"] : null,
     notes: Array.isArray(raw["notes"]) ? raw["notes"].filter((n): n is string => typeof n === "string") : [],
     error: typeof raw["error"] === "string" ? raw["error"] : null,
+    invocationId: typeof raw["invocationId"] === "string" ? raw["invocationId"] : undefined,
   };
 }
 
@@ -1009,6 +1012,32 @@ export function formatSummaryBlock(s: BurnSummaryBlock): string {
   lines.push("─".repeat(50));
   lines.push("");
   return lines.join("\n");
+}
+
+// ─── Invocation filtering ────────────────────────────────────────────
+
+/**
+ * Return rows belonging to a specific invocation, or the latest
+ * invocation if no id is given. Returns all rows when no rows carry
+ * an invocationId (backwards compat with old JSONL files).
+ */
+export function filterByInvocation(
+  rows: readonly BurnResultRow[],
+  invocationId?: string,
+): BurnResultRow[] {
+  if (invocationId) {
+    return rows.filter((r) => r.invocationId === invocationId);
+  }
+  // Find the latest invocationId by scanning from the end.
+  let latestId: string | undefined;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].invocationId) {
+      latestId = rows[i].invocationId;
+      break;
+    }
+  }
+  if (!latestId) return [...rows];
+  return rows.filter((r) => r.invocationId === latestId);
 }
 
 // ─── Config helpers ──────────────────────────────────────────────────

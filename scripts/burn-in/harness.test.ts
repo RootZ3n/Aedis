@@ -9,6 +9,7 @@ import {
   type SourceRepoGuard,
   classifyOutcome,
   computeSummary,
+  filterByInvocation,
   filterScenarios,
   formatProgressLine,
   formatSummaryBlock,
@@ -1023,6 +1024,61 @@ test("formatSummaryBlock: contains expected labels", () => {
   assert.match(block, /PASS:\s+1/);
   assert.match(block, /Avg cost:/);
   assert.match(block, /Avg duration:/);
+});
+
+// ─── filterByInvocation ──────────────────────────────────────────────
+
+test("filterByInvocation: explicit id returns only matching rows", () => {
+  const rows: BurnResultRow[] = [
+    normaliseBurnRow({ scenarioId: "s1", invocationId: "inv-a" }),
+    normaliseBurnRow({ scenarioId: "s2", invocationId: "inv-b" }),
+    normaliseBurnRow({ scenarioId: "s3", invocationId: "inv-a" }),
+  ];
+  const filtered = filterByInvocation(rows, "inv-a");
+  assert.equal(filtered.length, 2);
+  assert.deepEqual(filtered.map((r) => r.scenarioId), ["s1", "s3"]);
+});
+
+test("filterByInvocation: no id returns latest invocation (last seen)", () => {
+  const rows: BurnResultRow[] = [
+    normaliseBurnRow({ scenarioId: "s1", invocationId: "inv-old" }),
+    normaliseBurnRow({ scenarioId: "s2", invocationId: "inv-old" }),
+    normaliseBurnRow({ scenarioId: "s3", invocationId: "inv-new" }),
+    normaliseBurnRow({ scenarioId: "s4", invocationId: "inv-new" }),
+  ];
+  const filtered = filterByInvocation(rows);
+  assert.equal(filtered.length, 2);
+  assert.deepEqual(filtered.map((r) => r.scenarioId), ["s3", "s4"]);
+});
+
+test("filterByInvocation: single scenario with --scenario shows Total: 1", () => {
+  const rows: BurnResultRow[] = [
+    normaliseBurnRow({ scenarioId: "s1", invocationId: "inv-single" }),
+  ];
+  const filtered = filterByInvocation(rows, "inv-single");
+  assert.equal(filtered.length, 1);
+  const summary = computeSummary(filtered);
+  assert.equal(summary.total, 1);
+});
+
+test("filterByInvocation: no invocationId on any row returns all rows", () => {
+  const rows: BurnResultRow[] = [
+    normaliseBurnRow({ scenarioId: "s1" }),
+    normaliseBurnRow({ scenarioId: "s2" }),
+  ];
+  const filtered = filterByInvocation(rows);
+  assert.equal(filtered.length, 2);
+});
+
+test("filterByInvocation: mixed rows with/without invocationId filters by latest id", () => {
+  const rows: BurnResultRow[] = [
+    normaliseBurnRow({ scenarioId: "legacy-1" }),
+    normaliseBurnRow({ scenarioId: "s1", invocationId: "inv-1" }),
+    normaliseBurnRow({ scenarioId: "s2", invocationId: "inv-1" }),
+  ];
+  const filtered = filterByInvocation(rows);
+  assert.equal(filtered.length, 2);
+  assert.deepEqual(filtered.map((r) => r.scenarioId), ["s1", "s2"]);
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────
