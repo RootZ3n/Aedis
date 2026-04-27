@@ -222,6 +222,14 @@ import {
   type WorkspaceCleanupResult,
   type PatchArtifact,
 } from "./workspace-manager.js";
+import {
+  createShadowWorkspace,
+  selectBestCandidate,
+  type Candidate,
+  type CandidateStatus,
+  type WorkspaceEntry,
+  type WorkspaceRole,
+} from "./candidate.js";
 import { findImplForTest, findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
@@ -1302,6 +1310,17 @@ export class Coordinator {
       projectRoot: workspaceProjectRoot,
       sourceRepo: effectiveProjectRoot,
       workspace,
+      // Multi-workspace registry. Primary is registered immediately so
+      // any code path that resolves a workspace by id (shadow safety
+      // checks, candidate plumbing) sees a consistent map. Shadow
+      // workspaces are added later via createShadowWorkspaceForRun.
+      workspaces: workspace
+        ? new Map<string, WorkspaceEntry>([[
+            "primary",
+            { workspaceId: "primary", role: "primary", handle: workspace },
+          ]])
+        : new Map<string, WorkspaceEntry>(),
+      candidates: [],
       gatedContext,
       projectMemory,
       analysis,
@@ -3357,7 +3376,7 @@ export class Coordinator {
           .filter((t) => !seenPaths.has(resolve(active.projectRoot, t)));
         if (testFiles.length > 0) {
           deduped.push({
-            type: "test" as any,
+            type: "modify",
             description: `Test pairs for changed implementation files`,
             targetFiles: testFiles,
           });
@@ -6211,11 +6230,240 @@ export class Coordinator {
     };
   }
 
+  // ─── Shadow Workspace API ──────────────────────────────────────────
+  //
+  // Shadow workspaces are alternate sandboxes attached to an active
+  // run, used for candidate comparison (alternate model, retry
+  // isolation). They are deliberately a NARROW surface:
+  //   - createShadowWorkspaceForRun: register a new shadow for an
+  //     existing active run; returns the handle.
+  //   - runShadowBuilder: dispatch a Builder once in a shadow
+  //     workspace, capture a patch artifact, record the result as a
+  //     Candidate. Skips Critic/Verifier/Integrator on purpose — the
+  //     primary path is the only one that can promote, so the cheap
+  //     path is enough to compare diffs without building the full
+  //     graph twice.
+  //   - getRunCandidates / selectBestRunCandidate: read-only views
+  //     of candidates accumulated for a run.
+  //
+  // None of these functions can promote. The promoteToSource safety
+  // guard refuses any receipt whose workspace.role !== "primary".
+
+  /**
+   * Create and register a shadow workspace for an active run. The
+   * shadow is cloned from the same sourceRepo as the primary, lives
+   * at a separate /tmp path (prefix "aedis-ws-shadow-N-…"), and is
+   * recorded on active.workspaces under the returned workspaceId.
+   *
+   * Throws if the run is not active or the primary workspace is
+   * absent (we need its sourceRepo as the clone source).
+   */
+  async createShadowWorkspaceForRun(runId: string): Promise<WorkspaceEntry> {
+    const active = this.activeRuns.get(runId);
+    if (!active) {
+      throw new CoordinatorError(`createShadowWorkspaceForRun: no active run ${runId}`);
+    }
+    if (!active.workspace) {
+      throw new CoordinatorError(
+        `createShadowWorkspaceForRun: run ${runId} has no primary workspace — shadow needs a primary to clone from`,
+      );
+    }
+    // Allocate the next shadow index. Stable order: shadow-1, shadow-2, …
+    const existingShadowCount = [...active.workspaces.values()].filter(
+      (w) => w.role === "shadow",
+    ).length;
+    const shadowIndex = existingShadowCount + 1;
+    const entry = await createShadowWorkspace(
+      active.workspace.sourceRepo,
+      runId,
+      shadowIndex,
+    );
+    active.workspaces.set(entry.workspaceId, entry);
+    console.log(
+      `[coordinator] shadow workspace ${entry.workspaceId} created at ${entry.handle.workspacePath} ` +
+      `(source=${entry.handle.sourceRepo} sha=${entry.handle.sourceCommitSha.slice(0, 8)})`,
+    );
+    return entry;
+  }
+
+  /**
+   * Dispatch a Builder once in a shadow workspace and record the
+   * result as a Candidate. The Builder is the registered builder
+   * worker by default; callers can pass a different builder
+   * (alternate-model attempt) via opts.builder.
+   *
+   * Returns the recorded Candidate. The candidate's patchArtifact is
+   * captured via generatePatch from the shadow workspace; verifier
+   * verdict is null (verification is not run on the shadow path —
+   * the primary path remains the only verified-and-promotable one).
+   *
+   * SAFETY: this method never calls promoteToSource and never writes
+   * to the source repo. The shadow workspace is the only mutation
+   * surface.
+   */
+  async runShadowBuilder(
+    runId: string,
+    opts: {
+      builder?: BaseWorker;
+      assignmentOverride?: Partial<WorkerAssignment>;
+    } = {},
+  ): Promise<Candidate> {
+    const active = this.activeRuns.get(runId);
+    if (!active) {
+      throw new CoordinatorError(`runShadowBuilder: no active run ${runId}`);
+    }
+    // Find or create a shadow workspace. First-shadow-by-default for
+    // simple callers; multi-shadow callers can call
+    // createShadowWorkspaceForRun directly and then runShadowBuilder.
+    let shadow: WorkspaceEntry | undefined = [...active.workspaces.values()].find(
+      (w) => w.role === "shadow",
+    );
+    if (!shadow) {
+      shadow = await this.createShadowWorkspaceForRun(runId);
+    }
+
+    const builder = opts.builder ?? this.workerRegistry.getWorker("builder");
+    if (!builder) {
+      throw new CoordinatorError("runShadowBuilder: no builder worker registered");
+    }
+
+    // Build a minimal assignment scoped to the shadow workspace. The
+    // primary's intent + targetFiles are reused; the projectRoot is
+    // the shadow path so the builder writes there. Caller can
+    // override fields via assignmentOverride for alternate-model
+    // attempts that need a different tier / brief / token budget.
+    const baseAssignment = this.buildShadowAssignment(active, shadow);
+    const assignment: WorkerAssignment = { ...baseAssignment, ...opts.assignmentOverride };
+
+    const t0 = Date.now();
+    let result;
+    let status: CandidateStatus = "pending";
+    let reason = "";
+    try {
+      result = await builder.execute(assignment);
+      status = result.success ? "passed" : "failed";
+      reason = result.success
+        ? "shadow builder produced changes"
+        : (result.issues[0]?.message ?? "shadow builder failed");
+    } catch (err) {
+      status = "failed";
+      reason = `shadow builder threw: ${err instanceof Error ? err.message : String(err)}`;
+      result = null;
+    }
+    const latencyMs = Date.now() - t0;
+    const costUsd = result?.cost?.estimatedCostUsd ?? 0;
+
+    let patchArtifact: PatchArtifact | null = null;
+    try {
+      patchArtifact = await generatePatch(shadow.handle);
+    } catch (err) {
+      console.warn(
+        `[coordinator] shadow generatePatch failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const candidate: Candidate = {
+      workspaceId: shadow.workspaceId,
+      role: "shadow",
+      workspacePath: shadow.handle.workspacePath,
+      patchArtifact,
+      verifierVerdict: null,
+      criticalFindings: 0,
+      costUsd,
+      latencyMs,
+      status,
+      reason,
+    };
+    active.candidates.push(candidate);
+    console.log(
+      `[coordinator] shadow candidate recorded: workspaceId=${candidate.workspaceId} ` +
+      `status=${candidate.status} cost=$${costUsd.toFixed(4)} latency=${latencyMs}ms ` +
+      `patchBytes=${patchArtifact?.diff?.length ?? 0}`,
+    );
+    return candidate;
+  }
+
+  /**
+   * Build a WorkerAssignment scoped to a shadow workspace. Re-uses
+   * the run's intent, gated context, and target files; replaces
+   * projectRoot with the shadow path. Defaults are conservative
+   * (fast tier, modest token budget) so a simple alternate-model
+   * call needs no extra wiring.
+   */
+  private buildShadowAssignment(active: ActiveRun, shadow: WorkspaceEntry): WorkerAssignment {
+    const targetFiles = active.changeSet?.filesInScope?.map((f) => f.path) ?? [];
+    const task: RunTask = {
+      id: `${active.run.id}-${shadow.workspaceId}`,
+      parentTaskId: null,
+      workerType: "builder",
+      description: `[shadow] ${active.intent.charter.objective}`,
+      targetFiles,
+      status: "active",
+      assignedTo: null,
+      result: null,
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      costAccrued: null,
+    };
+    return {
+      task,
+      intent: active.intent,
+      context: { layers: [] } as unknown as WorkerAssignment["context"],
+      upstreamResults: [],
+      tier: "fast",
+      tokenBudget: 2048,
+      runState: active.run,
+      changes: [...active.changes],
+      workerResults: [],
+      projectRoot: shadow.handle.workspacePath,
+      sourceRepo: shadow.handle.sourceRepo,
+      recentContext: active.gatedContext,
+      implementationBrief: undefined,
+      signal: active.runAbortController.signal,
+    } as WorkerAssignment;
+  }
+
+  /**
+   * Read-only view of all candidates recorded for a run (primary +
+   * shadows). The primary candidate is appended automatically when
+   * the primary path produces a patch artifact at finalize / approve
+   * time; shadow candidates are appended by runShadowBuilder.
+   */
+  getRunCandidates(runId: string): readonly Candidate[] {
+    const active = this.activeRuns.get(runId);
+    return active ? [...active.candidates] : [];
+  }
+
+  /**
+   * Pick the best candidate for the approval gate, or null when no
+   * candidate qualifies. Pure-function selectBestCandidate does the
+   * actual decision; this is a per-run convenience wrapper.
+   */
+  selectBestRunCandidate(runId: string): Candidate | null {
+    return selectBestCandidate(this.getRunCandidates(runId));
+  }
+
   async promoteToSource(runId: string, sourceRepoPath?: string): Promise<{ ok: boolean; commitSha?: string; error?: string }> {
     const receipt = await this.receiptStore.getRun(runId);
     if (!receipt) return { ok: false, error: "No receipt found for run " + runId };
 
     const finalReceipt = (receipt as any).finalReceipt;
+
+    // Multi-workspace safety guard. Only "primary" workspaces may
+    // promote — shadow workspaces exist for alternate Builder attempts
+    // and must NEVER write to the source repo. Default to "primary"
+    // when the role field is missing (legacy receipts written before
+    // shadow support landed).
+    const persistentWorkspaceRole =
+      (receipt as any)?.workspace?.role ?? finalReceipt?.workspace?.role ?? "primary";
+    if (persistentWorkspaceRole !== "primary") {
+      const msg =
+        `Promote refused: workspace role is "${persistentWorkspaceRole}" — only primary workspaces may promote. ` +
+        `Shadow workspaces produce candidates for comparison and never write to the source repo.`;
+      console.error(`[coordinator] PROMOTE BLOCKED for ${runId}: ${msg}`);
+      return { ok: false, error: msg };
+    }
+
     const patchArtifact = finalReceipt?.patchArtifact as { diff?: string; changedFiles?: string[]; commitSha?: string | null } | undefined;
     // Source-repo resolution. The persistent receipt's TOP-LEVEL
     // sourceRepo is null for any run currently in this codebase — only
@@ -7299,8 +7547,28 @@ interface ActiveRun {
   /**
    * Workspace handle for isolated execution. Null when workspace
    * creation is disabled or failed (legacy fallback mode).
+   *
+   * Backward-compat anchor for code that pre-dates the multi-workspace
+   * model. Always points at the primary workspace; shadow workspaces
+   * are reachable via `workspaces` below.
    */
   workspace: WorkspaceHandle | null;
+  /**
+   * All workspaces attached to this run, keyed by stable workspaceId
+   * ("primary", "shadow-1", …). The primary entry mirrors `workspace`
+   * above. Shadow entries are added by createShadowWorkspaceForRun.
+   * WorkspaceEntry wraps a vanilla WorkspaceHandle with role + id —
+   * those are coordinator-side concerns that don't belong on the
+   * workspace-manager handle itself.
+   */
+  workspaces: Map<string, WorkspaceEntry>;
+  /**
+   * Per-workspace Builder candidates. The primary candidate is
+   * recorded by recordPrimaryCandidate when the run reaches a
+   * promotable state; shadow candidates are recorded by
+   * runShadowBuilder. Selection (selectBestCandidate) consumes this.
+   */
+  candidates: import("./candidate.js").Candidate[];
   /** Gated project memory relevant to the current prompt, for Scout context. */
   gatedContext: GatedContext;
   /**
