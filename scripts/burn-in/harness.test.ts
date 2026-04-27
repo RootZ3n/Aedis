@@ -324,7 +324,9 @@ test("runScenarioOnce: PROMOTED is rejected, cancelled as fallback, and source r
   });
 
   assert.equal(row.status, "PROMOTED");
-  assert.equal(row.verdict, "FAIL");
+  assert.equal(row.verdict, "SAFE_FAILURE");
+  assert.equal(row.classification, "promote_blocked_restored");
+  assert.match(row.narrative ?? "", /restored source repo as designed/);
   assert.equal(row.cleanup, "reject");
   assert.equal(row.cleanupOk, true);
   assert.equal(restored, true, "source repo must be restored after unsafe PROMOTED state");
@@ -371,6 +373,100 @@ test("runScenarioOnce: --allow-promote accepts PROMOTED and skips cleanup/restor
   assert.equal(row.cleanupOk, null);
   assert.equal(restoreCalls, 0);
   assert.equal(calls.some((c) => c.path.includes("/reject") || c.path.includes("/cancel")), false);
+});
+
+test("runScenarioOnce: PROMOTED + cleanup fail → FAIL with cleanup_failed classification", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: false, clean: false, ok: false, restored: false, error: "restore failed" };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-p", run_id: "run-p" });
+    if (path === "/approvals/run-p/reject") return notFound();
+    if (path === "/tasks/run-p/cancel") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-p") return ok<RunDetail>({ status: "PROMOTED", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-p") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "promoted-fail",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "FAIL");
+  assert.equal(row.classification, "cleanup_failed");
+  assert.ok(row.error, "must surface the restore error");
+});
+
+test("runScenarioOnce: READY_FOR_PROMOTION + cleanup ok → SAFE_FAILURE with promote_blocked_restored", async () => {
+  const sourceRepoGuard: SourceRepoGuard = {
+    async snapshot() {
+      return { head: "before", status: "" };
+    },
+    async restoreAndVerify() {
+      return { headUnchanged: true, clean: true, ok: true, restored: false, error: null };
+    },
+  };
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "task-rfp", run_id: "run-rfp" });
+    if (path === "/approvals/run-rfp/reject") return ok({ ok: true });
+    return notFound();
+  };
+  const get: Handler = (path) => {
+    if (path === "/api/runs/run-rfp") return ok<RunDetail>({ status: "READY_FOR_PROMOTION", summary: { changes: [{ path: "x.ts" }] } });
+    if (path === "/tasks/task-rfp") return ok({ active_run: false });
+    if (path === "/approvals/pending") return ok({ pending: [] });
+    return notFound();
+  };
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "rfp-restored",
+    prompt: "p",
+    repoPath: "/repo",
+    timeoutMs: 60_000,
+    pollIntervalMs: 1000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+    sourceRepoGuard,
+  });
+
+  assert.equal(row.verdict, "SAFE_FAILURE");
+  assert.equal(row.classification, "promote_blocked_restored");
+  assert.match(row.narrative ?? "", /restored source repo as designed/);
+});
+
+test("computeSummary: counts promote_blocked_restored (SAFE_FAILURE) in safeFail bucket, not fail", () => {
+  const rows: BurnResultRow[] = [
+    normaliseBurnRow({ verdict: "SAFE_FAILURE", classification: "promote_blocked_restored", costUsd: 0.02, durationMs: 5000 }),
+    normaliseBurnRow({ verdict: "PASS", costUsd: 0.10, durationMs: 3000 }),
+    normaliseBurnRow({ verdict: "FAIL", classification: "cleanup_failed", costUsd: 0.05, durationMs: 2000 }),
+  ];
+  const s = computeSummary(rows);
+  assert.equal(s.total, 3);
+  assert.equal(s.pass, 1);
+  assert.equal(s.fail, 1);
+  assert.equal(s.safeFail, 1);
 });
 
 test("runScenarioOnce: EXECUTION_ERROR with no files changed → SAFE_FAILURE, no cleanup attempted", async () => {

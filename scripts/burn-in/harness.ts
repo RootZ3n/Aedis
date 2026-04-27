@@ -150,6 +150,10 @@ export interface OutcomeClassification {
    */
   readonly cleanup: "none" | "cancel" | "reject";
   readonly note: string | null;
+  /** Override classification in the JSONL row (e.g. "promote_blocked_restored"). */
+  readonly classification?: string | null;
+  /** Override narrative in the JSONL row. */
+  readonly narrative?: string | null;
 }
 
 export interface ClassifyOptions {
@@ -599,7 +603,7 @@ export function buildResultRow(input: ResultRowInput): BurnResultRow {
     runId,
     status: detail?.status ?? null,
     phase: snap.phase,
-    classification: isTimeout ? "timeout" : (detail?.classification ?? null),
+    classification: isTimeout ? "timeout" : (outcome.classification ?? detail?.classification ?? null),
     verdict: finalVerdict,
     status_: finalVerdict,
     costUsd: snap.costUsd,
@@ -613,7 +617,7 @@ export function buildResultRow(input: ResultRowInput): BurnResultRow {
       : (explanation?.rootCause ?? null),
     narrative: isTimeout
       ? `Timeout after ${Math.round(poll.elapsedMs / 1000)}s — last status=${lastStatus} phase=${lastPhase}`
-      : (detail?.summary?.narrative ?? detail?.summary?.headline ?? null),
+      : (outcome.narrative ?? detail?.summary?.narrative ?? detail?.summary?.headline ?? null),
     errors,
     cleanup: outcome.cleanup,
     cleanupOk,
@@ -784,7 +788,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
   }
 
   // ── Classify ──────────────────────────────────────────────────────
-  const outcome: OutcomeClassification = pollWithFinal.timedOut
+  let outcome: OutcomeClassification = pollWithFinal.timedOut
     ? { verdict: "TIMEOUT", cleanup: "cancel", note: `timed out after ${timeoutMs}ms` }
     : classifyOutcome(pollWithFinal.detail, { allowPromote });
 
@@ -813,6 +817,34 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
     if (!source.ok) {
       error = error ?? source.error ?? "source repo verification failed";
     }
+  }
+
+  // ── Upgrade promoted-then-restored runs ─────────────────────────
+  const finalStatus = normaliseStatus(pollWithFinal.detail?.status);
+  if (
+    !allowPromote &&
+    (finalStatus === "PROMOTED" || finalStatus === "READY_FOR_PROMOTION") &&
+    !error &&
+    cleanupOk !== false
+  ) {
+    outcome = {
+      verdict: "SAFE_FAILURE",
+      cleanup: outcome.cleanup,
+      note: outcome.note,
+      classification: "promote_blocked_restored",
+      narrative: "Run reached promotion state; burn-in restored source repo as designed.",
+    };
+  } else if (
+    !allowPromote &&
+    (finalStatus === "PROMOTED" || finalStatus === "READY_FOR_PROMOTION") &&
+    (error || cleanupOk === false)
+  ) {
+    outcome = {
+      verdict: "FAIL",
+      cleanup: outcome.cleanup,
+      note: outcome.note,
+      classification: "cleanup_failed",
+    };
   }
 
   return buildResultRow({
