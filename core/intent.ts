@@ -41,6 +41,21 @@ export interface Charter {
   readonly successCriteria: readonly string[];
   readonly deliverables: readonly Deliverable[];
   readonly qualityBar: QualityBar;
+  /**
+   * Optional scope lock — when set, ONLY the listed files may be
+   * modified during the run. Set by CharterGenerator when the
+   * prompt sanitizer detects a "do not modify anything else"-style
+   * catch-all. Differs from `exclusions` (which list specific
+   * forbidden paths): a scope lock is an allowlist, so an unlisted
+   * file is automatically a violation even if no exclusion names it.
+   */
+  readonly scopeLock?: ScopeLock | null;
+}
+
+export interface ScopeLock {
+  readonly allowedFiles: readonly string[];
+  /** Short human-readable rationale, surfaced in errors/UI. */
+  readonly reason: string;
 }
 
 export interface Deliverable {

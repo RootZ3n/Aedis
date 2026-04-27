@@ -610,6 +610,17 @@ export class IntegrationJudge {
 
   /**
    * Scope boundary: are changes within the declared exclusions?
+   *
+   * Two enforcement modes:
+   *   1. Exclusion list (legacy): each change is checked against
+   *      `intent.exclusions`; matches are violations. Subject to
+   *      `strictScope` config — if false, violations are downgraded
+   *      to warnings.
+   *   2. Scope lock (allowlist): when `intent.charter.scopeLock` is
+   *      set, ONLY files in `scopeLock.allowedFiles` may be touched.
+   *      Always strict — `strictScope=false` does NOT relax this.
+   *      This is the path that catches "do not modify anything else"
+   *      violations (the burn-in 1-file → 9-files incident).
    */
   private checkScopeBoundary(
     intent: IntentObject,
@@ -628,14 +639,39 @@ export class IntegrationJudge {
       }
     }
 
-    const passed = issues.length === 0;
+    const scopeLock = intent.charter.scopeLock;
+    const lockIssues: string[] = [];
+    const lockAffected: string[] = [];
+    if (scopeLock) {
+      const allowed = new Set(scopeLock.allowedFiles);
+      for (const change of changes) {
+        if (!allowed.has(change.path)) {
+          lockIssues.push(
+            `"${change.path}" is outside the locked scope (allowed: ${scopeLock.allowedFiles.join(", ") || "<none>"})`,
+          );
+          lockAffected.push(change.path);
+        }
+      }
+    }
+
+    const exclusionPassed = issues.length === 0;
+    const lockPassed = lockIssues.length === 0;
+    // Lock failures are non-negotiable: the user explicitly said "no
+    // other files". Even when strictScope is off, an allowlist
+    // violation must surface as a hard fail.
+    const passed = (this.config.strictScope ? exclusionPassed : true) && lockPassed;
+    const allIssues = [...issues, ...lockIssues];
+    const allAffected = [...affectedFiles, ...lockAffected];
+    const detailsPrefix = lockIssues.length > 0
+      ? `scope_violation: ${lockIssues.length} unexpected file change(s) outside locked scope. `
+      : "";
     return {
       name: "Scope Boundary",
       category: "scope-boundary",
-      passed: this.config.strictScope ? passed : true,
+      passed,
       score: passed ? 1 : 0,
-      details: passed ? "All changes within scope" : issues.join("; "),
-      affectedFiles,
+      details: passed ? "All changes within scope" : detailsPrefix + allIssues.join("; "),
+      affectedFiles: allAffected,
     };
   }
 

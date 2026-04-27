@@ -29,6 +29,19 @@ export interface RequestAnalysis {
   riskSignals: string[];
   /** Ambiguities that need resolution or assumptions */
   ambiguities: string[];
+  /**
+   * True when the prompt contains a catch-all "do not modify anything
+   * else" / "no other files" phrase. Causes the charter to:
+   *   - skip auto-test deliverable injection
+   *   - publish a `scopeLock` allowlist on the Charter
+   *   - cause the integration judge to enforce that allowlist as a
+   *     hard blocker, regardless of strictScope config
+   *
+   * Optional so legacy literals that hand-build a RequestAnalysis
+   * (implementation-brief.ts, target-discovery tests) keep compiling
+   * — undefined / absent is treated as `false` everywhere.
+   */
+  lockScope?: boolean;
 }
 
 export type RequestCategory =
@@ -77,6 +90,11 @@ export class CharterGenerator {
     const scopeEstimate = this.estimateScope(lower, targets);
     const riskSignals = this.detectRiskSignals(lower);
     const ambiguities = this.detectAmbiguities(lower, targets);
+    // The sanitizer also returns a `lockScope` flag for catch-all
+    // "no other files" phrasings — re-run it here against the raw
+    // prompt (it strips literals/quotes before matching) so the
+    // signal is available to charter consumers.
+    const { lockScope } = sanitizePromptForFileExtraction(request);
 
     return {
       raw: request,
@@ -85,6 +103,7 @@ export class CharterGenerator {
       scopeEstimate,
       riskSignals,
       ambiguities,
+      lockScope,
     };
   }
 
@@ -106,7 +125,23 @@ export class CharterGenerator {
       );
     }
 
-    return { objective, successCriteria, deliverables, qualityBar };
+    // Scope lock: when the user explicitly said "do not modify
+    // anything else" (or similar), publish the explicit allowlist on
+    // the Charter so downstream gates (integration-judge) can enforce
+    // it strictly. The allowlist is the union of every deliverable's
+    // targetFiles — if a deliverable has zero targetFiles (placeholder
+    // case), the lock degrades to "no files allowed" which the judge
+    // will catch as the run inevitably touches something.
+    const scopeLock = analysis.lockScope === true
+      ? {
+          allowedFiles: Array.from(
+            new Set(deliverables.flatMap((d) => [...d.targetFiles])),
+          ),
+          reason: "Prompt contained an explicit \"do not modify anything else\" directive",
+        }
+      : null;
+
+    return { objective, successCriteria, deliverables, qualityBar, scopeLock };
   }
 
   /**
@@ -332,12 +367,17 @@ export class CharterGenerator {
       type: analysis.category === "scaffold" ? "create" as const : "modify" as const,
     }));
 
-    // Auto-add test deliverable if configured
+    // Auto-add test deliverable if configured. Suppressed when the
+    // user has locked the scope ("do not modify anything else") —
+    // injecting a *.test.ts deliverable into a comment-only single-
+    // file run is exactly how the burn-in 1-file → 9-files blow-up
+    // started.
     if (
       this.config.autoTestDeliverables &&
       analysis.category !== "test" &&
       analysis.category !== "docs" &&
-      analysis.category !== "investigation"
+      analysis.category !== "investigation" &&
+      analysis.lockScope !== true
     ) {
       deliverables.push({
         description: "Add or update tests for changed code",

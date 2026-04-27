@@ -33,6 +33,18 @@ export interface SanitizedPrompt {
    * does NOT mark config.yaml as a non-target.
    */
   readonly negatedTargets: ReadonlySet<string>;
+  /**
+   * True when the prompt contains a catch-all "do not touch anything
+   * else" / "no other files" / "only modify X" phrase. Distinct from
+   * `negatedTargets` because this is a SCOPE LOCK: the explicit
+   * targets named in the prompt are the only files the run is
+   * permitted to touch. Downstream consumers (CharterGenerator,
+   * Coordinator, IntegrationJudge) escalate any change outside that
+   * set to a hard scope_violation, regardless of `strictScope`
+   * config. Triggered the burn-in 9-files-on-1-file-task incident
+   * that motivated this whole change.
+   */
+  readonly lockScope: boolean;
 }
 
 const QUOTED_LITERAL_STRIPS: ReadonlyArray<RegExp> = [
@@ -52,6 +64,28 @@ const NEGATION_PATTERNS: ReadonlyArray<RegExp> = [
   /\b(?:do(?:es)?\s+not|don['’]?t|never|without)\s+(?:modify|modifying|change|changing|edit|editing|update|updating|touch|touching)\s+(?:the\s+)?([\w\-./]+\.[A-Za-z]+)/gi,
   // Object-led negation: "leave X unchanged/untouched/alone/as-is".
   /\bleave\s+(?:the\s+)?([\w\-./]+\.[A-Za-z]+)\s+(?:unchanged|untouched|alone|as[-\s]is)\b/gi,
+];
+
+/**
+ * Catch-all "no other files" phrasings. These don't name a specific
+ * file (so they can't go in `negatedTargets`) — they constrain the
+ * whole run to the explicit positive targets. Match against the
+ * sanitized prompt so a literal example inside quotes doesn't trip.
+ */
+const SCOPE_LOCK_PATTERNS: ReadonlyArray<RegExp> = [
+  // "Do not modify anything else", "do not change anything else",
+  // "do not touch anything else"
+  /\b(?:do(?:es)?\s+not|don['’]?t|never)\s+(?:modify|change|edit|update|touch|alter)\s+anything\s+else\b/i,
+  // "Do not touch any other file(s)" / "do not modify any other files"
+  /\b(?:do(?:es)?\s+not|don['’]?t|never)\s+(?:modify|change|edit|update|touch|alter)\s+(?:any\s+)?other\s+files?\b/i,
+  // "Do not modify other files" (without "any")
+  /\b(?:do(?:es)?\s+not|don['’]?t|never)\s+(?:modify|change|edit|update|touch|alter)\s+other\s+files?\b/i,
+  // "Without touching any other file"
+  /\bwithout\s+(?:modifying|changing|editing|updating|touching|altering)\s+(?:any\s+)?other\s+files?\b/i,
+  // "Only modify X" / "only touch X" — verb-led restrictive scope
+  /\bonly\s+(?:modify|change|edit|update|touch|alter)\s+(?:the\s+)?[\w\-./]+\.[A-Za-z]+/i,
+  // "No other files should be modified/touched" — passive form
+  /\bno\s+other\s+files?\s+(?:should\s+|are\s+to\s+|may\s+|must\s+|can\s+)?(?:be\s+)?(?:modified|changed|edited|updated|touched|altered)/i,
 ];
 
 /**
@@ -81,7 +115,12 @@ export function sanitizePromptForFileExtraction(prompt: string): SanitizedPrompt
     }
   }
 
-  return { sanitized, negatedTargets };
+  const lockScope = SCOPE_LOCK_PATTERNS.some((p) => {
+    p.lastIndex = 0;
+    return p.test(sanitized);
+  });
+
+  return { sanitized, negatedTargets, lockScope };
 }
 
 /**
