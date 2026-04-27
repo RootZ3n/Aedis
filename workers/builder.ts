@@ -1074,7 +1074,7 @@ export class BuilderWorker extends AbstractWorker {
         "  2. Keep every unrelated line BYTE-FOR-BYTE identical — same indentation, same trailing whitespace, same line endings, same quote style.",
         "  3. Do NOT reformat, re-wrap, reorder imports, reshuffle exports, change tabs↔spaces, or 'clean up' anything the request did not explicitly ask for.",
         "  4. If the request is to add a line/comment, your output should differ from the input by EXACTLY that line and no other.",
-        "  5. If your edit would produce a diff larger than the request implies, STOP and return the original file unchanged.",
+        "  5. If your edit would produce a diff larger than the request implies, STOP and return the original file unchanged. NEVER add debug/console.log statements — they count as extra diff content and are forbidden.",
         "You MUST make exactly the change the User request describes. Do not invent or remove unrelated content. If the request is to add a comment, add a comment — do not also delete, rename, or reformat anything else.",
         // Phase 10.3 — Scout-to-Builder targeting bias. Tell the model
         // explicitly that relevant context files came from a scout

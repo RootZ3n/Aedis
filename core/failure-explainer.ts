@@ -115,7 +115,13 @@ export function explainFailure(receipt: RunReceipt): FailureExplanation {
   }
 
   // ── Rule 4: execution gate no-op ───────────────────────────────
-  if (/no-op execution detected/i.test(gateReason)) {
+  // Skip this rule when the merge gate also blocked — the no-op detection
+  // is a downstream symptom of a scope-violation: the git-diff verifier
+  // found the builder modified a file outside the allowed scope, the
+  // workspace changes were rolled back, and the git-diff then shows zero
+  // diff (because rollback restored the original). Handing the user
+  // "scope violation" is more actionable than "no-op execution".
+  if (/no-op execution detected/i.test(gateReason) && mergeAction !== "block") {
     return {
       code: "no-op",
       stage: "execution-gate",
@@ -267,6 +273,22 @@ function detectAuthIssue(detail: string): FailureExplanation | null {
 
 function matchMergeBlocker(reason: string): FailureExplanation | null {
   const lower = reason.toLowerCase();
+  // Unexpected-reference-change — fires when the builder touched a
+  // context/test file that wasn't in scope. The workspace is rolled back
+  // on scope-violation, so git-diff then shows 0 files changed, which
+  // causes the execution gate to report no-op. We surface the real
+  // cause rather than letting it look like a builder failure.
+  if (/reference.context.file.*changed unexpectedly/i.test(lower) ||
+    /unexpected.reference.change/.test(lower)) {
+    return {
+      code: "scope-violation",
+      stage: "merging",
+      rootCause: `Merge blocked: ${truncate(reason, 160)}`,
+      suggestedFix:
+        "The builder modified a file outside the declared scope (typically a test or context file that was not the target). Re-run with a narrower scope that explicitly names only the files you want changed.",
+      evidence: [],
+    };
+  }
   // Bugfix must-modify rule — the coordinator emits this with a
   // distinctive `bugfix_target_not_modified` stem so it surfaces
   // cleanly to the harness instead of being bucketed as generic
