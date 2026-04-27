@@ -3371,9 +3371,24 @@ export class Coordinator {
       const allTargetFiles = deduped.flatMap((d) => d.targetFiles);
       const missingTests = findMissingTestFiles(allTargetFiles, active.projectRoot);
       if (missingTests.length > 0) {
+        // Skip test files already selected by the charter with role="test" —
+        // re-injecting them here causes scope-bleed: the git-diff-verifier
+        // flags the test as an "unexpected reference change" because it was
+        // added by the injector but not expected by the charter's manifest.
+        const charterTestPaths = new Set(
+          Array.from(
+            (active.intent.charter as { selectedFiles?: readonly { path: string }[] }).selectedFiles ?? [],
+          )
+            .filter((f: { path: string }) => /(test|spec|__mocks?__)/i.test(f.path))
+            .map((f: { path: string }) => resolve(active.projectRoot, f.path)),
+        );
         const testFiles = missingTests
           .map((p) => p.testPath!)
-          .filter((t) => !seenPaths.has(resolve(active.projectRoot, t)));
+          .filter(
+            (t) =>
+              !seenPaths.has(resolve(active.projectRoot, t)) &&
+              !charterTestPaths.has(resolve(active.projectRoot, t)),
+          );
         if (testFiles.length > 0) {
           deduped.push({
             type: "modify",
@@ -6441,6 +6456,59 @@ export class Coordinator {
    */
   selectBestRunCandidate(runId: string): Candidate | null {
     return selectBestCandidate(this.getRunCandidates(runId));
+  }
+
+  /**
+   * Discard non-selected SHADOW workspaces for a run. The primary
+   * workspace is NEVER touched here — its lifecycle is owned by the
+   * normal submit/approval/promote path. This method only cleans
+   * shadow workspaces that lost candidate selection so disk doesn't
+   * fill up with abandoned alternates.
+   *
+   * `selectedWorkspaceId` is the winning candidate's workspaceId.
+   * Pass null/undefined to discard ALL shadow workspaces (e.g.
+   * primary won and no shadow needs to survive).
+   *
+   * Returns the list of discarded workspaceIds. Best-effort: if a
+   * single discard fails it is logged and the rest still proceed.
+   */
+  async cleanupLosingCandidates(
+    runId: string,
+    selectedWorkspaceId?: string | null,
+  ): Promise<readonly string[]> {
+    const active = this.activeRuns.get(runId);
+    if (!active) return [];
+    const discarded: string[] = [];
+    for (const [workspaceId, entry] of active.workspaces) {
+      // Never touch the primary — its lifecycle belongs to the main
+      // submit/approve/promote flow.
+      if (entry.role !== "shadow") continue;
+      // Skip the selected one — that's the winner; its cleanup
+      // happens later via the same path the primary uses (caller's
+      // responsibility once the candidate has been promoted/rejected).
+      if (selectedWorkspaceId && workspaceId === selectedWorkspaceId) continue;
+      try {
+        const result = await discardWorkspace(entry.handle);
+        if (result.success) {
+          console.log(
+            `[coordinator] losing candidate cleanup: ${workspaceId} discarded ` +
+            `(method=${result.method}, ${result.durationMs}ms)`,
+          );
+          discarded.push(workspaceId);
+          active.workspaces.delete(workspaceId);
+        } else {
+          console.warn(
+            `[coordinator] losing candidate cleanup FAILED for ${workspaceId}: ${result.error}`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[coordinator] losing candidate cleanup threw for ${workspaceId}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return discarded;
   }
 
   async promoteToSource(runId: string, sourceRepoPath?: string): Promise<{ ok: boolean; commitSha?: string; error?: string }> {

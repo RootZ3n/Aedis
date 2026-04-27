@@ -494,3 +494,258 @@ test("single-workspace flow unchanged: a run that never touches the shadow API s
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// ─── Candidate selection policy: extended rules ─────────────────────
+//
+// These pure-function tests cover the full selectBestCandidate
+// policy that drives local-vs-cloud lane comparison. The minimal
+// 5-test scaffolding above pins backward compat (existing
+// primary-vs-shadow runs); these tests add the disqualification
+// rules + tiered tiebreakers (advisories → diff size → cost →
+// local-lane preference → primary-role).
+
+function makeCandidate(over: Partial<Candidate> & { workspaceId: string; role: "primary" | "shadow" }): Candidate {
+  return {
+    workspacePath: `/tmp/${over.workspaceId}`,
+    patchArtifact: null,
+    verifierVerdict: "pass",
+    criticalFindings: 0,
+    costUsd: 0,
+    latencyMs: 100,
+    status: "passed",
+    reason: "ok",
+    ...over,
+  };
+}
+
+test("candidate selection: candidate with critical findings is rejected", () => {
+  const a = makeCandidate({ workspaceId: "primary", role: "primary", criticalFindings: 1 });
+  const b = makeCandidate({ workspaceId: "shadow-1", role: "shadow" });
+  assert.equal(selectBestCandidate([a]), null, "single critical-finding candidate must not be selected");
+  assert.equal(selectBestCandidate([a, b]), b, "qualified shadow must beat disqualified primary with critical findings");
+});
+
+test("candidate selection: candidate with requiredDeliverablesCompleted=false is rejected", () => {
+  const a = makeCandidate({ workspaceId: "primary", role: "primary", requiredDeliverablesCompleted: false });
+  const b = makeCandidate({ workspaceId: "shadow-1", role: "shadow", requiredDeliverablesCompleted: true });
+  assert.equal(selectBestCandidate([a, b]), b, "candidate missing required deliverables must NOT be selected");
+});
+
+test("candidate selection: testsPassed=false / typecheckPassed=false / verifierVerdict=fail are all disqualifying", () => {
+  const a = makeCandidate({ workspaceId: "primary", role: "primary", testsPassed: false });
+  const b = makeCandidate({ workspaceId: "shadow-1", role: "shadow", typecheckPassed: false });
+  const c = makeCandidate({ workspaceId: "shadow-2", role: "shadow", verifierVerdict: "fail" });
+  const d = makeCandidate({ workspaceId: "shadow-3", role: "shadow" }); // qualified
+  assert.equal(selectBestCandidate([a, b, c, d]), d, "only the candidate with no negative quality signals should win");
+});
+
+test("candidate selection: prefers fewer advisories on quality tie", () => {
+  const noisy = makeCandidate({ workspaceId: "primary", role: "primary", advisoryFindings: 5 });
+  const clean = makeCandidate({ workspaceId: "shadow-1", role: "shadow", advisoryFindings: 1 });
+  assert.equal(selectBestCandidate([noisy, clean]), clean, "fewer advisories must win even when shadow vs primary");
+});
+
+test("candidate selection: prefers smaller diff on equal quality", () => {
+  const sprawl = makeCandidate({
+    workspaceId: "primary",
+    role: "primary",
+    changedFiles: ["a.ts", "b.ts", "c.ts", "d.ts"],
+  });
+  const surgical = makeCandidate({
+    workspaceId: "shadow-1",
+    role: "shadow",
+    changedFiles: ["a.ts"],
+  });
+  assert.equal(selectBestCandidate([sprawl, surgical]), surgical, "smaller diff must win on equal advisory count");
+});
+
+test("candidate selection: prefers lower cost only when quality is comparable", () => {
+  // Equal advisories + equal diff size → cost decides.
+  const cheap = makeCandidate({ workspaceId: "primary", role: "primary", costUsd: 0.001, advisoryFindings: 0 });
+  const expensive = makeCandidate({ workspaceId: "shadow-1", role: "shadow", costUsd: 1.0, advisoryFindings: 0 });
+  assert.equal(selectBestCandidate([cheap, expensive]), cheap, "cheaper candidate must win on quality tie");
+
+  // But cost MUST NOT win when quality differs — the more expensive
+  // candidate has fewer advisories, so it should still win.
+  const cheapButNoisy = makeCandidate({ workspaceId: "primary", role: "primary", costUsd: 0.001, advisoryFindings: 5 });
+  const expensiveButClean = makeCandidate({ workspaceId: "shadow-1", role: "shadow", costUsd: 1.0, advisoryFindings: 0 });
+  assert.equal(
+    selectBestCandidate([cheapButNoisy, expensiveButClean]),
+    expensiveButClean,
+    "cost must not override quality — fewer advisories wins regardless of cost",
+  );
+});
+
+test("candidate selection: local pass beats cloud fail (lane-tagged)", () => {
+  const localPass = makeCandidate({ workspaceId: "primary", role: "primary", lane: "local" });
+  const cloudFail = makeCandidate({
+    workspaceId: "shadow-1",
+    role: "shadow",
+    lane: "cloud",
+    status: "failed",
+  });
+  assert.equal(selectBestCandidate([localPass, cloudFail]), localPass, "passing local must beat failing cloud");
+});
+
+test("candidate selection: cloud pass beats local fail (lane-tagged)", () => {
+  const cloudPass = makeCandidate({ workspaceId: "primary", role: "primary", lane: "cloud" });
+  const localFail = makeCandidate({
+    workspaceId: "shadow-1",
+    role: "shadow",
+    lane: "local",
+    status: "failed",
+  });
+  assert.equal(selectBestCandidate([cloudPass, localFail]), cloudPass, "passing cloud must beat failing local");
+});
+
+test("candidate selection: local and cloud pass with equal quality → local wins (privacy/cost preference)", () => {
+  // Same advisories, same diff size, same cost — only the lane differs.
+  const cloud = makeCandidate({
+    workspaceId: "primary",
+    role: "primary",
+    lane: "cloud",
+    advisoryFindings: 0,
+    costUsd: 0.05,
+    changedFiles: ["a.ts"],
+  });
+  const local = makeCandidate({
+    workspaceId: "shadow-1",
+    role: "shadow",
+    lane: "local",
+    advisoryFindings: 0,
+    costUsd: 0.05,
+    changedFiles: ["a.ts"],
+  });
+  assert.equal(
+    selectBestCandidate([cloud, local]),
+    local,
+    "local lane must win on quality tie even when the cloud candidate is the primary",
+  );
+});
+
+test("candidate selection: cloud wins when local misses required deliverable", () => {
+  const localMissing = makeCandidate({
+    workspaceId: "primary",
+    role: "primary",
+    lane: "local",
+    requiredDeliverablesCompleted: false,
+  });
+  const cloudComplete = makeCandidate({
+    workspaceId: "shadow-1",
+    role: "shadow",
+    lane: "cloud",
+    requiredDeliverablesCompleted: true,
+  });
+  assert.equal(
+    selectBestCandidate([localMissing, cloudComplete]),
+    cloudComplete,
+    "cloud must win when local fails to complete required deliverables",
+  );
+});
+
+// ─── Cleanup behavior ───────────────────────────────────────────────
+
+test("losing candidate workspace cleanup: cleanupLosingCandidates discards non-selected shadow workspaces and leaves primary intact", async () => {
+  const repo = makeTempRepo();
+  try {
+    let resolveBlock!: () => void;
+    const block = new Promise<void>((r) => { resolveBlock = r; });
+    let cleanupResultPromise: Promise<readonly string[]> | null = null;
+    let primaryPathSnap = "";
+    let shadowPathSnap = "";
+
+    class ProbeBuilder extends RealBuilderWorker {
+      override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+        primaryPathSnap = assignment.projectRoot ?? "";
+        const runs = (coordinator as unknown as { activeRuns: Map<string, unknown> }).activeRuns;
+        const runId = [...runs.keys()][0] as string;
+        // Create a shadow workspace, capture its path, then cleanup
+        // with no selected workspaceId (i.e. discard ALL shadows).
+        const shadowEntry = await coordinator.createShadowWorkspaceForRun(runId);
+        shadowPathSnap = shadowEntry.handle.workspacePath;
+        cleanupResultPromise = coordinator.cleanupLosingCandidates(runId, null);
+        await cleanupResultPromise;
+        await block;
+        return super.execute(assignment);
+      }
+    }
+
+    const builder = new ProbeBuilder([
+      { path: "core/widget.ts", content: "export const widget = 13;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const submitPromise = coordinator.submit({ input: "modify widget in core" });
+    while (!cleanupResultPromise) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const discarded = await cleanupResultPromise;
+    resolveBlock();
+    await submitPromise;
+
+    assert.deepEqual(
+      [...discarded].sort(),
+      ["shadow-1"],
+      `cleanupLosingCandidates must report the discarded shadow id; got ${JSON.stringify(discarded)}`,
+    );
+    assert.equal(
+      existsSync(shadowPathSnap),
+      false,
+      `shadow workspace path must be removed from disk; ${shadowPathSnap} still exists`,
+    );
+    // Primary path must still exist mid-run (it gets cleaned up at
+    // the normal submit/approve/promote terminal).
+    assert.equal(
+      existsSync(primaryPathSnap),
+      true,
+      "primary workspace path must NOT be touched by cleanupLosingCandidates",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("losing candidate workspace cleanup: selectedWorkspaceId is preserved while other shadows are discarded", async () => {
+  const repo = makeTempRepo();
+  try {
+    let resolveBlock!: () => void;
+    const block = new Promise<void>((r) => { resolveBlock = r; });
+    let cleanupResultPromise: Promise<readonly string[]> | null = null;
+    const shadowPaths: Record<string, string> = {};
+
+    class ProbeBuilder extends RealBuilderWorker {
+      override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+        const runs = (coordinator as unknown as { activeRuns: Map<string, unknown> }).activeRuns;
+        const runId = [...runs.keys()][0] as string;
+        const s1 = await coordinator.createShadowWorkspaceForRun(runId);
+        const s2 = await coordinator.createShadowWorkspaceForRun(runId);
+        shadowPaths[s1.workspaceId] = s1.handle.workspacePath;
+        shadowPaths[s2.workspaceId] = s2.handle.workspacePath;
+        // Keep shadow-2 ("the winner"), discard the rest.
+        cleanupResultPromise = coordinator.cleanupLosingCandidates(runId, "shadow-2");
+        await cleanupResultPromise;
+        await block;
+        return super.execute(assignment);
+      }
+    }
+
+    const builder = new ProbeBuilder([
+      { path: "core/widget.ts", content: "export const widget = 14;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const submitPromise = coordinator.submit({ input: "modify widget in core" });
+    while (!cleanupResultPromise) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const discarded = await cleanupResultPromise;
+    resolveBlock();
+    await submitPromise;
+
+    assert.deepEqual([...discarded].sort(), ["shadow-1"], "only shadow-1 should be discarded; shadow-2 was selected");
+    assert.equal(existsSync(shadowPaths["shadow-1"]), false, "shadow-1 path must be removed");
+    assert.equal(existsSync(shadowPaths["shadow-2"]), true, "shadow-2 (selected) must NOT be removed");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
