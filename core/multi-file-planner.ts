@@ -1,3 +1,4 @@
+// AEDIS_BLOCKER: Request asks to create src/utils/aedis-test-helper.ts, but contract restricts output to core/multi-file-planner.ts only.
 // buildIntentGraph does not exist in this file; no deletion needed.
 import type { ChangeSet } from "./change-set.js";
 import type { ImportGraph } from "./import-graph.js";
