@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 /**
  * Lane config — shape for primary/shadow candidate-lane selection.
  *
@@ -198,6 +201,55 @@ export const DEFAULT_LANE_CONFIG: LaneConfig = Object.freeze({
   mode: "primary_only",
   primary: Object.freeze({ lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" }),
 });
+
+/**
+ * Load `.aedis/lane-config.json` from the given project root. Returns
+ * the parsed LaneConfig or `DEFAULT_LANE_CONFIG` when:
+ *   - the file does not exist (back-compat — every existing project)
+ *   - the file is unreadable / unparseable
+ *   - parseLaneConfig reports validation errors
+ *
+ * Validation errors are logged via `onError` (defaults to console.warn)
+ * so a malformed file surfaces in the boot log without blocking the
+ * run. The function never throws — lane config is observability-grade
+ * and must not be a runtime gate.
+ */
+export interface LoadLaneConfigOptions {
+  /** Override the path used for tests. Defaults to `<projectRoot>/.aedis/lane-config.json`. */
+  readonly path?: string;
+  /** Receives validation/IO errors. Defaults to console.warn. */
+  readonly onError?: (msg: string) => void;
+}
+
+export function loadLaneConfigFromDisk(
+  projectRoot: string,
+  opts: LoadLaneConfigOptions = {},
+): LaneConfig {
+  const onError = opts.onError ?? ((msg) => console.warn(msg));
+  const filePath = opts.path ?? resolve(projectRoot, ".aedis", "lane-config.json");
+
+  if (!existsSync(filePath)) return DEFAULT_LANE_CONFIG;
+
+  let raw: unknown;
+  try {
+    const text = readFileSync(filePath, "utf-8");
+    raw = JSON.parse(text);
+  } catch (err) {
+    onError(
+      `[lane-config] failed to read/parse ${filePath}: ${err instanceof Error ? err.message : String(err)} — falling back to DEFAULT_LANE_CONFIG`,
+    );
+    return DEFAULT_LANE_CONFIG;
+  }
+
+  const result = parseLaneConfig(raw);
+  if (!result.config) {
+    onError(
+      `[lane-config] ${filePath} failed validation: ${result.errors.join("; ")} — falling back to DEFAULT_LANE_CONFIG`,
+    );
+    return DEFAULT_LANE_CONFIG;
+  }
+  return result.config;
+}
 
 /**
  * Whether dual lanes should run for this config. False when mode is

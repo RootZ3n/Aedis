@@ -225,12 +225,19 @@ import {
 } from "./workspace-manager.js";
 import {
   createShadowWorkspace,
+  candidateDisqualification,
   selectBestCandidate,
   type Candidate,
   type CandidateStatus,
   type WorkspaceEntry,
   type WorkspaceRole,
 } from "./candidate.js";
+import {
+  DEFAULT_LANE_CONFIG,
+  laneConfigRunsShadow,
+  loadLaneConfigFromDisk,
+  type LaneConfig,
+} from "./lane-config.js";
 import { findImplForTest, findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
@@ -583,6 +590,38 @@ export interface RunReceipt {
    * hook skipped in verifier).
    */
   readonly fastPath?: boolean;
+  /**
+   * Candidate manifest — additive Phase B field. Records the lane
+   * outcomes for runs that exercised the multi-lane policy
+   * (`local_then_cloud` and friends). Empty/omitted on single-lane
+   * primary_only runs so existing receipt consumers see no change.
+   * The selected candidate (if any) is identified by
+   * `selectedCandidateWorkspaceId`; only the primary candidate can
+   * actually promote — see promoteToSource's role guard.
+   */
+  readonly candidates?: readonly CandidateManifestEntry[];
+  readonly selectedCandidateWorkspaceId?: string | null;
+  readonly laneMode?: import("./lane-config.js").LaneMode;
+}
+
+/**
+ * Per-candidate row on the receipt manifest. Pruned subset of the
+ * full Candidate type — only the fields a receipt reader needs to
+ * render lane status without dragging the workspace path / patch
+ * artifact through serialization.
+ */
+export interface CandidateManifestEntry {
+  readonly workspaceId: string;
+  readonly role: WorkspaceRole;
+  readonly lane?: import("./candidate.js").Lane;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly status: CandidateStatus;
+  readonly disqualification: string | null;
+  readonly costUsd: number;
+  readonly latencyMs: number;
+  readonly verifierVerdict: Candidate["verifierVerdict"];
+  readonly reason: string;
 }
 
 export interface TargetRoleReceipt {
@@ -1342,6 +1381,12 @@ export class Coordinator {
           ]])
         : new Map<string, WorkspaceEntry>(),
       candidates: [],
+      // Lane policy: load from `.aedis/lane-config.json` once per run
+      // off the SOURCE repo (not the workspace clone — the file lives
+      // alongside the source's other .aedis/ config). Fallback to
+      // DEFAULT_LANE_CONFIG when the file is absent so existing
+      // single-lane projects keep their current behavior verbatim.
+      laneConfig: loadLaneConfigFromDisk(effectiveProjectRoot),
       gatedContext,
       projectMemory,
       analysis,
@@ -2002,6 +2047,31 @@ export class Coordinator {
         mergeDecision,
       );
       const totalCost = active.run.totalCost?.estimatedCostUsd ?? 0;
+
+      // ── Phase B (local_then_cloud) — record primary candidate, run
+      // shadow if primary disqualified, select best. SAFETY: this runs
+      // BEFORE canCommit / approval branches, but does not modify
+      // mergeDecision, verificationReceipt, or workspace contents.
+      // The selection is observability-only in Phase B — even if a
+      // shadow wins, today's pipeline still routes the primary
+      // workspace to approval (no swap). Shadow's content reaching
+      // promote is Phase C and explicitly out of scope here.
+      this.recordPrimaryCandidate(active, {
+        mergeDecision,
+        verificationReceipt,
+        lane: active.laneConfig.primary.lane,
+        provider: active.laneConfig.primary.provider,
+        model: active.laneConfig.primary.model,
+      });
+      try {
+        await this.maybeRunFallbackShadow(active);
+      } catch (err) {
+        // Shadow lane errors must not break the primary's outcome —
+        // log and continue. The primary candidate is already recorded.
+        console.warn(
+          `[coordinator] local_then_cloud shadow lane threw (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
 
       // Phase 10: Commit
       const changeCount = Math.max(active.changes.length, active.run.filesTouched.length);
@@ -6588,13 +6658,155 @@ export class Coordinator {
 
   /**
    * Read-only view of all candidates recorded for a run (primary +
-   * shadows). The primary candidate is appended automatically when
-   * the primary path produces a patch artifact at finalize / approve
-   * time; shadow candidates are appended by runShadowBuilder.
+   * shadows). The primary candidate is appended by
+   * recordPrimaryCandidate just before the approval gate; shadow
+   * candidates are appended by runShadowBuilder.
    */
   getRunCandidates(runId: string): readonly Candidate[] {
     const active = this.activeRuns.get(runId);
     return active ? [...active.candidates] : [];
+  }
+
+  /**
+   * Build a primary Candidate from the run's current state and append
+   * it to active.candidates. Idempotent — calling twice on the same
+   * run replaces the previous primary entry rather than duplicating
+   * it. Used by the local_then_cloud fallback path so the primary
+   * lane's outcome is recorded as a comparable Candidate.
+   *
+   * SAFETY: this method does not mutate anything outside
+   * active.candidates. The primary workspace, receipt, and verifier
+   * state are read-only from here.
+   */
+  recordPrimaryCandidate(
+    active: ActiveRun,
+    inputs: {
+      mergeDecision: MergeDecision | null;
+      verificationReceipt: VerificationReceipt | null;
+      lane?: import("./candidate.js").Lane;
+      provider?: string;
+      model?: string;
+    },
+  ): Candidate {
+    const status: CandidateStatus = inputs.mergeDecision?.action === "apply" ? "passed" : "failed";
+    const reason = inputs.mergeDecision?.summary ?? "primary lane completed";
+    const costUsd = active.run.totalCost?.estimatedCostUsd ?? 0;
+    const latencyMs = Date.now() - new Date(active.run.startedAt).getTime();
+    const criticalFindings = inputs.mergeDecision?.critical?.length ?? 0;
+    const advisoryFindings = inputs.mergeDecision?.advisory?.length ?? 0;
+    const verifierVerdict = inputs.verificationReceipt?.verdict ?? null;
+
+    // Quality signals derived from the verification receipt's stage
+    // outcomes. Stages may be absent on early-exit paths — leave the
+    // optional flags undefined rather than guessing false, so the
+    // selection policy treats them as "unknown" instead of disqualifying.
+    // Test stages don't have a dedicated VerificationStage value yet
+    // — they're surfaced by name via the custom-hook stage. Match on
+    // both the canonical stage and the name to capture either shape.
+    let testsPassed: boolean | undefined;
+    let typecheckPassed: boolean | undefined;
+    if (inputs.verificationReceipt?.stages) {
+      for (const stage of inputs.verificationReceipt.stages) {
+        if (stage.stage === "typecheck") typecheckPassed = stage.passed;
+        const nameLower = stage.name?.toLowerCase() ?? "";
+        if (nameLower.includes("test")) testsPassed = stage.passed;
+      }
+    }
+
+    const candidate: Candidate = {
+      workspaceId: "primary",
+      role: "primary",
+      workspacePath: active.workspace?.workspacePath ?? active.projectRoot,
+      patchArtifact: active.patchArtifact ?? null,
+      verifierVerdict,
+      criticalFindings,
+      advisoryFindings,
+      costUsd,
+      latencyMs,
+      status,
+      reason,
+      ...(inputs.lane !== undefined ? { lane: inputs.lane } : {}),
+      ...(inputs.provider !== undefined ? { provider: inputs.provider } : {}),
+      ...(inputs.model !== undefined ? { model: inputs.model } : {}),
+      ...(testsPassed !== undefined ? { testsPassed } : {}),
+      ...(typecheckPassed !== undefined ? { typecheckPassed } : {}),
+      changedFiles: active.changes.map((c) => c.path),
+    };
+
+    // Idempotent: replace any prior primary entry rather than push.
+    const existing = active.candidates.findIndex((c) => c.workspaceId === "primary");
+    if (existing >= 0) active.candidates[existing] = candidate;
+    else active.candidates.push(candidate);
+    return candidate;
+  }
+
+  /**
+   * `local_then_cloud` fallback executor. Runs the shadow lane (with
+   * the configured shadow provider/model) when the primary candidate
+   * disqualifies AND the lane config asks for cloud-fallback. Returns
+   * the shadow Candidate, or null when no shadow ran (primary
+   * qualified, mode is primary_only, or no shadow assignment).
+   *
+   * SAFETY:
+   *   - Never runs in parallel — primary lane is fully complete before
+   *     this fires.
+   *   - Reads `active.laneConfig`; the policy decision is local.
+   *   - Calls runShadowBuilder which already enforces the
+   *     "shadow-never-promotes" invariant; no new write paths.
+   */
+  async maybeRunFallbackShadow(active: ActiveRun): Promise<Candidate | null> {
+    if (active.laneConfig.mode !== "local_then_cloud") return null;
+    if (!laneConfigRunsShadow(active.laneConfig)) return null;
+
+    // Find the primary candidate this fallback evaluates against.
+    const primary = active.candidates.find((c) => c.workspaceId === "primary");
+    if (!primary) {
+      console.warn(
+        `[coordinator] maybeRunFallbackShadow: no primary candidate recorded for run ${active.run.id}; skipping fallback`,
+      );
+      return null;
+    }
+    if (candidateDisqualification(primary) === null) {
+      // Primary qualifies — local_then_cloud's whole point is to skip
+      // the cloud lane in this case. No-op.
+      console.log(
+        `[coordinator] local_then_cloud: primary qualified (status=${primary.status}); shadow lane skipped`,
+      );
+      return null;
+    }
+
+    const shadowAssignment = active.laneConfig.shadow;
+    if (!shadowAssignment) return null;
+    console.log(
+      `[coordinator] local_then_cloud: primary disqualified (${candidateDisqualification(primary)}) — running shadow lane (${shadowAssignment.provider}/${shadowAssignment.model})`,
+    );
+    return await this.runShadowBuilder(active.run.id, {
+      lane: shadowAssignment.lane,
+      provider: shadowAssignment.provider,
+      model: shadowAssignment.model,
+    });
+  }
+
+  /**
+   * Build the persistable candidate manifest for the receipt. Pure
+   * projection from active.candidates — strips workspace paths and
+   * patch artifacts (those live elsewhere on the receipt) so the
+   * manifest stays compact and stable across receipt readers.
+   */
+  buildCandidateManifest(active: ActiveRun): readonly CandidateManifestEntry[] {
+    return active.candidates.map((c): CandidateManifestEntry => ({
+      workspaceId: c.workspaceId,
+      role: c.role,
+      ...(c.lane !== undefined ? { lane: c.lane } : {}),
+      ...(c.provider !== undefined ? { provider: c.provider } : {}),
+      ...(c.model !== undefined ? { model: c.model } : {}),
+      status: c.status,
+      disqualification: candidateDisqualification(c),
+      costUsd: c.costUsd,
+      latencyMs: c.latencyMs,
+      verifierVerdict: c.verifierVerdict,
+      reason: c.reason,
+    }));
   }
 
   /**
@@ -7247,6 +7459,17 @@ export class Coordinator {
       targetRoles,
       confidenceGate,
       fastPath: active.fastPath || undefined,
+      // Candidate manifest (Phase B). Only emitted when at least one
+      // candidate was recorded — keeps receipts emitted on legacy /
+      // primary_only runs byte-identical to pre-Phase-B receipts.
+      ...(active.candidates.length > 0
+        ? {
+            candidates: this.buildCandidateManifest(active),
+            selectedCandidateWorkspaceId:
+              selectBestCandidate(active.candidates)?.workspaceId ?? null,
+            laneMode: active.laneConfig.mode,
+          }
+        : {}),
     };
 
     // Compose the human-readable summary from the receipt we just
@@ -7813,6 +8036,15 @@ interface ActiveRun {
    * runShadowBuilder. Selection (selectBestCandidate) consumes this.
    */
   candidates: import("./candidate.js").Candidate[];
+  /**
+   * Lane policy resolved at submit() time. Loaded from
+   * `.aedis/lane-config.json` via loadLaneConfigFromDisk; falls back
+   * to DEFAULT_LANE_CONFIG (primary_only) when no file exists. The
+   * `local_then_cloud` mode is the only non-primary mode wired
+   * through the production pipeline today; everything else
+   * type-checks but the dispatch path is still primary-only.
+   */
+  laneConfig: import("./lane-config.js").LaneConfig;
   /** Gated project memory relevant to the current prompt, for Scout context. */
   gatedContext: GatedContext;
   /**
