@@ -449,6 +449,13 @@ export function buildResultRow(input: ResultRowInput): BurnResultRow {
   const errors = (detail?.errors ?? [])
     .map((e) => (typeof e?.message === "string" ? e.message : ""))
     .filter((m) => m.length > 0);
+
+  // Timeout-specific overrides: populate failure fields from last
+  // known state so the JSONL row is self-describing.
+  const isTimeout = poll.timedOut;
+  const lastStatus = snap.status || "UNKNOWN";
+  const lastPhase = snap.phase ?? "—";
+
   return {
     scenarioId,
     timestamp: input.nowIso ?? new Date().toISOString(),
@@ -459,15 +466,21 @@ export function buildResultRow(input: ResultRowInput): BurnResultRow {
     runId,
     status: detail?.status ?? null,
     phase: snap.phase,
-    classification: detail?.classification ?? null,
+    classification: isTimeout ? "timeout" : (detail?.classification ?? null),
     verdict: finalVerdict,
     status_: finalVerdict,
     costUsd: snap.costUsd,
     durationMs: poll.elapsedMs,
     filesChanged: snap.filesChanged,
-    failureCode: explanation?.code ?? null,
-    failureRootCause: explanation?.rootCause ?? null,
-    narrative: detail?.summary?.narrative ?? detail?.summary?.headline ?? null,
+    failureCode: isTimeout
+      ? "timeout"
+      : (explanation?.code ?? null),
+    failureRootCause: isTimeout
+      ? "Run exceeded time limit without reaching terminal state"
+      : (explanation?.rootCause ?? null),
+    narrative: isTimeout
+      ? `Timeout after ${Math.round(poll.elapsedMs / 1000)}s — last status=${lastStatus} phase=${lastPhase}`
+      : (detail?.summary?.narrative ?? detail?.summary?.headline ?? null),
     errors,
     cleanup: outcome.cleanup,
     cleanupOk,
@@ -598,7 +611,7 @@ export async function runScenarioOnce(opts: RunOnceOptions): Promise<BurnResultR
 
   // ── Classify ──────────────────────────────────────────────────────
   const outcome: OutcomeClassification = pollWithFinal.timedOut
-    ? { verdict: "ERROR", cleanup: "cancel", note: `timed out after ${timeoutMs}ms` }
+    ? { verdict: "TIMEOUT", cleanup: "cancel", note: `timed out after ${timeoutMs}ms` }
     : classifyOutcome(pollWithFinal.detail);
 
   // ── Cleanup ───────────────────────────────────────────────────────

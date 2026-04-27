@@ -339,6 +339,42 @@ test("runScenarioOnce: timeout fetches one final detail and attempts cancel via 
   assert.equal(row.status, "running");
   assert.equal(row.phase, "building");
   assert.equal(row.costUsd, 0.02);
+  // Timeout-specific classification fields.
+  assert.equal(row.classification, "timeout", "timeout must set classification=timeout");
+  assert.equal(row.failureCode, "timeout", "timeout must set failureCode=timeout");
+  assert.equal(row.failureRootCause, "Run exceeded time limit without reaching terminal state");
+  assert.match(row.narrative ?? "", /Timeout after.*last status=RUNNING.*phase=building/);
+});
+
+test("runScenarioOnce: timeout preserves last known state in JSONL row", async () => {
+  const post: Handler = (path) => {
+    if (path === "/tasks") return ok({ task_id: "t-t", run_id: "r-t" });
+    return ok({ ok: true });
+  };
+  const get: Handler = () =>
+    ok<RunDetail>({ status: "running", runState: { phase: "scouting" }, totalCostUsd: 0.07 });
+  const fakeNow = mkClock();
+  const { http } = mockHttp({ get, post });
+  const row = await runScenarioOnce({
+    http,
+    scenarioId: "s-timeout-state",
+    prompt: "p",
+    repoPath: "/r",
+    timeoutMs: 3_000,
+    pollIntervalMs: 1_000,
+    now: fakeNow.now,
+    sleep: fakeNow.sleep,
+  });
+  assert.equal(row.verdict, "TIMEOUT");
+  assert.equal(row.status_, "TIMEOUT");
+  // Last known state carried through.
+  assert.equal(row.status, "running");
+  assert.equal(row.phase, "scouting");
+  assert.equal(row.costUsd, 0.07);
+  assert.ok(row.filesChanged === 0);
+  // Must NOT be classified as ERROR.
+  assert.notEqual(row.verdict, "ERROR");
+  assert.notEqual(row.classification, "ERROR");
 });
 
 test("runScenarioOnce: never auto-approves — no POST to /approvals/:runId/approve", async () => {
