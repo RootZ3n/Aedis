@@ -122,9 +122,9 @@ test("repair-audit result shape never exposes repairsApplied or repairsAttempted
     );
 
     // No legacy fields under any name.
-    assert.equal(("repairsApplied" in (result as Record<string, unknown>)), false);
-    assert.equal(("repairsAttempted" in (result as Record<string, unknown>)), false);
-    assert.equal(("issues" in (result as Record<string, unknown>)), false);
+    assert.equal(("repairsApplied" in (result as unknown as Record<string, unknown>)), false);
+    assert.equal(("repairsAttempted" in (result as unknown as Record<string, unknown>)), false);
+    assert.equal(("issues" in (result as unknown as Record<string, unknown>)), false);
 
     // Type-level invariant: literal true.
     assert.equal(result.auditOnly, true);

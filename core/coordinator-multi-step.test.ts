@@ -44,6 +44,7 @@ import type {
   WorkerType,
   WorkerOutput,
   BuilderOutput,
+  FileChange,
 } from "../workers/base.js";
 import type { CostEntry } from "./runstate.js";
 import type { TrustProfile } from "../router/trust-router.js";
@@ -113,7 +114,7 @@ class MultiStepBuilder extends AbstractWorker {
     const { writeFile, readFile } = await import("node:fs/promises");
     const { resolve } = await import("node:path");
     const root = assignment.projectRoot ?? process.cwd();
-    const changes: BuilderOutput["changes"] = [];
+    const changes: FileChange[] = [];
 
     for (let i = 0; i < targetFiles.length; i += 1) {
       const f = targetFiles[i];
@@ -488,10 +489,12 @@ test("multi-step upstream-failure: wave-1 fail halts downstream waves and surfac
     );
 
     // The run must NOT have committed and must NOT have paused for approval.
+    // commitSha lives on the embedded RunReceipt (finalReceipt), not on
+    // the persistent envelope itself.
     assert.equal(
-      persisted.commitSha ?? null,
+      persisted.finalReceipt?.commitSha ?? null,
       null,
-      `run with failed upstream wave must not produce a commit SHA; got ${persisted.commitSha}`,
+      `run with failed upstream wave must not produce a commit SHA; got ${persisted.finalReceipt?.commitSha}`,
     );
     assert.notEqual(
       persisted.status,
@@ -692,9 +695,9 @@ test("critic stage timeout: synthetic failure carries [critic_timeout] classific
     // The run must end without a commit and without entering approval —
     // critic timeout is a hard failure, not a pause.
     assert.equal(
-      persisted.commitSha ?? null,
+      persisted.finalReceipt?.commitSha ?? null,
       null,
-      `critic-timeout run must not produce a commit SHA; got ${persisted.commitSha}`,
+      `critic-timeout run must not produce a commit SHA; got ${persisted.finalReceipt?.commitSha}`,
     );
     assert.notEqual(
       persisted.status,

@@ -120,7 +120,10 @@ test("change-set: auto-injected test pairs stay optional/non-mutating", () => {
     "Fix the off-by-one in core/run-summary.ts.",
     [
       { description: "Modify core/run-summary.ts", type: "modify", targetFiles: ["core/run-summary.ts"] },
-      { description: "Test pairs for changed implementation files", type: "test", targetFiles: ["core/run-summary.test.ts"] },
+      // Auto-injection is detected by description, not by `type` —
+      // see isAutoInjectedTestPair in change-set.ts. Use a valid
+      // Deliverable.type ("modify") to satisfy the union.
+      { description: "Test pairs for changed implementation files", type: "modify", targetFiles: ["core/run-summary.test.ts"] },
     ],
   );
 

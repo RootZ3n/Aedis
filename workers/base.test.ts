@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 
 import {
   AbstractWorker,
-  type CostEntry,
   type WorkerAssignment,
   type WorkerOutput,
   type WorkerResult,
   type WorkerType,
 } from "./base.js";
+import type { CostEntry } from "../core/runstate.js";
 import type { InvokeAttempt } from "../core/model-invoker.js";
 
 class TestWorker extends AbstractWorker {
