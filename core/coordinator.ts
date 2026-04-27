@@ -3258,7 +3258,7 @@ export class Coordinator {
 
     // ── PHASE 3 — Deduplicate by resolved absolute path ─────────────────
     const seenPaths = new Set<string>();
-    const deduped: Deliverable[] = [];
+    let deduped: Deliverable[] = [];
     for (const d of filtered) {
       const uniqueFiles: string[] = [];
       for (const f of d.targetFiles) {
@@ -3367,7 +3367,20 @@ export class Coordinator {
     const isBugfixCategory = analysis.category === "bugfix";
     const isBugfixPrompt = isBugfixLikePrompt(active.intent.userRequest);
     const isBugfix = isBugfixCategory || isBugfixPrompt;
-    if (!explicitTestRequest && !isBugfix) {
+    // Scope lock veto — when the user said "do not modify anything
+    // else", injecting an adjacent test file is exactly the burn-in-01
+    // 1-file → 9-files failure mode. The charter-level fix
+    // (CharterGenerator.buildDeliverables) blocks one path; this
+    // blocks the parallel coordinator path that runs even when the
+    // charter only emitted a single deliverable.
+    const scopeLockedForInjection = active.intent.charter.scopeLock != null;
+    if (scopeLockedForInjection) {
+      console.log(
+        `[coordinator] prepareDeliverablesForGraph: scopeLock active — skipping Phase 4 test-pair injection ` +
+        `(allowedFiles: ${active.intent.charter.scopeLock?.allowedFiles.join(", ") ?? "<none>"})`,
+      );
+    }
+    if (!explicitTestRequest && !isBugfix && !scopeLockedForInjection) {
       const allTargetFiles = deduped.flatMap((d) => d.targetFiles);
       const missingTests = findMissingTestFiles(allTargetFiles, active.projectRoot);
       if (missingTests.length > 0) {
@@ -3508,6 +3521,51 @@ export class Coordinator {
       console.warn(
         `[coordinator] prepareDeliverablesForGraph: TRIPWIRE — user-named target ${canonical} fell out of deliverables. Merge gate will block.`,
       );
+    }
+
+    // ── Scope-lock allowlist intersection ────────────────────────────────
+    // Final defensive pass: if the charter has a scopeLock, the
+    // graph dispatch must NEVER include a file outside allowedFiles.
+    // This catches anything that snuck in via Phase 4 test-pair
+    // injection (already gated above), Phase 4.5 belt-and-suspenders
+    // stripping (which preserves user-named test files), or any
+    // future expansion path. We trim each deliverable's targetFiles
+    // to the allowlist and drop deliverables that empty out.
+    const scopeLock = active.intent.charter.scopeLock;
+    if (scopeLock) {
+      const allowed = new Set(
+        scopeLock.allowedFiles.map((f) => resolve(active.projectRoot, f)),
+      );
+      const beforeCount = deduped.length;
+      const filtered: Deliverable[] = [];
+      for (const d of deduped) {
+        const kept = d.targetFiles.filter((f) =>
+          allowed.has(resolve(active.projectRoot, f)),
+        );
+        const dropped = d.targetFiles.filter(
+          (f) => !allowed.has(resolve(active.projectRoot, f)),
+        );
+        if (dropped.length > 0) {
+          decisions.push(
+            `  scope-lock: drop ${dropped.join(", ")} from "${d.description}" — ` +
+            `not in allowedFiles (${scopeLock.allowedFiles.join(", ")})`,
+          );
+          for (const f of dropped) {
+            seenPaths.delete(resolve(active.projectRoot, f));
+          }
+        }
+        if (kept.length > 0) {
+          filtered.push({ ...d, targetFiles: kept });
+        } else {
+          decisions.push(
+            `  scope-lock: strip deliverable "${d.description}" — every target was outside allowedFiles`,
+          );
+        }
+      }
+      if (filtered.length !== beforeCount) {
+        didFilter = true;
+      }
+      deduped = filtered;
     }
 
     console.log(`[coordinator] prepareDeliverablesForGraph: ${deduped.length} deliverable(s) after filter+dedup+test-inject`);
@@ -6710,10 +6768,37 @@ export class Coordinator {
   // ─── Change Collection ─────────────────────────────────────────────
 
   private collectChanges(active: ActiveRun, result: WorkerResult): void {
+    const incoming =
+      result.output.kind === "builder"
+        ? result.output.changes
+        : result.output.kind === "integrator"
+          ? result.output.finalChanges
+          : null;
+    if (!incoming) return;
+    // Defense-in-depth scope-lock filter: even though Phase 4 / Phase
+    // 4.5 already trimmed deliverables, a worker that misreports
+    // changes (or any future expansion path) must not be able to
+    // smuggle a mutation past the allowlist. Drop changes here too —
+    // they won't reach the judge, merge gate, or receipt counts.
+    const lock = active.intent.charter.scopeLock;
+    const filtered = lock
+      ? incoming.filter((c) => {
+          const allowed = new Set(
+            lock.allowedFiles.map((f) => resolve(active.projectRoot, f)),
+          );
+          const inScope = allowed.has(resolve(active.projectRoot, c.path));
+          if (!inScope) {
+            console.warn(
+              `[coordinator] scope-lock: dropping out-of-scope change ${c.path} (allowed: ${lock.allowedFiles.join(", ")})`,
+            );
+          }
+          return inScope;
+        })
+      : [...incoming];
     if (result.output.kind === "builder") {
-      active.changes.push(...result.output.changes);
-    } else if (result.output.kind === "integrator") {
-      active.changes = [...result.output.finalChanges];
+      active.changes.push(...filtered);
+    } else {
+      active.changes = filtered;
     }
   }
 

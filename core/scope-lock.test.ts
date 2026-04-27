@@ -12,12 +12,17 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { sanitizePromptForFileExtraction } from "./prompt-sanitizer.js";
 import { CharterGenerator } from "./charter.js";
 import { createIntent } from "./intent.js";
 import { createRunState } from "./runstate.js";
 import { IntegrationJudge } from "./integration-judge.js";
+import { Coordinator, type RunReceipt } from "./coordinator.js";
+import { classifyExecution } from "./execution-classification.js";
 import type { FileChange, WorkerResult } from "../workers/base.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -247,6 +252,259 @@ test("scope-lock: judge.scopeCheck.affectedFiles count equals the number of out-
   );
   // Files reported must match the actual extra changes.
   assert.deepEqual(new Set(scopeCheck.affectedFiles), new Set(["src/b.ts", "src/c.ts"]));
+});
+
+// ─── Coordinator: prepareDeliverablesForGraph + collectChanges ───────
+
+function setupRunSummaryFixture(): { dir: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-scope-lock-"));
+  mkdirSync(join(dir, "core"), { recursive: true });
+  // Both files exist on disk so the test-pair-injection path's
+  // findMissingTestFiles would consider injecting the .test.ts.
+  writeFileSync(join(dir, "core/run-summary.ts"), "// stub source\n", "utf-8");
+  writeFileSync(join(dir, "core/run-summary.test.ts"), "// stub test\n", "utf-8");
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+function buildActiveWithCharter(opts: {
+  projectRoot: string;
+  prompt: string;
+}) {
+  const gen = new CharterGenerator({ autoTestDeliverables: false });
+  const analysis = gen.analyzeRequest(opts.prompt);
+  const charter = gen.generateCharter(analysis);
+  const intent = createIntent({
+    runId: "scope-lock-test",
+    userRequest: opts.prompt,
+    charter,
+    constraints: [],
+  });
+  const changeSet = {
+    intent,
+    filesInScope: [],
+    dependencyRelationships: {},
+    invariants: [],
+    sharedInvariants: [],
+    acceptanceCriteria: [],
+    coherenceVerdict: { coherent: true, reason: "test fixture" },
+  };
+  return {
+    intent,
+    run: createRunState(intent.id, "scope-lock-test"),
+    projectRoot: opts.projectRoot,
+    sourceRepo: opts.projectRoot,
+    normalizedInput: opts.prompt,
+    rejectedCandidates: [],
+    userNamedStrippedTargets: [],
+    analysis,
+    waveVerifications: [],
+    changes: [] as FileChange[],
+    workerResults: [] as WorkerResult[],
+    cancelled: false,
+    cancelledGenerations: new Set<string>(),
+    pendingDispatches: new Map(),
+    runAbortController: new AbortController(),
+    weakOutputRetries: 0,
+    memorySuggestions: [],
+    workspace: null,
+    projectMemory: { recentTaskSummaries: [], substrate: null },
+    gatedContext: { relevantFiles: [], recentTaskSummaries: [], language: null, memoryNotes: [], suggestedNextSteps: [] },
+    changeSet,
+    plan: undefined,
+    scopeClassification: null,
+    blastRadius: null,
+  };
+}
+
+test("coordinator.prepareDeliverablesForGraph: scopeLock blocks Phase 4 test-pair injection", () => {
+  const { dir, cleanup } = setupRunSummaryFixture();
+  try {
+    const coord = new (Coordinator as any)({ projectRoot: dir });
+    const active = buildActiveWithCharter({
+      projectRoot: dir,
+      prompt:
+        "In core/run-summary.ts, find the existing top-of-file comment block. " +
+        "At the very end of that block, add a single new comment line that reads exactly: " +
+        "'// burn-in: comment-swap probe.' Do not modify anything else.",
+    });
+    // Sanity: charter scopeLock is set.
+    assert.ok(active.intent.charter.scopeLock, "charter.scopeLock must be set");
+    const deliverables = coord.prepareDeliverablesForGraph(active, active.analysis);
+    const allTargets = deliverables.flatMap((d: any) => d.targetFiles);
+    assert.deepEqual(
+      allTargets,
+      ["core/run-summary.ts"],
+      `expected only the source file in dispatch; got [${allTargets.join(", ")}]`,
+    );
+    for (const t of allTargets) {
+      assert.doesNotMatch(t, /\.test\.ts$/, `unexpected test deliverable: ${t}`);
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test("coordinator.prepareDeliverablesForGraph: scopeLock strips an out-of-scope deliverable that snuck in", () => {
+  const { dir, cleanup } = setupRunSummaryFixture();
+  try {
+    const coord = new (Coordinator as any)({ projectRoot: dir });
+    const active = buildActiveWithCharter({
+      projectRoot: dir,
+      prompt:
+        "In core/run-summary.ts, add a one-line comment. Do not modify anything else.",
+    });
+    // Simulate a future expansion path that injected a stray
+    // deliverable into the (still-frozen original) intent's
+    // dispatch path. We do this by directly handing the method an
+    // analysis whose targets carry the extra file.
+    const analysisExt = {
+      ...active.analysis,
+      targets: ["core/run-summary.ts", "core/run-summary.test.ts"],
+    };
+    // The intent.charter.deliverables remain locked to the source —
+    // we're testing the coordinator-level allowlist intersection.
+    const deliverables = coord.prepareDeliverablesForGraph(active, analysisExt);
+    const allTargets = deliverables.flatMap((d: any) => d.targetFiles);
+    assert.ok(
+      !allTargets.some((t: string) => t.endsWith(".test.ts")),
+      `scope lock must strip the test target; got [${allTargets.join(", ")}]`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("coordinator.collectChanges: scopeLock filters out out-of-scope FileChanges from a builder result", () => {
+  const { dir, cleanup } = setupRunSummaryFixture();
+  try {
+    const coord = new (Coordinator as any)({ projectRoot: dir });
+    const active = buildActiveWithCharter({
+      projectRoot: dir,
+      prompt:
+        "In core/run-summary.ts, add a one-line comment. Do not modify anything else.",
+    });
+    assert.ok(active.intent.charter.scopeLock);
+    const sourceChange: FileChange = {
+      path: "core/run-summary.ts",
+      operation: "modify",
+      diff: "@@ -1 +1 @@\n-old\n+new\n",
+      content: "new",
+      originalContent: "old",
+    };
+    const testChange: FileChange = {
+      path: "core/run-summary.test.ts",
+      operation: "modify",
+      diff: "@@ -1 +1 @@\n-x\n+y\n",
+      content: "y",
+      originalContent: "x",
+    };
+    const builderResult: WorkerResult = {
+      workerType: "builder",
+      taskId: "t1",
+      success: true,
+      output: { kind: "builder", changes: [sourceChange, testChange] } as any,
+      issues: [],
+      cost: { model: "test", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+      confidence: 0.9,
+      touchedFiles: [],
+      assumptions: [],
+      durationMs: 1,
+    };
+    coord.collectChanges(active, builderResult);
+    assert.equal(active.changes.length, 1);
+    assert.equal(active.changes[0].path, "core/run-summary.ts");
+  } finally {
+    cleanup();
+  }
+});
+
+// ─── execution-classification: scope-violation rule wins over no-op ──
+
+function makeReceiptStub(over: Partial<RunReceipt>): RunReceipt {
+  return {
+    runId: "r",
+    intentId: "i",
+    verdict: "failed",
+    executionVerified: false,
+    executionGateReason: "",
+    verificationReceipt: null,
+    judgmentReport: null,
+    mergeDecision: null,
+    graphSummary: { totalNodes: 1, completed: 0, failed: 1 },
+    ...over,
+  } as unknown as RunReceipt;
+}
+
+test("classifyExecution: scope-boundary judge blocker wins over the gate-no-op text", () => {
+  const receipt = makeReceiptStub({
+    executionGateReason:
+      "No-op execution detected: 2 change(s) were content-identical — no real modification applied",
+    mergeDecision: {
+      action: "block",
+      findings: [],
+      critical: [
+        {
+          source: "integration-judge",
+          severity: "critical",
+          code: "judge:scope-boundary",
+          message: "scope_violation: \"core/run-summary.test.ts\" is outside the locked scope",
+        },
+      ],
+      advisory: [],
+      primaryBlockReason: "scope_violation: \"core/run-summary.test.ts\" is outside the locked scope",
+      summary: "MERGE BLOCKED",
+    } as any,
+  });
+  const result = classifyExecution(receipt);
+  assert.equal(result.classification, "FAILED");
+  assert.equal(result.reasonCode, "scope-violation");
+  assert.match(result.reason, /Scope violation/);
+  assert.match(result.reason, /run-summary\.test\.ts/);
+});
+
+test("classifyExecution: git-diff:unexpected-reference-change is also classified as scope-violation", () => {
+  const receipt = makeReceiptStub({
+    executionGateReason: "No-op execution detected: 2 change(s) were content-identical",
+    mergeDecision: {
+      action: "block",
+      findings: [],
+      critical: [
+        {
+          source: "change-set-gate",
+          severity: "critical",
+          code: "git-diff:unexpected-reference-change",
+          message: "1 reference/context file(s) changed unexpectedly: core/run-summary.test.ts",
+        },
+      ],
+      advisory: [],
+      primaryBlockReason: "1 reference/context file(s) changed unexpectedly: core/run-summary.test.ts",
+      summary: "MERGE BLOCKED",
+    } as any,
+  });
+  const result = classifyExecution(receipt);
+  assert.equal(result.classification, "FAILED");
+  assert.equal(result.reasonCode, "scope-violation");
+});
+
+test("classifyExecution: legitimate no-op without scope-violation still classifies as NO_OP", () => {
+  // Regression guard — ensure the new rule doesn't swallow the
+  // existing gate-no-op classification when there's no scope finding.
+  const receipt = makeReceiptStub({
+    verdict: "success",
+    executionGateReason:
+      "No-op execution detected: no files were created, modified, or deleted",
+    mergeDecision: {
+      action: "block",
+      findings: [],
+      critical: [],
+      advisory: [],
+      primaryBlockReason: "",
+      summary: "",
+    } as any,
+  });
+  const result = classifyExecution(receipt);
+  assert.equal(result.classification, "NO_OP");
+  assert.equal(result.reasonCode, "gate-no-op");
 });
 
 // ─── burn-in-01 end-to-end shape ─────────────────────────────────────

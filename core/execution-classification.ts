@@ -79,6 +79,31 @@ export function classifyExecution(receipt: RunReceipt): ExecutionClassificationR
     };
   }
 
+  // ── Rule 1b: scope-violation merge block → FAILED (scope-violation)
+  // When the merge gate blocks because of an explicit scope-lock
+  // breach — either via the integration-judge scope-boundary check
+  // (`judge:scope-boundary`) or the git-diff verifier's
+  // unexpected-reference signal (`git-diff:unexpected-reference-change`)
+  // — surface that as the primary cause. Otherwise the gate-no-op
+  // rule below would mask the real reason, exactly as observed in
+  // burn-in-01: a content-identical bogus edit on the out-of-scope
+  // file got reported as NO_OP instead of "you touched a file that
+  // wasn't allowed". Fires before the no-op rule on purpose.
+  const scopeViolation = receipt.mergeDecision?.critical.find(
+    (f) =>
+      f.code === "judge:scope-boundary" ||
+      f.code === "git-diff:unexpected-reference-change",
+  );
+  if (scopeViolation && mergeAction === "block") {
+    factors.push(`scope:${scopeViolation.code}`);
+    return {
+      classification: "FAILED",
+      reasonCode: "scope-violation",
+      reason: `Scope violation: ${scopeViolation.message}`,
+      factors,
+    };
+  }
+
   // ── Rule 2: gate blocked as no-op → NO_OP ───────────────────────
   // The execution gate reports a "no_op" via its reason text. We
   // detect it by the specific marker the gate uses, which is stable
