@@ -321,3 +321,7 @@ export interface WaveOutcomeSummary {
 export function tryAddFunctionToNonexistentFile(): { success: boolean; reason: string } {
   return { success: false, reason: "core/nonexistent-file-xyz.ts does not exist" };
 }
+
+export function helloAedis(): string {
+  return "hello from Aedis";
+}
