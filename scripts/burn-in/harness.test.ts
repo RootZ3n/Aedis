@@ -6,6 +6,7 @@ import {
   type JsonResponse,
   type RunDetail,
   classifyOutcome,
+  filterScenarios,
   formatProgressLine,
   isTerminal,
   pollUntilTerminal,
@@ -410,6 +411,40 @@ test("resolveTimeoutMs: env override wins, garbage falls back", () => {
   assert.equal(resolveTimeoutMs("not-a-number", 900_000), 900_000);
   assert.equal(resolveTimeoutMs("0", 900_000), 900_000);
   assert.equal(resolveTimeoutMs("-50", 900_000), 900_000);
+});
+
+// ─── filterScenarios ─────────────────────────────────────────────
+
+const SAMPLE_SCENARIOS = [
+  { id: "s-01", prompt: "a" },
+  { id: "s-02", prompt: "b" },
+  { id: "s-03", prompt: "c" },
+] as const;
+
+test("filterScenarios: exact --scenario runs one scenario", () => {
+  const result = filterScenarios(SAMPLE_SCENARIOS, ["node", "test.ts", "--scenario", "s-02"]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, "s-02");
+});
+
+test("filterScenarios: unknown scenario exits nonzero", () => {
+  const origExit = process.exit;
+  let exitCode: number | undefined;
+  process.exit = ((code: number) => { exitCode = code; throw new Error("exit"); }) as never;
+  try {
+    filterScenarios(SAMPLE_SCENARIOS, ["node", "test.ts", "--scenario", "nope"]);
+    assert.fail("should have called process.exit");
+  } catch (e) {
+    assert.equal((e as Error).message, "exit");
+    assert.equal(exitCode, 1);
+  } finally {
+    process.exit = origExit;
+  }
+});
+
+test("filterScenarios: no --scenario flag returns all scenarios", () => {
+  const result = filterScenarios(SAMPLE_SCENARIOS, ["node", "test.ts"]);
+  assert.equal(result.length, SAMPLE_SCENARIOS.length);
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────

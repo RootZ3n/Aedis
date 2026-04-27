@@ -15,6 +15,7 @@ import {
   type BurnResultRow,
   createFetchClient,
   DEFAULT_BURN_TIMEOUT_MS,
+  filterScenarios,
   resolveTimeoutMs,
   runScenarioOnce,
 } from "./harness.js";
@@ -166,7 +167,9 @@ const SCENARIOS = [
 ] as const;
 
 async function main(): Promise<void> {
-  console.log(`🔥 AEDIS HARD BURN-IN — ${SCENARIOS.length} scenarios`);
+  const activeScenarios = filterScenarios(SCENARIOS);
+
+  console.log(`🔥 AEDIS HARD BURN-IN — ${activeScenarios.length} scenarios`);
   console.log(`Target:  ${TARGET}`);
   console.log(`Timeout: ${TIMEOUT_MS}ms${process.env["AEDIS_BURN_TIMEOUT_MS"] ? " (env override)" : " (default)"}`);
   console.log(`Results: ${RESULTS_FILE}\n`);
@@ -192,9 +195,9 @@ async function main(): Promise<void> {
   writeFileSync(RESULTS_FILE, "", "utf-8");
 
   const results: BurnResultRow[] = [];
-  for (let i = 0; i < SCENARIOS.length; i++) {
-    const s = SCENARIOS[i];
-    process.stdout.write(`  [${i + 1}/${SCENARIOS.length}] ${s.id}... `);
+  for (let i = 0; i < activeScenarios.length; i++) {
+    const s = activeScenarios[i];
+    process.stdout.write(`  [${i + 1}/${activeScenarios.length}] ${s.id}... `);
     const r = await runScenarioOnce({
       http,
       scenarioId: s.id,
@@ -223,7 +226,7 @@ async function main(): Promise<void> {
 
   console.log(`\n─────────────────────────────────────────────────────────────`);
   console.log(
-    `🔥 BURN-IN DONE: ${SCENARIOS.length} scenarios | pass=${buckets.PASS} fail=${buckets.FAIL} ` +
+    `🔥 BURN-IN DONE: ${activeScenarios.length} scenarios | pass=${buckets.PASS} fail=${buckets.FAIL} ` +
       `err=${buckets.ERROR} timeout=${buckets.TIMEOUT} safe=${buckets.SAFE_FAILURE} ` +
       `pending=${buckets.PENDING_APPROVAL} blocked=${buckets.BLOCKED} | $${totalCost.toFixed(4)}`,
   );

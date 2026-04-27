@@ -639,3 +639,26 @@ export function resolveTimeoutMs(
   if (!Number.isFinite(parsed) || parsed <= 0) return fallbackMs;
   return parsed;
 }
+
+// ─── Scenario filter ─────────────────────────────────────────────────
+
+/**
+ * Parse `--scenario <id>` from argv and return the filtered list.
+ * Exits with code 1 and a helpful message when the id doesn't match.
+ * Returns the full list when `--scenario` is absent.
+ */
+export function filterScenarios<T extends { id: string }>(
+  scenarios: readonly T[],
+  argv: string[] = process.argv,
+): T[] {
+  const idx = argv.indexOf("--scenario");
+  if (idx === -1 || idx + 1 >= argv.length) return [...scenarios];
+  const target = argv[idx + 1];
+  const match = scenarios.filter((s) => s.id === target);
+  if (match.length === 0) {
+    const ids = scenarios.map((s) => s.id).join("\n  ");
+    console.error(`Unknown scenario: ${target}\nAvailable:\n  ${ids}`);
+    process.exit(1);
+  }
+  return match;
+}

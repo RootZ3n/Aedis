@@ -20,6 +20,7 @@ import {
   type BurnResultRow,
   createFetchClient,
   DEFAULT_BURN_TIMEOUT_MS,
+  filterScenarios,
   resolveTimeoutMs,
   runScenarioOnce,
 } from "./harness.js";
@@ -190,12 +191,14 @@ async function main(): Promise<void> {
     return;
   }
 
+  const activeScenarios = filterScenarios(SCENARIOS);
+
   console.log(`\n🔬 AEDIS BURN-IN HARNESS (soft)`);
   console.log(`Target:  ${AEDIS_BASE}`);
   console.log(`Project: ${PROJECT_ROOT}`);
   console.log(`Timeout: ${TIMEOUT_MS}ms${process.env["AEDIS_BURN_TIMEOUT_MS"] ? " (env override)" : " (default)"}`);
   console.log(`Results: ${RESULTS_FILE}`);
-  console.log(`Scenarios: ${SCENARIOS.length}\n`);
+  console.log(`Scenarios: ${activeScenarios.length}\n`);
 
   const http = createFetchClient(AEDIS_BASE);
 
@@ -215,7 +218,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  for (const scenario of SCENARIOS) {
+  for (const scenario of activeScenarios) {
     const repo = scenario.repo ?? PROJECT_ROOT;
     console.log(`\n${"═".repeat(70)}`);
     console.log(`SCENARIO: ${scenario.id}`);
