@@ -182,6 +182,30 @@ export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
       maxCostUsd: 0.15,
     },
   },
+
+
+  // ── 9. Command-loop troubleshooting ───────────────────────────────
+  // Tests that Aedis can make a change, run validation commands,
+  // interpret failures, repair if needed, and rerun commands.
+  {
+    id: "burn-in-09-command-loop",
+    prompt:
+      "In core/retry-utils.ts, add a small exported function " +
+      "'clampDelay(delayMs: number, maxMs: number): number' that returns " +
+      "Math.min(delayMs, maxMs). Then create core/retry-utils.test.ts " +
+      "with three focused tests for clampDelay: (1) returns the delay " +
+      "when below max, (2) returns max when delay exceeds max, (3) returns " +
+      "max when delay equals max. After making the changes, run: " +
+      "npm run security:secrets, npm test, npm run build, npx tsc --noEmit. " +
+      "If any command fails, inspect the output, fix the issue, and rerun " +
+      "the failing command. Only modify core/retry-utils.ts and " +
+      "core/retry-utils.test.ts — do not touch any other file.",
+    expected: {
+      classification: ["PARTIAL_SUCCESS", "SUCCESS", "EXECUTION_ERROR"],
+      minFilesChanged: 2,
+      maxCostUsd: 0.40,
+    },
+  },
   ];
 }
 

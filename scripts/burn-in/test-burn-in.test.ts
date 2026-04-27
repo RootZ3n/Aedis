@@ -57,9 +57,9 @@ test("buildScenarios with no tag still produces a usable burn-in-01 prompt", () 
   );
 });
 
-test("buildScenarios returns 8 scenarios", () => {
+test("buildScenarios returns 9 scenarios", () => {
   const scenarios = buildScenarios({ tag: "t" });
-  assert.equal(scenarios.length, 8);
+  assert.equal(scenarios.length, 9);
   assert.deepEqual(
     scenarios.map((s) => s.id),
     [
@@ -71,8 +71,43 @@ test("buildScenarios returns 8 scenarios", () => {
       "burn-in-06-no-op-recovery",
       "burn-in-07-source-plus-test",
       "burn-in-08-external-repo",
+      "burn-in-09-command-loop",
     ],
   );
+});
+
+test("burn-in-09: prompt references validation commands by name", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  const s09 = scenarios.find((s) => s.id === "burn-in-09-command-loop");
+  assert.ok(s09, "burn-in-09 must exist");
+  assert.match(s09.prompt, /npm run security:secrets/);
+  assert.match(s09.prompt, /npm test/);
+  assert.match(s09.prompt, /npm run build/);
+  assert.match(s09.prompt, /npx tsc --noEmit/);
+});
+
+test("burn-in-09: expects at least 2 files changed", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  const s09 = scenarios.find((s) => s.id === "burn-in-09-command-loop");
+  assert.ok(s09);
+  assert.ok(
+    s09.expected.minFilesChanged !== undefined && s09.expected.minFilesChanged >= 2,
+    "command-loop must change source + test file",
+  );
+});
+
+test("burn-in-09: prompt includes scope-lock phrasing", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  const s09 = scenarios.find((s) => s.id === "burn-in-09-command-loop");
+  assert.ok(s09);
+  assert.match(s09.prompt, /do not touch any other file/i);
+});
+
+test("burn-in-09: prompt instructs fix-and-rerun on failure", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  const s09 = scenarios.find((s) => s.id === "burn-in-09-command-loop");
+  assert.ok(s09);
+  assert.match(s09.prompt, /fix.*rerun/i);
 });
 
 test("buildScenarios returns fresh arrays — callers can't mutate cached state", () => {
