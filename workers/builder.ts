@@ -113,6 +113,20 @@ export interface BuilderWorkerConfig {
    * the fallback.
    */
   readonly fallbackModel?: { provider: Provider; model: string } | null;
+  /**
+   * Pin this Builder to a specific (provider, model). When set,
+   * `getActiveModelConfig` returns this pair regardless of
+   * `.aedis/model-config.json` or tier resolution. Used by Phase D
+   * lane dispatch (`createBuilderForLane`) so a transient Builder can
+   * run a single lane on its own model without mutating the
+   * project's persisted config or the WorkerRegistry.
+   *
+   * Constructor-scoped; never read from disk. The legacy
+   * `defaultModel`/`defaultProvider` are still honored on the
+   * configRoot-load failure path so existing tests/harnesses that
+   * don't set this field keep working.
+   */
+  readonly pinnedModel?: { provider: Provider; model: string } | null;
 }
 
 // Default fallback chain target — Kimi K2 via OpenRouter as the cheap-and-fast
@@ -619,6 +633,7 @@ export class BuilderWorker extends AbstractWorker {
   private readonly defaultModel: string;
   private readonly defaultProvider: Provider;
   private readonly fallbackModel: { provider: Provider; model: string } | null;
+  private readonly pinnedModel: { provider: Provider; model: string } | null;
   private readonly diffApplier: DiffApplier;
 
   /**
@@ -646,6 +661,7 @@ export class BuilderWorker extends AbstractWorker {
     this.fallbackModel = config.fallbackModel === null
       ? null
       : (config.fallbackModel ?? DEFAULT_FALLBACK);
+    this.pinnedModel = config.pinnedModel ?? null;
     this.diffApplier = new DiffApplier();
   }
 
@@ -849,6 +865,13 @@ export class BuilderWorker extends AbstractWorker {
     projectRoot: string,
     tier: WorkerAssignment["tier"] = "standard",
   ): { model: string; provider: string } {
+    // Constructor-time pin (Phase D lane dispatch) wins over every
+    // other source. The factory creates a transient Builder for a
+    // single lane invocation, so reading .aedis/model-config.json
+    // would defeat the whole point of the pin.
+    if (this.pinnedModel) {
+      return { model: this.pinnedModel.model, provider: this.pinnedModel.provider };
+    }
     try {
       const config = loadModelConfig(projectRoot);
       const resolved = resolveBuilderModelForTier(config, tier);
@@ -936,6 +959,11 @@ export class BuilderWorker extends AbstractWorker {
     projectRoot: string,
     tier: WorkerAssignment["tier"] = "standard",
   ): readonly { provider: string; model: string }[] {
+    // A pinned Builder (Phase D lane dispatch) is single-shot by
+    // contract — pulling a fallback chain from disk would silently
+    // run a different model for the lane, defeating the lane
+    // attribution on the resulting Candidate.
+    if (this.pinnedModel) return [];
     try {
       const config = loadModelConfig(projectRoot);
       const resolved = resolveBuilderChainForTier(config, tier);

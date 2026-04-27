@@ -238,6 +238,7 @@ import {
   loadLaneConfigFromDisk,
   type LaneConfig,
 } from "./lane-config.js";
+import { createBuilderForLane } from "./lane-builder-factory.js";
 import { findImplForTest, findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
@@ -314,6 +315,18 @@ export interface CoordinatorConfig {
    * setting `requireWorkspace: false` in the CoordinatorConfig.
    */
   requireWorkspace: boolean;
+  /**
+   * Phase D injection point — used by `maybeRunFallbackShadow` to
+   * construct the lane-pinned BuilderWorker for the shadow lane.
+   * Defaults to the real `createBuilderForLane` factory; tests
+   * (and any future caller that needs to swap in a stub builder
+   * without mutating WorkerRegistry) can override it.
+   *
+   * When the factory returns null the shadow lane silently falls
+   * back to the registered default Builder so a misconfigured
+   * `lane-config.json` never crashes the run.
+   */
+  laneBuilderFactory?: typeof createBuilderForLane;
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -6777,10 +6790,44 @@ export class Coordinator {
 
     const shadowAssignment = active.laneConfig.shadow;
     if (!shadowAssignment) return null;
+
+    // ── Phase D: pin the shadow Builder to lane-config.shadow's
+    // (provider, model). Constructed transient — no registry mutation,
+    // no model-config.json on-disk side effects, no cross-run leakage.
+    // If the configured provider isn't in the supported Provider
+    // union, fall back to the registry's default Builder so a typo in
+    // lane-config.json doesn't crash the run; the candidate manifest
+    // still records the intended lane labels for diagnosis.
+    //
+    // The factory is injectable via `config.laneBuilderFactory` so
+    // tests can substitute a stub builder without touching the
+    // WorkerRegistry or making real network calls.
+    const factory = this.config.laneBuilderFactory ?? createBuilderForLane;
+    const laneBuilder = factory({
+      projectRoot: active.projectRoot,
+      provider: shadowAssignment.provider,
+      model: shadowAssignment.model,
+      runState: active.run,
+    });
+    if (!laneBuilder) {
+      console.warn(
+        `[coordinator] local_then_cloud: lane-config.shadow.provider="${shadowAssignment.provider}" is not a supported Provider — ` +
+        `shadow lane will dispatch the registered default Builder. Fix lane-config.json or expand SUPPORTED_PROVIDERS.`,
+      );
+    }
+    // Cost-surfacing log (Phase D minimal cost guard). A second model
+    // invocation costs real money; the operator should see exactly
+    // which provider/model is about to be charged before the call.
+    // Full budget enforcement is deferred — this line is the entire
+    // cost guard for now.
     console.log(
-      `[coordinator] local_then_cloud: primary disqualified (${candidateDisqualification(primary)}) — running shadow lane (${shadowAssignment.provider}/${shadowAssignment.model})`,
+      `[coordinator] local_then_cloud: primary disqualified (${candidateDisqualification(primary)}) — ` +
+      `dispatching SHADOW LANE on ${shadowAssignment.provider}/${shadowAssignment.model} ` +
+      `(lane=${shadowAssignment.lane}, run=${active.run.id.slice(0, 8)}); ` +
+      `this is a SECOND model call — operator-visible cost will be charged to this run.`,
     );
     return await this.runShadowBuilder(active.run.id, {
+      ...(laneBuilder ? { builder: laneBuilder } : {}),
       lane: shadowAssignment.lane,
       provider: shadowAssignment.provider,
       model: shadowAssignment.model,

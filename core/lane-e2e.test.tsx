@@ -177,6 +177,10 @@ function buildHarness(projectRoot: string, opts: { typecheckPasses: boolean }) {
     {
       projectRoot, autoCommit: true, requireWorkspace: true,
       requireApproval: false, autoPromoteOnSuccess: false,
+      // Force shadow lane to fall back to the registered stub Builder
+      // — see lane-execution.test.ts for the rationale (Phase D
+      // factory would otherwise hit the network).
+      laneBuilderFactory: () => null,
       verificationConfig: {
         requiredChecks: [],
         // The decisive lever: when typecheck "fails" with a blocker
