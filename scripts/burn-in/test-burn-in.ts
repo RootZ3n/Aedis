@@ -1,51 +1,63 @@
 /**
- * Aedis Burn-In Harness v2
- * Tests Aedis against the 8 recommended burn-in scenarios.
+ * Aedis Burn-In Harness — soft suite.
  *
- * Usage:
- *   cd /mnt/ai/aedis && npx tsx test-burn-in.ts
- *   AEDIS_BASE=http://localhost:18796 npx tsx test-burn-in.ts
+ * Submits each scenario, polls the canonical run state machine, and
+ * appends a normalised JSONL row per scenario. Never auto-approves
+ * — runs that reach AWAITING_APPROVAL get rejected so source stays
+ * untouched.
  *
- * Each result is appended to /mnt/ai/tmp/aedis-burn-in-results.jsonl
- * Run with --summary to see accumulated results without re-running tests.
+ *   cd /mnt/ai/aedis && npx tsx scripts/burn-in/test-burn-in.ts
+ *   AEDIS_BASE=http://localhost:18796 npx tsx scripts/burn-in/test-burn-in.ts
+ *   AEDIS_BURN_TIMEOUT_MS=600000 npx tsx scripts/burn-in/test-burn-in.ts
+ *
+ * Each row is appended to /mnt/ai/tmp/aedis-burn-in-results.jsonl
+ * Run with --summary to print accumulated results without re-running.
  */
 
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+
+import {
+  type BurnResultRow,
+  createFetchClient,
+  DEFAULT_BURN_TIMEOUT_MS,
+  resolveTimeoutMs,
+  runScenarioOnce,
+} from "./harness.js";
 
 const AEDIS_BASE = process.env["AEDIS_BASE"] ?? "http://localhost:18796";
 const RESULTS_FILE = "/mnt/ai/tmp/aedis-burn-in-results.jsonl";
-const PROJECT_ROOT = "/mnt/ai/aedis"; // test against itself
-
-// ─── Scenario Definitions ───────────────────────────────────────────────────
+const PROJECT_ROOT = "/mnt/ai/aedis";
+const TIMEOUT_MS = resolveTimeoutMs(process.env["AEDIS_BURN_TIMEOUT_MS"], DEFAULT_BURN_TIMEOUT_MS);
 
 interface Scenario {
   id: string;
   prompt: string;
   repo?: string;
   expected: {
-    classification?: string[]; // acceptable verdicts
-    shouldAsk?: boolean; // ambiguous → should ask for clarification
-    shouldBlock?: boolean; // ts-breaking → should be blocked
+    classification?: string[];
+    shouldAsk?: boolean;
     minFilesChanged?: number;
     maxCostUsd?: number;
   };
 }
 
 const SCENARIOS: Scenario[] = [
-  // ── 1. Small bugfix + test ──────────────────────────────────────────────
+  // ── 1. Tiny single-line comment swap ─────────────────────────────────
   {
-    id: "burn-in-01-bugfix-test",
+    id: "burn-in-01-comment-swap-tiny",
+    // Kept deliberately small so the first scenario doesn't
+    // accidentally exercise multi-wave behaviour. One file, one
+    // comment, no neighbours.
     prompt:
-      "In core/change-set.ts, the FileInclusion type has a comment that says '// TODO: split mutations by type' but the comment is misleading. Replace it with: '// Mutation expectation for the merge gate. True = output must differ from input.' Keep the edit minimal.",
+      "In core/run-summary.ts, find the existing top-of-file comment block. At the very end of that block, add a single new comment line that reads exactly: '// burn-in: comment-swap probe.' Do not modify anything else.",
     expected: {
       classification: ["PARTIAL_SUCCESS", "SUCCESS", "NO_OP", "EXECUTION_ERROR"],
       minFilesChanged: 1,
-      maxCostUsd: 0.15,
+      maxCostUsd: 0.10,
     },
   },
 
-  // ── 2. Two-file refactor ─────────────────────────────────────────────────
+  // ── 2. Two-file refactor (rename within one function) ───────────────
   {
     id: "burn-in-02-two-file-refactor",
     prompt:
@@ -57,7 +69,7 @@ const SCENARIOS: Scenario[] = [
     },
   },
 
-  // ── 3. Multi-step 4–6 file improvement ──────────────────────────────────
+  // ── 3. Multi-step 4–6 file improvement ──────────────────────────────
   {
     id: "burn-in-03-multi-file-improvement",
     prompt:
@@ -69,7 +81,7 @@ const SCENARIOS: Scenario[] = [
     },
   },
 
-  // ── 4. Ambiguous prompt — should ask, not guess ─────────────────────────
+  // ── 4. Ambiguous prompt — should ask, not guess ─────────────────────
   {
     id: "burn-in-04-ambiguous-should-ask",
     prompt: "Clean up the config handling.",
@@ -80,7 +92,7 @@ const SCENARIOS: Scenario[] = [
     },
   },
 
-  // ── 5. Explicit "do not touch X" constraint ─────────────────────────────
+  // ── 5. Explicit "do not touch X" constraint ─────────────────────────
   {
     id: "burn-in-05-do-not-touch",
     prompt:
@@ -92,7 +104,7 @@ const SCENARIOS: Scenario[] = [
     },
   },
 
-  // ── 6. Builder timeout / no-op recovery ──────────────────────────────────
+  // ── 6. Builder timeout / no-op recovery ──────────────────────────────
   {
     id: "burn-in-06-no-op-recovery",
     prompt:
@@ -103,19 +115,19 @@ const SCENARIOS: Scenario[] = [
     },
   },
 
-  // ── 7. Explicit source+test changes ──────────────────────────────────────
+  // ── 7. Explicit source+test changes ──────────────────────────────────
   {
     id: "burn-in-07-source-plus-test",
     prompt:
       "In core/run-summary.ts, add a new exportable helper function 'formatVerdictBadge' that takes a string verdict ('SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILED') and returns a string badge ('✅ SUCCESS', '⚠️ PARTIAL_SUCCESS', '❌ FAILED'). Add one focused test in core/run-summary.test.ts that exercises this function with all three inputs.",
     expected: {
       classification: ["PARTIAL_SUCCESS", "SUCCESS", "NO_OP", "EXECUTION_ERROR"],
-      minFilesChanged: 2, // run-summary.ts + test file
+      minFilesChanged: 2,
       maxCostUsd: 0.30,
     },
   },
 
-  // ── 8. External repo (Crucible) ─────────────────────────────────────────
+  // ── 8. External repo (Crucible) ─────────────────────────────────────
   {
     id: "burn-in-08-external-repo",
     repo: "/mnt/ai/crucible",
@@ -129,331 +141,122 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
-// ─── Aedis API Client ───────────────────────────────────────────────────────
-
-interface SubmitResponse {
-  task_id: string;
-  run_id: string;
-  status: string;
-  prompt: string;
-  repo_path: string;
-}
-
-interface RunStatus {
-  id: string;
-  taskId: string;
-  runId: string;
-  status: string;
-  phase: string | null;
-  totalCostUsd: number;
-  classification: string | null;
-  summary: {
-    headline: string | null;
-    narrative: string | null;
-    changes?: Array<{ path: string }>;
-    failureExplanation?: {
-      code: string;
-      stage: string;
-      rootCause: string;
-      suggestedFix: string;
-      evidence: string[];
-    };
-  };
-  errors: Array<{ source: string; message: string }>;
-  executionVerified: boolean | null;
-}
-
-async function aedisSubmit(prompt: string, repoPath: string): Promise<SubmitResponse> {
-  const res = await fetch(`${AEDIS_BASE}/tasks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, repoPath }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Aedis POST /tasks failed ${res.status}: ${text}`);
-  }
-  return res.json() as Promise<SubmitResponse>;
-}
-
-async function aedisStatus(runId: string): Promise<RunStatus> {
-  const res = await fetch(`${AEDIS_BASE}/api/runs/${runId}`);
-  if (!res.ok) throw new Error(`Status fetch failed ${res.status}`);
-  return res.json() as Promise<RunStatus>;
-}
-
-async function aedisApprove(runId: string): Promise<void> {
-  const res = await fetch(`${AEDIS_BASE}/api/runs/${runId}/approve`, { method: "POST" });
-  if (!res.ok && res.status !== 404) {
-    const text = await res.text();
-    throw new Error(`Approve failed ${res.status}: ${text}`);
-  }
-}
-
-async function aedisCancel(runId: string): Promise<void> {
-  const res = await fetch(`${AEDIS_BASE}/api/runs/${runId}/cancel`, { method: "POST" });
-  if (!res.ok && res.status !== 404) {
-    const text = await res.text();
-    throw new Error(`Cancel failed ${res.status}: ${text}`);
-  }
-}
-
-const TERMINAL_STATUSES = new Set([
-  "COMPLETE", "COMPLETED", "PROMOTED", "READY_FOR_PROMOTION",
-  "EXECUTION_ERROR", "ERROR", "ABORTED", "FAILED",
-  "INTERRUPTED", "CANCELLED",
-]);
-
-async function aedisWaitForCompletion(
-  runId: string,
-  taskId: string,
-  timeoutMs = 300_000,
-): Promise<RunStatus> {
-  const deadline = Date.now() + timeoutMs;
-  let lastStatus: RunStatus | null = null;
-  let approvalAttempts = 0;
-
-  while (Date.now() < deadline) {
-    const status = await aedisStatus(runId);
-    lastStatus = status;
-    const phase = status.status ?? status.phase ?? "";
-    const phaseUpper = phase.toUpperCase();
-
-    if (TERMINAL_STATUSES.has(phaseUpper)) {
-      return status;
-    }
-
-    // Handle approval states — auto-approve once
-    if (phaseUpper === "AWAITING_APPROVAL" || phaseUpper === "PENDING_APPROVAL" || phaseUpper === "READY_FOR_PROMOTION") {
-      approvalAttempts++;
-      if (approvalAttempts === 1) {
-        console.log(`  ⏳ Phase=${phase} — auto-approving...`);
-        await aedisApprove(runId);
-        await sleep(3000);
-        continue;
-      }
-      // If still waiting after approve, keep polling
-      await sleep(5000);
-      continue;
-    }
-
-    await sleep(5000);
-  }
-
-  throw new Error(`Timeout waiting for run ${runId} after ${timeoutMs}ms (last status: ${lastStatus?.status})`);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-// ─── Result Logging ─────────────────────────────────────────────────────────
-
-interface RunResult {
-  scenarioId: string;
-  timestamp: string;
-  prompt: string;
-  repo: string;
-  submitted: boolean;
-  taskId: string;
-  runId: string;
-  error: string | null;
-  status: string | null;
-  classification: string | null;
-  costUsd: number | null;
-  confidence: number | null;
-  durationMs: number | null;
-  filesChanged: number | null;
-  failureCode: string | null;
-  failureRootCause: string | null;
-  narrative: string | null;
-  status_: "PASS" | "FAIL" | "ERROR";
-  notes: string[];
-}
-
-function logResult(result: RunResult): void {
-  const line = JSON.stringify(result);
-  appendFileSync(RESULTS_FILE, line + "\n", "utf-8");
+function logResult(result: BurnResultRow): void {
+  appendFileSync(RESULTS_FILE, JSON.stringify(result) + "\n", "utf-8");
   const cost = result.costUsd?.toFixed(4) ?? "?.????";
-  console.log(`  → [${result.status_}] ${result.scenarioId} | ${result.status ?? "?"} | $${cost} | ${result.classification ?? "?"} | ${result.filesChanged ?? "?"} files`);
+  const cleanup = result.cleanup === "none" ? "" : ` cleanup=${result.cleanup}(${result.cleanupOk ? "ok" : "fail"})`;
+  console.log(
+    `  → [${result.verdict}] ${result.scenarioId} | status=${result.status ?? "?"} phase=${result.phase ?? "—"} | $${cost} | ${result.filesChanged} files${cleanup}`,
+  );
   if (result.notes.length > 0) {
     for (const n of result.notes) console.log(`     └─ ${n}`);
   }
 }
 
-function summarizeResults(): void {
+function summariseResults(): void {
   if (!existsSync(RESULTS_FILE)) {
     console.log("\nNo results yet.\n");
     return;
   }
   const lines = readFileSync(RESULTS_FILE, "utf-8").split("\n").filter(Boolean);
-  const results: RunResult[] = lines.map((l) => JSON.parse(l));
-
-  const pass = results.filter((r) => r.status_ === "PASS").length;
-  const fail = results.filter((r) => r.status_ === "FAIL").length;
-  const err = results.filter((r) => r.status_ === "ERROR").length;
-  const totalCost = results.reduce((s, r) => s + (r.costUsd ?? 0), 0);
-
-  console.log(`\n${"─".repeat(70)}`);
-  console.log(`BURN-IN SUMMARY: ${results.length} scenarios | ${pass} pass | ${fail} fail | ${err} error | $${totalCost.toFixed(4)} total`);
-  console.log(`${"─".repeat(70)}`);
-
+  const results: BurnResultRow[] = lines.map((l) => JSON.parse(l) as BurnResultRow);
+  const buckets = { PASS: 0, FAIL: 0, ERROR: 0, TIMEOUT: 0, SAFE_FAILURE: 0, PENDING_APPROVAL: 0, BLOCKED: 0 };
+  let totalCost = 0;
   for (const r of results) {
-    const icon = r.status_ === "PASS" ? "✅" : r.status_ === "FAIL" ? "❌" : "💥";
+    buckets[r.verdict as keyof typeof buckets] = (buckets[r.verdict as keyof typeof buckets] ?? 0) + 1;
+    totalCost += r.costUsd ?? 0;
+  }
+  console.log(`\n${"─".repeat(70)}`);
+  console.log(
+    `BURN-IN SUMMARY: ${results.length} scenarios | pass=${buckets.PASS} fail=${buckets.FAIL} ` +
+      `err=${buckets.ERROR} timeout=${buckets.TIMEOUT} safe=${buckets.SAFE_FAILURE} ` +
+      `pending=${buckets.PENDING_APPROVAL} blocked=${buckets.BLOCKED} | $${totalCost.toFixed(4)}`,
+  );
+  console.log(`${"─".repeat(70)}`);
+  for (const r of results) {
     const cost = r.costUsd?.toFixed(4) ?? "?.????";
-    console.log(`  ${icon} ${r.scenarioId.padEnd(38)} ${(r.status ?? "?").padEnd(25)} $${cost}  ${r.classification ?? "?"}`);
-    if (r.notes.length > 0) {
-      for (const n of r.notes) console.log(`     └─ ${n}`);
-    }
+    console.log(
+      `  ${r.verdict.padEnd(16)} ${r.scenarioId.padEnd(38)} ${(r.status ?? "?").padEnd(22)} $${cost}`,
+    );
+    if (r.notes.length > 0) for (const n of r.notes) console.log(`     └─ ${n}`);
   }
   console.log(`${"─".repeat(70)}\n`);
 }
 
-// ─── Scenario Runner ────────────────────────────────────────────────────────
-
-async function runScenario(scenario: Scenario): Promise<RunResult> {
-  const repo = scenario.repo ?? PROJECT_ROOT;
-  const startMs = Date.now();
-  const notes: string[] = [];
-
-  console.log(`\n${"═".repeat(70)}`);
-  console.log(`SCENARIO: ${scenario.id}`);
-  console.log(`Prompt: ${scenario.prompt.slice(0, 90)}${scenario.prompt.length > 90 ? "..." : ""}`);
-  console.log(`Repo: ${repo}`);
-  console.log(`${"═".repeat(70)}`);
-
-  let submitted = false;
-  let taskId = "";
-  let runId = "";
-  let error: string | null = null;
-  let status: string | null = null;
-  let classification: string | null = null;
-  let costUsd: number | null = null;
-  let durationMs: number | null = null;
-  let filesChanged: number | null = null;
-  let failureCode: string | null = null;
-  let failureRootCause: string | null = null;
-  let narrative: string | null = null;
-  let resultStatus: RunResult["status_"] = "ERROR";
-
-  try {
-    // Submit
-    const submitResp = await aedisSubmit(scenario.prompt, repo);
-    taskId = submitResp.task_id ?? "";
-    runId = submitResp.run_id ?? submitResp.id ?? "";
-    submitted = true;
-    console.log(`  📮 Submitted: task=${taskId} run=${runId}`);
-
-    // Wait for completion
-    const finalStatus = await aedisWaitForCompletion(runId, taskId);
-
-    status = finalStatus.status ?? null;
-    classification = finalStatus.classification ?? null;
-    costUsd = finalStatus.totalCostUsd ?? null;
-    durationMs = Date.now() - startMs;
-    filesChanged = finalStatus.summary.changes?.length ?? null;
-    failureCode = finalStatus.summary.failureExplanation?.code ?? null;
-    failureRootCause = finalStatus.summary.failureExplanation?.rootCause ?? null;
-    narrative = finalStatus.summary.narrative ?? finalStatus.summary.headline ?? null;
-
-    // Determine pass/fail
-    const phaseUpper = (status ?? "").toUpperCase();
-    const isSuccess = ["PROMOTED", "COMPLETE", "COMPLETED", "READY_FOR_PROMOTION"].includes(phaseUpper);
-    const isFailure = ["EXECUTION_ERROR", "NO_OP", "PARTIAL_SUCCESS", "FAILED", "ABORTED"].includes(phaseUpper) ||
-      (phaseUpper === "INTERRUPTED" && scenario.expected?.shouldAsk);
-
-    if (isSuccess) {
-      resultStatus = "PASS";
-    } else if (isFailure) {
-      resultStatus = "FAIL";
-    } else {
-      resultStatus = "FAIL";
-      notes.push(`Unexpected terminal phase: ${status}`);
-    }
-
-    // Check constraints
-    if (scenario.expected.shouldAsk && status !== "INTERRUPTED") {
-      notes.push(`⚠️ Expected ambiguous→INTERRUPTED(clarify), got: ${status}`);
-    }
-    if (scenario.expected.maxCostUsd && costUsd && costUsd > scenario.expected.maxCostUsd) {
-      notes.push(`⚠️ Cost $${costUsd.toFixed(4)} exceeds max $${scenario.expected.maxCostUsd}`);
-    }
-    if (scenario.expected.minFilesChanged && filesChanged !== null && filesChanged < (scenario.expected.minFilesChanged ?? 0)) {
-      notes.push(`⚠️ Only ${filesChanged} files changed, expected >= ${scenario.expected.minFilesChanged}`);
-    }
-
-    console.log(`  ✅ Done: status=${status} class=${classification} cost=$${costUsd?.toFixed(4) ?? "?"} files=${filesChanged ?? "?"} time=${durationMs}ms`);
-    if (failureCode) console.log(`     failure: ${failureCode} — ${failureRootCause?.slice(0, 80)}`);
-
-  } catch (err) {
-    error = String(err);
-    resultStatus = "ERROR";
-    durationMs = Date.now() - startMs;
-    console.error(`  💥 Error: ${error}`);
-    if (runId) {
-      try { await aedisCancel(runId); } catch { /* ignore */ }
-    }
-  }
-
-  return {
-    scenarioId: scenario.id,
-    timestamp: new Date().toISOString(),
-    prompt: scenario.prompt,
-    repo,
-    submitted,
-    taskId,
-    runId,
-    error,
-    status,
-    classification,
-    costUsd,
-    confidence: null,
-    durationMs,
-    filesChanged,
-    failureCode,
-    failureRootCause,
-    narrative,
-    status_: resultStatus,
-    notes,
-  };
-}
-
-// ─── Main ───────────────────────────────────────────────────────────────────
-
-async function main() {
-  const summary = process.argv.includes("--summary");
-  if (summary) {
-    summarizeResults();
+async function main(): Promise<void> {
+  const summaryOnly = process.argv.includes("--summary");
+  if (summaryOnly) {
+    summariseResults();
     return;
   }
 
-  console.log(`\n🔬 AEDIS BURN-IN HARNESS`);
-  console.log(`Target: ${AEDIS_BASE}`);
+  console.log(`\n🔬 AEDIS BURN-IN HARNESS (soft)`);
+  console.log(`Target:  ${AEDIS_BASE}`);
   console.log(`Project: ${PROJECT_ROOT}`);
-  console.log(`Scenarios: ${SCENARIOS.length}`);
-  console.log(`Results: ${RESULTS_FILE}\n`);
+  console.log(`Timeout: ${TIMEOUT_MS}ms${process.env["AEDIS_BURN_TIMEOUT_MS"] ? " (env override)" : " (default)"}`);
+  console.log(`Results: ${RESULTS_FILE}`);
+  console.log(`Scenarios: ${SCENARIOS.length}\n`);
 
-  // Health check
+  const http = createFetchClient(AEDIS_BASE);
+
+  // Health check — fail fast rather than time out N×timeout later.
   try {
-    const healthRes = await fetch(`${AEDIS_BASE}/health`);
-    const health = await healthRes.json() as Record<string, unknown>;
-    const workers = health.workers as Record<string, { available: boolean; count: number }>;
-    const allUp = Object.values(workers).every((w) => w.available);
+    const res = await http.getJson<{ workers?: Record<string, { available: boolean }>; all_workers_available?: boolean }>(`/health`);
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+    const allUp = res.body.all_workers_available
+      ?? Object.values(res.body.workers ?? {}).every((w) => w.available);
     console.log(`Health: ${allUp ? "✅ All workers available" : "⚠️ Some workers down"}`);
-    console.log(`Workers:`, JSON.stringify(workers));
-    if (!allUp) process.exit(1);
+    if (!allUp) {
+      console.log(`Workers: ${JSON.stringify(res.body.workers ?? {})}`);
+      process.exit(1);
+    }
   } catch (err) {
-    console.error(`❌ Cannot reach Aedis at ${AEDIS_BASE}: ${err}`);
+    console.error(`❌ Cannot reach Aedis at ${AEDIS_BASE}: ${(err as Error).message}`);
     process.exit(1);
   }
 
   for (const scenario of SCENARIOS) {
-    const result = await runScenario(scenario);
+    const repo = scenario.repo ?? PROJECT_ROOT;
+    console.log(`\n${"═".repeat(70)}`);
+    console.log(`SCENARIO: ${scenario.id}`);
+    console.log(`Prompt:   ${scenario.prompt.slice(0, 90)}${scenario.prompt.length > 90 ? "…" : ""}`);
+    console.log(`Repo:     ${repo}`);
+    console.log(`${"═".repeat(70)}`);
+
+    const extraNotes: string[] = [];
+    const result = await runScenarioOnce({
+      http,
+      scenarioId: scenario.id,
+      prompt: scenario.prompt,
+      repoPath: repo,
+      timeoutMs: TIMEOUT_MS,
+      onProgress: (line) => console.log(`  ${line}`),
+      extraNotes,
+    });
+
+    // Scenario-level expectation checks (logged into notes).
+    if (scenario.expected.shouldAsk && result.status !== "INTERRUPTED" && result.verdict !== "BLOCKED") {
+      result.notes.push(`⚠️ Expected ambiguous→INTERRUPTED, got: ${result.status}`);
+    }
+    if (
+      scenario.expected.maxCostUsd !== undefined &&
+      result.costUsd !== null &&
+      result.costUsd > scenario.expected.maxCostUsd
+    ) {
+      result.notes.push(`⚠️ Cost $${result.costUsd.toFixed(4)} exceeds max $${scenario.expected.maxCostUsd}`);
+    }
+    if (
+      scenario.expected.minFilesChanged !== undefined &&
+      result.filesChanged < scenario.expected.minFilesChanged
+    ) {
+      result.notes.push(`⚠️ Only ${result.filesChanged} files changed, expected ≥ ${scenario.expected.minFilesChanged}`);
+    }
+
     logResult(result);
-    await sleep(3000); // 3s between runs to avoid flooding
+    await new Promise((r) => setTimeout(r, 3000));
   }
 
-  summarizeResults();
+  summariseResults();
 }
 
 main().catch((err) => {

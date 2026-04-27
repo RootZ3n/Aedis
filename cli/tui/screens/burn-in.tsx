@@ -283,7 +283,7 @@ function CombinedSummaryBanner({ combined }: { combined: BurnCombinedSummary }) 
   if (combined.total === 0) {
     return <Text dimColor>Burn-in: no scenarios recorded yet.</Text>;
   }
-  const { total, pass, fail, error, timeout, avgCostUsd, topFailureReason } = combined;
+  const { total, pass, fail, error, timeout, pendingApproval, avgCostUsd, topFailureReason } = combined;
   return (
     <Box flexDirection="column">
       <Text>
@@ -292,8 +292,13 @@ function CombinedSummaryBanner({ combined }: { combined: BurnCombinedSummary }) 
         <Text color="green">{pass} pass</Text>{" "}/
         {" "}<Text color="red">{fail} fail</Text>{" "}/
         {" "}<Text color="magenta">{error} err</Text>{" "}/
-        {" "}<Text color="yellow">{timeout} timeout</Text>{" "}•{" "}
-        avg ${avgCostUsd.toFixed(4)}/scenario
+        {" "}<Text color="yellow">{timeout} timeout</Text>
+        {pendingApproval > 0 && (
+          <>
+            {" "}/ <Text color="cyan">{pendingApproval} pending</Text>
+          </>
+        )}
+        {"  •  "}avg ${avgCostUsd.toFixed(4)}/scenario
       </Text>
       <Text>
         <Text dimColor>top failure: </Text>
@@ -340,6 +345,12 @@ function SuiteSummaryView({ summary }: { summary: BurnSuiteSummary }) {
           <>
             {"  "}
             <Text color="blue">blocked {summary.blocked}</Text>
+          </>
+        )}
+        {summary.pendingApproval > 0 && (
+          <>
+            {"  "}
+            <Text color="cyan">pending {summary.pendingApproval}</Text>
           </>
         )}
       </Text>

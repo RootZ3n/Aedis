@@ -22,7 +22,7 @@
     "dev": "npx tsx watch server/index.ts",
     "cli": "tsx cli/aedis.ts",
     "prepack": "npm run build",
-    "test": "bash -O globstar -c 'tsx --test core/**/*.test.ts server/**/*.test.ts workers/**/*.test.ts cli/**/*.test.{ts,tsx}'",
+    "test": "bash -O globstar -c 'tsx --test core/**/*.test.ts server/**/*.test.ts workers/**/*.test.ts cli/**/*.test.{ts,tsx} scripts/**/*.test.ts'",
     "tui": "tsx cli/tui/index.tsx",
     "security:secrets": "bash scripts/check-secrets.sh",
     "check": "npm run security:secrets && npm test && npm run build && npx tsc -p tsconfig.build.json --noEmit",

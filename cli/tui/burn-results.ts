@@ -24,6 +24,7 @@ export type BurnVerdict =
   | "TIMEOUT"
   | "BLOCKED"
   | "SAFE_FAILURE"
+  | "PENDING_APPROVAL"
   | "UNKNOWN";
 
 export interface BurnResultRow {
@@ -50,6 +51,7 @@ export interface BurnSuiteSummary {
   readonly error: number;
   readonly timeout: number;
   readonly blocked: number;
+  readonly pendingApproval: number;
   readonly totalCostUsd: number;
   readonly totalDurationMs: number;
   readonly lastTimestamp: string | null;
@@ -65,6 +67,7 @@ const KNOWN_VERDICTS: ReadonlySet<string> = new Set([
   "TIMEOUT",
   "BLOCKED",
   "SAFE_FAILURE",
+  "PENDING_APPROVAL",
 ]);
 
 function normaliseVerdict(raw: unknown): BurnVerdict {
@@ -154,6 +157,7 @@ export function summariseRows(
   let error = 0;
   let timeout = 0;
   let blocked = 0;
+  let pendingApproval = 0;
   let lastTimestamp: string | null = null;
   for (const row of rows) {
     if (row.costUsd !== null) totalCostUsd += row.costUsd;
@@ -165,6 +169,7 @@ export function summariseRows(
       case "TIMEOUT": timeout += 1; break;
       case "BLOCKED":
       case "SAFE_FAILURE": blocked += 1; break;
+      case "PENDING_APPROVAL": pendingApproval += 1; break;
       // UNKNOWN intentionally excluded from counts so the buckets sum
       // to total - unknown rather than silently miscategorising.
     }
@@ -182,6 +187,7 @@ export function summariseRows(
     error,
     timeout,
     blocked,
+    pendingApproval,
     totalCostUsd,
     totalDurationMs,
     lastTimestamp,
@@ -223,6 +229,7 @@ export interface BurnCombinedSummary {
   readonly error: number;
   readonly timeout: number;
   readonly blocked: number;
+  readonly pendingApproval: number;
   readonly totalCostUsd: number;
   /**
    * Average cost per scenario, including scenarios that recorded
@@ -233,7 +240,12 @@ export interface BurnCombinedSummary {
   readonly topFailureReason: { reason: string; count: number } | null;
 }
 
-const NON_FAILURE_VERDICTS: ReadonlySet<BurnVerdict> = new Set(["PASS", "BLOCKED", "SAFE_FAILURE"]);
+const NON_FAILURE_VERDICTS: ReadonlySet<BurnVerdict> = new Set([
+  "PASS",
+  "BLOCKED",
+  "SAFE_FAILURE",
+  "PENDING_APPROVAL",
+]);
 
 /**
  * Find the failure reason that appears most often across the rows.
@@ -284,6 +296,7 @@ export function combineSummaries(
   let error = 0;
   let timeout = 0;
   let blocked = 0;
+  let pendingApproval = 0;
   let totalCostUsd = 0;
   const allRows: BurnResultRow[] = [];
   for (const s of summaries) {
@@ -293,6 +306,7 @@ export function combineSummaries(
     error += s.error;
     timeout += s.timeout;
     blocked += s.blocked;
+    pendingApproval += s.pendingApproval;
     totalCostUsd += s.totalCostUsd;
     allRows.push(...s.rows);
   }
@@ -304,6 +318,7 @@ export function combineSummaries(
     error,
     timeout,
     blocked,
+    pendingApproval,
     totalCostUsd,
     avgCostUsd,
     topFailureReason: topFailureReason(allRows),
