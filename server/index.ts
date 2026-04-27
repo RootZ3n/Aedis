@@ -13,6 +13,7 @@ import "dotenv/config";
 import { existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { createServer as netCreateServer } from "net";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
@@ -71,6 +72,34 @@ function readPortFromEnv(): number {
   if (!raw) return 18796;
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 && parsed <= 65_535 ? parsed : 18796;
+}
+
+/**
+ * Probe whether `port` is already bound on `host`. Returns true when a
+ * live listener occupies the port (EADDRINUSE on a probe bind). Used
+ * before startup recovery so a duplicate `node dist/server/index.js`
+ * invocation cannot run `markIncompleteRunsCrashed` against a healthy
+ * sibling — that race deletes the live server's worktree mid-run and
+ * surfaces as burn-in BLOCKED/INTERRUPTED with `ENOENT` on the active
+ * workspace.
+ */
+export function isPortInUse(port: number, host: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = netCreateServer();
+    probe.unref();
+    probe.once("error", (err: NodeJS.ErrnoException) => {
+      probe.close();
+      resolve(err.code === "EADDRINUSE");
+    });
+    probe.once("listening", () => {
+      probe.close(() => resolve(false));
+    });
+    try {
+      probe.listen(port, host);
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 const DEFAULT_CONFIG: ServerConfig = {
@@ -281,6 +310,21 @@ export async function createServer(
 
   const eventBus = createEventBus();
   const receiptStore = new ReceiptStore(cfg.projectRoot);
+
+  // Bail before startup recovery if another aedis server already owns
+  // the port. `markIncompleteRunsCrashed` rewrites every RUNNING run to
+  // INTERRUPTED and deletes its worktree — running it from a duplicate
+  // process kills the live server's in-flight runs (the burn-in-09
+  // 10s/BLOCKED symptom). The `bind probe` matches what Fastify will do
+  // at listen time, so the check is true to the conflict it guards.
+  const probeHost = cfg.host === "0.0.0.0" ? "127.0.0.1" : cfg.host;
+  if (await isPortInUse(cfg.port, probeHost)) {
+    throw new Error(
+      `[server] port ${cfg.port} already bound on ${probeHost} — another aedis server is running. ` +
+      `Refusing to run startup recovery (would orphan the live server's runs).`,
+    );
+  }
+
   const recovery = await receiptStore.markIncompleteRunsCrashed(
     `Server restarted on ${new Date().toISOString()} before the run reached a terminal state`,
   );
@@ -509,7 +553,17 @@ export async function startServer(
   workerRegistry?: WorkerRegistry
 ): Promise<void> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
-  const server = await createServer(cfg, trustProfile, workerRegistry);
+  let server: Awaited<ReturnType<typeof createServer>>;
+  try {
+    server = await createServer(cfg, trustProfile, workerRegistry);
+  } catch (err) {
+    // The port-in-use guard inside createServer throws BEFORE
+    // recovery runs, so a duplicate `node dist/server/index.js` exits
+    // here without touching state. Surface a concise message rather
+    // than a stack trace.
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 
   try {
     const address = await server.listen({ port: cfg.port, host: cfg.host });
