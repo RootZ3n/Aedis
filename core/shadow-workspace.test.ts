@@ -327,7 +327,11 @@ test("shadow workspace: runShadowBuilder writes to shadow workspace and source r
     while (!candidatePromise) {
       await new Promise((r) => setTimeout(r, 10));
     }
-    const candidate = await candidatePromise;
+    // Cast: TS narrows `candidatePromise` to `never` after the polling
+    // loop because the loop body never reassigns it — the assignment
+    // lives in a closure (ProbeBuilder.execute) that the flow analysis
+    // can't track. Same pattern as line 273 above.
+    const candidate = await (candidatePromise as Promise<Candidate>);
     resolveBlock();
     await submitPromise;
 
