@@ -25,6 +25,7 @@
  * to the RunReceipt as `summary` so receipts remain the single
  * source of truth.
 // burn-in: comment-swap probe.
+// burn-in: comment-swap probe.
  */
 
 import type { RunReceipt } from "./coordinator.js";
