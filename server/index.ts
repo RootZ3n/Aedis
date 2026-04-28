@@ -128,10 +128,10 @@ export const DEFAULT_CONFIG: ServerConfig = {
   host: process.env["AEDIS_HOST"] ?? "0.0.0.0",
   stateRoot: process.env["AEDIS_STATE_ROOT"] ?? process.cwd(),
   projectRoot: process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd(),
-  // TAILSCALE_ONLY=true in .env disables auth so local browsers and
-  // curl can reach the server. Defaults to false (auth enabled) so a
-  // misconfigured deploy never accidentally exposes an unsecured server.
-  disableAuth: process.env["TAILSCALE_ONLY"] === "true",
+  // TAILSCALE_ONLY=true keeps Tailscale auth enforced. Operators may set
+  // TAILSCALE_ONLY=false for local-only development. Defaults to auth
+  // enabled so a misconfigured deploy never exposes an unsecured server.
+  disableAuth: process.env["TAILSCALE_ONLY"] === "false",
 };
 
 // ─── Server Context (shared across routes) ───────────────────────────
@@ -443,7 +443,7 @@ export async function createServer(
   // to check when the server is unreachable or `aedis doctor` shows an
   // auth-enabled server is blocking requests.
   if (cfg.disableAuth) {
-    console.log(`[server] auth: DISABLED (TAILSCALE_ONLY=false or not set) — server is OPEN`);
+    console.log(`[server] auth: DISABLED (TAILSCALE_ONLY=false) — server is OPEN`);
     console.log(`[server] ⚠ NOT recommended for production or internet-facing deployments`);
   } else {
     console.log(`[server] auth: ENABLED — Tailscale identity required for all API access`);

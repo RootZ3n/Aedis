@@ -109,10 +109,10 @@ test("parseApprovalTimeoutHours: non-numeric strings → null", async () => {
 
 // ─── TAILSCALE_ONLY wiring ────────────────────────────────────────────
 //
-// TAILSCALE_ONLY=true in .env maps to disableAuth=true in ServerConfig,
-// which disables Tailscale auth middleware so local browsers can reach
-// the server. The default (unset or "false") must keep auth enabled so a
-// misconfigured deploy never accidentally exposes an unsecured server.
+// TAILSCALE_ONLY=true in .env keeps Tailscale auth enforced. Operators
+// may set TAILSCALE_ONLY=false for local-only development. The default
+// must keep auth enabled so a misconfigured deploy never accidentally
+// exposes an unsecured server.
 //
 // Each test spawns a subprocess that sets the env var and verifies the
 // computed config value — this is the only way to test env-reading logic
@@ -189,14 +189,14 @@ async function getConfigRootsFromEnv(projectRoot: string, stateRoot: string): Pr
   }
 }
 
-test("TAILSCALE_ONLY=true sets disableAuth=true in DEFAULT_CONFIG", async () => {
+test("TAILSCALE_ONLY=true sets disableAuth=false in DEFAULT_CONFIG", async () => {
   const disabled = await getDisableAuthFromEnv("true");
-  assert.equal(disabled, true, "TAILSCALE_ONLY=true must set disableAuth=true");
+  assert.equal(disabled, false, "TAILSCALE_ONLY=true must keep Tailscale auth enabled");
 });
 
-test("TAILSCALE_ONLY=false sets disableAuth=false in DEFAULT_CONFIG", async () => {
+test("TAILSCALE_ONLY=false sets disableAuth=true in DEFAULT_CONFIG", async () => {
   const disabled = await getDisableAuthFromEnv("false");
-  assert.equal(disabled, false, "TAILSCALE_ONLY=false must set disableAuth=false");
+  assert.equal(disabled, true, "TAILSCALE_ONLY=false must disable Tailscale auth for local development");
 });
 
 test("TAILSCALE_ONLY unset defaults to disableAuth=false (auth enabled)", async () => {
