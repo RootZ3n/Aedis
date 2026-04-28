@@ -265,6 +265,8 @@ const exec = promisify(execFile);
 
 export interface CoordinatorConfig {
   projectRoot: string;
+  /** Runtime state root for Aedis-owned memory/cache/receipts. */
+  stateRoot?: string;
   /** Maximum rehearsal iterations (Builder ↔ Critic ↔ Verifier) */
   maxRehearsalRounds: number;
   /** Maximum recovery attempts on failure */
@@ -405,6 +407,15 @@ export function needsBroadCleanupClarification(input: string): boolean {
   if (!hasBroadCleanupVerb) return false;
 
   return /\b(config|configuration|settings|options|handling|error handling|auth|routing|routes?|state|storage|providers?)\b/.test(normalized);
+}
+
+export function needsAmbiguousCreateClarification(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) return false;
+  if (hasConcreteCodeTarget(input)) return false;
+  const asksToCreate = /\b(create|add|make)\b/.test(normalized);
+  if (!asksToCreate) return false;
+  return /\b(file|document|page|component|module|script|endpoint|route)\b/.test(normalized);
 }
 
 /**
@@ -880,11 +891,18 @@ export class Coordinator {
         question: "Which config file, function, or route should I clean up? Please name the target path or symbol.",
       };
     }
+    if (needsAmbiguousCreateClarification(input)) {
+      console.log(`[coordinator] ambiguous create prompt needs clarification before target inference: "${input}"`);
+      return {
+        kind: "needs_clarification",
+        question: "Which path should I create, and what exact content or behavior should it have?",
+      };
+    }
 
     // GAP 2 — Decomposition gate: run scope classification early
     // to check if decomposition is recommended before full execution.
     const effectiveProjectRoot = submission.projectRoot ?? this.config.projectRoot;
-    const projectMemory = await loadMemory(effectiveProjectRoot);
+    const projectMemory = await loadMemory(effectiveProjectRoot, this.config.stateRoot);
     const gated = gateContext(projectMemory, input);
     let normalizedInput = await normalizePrompt(input, gated, effectiveProjectRoot);
 
@@ -1059,7 +1077,7 @@ export class Coordinator {
       `[coordinator] effective projectRoot for this submission: ${effectiveProjectRoot}` +
       (submission.projectRoot ? " (overridden via submission)" : " (Coordinator default)")
     );
-    const projectMemory = await loadMemory(effectiveProjectRoot);
+    const projectMemory = await loadMemory(effectiveProjectRoot, this.config.stateRoot);
     let gatedContext = gateContext(projectMemory, input);
     console.log("[coordinator] gated context:", JSON.stringify(gatedContext));
     // Skip redundant normalization when submitWithGates already did it.
@@ -1287,7 +1305,7 @@ export class Coordinator {
     // Retrieve relevant memory entries and inject as prior-knowledge hints.
     // Memory is ADVISORY ONLY — current source code always takes precedence.
     try {
-      const memoryStore = await ProjectMemoryStore.open(effectiveProjectRoot);
+      const memoryStore = await ProjectMemoryStore.open(effectiveProjectRoot, this.config.stateRoot);
       const taskTags = [
         scopeClassification.type,
         ...(charterTargets.length > 0 ? ["multi-file"] : ["single-file"]),
@@ -8111,7 +8129,7 @@ export class Coordinator {
       evaluationScore: receipt.evaluation?.aggregate?.averageScore ?? null,
       evaluationPassed: receipt.evaluation?.aggregate?.overallPass ?? null,
       disagreementDirection: receipt.evaluation?.disagreement?.direction ?? null,
-    });
+    }, this.config.stateRoot);
 
     const memoryAdapter = await getAedisMemoryAdapter();
     if (!memoryAdapter) return [];

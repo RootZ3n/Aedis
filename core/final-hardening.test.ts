@@ -25,6 +25,7 @@ import {
   type ProjectMemory,
 } from "./project-memory.js";
 import type { VerificationReceipt } from "./verification-pipeline.js";
+import { needsAmbiguousCreateClarification } from "./coordinator.js";
 
 // ─── VELUM NORMALIZATION (P2-11) ────────────────────────────────────
 
@@ -416,4 +417,38 @@ test("file-lock: memory file itself is present and parseable", async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("project-memory: configured stateRoot keeps memory out of target repo", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aedis-mem-target-"));
+  const stateRoot = mkdtempSync(join(tmpdir(), "aedis-mem-state-"));
+  try {
+    await recordTask(root, {
+      prompt: "failed before approval",
+      verdict: "failed",
+      commitSha: null,
+      cost: 0,
+      timestamp: new Date().toISOString(),
+      filesTouched: ["README.md"],
+    }, stateRoot);
+
+    assert.equal(existsSync(join(root, ".aedis", "memory.json")), false);
+    const path = getMemoryFilePath(root, stateRoot);
+    assert.ok(path.startsWith(stateRoot), `expected state root path, got ${path}`);
+    assert.equal(existsSync(path), true);
+    const memory = await loadMemory(root, stateRoot);
+    assert.equal(memory.recentTasks[0]?.prompt, "failed before approval");
+  } finally {
+    rmSync(stateRoot, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("submit gate: explicit new file path is concrete, vague create remains clarification", () => {
+  assert.equal(
+    needsAmbiguousCreateClarification("Create hello-aedis.txt containing exactly: Aedis RC smoke test."),
+    false,
+  );
+  assert.equal(needsAmbiguousCreateClarification("Create a useful file."), true);
+  assert.equal(needsAmbiguousCreateClarification("Improve the repo."), false);
 });

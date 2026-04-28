@@ -33,6 +33,7 @@ import { execFileSync } from "node:child_process";
 
 import { Coordinator } from "./coordinator.js";
 import { ReceiptStore } from "./receipt-store.js";
+import { getMemoryFilePath } from "./project-memory.js";
 import { taskRoutes } from "../server/routes/tasks.js";
 import { WorkerRegistry, AbstractWorker } from "../workers/base.js";
 import type {
@@ -210,6 +211,7 @@ function buildHarness(projectRoot: string, opts: {
   const coordinator = new Coordinator(
     {
       projectRoot,
+      ...(opts.stateRoot ? { stateRoot: opts.stateRoot } : {}),
       autoCommit: true,
       requireWorkspace: true,
       requireApproval: opts.requireApproval,
@@ -505,6 +507,36 @@ test("approval flow: autoPromote=false creates pending approval after successful
     assert.deepEqual(coordinator.listActiveRunIds(), [receipt.runId]);
     assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), "export const widget = 1;\n");
   } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("failed pre-approval run writes memory under stateRoot and leaves target repo clean", async () => {
+  const repo = makeTempRepo();
+  const stateRoot = mkdtempSync(join(tmpdir(), "aedis-memory-state-"));
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 2;\n" },
+      { path: "core/extra.ts", content: "export const extra = true;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, {
+      builder,
+      requireApproval: true,
+      stateRoot,
+    });
+
+    const receipt = await coordinator.submit({
+      input: "Update core/widget.ts to export widget as 2.",
+    });
+
+    assert.equal(receipt.verdict, "failed");
+    assert.equal(execFileSync("git", ["status", "--short"], { cwd: repo }).toString("utf-8"), "");
+    assert.equal(existsSync(join(repo, ".aedis", "memory.json")), false);
+    const memoryPath = getMemoryFilePath(repo, stateRoot);
+    assert.ok(memoryPath.startsWith(stateRoot));
+    assert.equal(existsSync(memoryPath), true, "memory should be persisted under AEDIS_STATE_ROOT");
+  } finally {
+    rmSync(stateRoot, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
 });

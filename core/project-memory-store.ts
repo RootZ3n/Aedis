@@ -15,8 +15,8 @@
  */
 
 import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { join, resolve } from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -76,19 +76,34 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-function storagePath(projectRoot: string, ...parts: string[]): string {
-  return join(resolve(projectRoot), STORAGE_DIR, ...parts);
+function projectStateId(projectRoot: string): string {
+  const root = resolve(projectRoot);
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, 16);
+  const leaf = root.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^A-Za-z0-9._-]/g, "_") || "repo";
+  return `${leaf}-${hash}`;
 }
 
-async function ensureStorageDir(projectRoot: string): Promise<void> {
-  await mkdir(storagePath(projectRoot), { recursive: true });
-  await mkdir(storagePath(projectRoot, ENTRIES_DIR), { recursive: true });
+function storageRoot(projectRoot: string, stateRoot?: string): string {
+  const root = resolve(projectRoot);
+  if (!stateRoot) return join(root, STORAGE_DIR);
+  const runtimeRoot = resolve(stateRoot);
+  if (runtimeRoot === root) return join(root, STORAGE_DIR);
+  return join(runtimeRoot, "state", "project-memory-store", projectStateId(root));
+}
+
+function storagePath(projectRoot: string, stateRoot: string | undefined, ...parts: string[]): string {
+  return join(storageRoot(projectRoot, stateRoot), ...parts);
+}
+
+async function ensureStorageDir(projectRoot: string, stateRoot?: string): Promise<void> {
+  await mkdir(storagePath(projectRoot, stateRoot), { recursive: true });
+  await mkdir(storagePath(projectRoot, stateRoot, ENTRIES_DIR), { recursive: true });
 }
 
 // ─── Meta helpers ────────────────────────────────────────────────────
 
-async function loadMeta(projectRoot: string): Promise<Meta> {
-  const path = storagePath(projectRoot, META_FILE);
+async function loadMeta(projectRoot: string, stateRoot?: string): Promise<Meta> {
+  const path = storagePath(projectRoot, stateRoot, META_FILE);
   if (!(await fileExists(path))) return { entries: {} };
   try {
     const raw = await readFile(path, "utf8");
@@ -99,15 +114,15 @@ async function loadMeta(projectRoot: string): Promise<Meta> {
   }
 }
 
-async function saveMeta(projectRoot: string, meta: Meta): Promise<void> {
-  const path = storagePath(projectRoot, META_FILE);
+async function saveMeta(projectRoot: string, stateRoot: string | undefined, meta: Meta): Promise<void> {
+  const path = storagePath(projectRoot, stateRoot, META_FILE);
   await writeFile(path, JSON.stringify(meta, null, 2), "utf8");
 }
 
 // ─── Access log helpers ──────────────────────────────────────────────
 
-async function loadAccessLog(projectRoot: string): Promise<AccessLog> {
-  const path = storagePath(projectRoot, ACCESS_LOG_FILE);
+async function loadAccessLog(projectRoot: string, stateRoot?: string): Promise<AccessLog> {
+  const path = storagePath(projectRoot, stateRoot, ACCESS_LOG_FILE);
   if (!(await fileExists(path))) return { lastAccessed: {} };
   try {
     const raw = await readFile(path, "utf8");
@@ -118,15 +133,15 @@ async function loadAccessLog(projectRoot: string): Promise<AccessLog> {
   }
 }
 
-async function saveAccessLog(projectRoot: string, log: AccessLog): Promise<void> {
-  const path = storagePath(projectRoot, ACCESS_LOG_FILE);
+async function saveAccessLog(projectRoot: string, stateRoot: string | undefined, log: AccessLog): Promise<void> {
+  const path = storagePath(projectRoot, stateRoot, ACCESS_LOG_FILE);
   await writeFile(path, JSON.stringify(log, null, 2), "utf8");
 }
 
-async function touchEntry(projectRoot: string, entryId: string): Promise<void> {
-  const log = await loadAccessLog(projectRoot);
+async function touchEntry(projectRoot: string, stateRoot: string | undefined, entryId: string): Promise<void> {
+  const log = await loadAccessLog(projectRoot, stateRoot);
   log.lastAccessed[entryId] = Date.now();
-  await saveAccessLog(projectRoot, log);
+  await saveAccessLog(projectRoot, stateRoot, log);
 }
 
 // ─── Atomic write helper ─────────────────────────────────────────────
@@ -150,12 +165,14 @@ function computeExpiresAt(confidence: number, source: string): number {
 
 export class ProjectMemoryStore {
   private projectRoot: string;
+  private stateRoot: string | undefined;
   private meta: Meta;
   private accessLog: AccessLog;
   private dirty: boolean = false;
 
-  private constructor(projectRoot: string, meta: Meta, accessLog: AccessLog) {
+  private constructor(projectRoot: string, stateRoot: string | undefined, meta: Meta, accessLog: AccessLog) {
     this.projectRoot = resolve(projectRoot);
+    this.stateRoot = stateRoot ? resolve(stateRoot) : undefined;
     this.meta = meta;
     this.accessLog = accessLog;
   }
@@ -166,12 +183,12 @@ export class ProjectMemoryStore {
    * Open (or create) the memory store for `projectRoot`.
    * Runs expiry check on all entries as a side effect.
    */
-  static async open(projectRoot: string): Promise<ProjectMemoryStore> {
-    await ensureStorageDir(projectRoot);
-    const meta = await loadMeta(projectRoot);
-    const accessLog = await loadAccessLog(projectRoot);
+  static async open(projectRoot: string, stateRoot?: string): Promise<ProjectMemoryStore> {
+    await ensureStorageDir(projectRoot, stateRoot);
+    const meta = await loadMeta(projectRoot, stateRoot);
+    const accessLog = await loadAccessLog(projectRoot, stateRoot);
 
-    const store = new ProjectMemoryStore(projectRoot, meta, accessLog);
+    const store = new ProjectMemoryStore(projectRoot, stateRoot, meta, accessLog);
     await store.runExpiryCheck();
     return store;
   }
@@ -215,15 +232,15 @@ export class ProjectMemoryStore {
     const filename = this.nextFilename();
     const entryFile: MemoryEntryFile = { entry, observations: [] };
 
-    await ensureStorageDir(this.projectRoot);
-    const entryPath = storagePath(this.projectRoot, ENTRIES_DIR, filename);
+    await ensureStorageDir(this.projectRoot, this.stateRoot);
+    const entryPath = storagePath(this.projectRoot, this.stateRoot, ENTRIES_DIR, filename);
     await atomicWrite(entryPath, JSON.stringify(entryFile, null, 2));
 
     this.meta.entries[entry.id] = filename;
-    await saveMeta(this.projectRoot, this.meta);
+    await saveMeta(this.projectRoot, this.stateRoot, this.meta);
 
     this.accessLog.lastAccessed[entry.id] = now;
-    await saveAccessLog(this.projectRoot, this.accessLog);
+    await saveAccessLog(this.projectRoot, this.stateRoot, this.accessLog);
 
     await this.ensureMaxEntries();
 
@@ -238,7 +255,7 @@ export class ProjectMemoryStore {
     const filename = this.meta.entries[id];
     if (!filename) return null;
 
-    const entryPath = storagePath(this.projectRoot, ENTRIES_DIR, filename);
+    const entryPath = storagePath(this.projectRoot, this.stateRoot, ENTRIES_DIR, filename);
     if (!(await fileExists(entryPath))) return null;
 
     try {
@@ -246,7 +263,7 @@ export class ProjectMemoryStore {
       const { entry } = JSON.parse(raw) as MemoryEntryFile;
 
       // Touch access time
-      await touchEntry(this.projectRoot, id);
+      await touchEntry(this.projectRoot, this.stateRoot, id);
 
       return entry;
     } catch {
@@ -293,7 +310,7 @@ export class ProjectMemoryStore {
     const filename = this.meta.entries[id];
     if (!filename) return null;
 
-    const entryPath = storagePath(this.projectRoot, ENTRIES_DIR, filename);
+    const entryPath = storagePath(this.projectRoot, this.stateRoot, ENTRIES_DIR, filename);
     if (!(await fileExists(entryPath))) return null;
 
     try {
@@ -326,7 +343,7 @@ export class ProjectMemoryStore {
       file.entry = updatedEntry;
 
       await atomicWrite(entryPath, JSON.stringify(file, null, 2));
-      await touchEntry(this.projectRoot, id);
+      await touchEntry(this.projectRoot, this.stateRoot, id);
 
       return updatedEntry;
     } catch {
@@ -394,7 +411,7 @@ export class ProjectMemoryStore {
     let expiredCount = 0;
 
     for (const [id, filename] of Object.entries(this.meta.entries)) {
-      const entryPath = storagePath(this.projectRoot, ENTRIES_DIR, filename);
+      const entryPath = storagePath(this.projectRoot, this.stateRoot, ENTRIES_DIR, filename);
       if (!(await fileExists(entryPath))) continue;
 
       try {
@@ -456,16 +473,16 @@ export class ProjectMemoryStore {
     const filename = this.meta.entries[id];
     if (!filename) return false;
 
-    const entryPath = storagePath(this.projectRoot, ENTRIES_DIR, filename);
+    const entryPath = storagePath(this.projectRoot, this.stateRoot, ENTRIES_DIR, filename);
     if (await fileExists(entryPath)) {
       await unlink(entryPath);
     }
 
     delete this.meta.entries[id];
-    await saveMeta(this.projectRoot, this.meta);
+    await saveMeta(this.projectRoot, this.stateRoot, this.meta);
 
     delete this.accessLog.lastAccessed[id];
-    await saveAccessLog(this.projectRoot, this.accessLog);
+    await saveAccessLog(this.projectRoot, this.stateRoot, this.accessLog);
 
     return true;
   }
@@ -482,7 +499,7 @@ export class ProjectMemoryStore {
     const filename = this.meta.entries[id];
     if (!filename) return null;
 
-    const entryPath = storagePath(this.projectRoot, ENTRIES_DIR, filename);
+    const entryPath = storagePath(this.projectRoot, this.stateRoot, ENTRIES_DIR, filename);
     if (!(await fileExists(entryPath))) return null;
 
     try {
@@ -528,8 +545,9 @@ export async function upsertEntry(
     taskId?: string;
     confirmed?: boolean;
   },
+  stateRoot?: string,
 ): Promise<ProjectMemoryEntry> {
-  const store = await ProjectMemoryStore.open(projectRoot);
+  const store = await ProjectMemoryStore.open(projectRoot, stateRoot);
 
   // Check if entry with this key already exists
   const existing = await store.listEntries({ includeExpired: true });
@@ -538,7 +556,7 @@ export async function upsertEntry(
   if (match) {
     const now = Date.now();
     // Update existing: value can be updated, observation added
-    const filePath = storagePath(projectRoot, ENTRIES_DIR, store["meta"].entries[match.id]);
+    const filePath = storagePath(projectRoot, stateRoot, ENTRIES_DIR, store["meta"].entries[match.id]);
     const raw = await readFile(filePath, "utf8");
     const file = JSON.parse(raw) as MemoryEntryFile;
 
@@ -557,7 +575,7 @@ export async function upsertEntry(
     }
 
     await atomicWrite(filePath, JSON.stringify(file, null, 2));
-    await touchEntry(projectRoot, match.id);
+    await touchEntry(projectRoot, stateRoot, match.id);
 
     return file.entry;
   }

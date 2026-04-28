@@ -1,7 +1,9 @@
 /**
  * ProjectMemory — persistent per-repo knowledge across Aedis sessions.
  *
- * Stored at {projectRoot}/.aedis/memory.json. Tracks:
+ * Stored at {stateRoot}/state/project-memory/<project-id>/memory.json when
+ * a runtime state root is configured, otherwise at
+ * {projectRoot}/.aedis/memory.json for legacy/direct callers. Tracks:
  *   - last 20 file paths touched (deduped, most-recent-first)
  *   - last 10 task summaries (prompt, verdict, commitSha, cost, timestamp)
  *   - up to 20 file clusters that tend to change together
@@ -12,6 +14,7 @@
  * yet" rather than an error so the rest of the pipeline can keep running.
  */
 
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { withRepoLock } from "./file-lock.js";
 import { dirname, join, resolve } from "node:path";
@@ -115,8 +118,19 @@ const MAX_CLUSTERS = 20;
 const MAX_PATTERNS = 20;
 const MAX_PATTERN_LIST = 5;
 
-function memoryPath(projectRoot: string): string {
-  return join(resolve(projectRoot), MEMORY_DIR, MEMORY_FILE);
+function projectStateId(projectRoot: string): string {
+  const root = resolve(projectRoot);
+  const hash = createHash("sha256").update(root).digest("hex").slice(0, 16);
+  const leaf = root.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^A-Za-z0-9._-]/g, "_") || "repo";
+  return `${leaf}-${hash}`;
+}
+
+function memoryPath(projectRoot: string, stateRoot?: string): string {
+  const root = resolve(projectRoot);
+  if (!stateRoot) return join(root, MEMORY_DIR, MEMORY_FILE);
+  const runtimeRoot = resolve(stateRoot);
+  if (runtimeRoot === root) return join(root, MEMORY_DIR, MEMORY_FILE);
+  return join(runtimeRoot, "state", "project-memory", projectStateId(root), MEMORY_FILE);
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -546,9 +560,9 @@ function updateFileClusters(
  * or is unreadable/corrupt, returns a fresh empty memory with the
  * detected language pre-filled. Never throws.
  */
-export async function loadMemory(projectRoot: string): Promise<ProjectMemory> {
+export async function loadMemory(projectRoot: string, stateRoot?: string): Promise<ProjectMemory> {
   const root = resolve(projectRoot);
-  const path = memoryPath(root);
+  const path = memoryPath(root, stateRoot);
   const language = await detectLanguage(root);
 
   if (!(await fileExists(path))) {
@@ -606,9 +620,10 @@ export async function loadMemory(projectRoot: string): Promise<ProjectMemory> {
 export async function saveMemory(
   projectRoot: string,
   memory: ProjectMemory,
+  stateRoot?: string,
 ): Promise<void> {
   const root = resolve(projectRoot);
-  const path = memoryPath(root);
+  const path = memoryPath(root, stateRoot);
   await mkdir(dirname(path), { recursive: true });
 
   const next: ProjectMemory = {
@@ -643,9 +658,10 @@ export async function saveMemory(
 export async function recordTask(
   projectRoot: string,
   taskSummary: TaskSummary,
+  stateRoot?: string,
 ): Promise<ProjectMemory> {
   const root = resolve(projectRoot);
-  const path = memoryPath(root);
+  const path = memoryPath(root, stateRoot);
   // The read-modify-write must happen inside a single lock so two
   // concurrent runs don't each load the same base, update it, and
   // last-writer-wins one of them away. Both saveMemory and this
@@ -653,7 +669,7 @@ export async function recordTask(
   // if we release before re-acquiring — so we inline the write
   // instead of calling saveMemory.
   return withRepoLock(path, async () => {
-    const memory = await loadMemory(projectRoot);
+    const memory = await loadMemory(projectRoot, stateRoot);
 
     const touched = Array.isArray(taskSummary.filesTouched)
       ? normalizeTouchedFiles(taskSummary.filesTouched)
@@ -696,8 +712,8 @@ export async function recordTask(
  * language and project root. Useful for starting a fresh session without
  * deleting the memory file itself.
  */
-export async function clearMemory(projectRoot: string): Promise<ProjectMemory> {
-  const memory = await loadMemory(projectRoot);
+export async function clearMemory(projectRoot: string, stateRoot?: string): Promise<ProjectMemory> {
+  const memory = await loadMemory(projectRoot, stateRoot);
   const next: ProjectMemory = {
     projectRoot: memory.projectRoot,
     language: memory.language,
@@ -708,7 +724,7 @@ export async function clearMemory(projectRoot: string): Promise<ProjectMemory> {
     updatedAt: new Date().toISOString(),
     schemaVersion: memory.schemaVersion,
   };
-  await saveMemory(projectRoot, next);
+  await saveMemory(projectRoot, next, stateRoot);
   return next;
 }
 
@@ -716,8 +732,8 @@ export async function clearMemory(projectRoot: string): Promise<ProjectMemory> {
  * Delete the project memory file if it exists. Does not throw if the file
  * is already missing. Useful for resetting project state completely.
  */
-export async function deleteMemory(projectRoot: string): Promise<void> {
-  const path = memoryPath(projectRoot);
+export async function deleteMemory(projectRoot: string, stateRoot?: string): Promise<void> {
+  const path = memoryPath(projectRoot, stateRoot);
   if (await fileExists(path)) {
     await unlink(path);
   }
@@ -727,6 +743,6 @@ export async function deleteMemory(projectRoot: string): Promise<void> {
  * Returns the absolute path to the memory file for a given project root.
  * Useful for external tooling, debugging, or manual inspection.
  */
-export function getMemoryFilePath(projectRoot: string): string {
-  return memoryPath(projectRoot);
+export function getMemoryFilePath(projectRoot: string, stateRoot?: string): string {
+  return memoryPath(projectRoot, stateRoot);
 }

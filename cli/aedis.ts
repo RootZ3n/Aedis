@@ -137,6 +137,12 @@ export interface DoctorHealthShape {
     mode: "tailscale-only" | "open";
     tailscaleOnly: boolean;
   };
+  state?: {
+    root?: string;
+    receipts?: string;
+    projectRoot?: string;
+    isolatedFromProject?: boolean;
+  };
 }
 
 /**
@@ -217,6 +223,15 @@ export function formatDoctorReport(input: DoctorInput): string {
       }
     } else {
       lines.push(`auth:             unknown (server may be pre-fix — rebuild recommended)`);
+    }
+    const state = h.state;
+    if (state) {
+      lines.push(`state_root:       ${state.root ?? "unknown"}`);
+      lines.push(`receipts:         ${state.receipts ?? "unknown"}`);
+      lines.push(`project_root:     ${state.projectRoot ?? "unknown"}`);
+      lines.push(`state_isolated:   ${state.isolatedFromProject === undefined ? "unknown" : state.isolatedFromProject ? "yes" : "no"}`);
+    } else {
+      lines.push(`state_root:       unknown (server may be pre-fix — rebuild recommended)`);
     }
   }
 

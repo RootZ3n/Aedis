@@ -21,7 +21,7 @@ async function buildApp(policy?: unknown) {
     workerRegistry: {
       getWorkers: () => [{}],
     },
-    config: { projectRoot: "/tmp/health-test", port: 18796 },
+    config: { projectRoot: "/tmp/health-test", stateRoot: "/tmp/aedis-health-state", port: 18796 },
     startedAt: "2026-04-27T22:00:00.000Z",
     pid: 4242,
     build: STUB_BUILD,
@@ -52,6 +52,21 @@ test("GET /health surfaces pid, startedAt, and build metadata", async () => {
     assert.deepEqual(body.build, STUB_BUILD);
     // Legacy `version` field still mirrors build.version for older readers.
     assert.equal(body.version, STUB_BUILD.version);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /health surfaces runtime state root without secrets", async () => {
+  const app = await buildApp();
+  try {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    const body = res.json();
+    assert.equal(body.state.root, "/tmp/aedis-health-state");
+    assert.equal(body.state.receipts, "/tmp/aedis-health-state/state/receipts");
+    assert.equal(body.state.projectRoot, "/tmp/health-test");
+    assert.equal(body.state.isolatedFromProject, true);
+    assert.equal(JSON.stringify(body).includes("API_KEY"), false);
   } finally {
     await app.close();
   }

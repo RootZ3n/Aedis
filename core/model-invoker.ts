@@ -140,6 +140,16 @@ export function createRunInvocationContext(): RunInvocationContext {
 
 const CB_PATH = ".aedis/circuit-breaker-state.json";
 
+function cbPath(): string {
+  const stateRoot = process.env["AEDIS_STATE_ROOT"];
+  if (!stateRoot) return CB_PATH;
+  return require("node:path").join(
+    require("node:path").resolve(stateRoot),
+    "state",
+    "circuit-breaker-state.json",
+  );
+}
+
 interface CbEntry { failures: number; lastFailure: number; }
 interface CbState { providers: Record<string, CbEntry>; }
 
@@ -149,13 +159,15 @@ const CB_HALF_LIFE_MS = 5 * 60 * 1000;
 
 function cbRead(): CbState {
   try {
-    return JSON.parse(String(require("fs").readFileSync(CB_PATH))) as CbState;
+    return JSON.parse(String(require("fs").readFileSync(cbPath()))) as CbState;
   } catch { return { providers: {} }; }
 }
 function cbWrite(s: CbState): void {
   const { writeFileSync, mkdirSync } = require("fs") as typeof import("fs");
-  try { mkdirSync(".aedis", { recursive: true }); } catch { /* exists */ }
-  writeFileSync(CB_PATH, JSON.stringify(s, null, 2));
+  const { dirname } = require("node:path") as typeof import("node:path");
+  const path = cbPath();
+  try { mkdirSync(dirname(path), { recursive: true }); } catch { /* exists */ }
+  writeFileSync(path, JSON.stringify(s, null, 2));
 }
 function cbScore(e: CbEntry): number {
   const age = Date.now() - e.lastFailure;

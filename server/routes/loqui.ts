@@ -74,7 +74,7 @@ export const loquiRoutes: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
-      const result = await answerLoqui(question, repoPath);
+      const result = await answerLoqui(question, repoPath, fastify.ctx.config.stateRoot);
 
       reply.send({
         answer: result.answer,

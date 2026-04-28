@@ -182,6 +182,7 @@ function buildHarness(projectRoot: string, opts: {
   const coordinator = new Coordinator(
     {
       projectRoot,
+      ...(opts.stateRoot ? { stateRoot: opts.stateRoot } : {}),
       autoCommit: false,
       requireWorkspace: opts.requireWorkspace ?? true,
     },

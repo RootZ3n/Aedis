@@ -51,6 +51,7 @@ export async function askLoqui(
 export async function answerLoqui(
   question: string,
   projectRoot: string,
+  stateRoot?: string,
 ): Promise<LoquiAnswer> {
   const trimmed = (question ?? "").trim();
   if (!trimmed) {
@@ -63,8 +64,8 @@ export async function answerLoqui(
     };
   }
 
-  const grounding = await buildGroundedRepoContext(trimmed, projectRoot);
-  const { gated, lastTasks } = await loadSupplementalMemory(trimmed, projectRoot);
+  const grounding = await buildGroundedRepoContext(trimmed, projectRoot, stateRoot);
+  const { gated, lastTasks } = await loadSupplementalMemory(trimmed, projectRoot, stateRoot);
   const prompt = buildPrompt(trimmed, grounding, gated, lastTasks);
   const providerResult = await callProviderChain(prompt);
 
@@ -90,9 +91,10 @@ export async function answerLoqui(
 async function loadSupplementalMemory(
   question: string,
   projectRoot: string,
+  stateRoot?: string,
 ): Promise<{ gated: GatedContext | null; lastTasks: readonly TaskSummary[] }> {
   try {
-    const memory = await loadMemory(projectRoot);
+    const memory = await loadMemory(projectRoot, stateRoot);
     return {
       gated: gateContext(memory, question),
       lastTasks: memory.recentTasks.slice(0, 3),

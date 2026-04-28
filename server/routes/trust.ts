@@ -32,7 +32,7 @@ export const trustRoutes: FastifyPluginAsync = async (fastify) => {
 
         const index = await fastify.ctx.receiptStore.listRuns(limit);
         const receipts = await loadReceipts(fastify.ctx.receiptStore, index);
-        const memory = await loadMemory(fastify.ctx.config.projectRoot);
+        const memory = await loadMemory(fastify.ctx.config.projectRoot, fastify.ctx.config.stateRoot);
         const dashboard = buildTrustDashboard(receipts, memory);
 
         reply.send(dashboard);
@@ -54,7 +54,7 @@ export const trustRoutes: FastifyPluginAsync = async (fastify) => {
       try {
         const index = await fastify.ctx.receiptStore.listRuns(20);
         const receipts = await loadReceipts(fastify.ctx.receiptStore, index);
-        const memory = await loadMemory(fastify.ctx.config.projectRoot);
+        const memory = await loadMemory(fastify.ctx.config.projectRoot, fastify.ctx.config.stateRoot);
         const dashboard = buildTrustDashboard(receipts, memory);
 
         reply.send(dashboard.vitals);

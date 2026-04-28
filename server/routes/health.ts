@@ -10,6 +10,7 @@
  */
 
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
+import { join, resolve } from "node:path";
 import type { ServerContext } from "../index.js";
 import type { WorkerType } from "../../workers/base.js";
 
@@ -69,6 +70,14 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
         mode: authEnabled ? "tailscale-only" : "open",
         tailscaleOnly: authEnabled,
       };
+      const stateRoot = context.config.stateRoot;
+      const projectRoot = context.config.projectRoot;
+      const state = {
+        root: stateRoot,
+        receipts: join(stateRoot, "state", "receipts"),
+        projectRoot,
+        isolatedFromProject: resolve(stateRoot) !== resolve(projectRoot),
+      };
 
       reply.send({
         status,
@@ -94,6 +103,7 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
           endpoint: `/ws`,
         },
         auth,
+        state,
         crucibulum: {
           connected: false, // TODO: wire up when Crucibulum is integrated
           last_sync: null,

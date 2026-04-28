@@ -30,6 +30,7 @@ function makeRepo(): string {
   mkdirSync(join(dir, "core"), { recursive: true });
   writeFileSync(join(dir, "core/run-summary.ts"), "export const summary = 1;\n", "utf-8");
   writeFileSync(join(dir, "core/run-summary.test.ts"), "import test from 'node:test';\n", "utf-8");
+  writeFileSync(join(dir, "README.md"), "# Test Repo\n", "utf-8");
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "test@aedis.local"], { cwd: dir });
   execFileSync("git", ["config", "user.name", "Aedis Test"], { cwd: dir });
@@ -132,4 +133,34 @@ test("change-set: auto-injected test pairs stay optional/non-mutating", () => {
 
   assert.equal(testFile?.mutationRole, "write-optional");
   assert.equal(testFile?.mutationExpected, false);
+});
+
+test("change-set: explicitly requested README append is expected mutation", async () => {
+  const repo = makeRepo();
+  try {
+    const intent = intentFor(
+      "Append the exact line Aedis RC smoke test. to README.md.",
+      [
+        { description: "Modify README.md", type: "modify", targetFiles: ["README.md"] },
+      ],
+    );
+    const changeSet = createChangeSet(intent, ["README.md"], undefined, repo);
+    const readme = changeSet.filesInScope.find((file) => file.path === "README.md");
+
+    assert.equal(readme?.mutationRole, "write-required");
+    assert.equal(readme?.mutationExpected, true);
+
+    writeFileSync(join(repo, "README.md"), "# Test Repo\nAedis RC smoke test.\n", "utf-8");
+    const result = await verifyGitDiff({
+      projectRoot: repo,
+      manifestFiles: changeSet.filesInScope.map((file) => file.path),
+      expectedFiles: changeSet.filesInScope.filter((file) => file.mutationExpected).map((file) => file.path),
+      nonMutatingFiles: changeSet.filesInScope.filter((file) => !file.mutationExpected).map((file) => file.path),
+    });
+
+    assert.deepEqual(result.unexpectedReferenceChanges, []);
+    assert.equal(result.passed, true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

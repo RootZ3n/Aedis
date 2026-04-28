@@ -392,6 +392,7 @@ export async function createServer(
   const coordinator = new Coordinator(
     {
       projectRoot: cfg.projectRoot,
+      stateRoot: cfg.stateRoot,
       verificationConfig,
       autoPromoteOnSuccess: safe.autoPromoteOnSuccess,
       requireApproval: safe.requireApproval,

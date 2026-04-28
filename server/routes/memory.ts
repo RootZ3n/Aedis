@@ -48,7 +48,7 @@ export const memoryRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get("/stats", async (_request, reply) => {
     const projectRoot = ctx().config.projectRoot;
-    const store = await ProjectMemoryStore.open(projectRoot);
+    const store = await ProjectMemoryStore.open(projectRoot, fastify.ctx.config.stateRoot);
     const stats = await store.stats();
     store.close();
     return reply.send({ ok: true, ...stats });
@@ -62,7 +62,7 @@ export const memoryRoutes: FastifyPluginAsync = async (fastify) => {
     "/",
     async (request, reply) => {
       const projectRoot = ctx().config.projectRoot;
-      const store = await ProjectMemoryStore.open(projectRoot);
+      const store = await ProjectMemoryStore.open(projectRoot, fastify.ctx.config.stateRoot);
 
       const { tag } = request.query;
       const entries = await store.listEntries({
@@ -97,7 +97,7 @@ export const memoryRoutes: FastifyPluginAsync = async (fastify) => {
     "/query",
     async (request, reply) => {
       const projectRoot = ctx().config.projectRoot;
-      const store = await ProjectMemoryStore.open(projectRoot);
+      const store = await ProjectMemoryStore.open(projectRoot, fastify.ctx.config.stateRoot);
 
       const taskTags = request.query.taskTags
         ? request.query.taskTags.split(",").map((t) => t.trim())
@@ -141,7 +141,7 @@ export const memoryRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id",
     async (request, reply) => {
       const projectRoot = ctx().config.projectRoot;
-      const store = await ProjectMemoryStore.open(projectRoot);
+      const store = await ProjectMemoryStore.open(projectRoot, fastify.ctx.config.stateRoot);
 
       const file = await store.getEntryFile(request.params.id);
       store.close();
@@ -177,7 +177,7 @@ export const memoryRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const store = await ProjectMemoryStore.open(projectRoot);
+      const store = await ProjectMemoryStore.open(projectRoot, fastify.ctx.config.stateRoot);
       const entry = await store.createEntry({ key, value, confidence, source, tags });
       store.close();
 
@@ -192,7 +192,7 @@ export const memoryRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id",
     async (request, reply) => {
       const projectRoot = ctx().config.projectRoot;
-      const store = await ProjectMemoryStore.open(projectRoot);
+      const store = await ProjectMemoryStore.open(projectRoot, fastify.ctx.config.stateRoot);
 
       const updated = await store.updateEntry(request.params.id, request.body ?? {});
       store.close();
@@ -213,7 +213,7 @@ export const memoryRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id",
     async (request, reply) => {
       const projectRoot = ctx().config.projectRoot;
-      const store = await ProjectMemoryStore.open(projectRoot);
+      const store = await ProjectMemoryStore.open(projectRoot, fastify.ctx.config.stateRoot);
 
       const flagged = await store.flagExpired(request.params.id, request.query.reason);
       store.close();

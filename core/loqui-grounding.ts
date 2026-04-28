@@ -37,8 +37,9 @@ export interface GroundedRepoContext {
 export async function buildGroundedRepoContext(
   question: string,
   projectRoot: string,
+  stateRoot?: string,
 ): Promise<GroundedRepoContext> {
-  const index = new RepoIndex();
+  const index = new RepoIndex(stateRoot);
   const persisted = await index.loadFromDisk(projectRoot);
   const built = persisted
     ? null

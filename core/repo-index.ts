@@ -1,8 +1,9 @@
 /**
  * RepoIndex — living codebase map for Aedis.
  *
- * It scans a repo, builds a per-file profile, persists it to .aedis,
- * and can refresh incrementally when files change.
+ * It scans a repo, builds a per-file profile, and persists it under the
+ * configured runtime state root when provided. Legacy direct callers without
+ * a state root still use .aedis.
  */
 
 import { createHash } from "node:crypto";
@@ -34,10 +35,15 @@ export interface RepoIndexSnapshot {
 
 export class RepoIndex {
   private repoPath = "";
+  private stateRoot: string | undefined;
   private files = new Map<string, IndexedFile>();
   private reverseDeps = new Map<string, Set<string>>();
   private generatedPatterns = new Set<string>();
   private watcherAbort: AbortController | null = null;
+
+  constructor(stateRoot?: string) {
+    this.stateRoot = stateRoot ? resolve(stateRoot) : undefined;
+  }
 
   async buildIndex(repoPath: string): Promise<RepoIndexSnapshot> {
     this.repoPath = resolve(repoPath);
@@ -143,6 +149,7 @@ export class RepoIndex {
     // .aedis/ via persist().
     const resolvedRoot = resolve(repoPath);
     const candidates = [
+      ...(this.stateRoot ? [join(this.stateRoot, "state", "repo-index", this.projectStateId(resolvedRoot), "repo-index.json")] : []),
       join(resolvedRoot, ".aedis", "repo-index.json"),
       join(resolvedRoot, ".zendorium", "repo-index.json"),
     ];
@@ -365,9 +372,18 @@ export class RepoIndex {
     // Canonical location post-rename is .aedis/. The legacy
     // .zendorium/ directory is read-only (see loadFromDisk) and
     // stops being used the moment the next persist completes.
-    const stateDir = join(this.repoPath, ".aedis");
+    const stateDir = this.stateRoot
+      ? join(this.stateRoot, "state", "repo-index", this.projectStateId(this.repoPath))
+      : join(this.repoPath, ".aedis");
     await mkdir(stateDir, { recursive: true });
     await writeFile(join(stateDir, "repo-index.json"), JSON.stringify(this.snapshot(), null, 2), "utf-8");
+  }
+
+  private projectStateId(projectRoot: string): string {
+    const root = resolve(projectRoot);
+    const hash = createHash("sha256").update(root).digest("hex").slice(0, 16);
+    const leaf = root.split(/[\\/]/).filter(Boolean).pop()?.replace(/[^A-Za-z0-9._-]/g, "_") || "repo";
+    return `${leaf}-${hash}`;
   }
 
   private snapshot(): RepoIndexSnapshot {

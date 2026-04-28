@@ -146,11 +146,6 @@ export function prepareTargetsForPrompt(input: {
       continue;
     }
 
-    if (isBasenameTarget(normalized)) {
-      basenameTargets.push(normalized);
-      continue;
-    }
-
     // Creation intent: the prompt explicitly says to create this file
     // (e.g. "Then create core/retry-utils.test.ts with …"). Accept the
     // non-existent path so the builder can produce it. Without this,
@@ -162,6 +157,11 @@ export function prepareTargetsForPrompt(input: {
         score: 0.9,
         reasons: ["prompt explicitly requests file creation"],
       });
+      continue;
+    }
+
+    if (isBasenameTarget(normalized)) {
+      basenameTargets.push(normalized);
       continue;
     }
 

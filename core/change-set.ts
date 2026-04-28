@@ -205,6 +205,10 @@ function classifyNecessity(intent: IntentObject, file: string): FileNecessity {
     return "required";
   }
 
+  // Files explicitly listed in deliverables are required. This includes
+  // markdown/docs when the user asks for a precise edit to that file.
+  if (deliverable && !isAutoInjectedTestPair(deliverable)) return "required";
+
   // Test files and docs are optional — their failure shouldn't block
   if (
     isTestLikePath(normalized) ||
@@ -213,9 +217,6 @@ function classifyNecessity(intent: IntentObject, file: string): FileNecessity {
   ) {
     return "optional";
   }
-
-  // Files explicitly listed in deliverables are required
-  if (deliverable) return "required";
 
   return "required";
 }

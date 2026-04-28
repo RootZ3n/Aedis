@@ -20,6 +20,12 @@ test("doctor: server reachable + matching commit prints expected fields with no 
       uptime_human: "5m 49s",
       startedAt: "2026-04-27T21:55:00.000Z",
       build: { ...KNOWN_LOCAL },
+      state: {
+        root: "/tmp/aedis-state",
+        receipts: "/tmp/aedis-state/state/receipts",
+        projectRoot: "/tmp/target-repo",
+        isolatedFromProject: true,
+      },
     },
     fetchError: null,
     localBuild: KNOWN_LOCAL,
@@ -31,6 +37,9 @@ test("doctor: server reachable + matching commit prints expected fields with no 
   assert.match(report, /port:\s+18796/);
   assert.match(report, /uptime:\s+5m 49s/);
   assert.match(report, /server_commit:\s+abcdef01/);
+  assert.match(report, /state_root:\s+\/tmp\/aedis-state/);
+  assert.match(report, /receipts:\s+\/tmp\/aedis-state\/state\/receipts/);
+  assert.match(report, /state_isolated:\s+yes/);
   assert.match(report, /server_built:\s+2026-04-27T22:00:00\.000Z/);
   assert.match(report, /local_commit:\s+abcdef01/);
   // No drift warnings expected on a matched checkout.
