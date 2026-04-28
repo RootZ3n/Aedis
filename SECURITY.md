@@ -29,11 +29,16 @@ Patterns the gate fails on:
 
 ### Allowlisted fixtures
 
-Exactly one literal string is allowlisted, used by `server/routes/providers.test.ts` to assert the API never serializes a real key:
+Allowlisted strings are key-shaped test fixtures used to exercise the
+redactor and the provider serializer without touching a real provider.
+The current allowlist (top of `scripts/check-secrets.sh`):
 
-- `sk-secret-not-to-leak`
+- `sk-secret-not-to-leak` — `server/routes/providers.test.ts`, asserts the API never serializes a configured provider key.
+- `sk-abc123def456ghi789jkl012mno` and three variants (`sk-proj-`, `sk-or-v1-`, `sk-ant-api03-` prefixes) — `core/redaction.test.ts`, exercise the sk- redaction patterns.
+- `Bearer eyABCDEF1234567890abcdef` — `core/redaction.test.ts`, exercises Bearer-token redaction.
+- `OPENAI_API_KEY=sk-foo123`, `ANTHROPIC_API_KEY=sk-ant-xxx`, `OPENAI_API_KEY=sk-real-key-here` — `core/redaction.test.ts`, exercise the `*_API_KEY=` assignment pattern.
 
-Add new fixtures only by editing the `allowlist[]` array at the top of `scripts/check-secrets.sh`. Never allowlist a real key.
+Add new fixtures only by editing the `allowlist[]` array at the top of `scripts/check-secrets.sh`. Never allowlist a real key. The pattern `abc123def456ghi789jkl012` is the convention for shaped-but-fake strings — keep new fixtures inside that pattern so the convention stays loud.
 
 ## What to do if a key leaks
 

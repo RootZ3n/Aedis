@@ -28,8 +28,24 @@ echo "[check-secrets] gitleaks not installed; using built-in pattern scan"
 
 # Allowlisted fixture strings. Each is a literal substring that, if
 # matched alongside a forbidden pattern, is NOT counted as a finding.
+# All entries below are non-secrets — they're test fixtures used to
+# assert redaction / serialization behavior. Real keys MUST never be
+# allowlisted; rotate immediately if one is found here.
 allowlist=(
+  # server/routes/providers.test.ts — asserts the API never leaks a
+  # configured provider key.
   "sk-secret-not-to-leak"
+  # core/redaction.test.ts — fixtures shaped like real keys so the
+  # redactor can be exercised end-to-end without depending on a real
+  # provider. Pattern `abc123def456ghi789jkl012` is the giveaway.
+  "sk-abc123def456ghi789jkl012mno"
+  "sk-proj-abc123def456ghi789jkl012mno"
+  "sk-or-v1-abc123def456ghi789jkl012"
+  "sk-ant-api03-abc123def456ghi789jkl012"
+  "Bearer eyABCDEF1234567890abcdef"
+  "OPENAI_API_KEY=sk-foo123"
+  "ANTHROPIC_API_KEY=sk-ant-xxx"
+  "OPENAI_API_KEY=sk-real-key-here"
 )
 
 # Forbidden patterns — extended regex, evaluated against each tracked
