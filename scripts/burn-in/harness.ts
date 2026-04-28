@@ -98,6 +98,18 @@ export function isTerminal(status: string | null | undefined): boolean {
 
 // ─── Run detail shape (subset we care about) ─────────────────────────
 
+/**
+ * One persisted worker dispatch entry. Mirrors
+ * core/receipt-store.ts:ReceiptWorkerEvent. Used by the repair-loop
+ * predicates below to count builder/verifier dispatches without
+ * importing the full receipt-store types into the burn-in harness.
+ */
+export interface RunDetailWorkerEvent {
+  readonly workerType?: string | null;
+  readonly status?: string | null;
+  readonly taskId?: string | null;
+}
+
 export interface RunDetail {
   status: string | null;
   /** Sometimes "phase" is on the body root, sometimes inside runState. */
@@ -117,8 +129,78 @@ export interface RunDetail {
       suggestedFix?: string | null;
       evidence?: ReadonlyArray<string> | null;
     } | null;
+    /** Verification verdict surfaced by run-summary, when present. */
+    verification?: string | null;
   } | null;
+  /**
+   * Worker dispatch events persisted on the receipt. Optional because
+   * legacy receipts and the in-flight tracked-runs path leave it
+   * empty; predicates below treat undefined/empty as "no evidence".
+   */
+  workerEvents?: ReadonlyArray<RunDetailWorkerEvent> | null;
+  /**
+   * Persisted verification receipt. Read for the final verifier
+   * verdict pass/pass-with-warnings/fail. Predicates below treat a
+   * missing verdict as "not-run".
+   */
+  verificationReceipt?: { verdict?: string | null } | null;
   errors?: ReadonlyArray<{ source?: string; message?: string }> | null;
+}
+
+// ─── Repair-loop predicates ─────────────────────────────────────────
+//
+// These are pure functions over RunDetail used by burn-in-10's
+// expectation block. Kept here (not in test-burn-in.ts) so unit tests
+// can import them without dragging in the polling main().
+
+/**
+ * True when the run actually executed validation commands — at least
+ * one verifier worker event reached status="completed". Without this,
+ * the scenario's "run npm test" instruction was never honoured and
+ * the outcome cannot be considered verified.
+ */
+export function hasCommandEvidence(detail: RunDetail | null): boolean {
+  const events = detail?.workerEvents ?? [];
+  return events.some(
+    (e) => e?.workerType === "verifier" && e?.status === "completed",
+  );
+}
+
+/**
+ * Count repair attempts. A repair attempt = a builder dispatch beyond
+ * the first one. Multiple builder events arise from the recovery path
+ * after a failed dispatch (executeGraph → attemptRecovery → re-dispatch)
+ * or from in-loop fix-and-rerun within a single task. Returns 0 when
+ * no builder events are present (legacy or in-flight detail).
+ */
+export function countRepairAttempts(detail: RunDetail | null): number {
+  const events = detail?.workerEvents ?? [];
+  const builderCount = events.filter((e) => e?.workerType === "builder").length;
+  return Math.max(0, builderCount - 1);
+}
+
+/**
+ * Final verifier verdict — "pass" | "pass-with-warnings" | "fail" |
+ * "not-run". Reads first from the persisted verificationReceipt.verdict;
+ * falls back to summary.verification. "not-run" is the safe default
+ * for anything we can't confirm — never assume verified silence.
+ */
+export function finalVerifierVerdict(
+  detail: RunDetail | null,
+): "pass" | "pass-with-warnings" | "fail" | "not-run" {
+  const fromReceipt = detail?.verificationReceipt?.verdict;
+  if (fromReceipt === "pass" || fromReceipt === "pass-with-warnings" || fromReceipt === "fail") {
+    return fromReceipt;
+  }
+  const fromSummary = detail?.summary?.verification;
+  if (
+    fromSummary === "pass" ||
+    fromSummary === "pass-with-warnings" ||
+    fromSummary === "fail"
+  ) {
+    return fromSummary;
+  }
+  return "not-run";
 }
 
 export interface RunSnapshot {
@@ -582,6 +664,15 @@ export interface BurnResultRow {
   error: string | null;
   /** Unique per harness invocation — used to separate current-run rows from history. */
   invocationId?: string;
+  /**
+   * Repair-loop signals — populated for every row from the last
+   * successful detail fetch. Used by the burn-in-10 expectation
+   * block (and by post-hoc summaries) to verify the create →
+   * validate → repair → rerun cycle actually happened.
+   */
+  commandEvidence?: boolean;
+  repairAttempts?: number;
+  finalVerifierVerdict?: "pass" | "pass-with-warnings" | "fail" | "not-run";
 }
 
 export function buildResultRow(input: ResultRowInput): BurnResultRow {
@@ -632,6 +723,9 @@ export function buildResultRow(input: ResultRowInput): BurnResultRow {
     fetchError: poll.lastFetchError,
     notes: outcome.note ? [outcome.note, ...notes] : [...notes],
     error,
+    commandEvidence: hasCommandEvidence(detail),
+    repairAttempts: countRepairAttempts(detail),
+    finalVerifierVerdict: finalVerifierVerdict(detail),
   };
 }
 

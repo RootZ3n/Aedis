@@ -46,3 +46,9 @@ receipts/
 **/receipts/
 *.backup
 *.bak
+
+# Burn-in scenario fixture targets — disposable, never committed.
+# burn-in-10 creates files under tmp/burn-in/ inside an isolated
+# workspace; the auto-reject path keeps source untouched, but this
+# is a defense-in-depth so an accidental approval cannot land them.
+tmp/burn-in/

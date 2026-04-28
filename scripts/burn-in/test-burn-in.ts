@@ -49,6 +49,27 @@ export interface Scenario {
     shouldAsk?: boolean;
     minFilesChanged?: number;
     maxCostUsd?: number;
+    /**
+     * Repair-loop scenarios (burn-in-10): minimum number of distinct
+     * builder dispatches the run must execute. A repair attempt
+     * presents as a second builder event after a failed first one;
+     * see countRepairAttempts in harness.ts.
+     */
+    minRepairAttempts?: number;
+    /**
+     * Repair-loop scenarios: at least one verifier worker event must
+     * have completed (status="completed"). Without this, the scenario
+     * never actually ran the validation commands it told the model to
+     * run, so a "passed" outcome would be unverified.
+     */
+    requireCommandEvidence?: boolean;
+    /**
+     * Repair-loop scenarios: the final verification verdict must be
+     * pass or pass-with-warnings (not fail, not "not-run"). Pin the
+     * post-repair invariant — even a successful repair loop must
+     * leave verification in a known-good state.
+     */
+    requireFinalVerifierPass?: boolean;
   };
 }
 
@@ -272,6 +293,53 @@ export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
       maxCostUsd: 0.40,
     },
   },
+
+  // ── 10. Repair loop ─────────────────────────────────────────────────
+  // Forces the create → validate → observe failure → repair → rerun
+  // cycle. The function (`rotateString`) has a wrap-around edge case
+  // (n > s.length) that the naive `s.slice(n) + s.slice(0, n)` fails
+  // — the wraparound test is in the prompt, the model has to notice
+  // the failure, fix the modulo math, and rerun. Files land under
+  // tmp/burn-in/ which is in .gitignore so an accidental approval
+  // can't commit them.
+  //
+  // Expectation contract (extended for repair-loop scenarios):
+  //   - filesChanged >= 2 (source + test)
+  //   - command evidence: verifier completed at least once
+  //   - repair attempts >= 1: at least one builder dispatch beyond
+  //     the first one (recovery re-dispatch on test failure)
+  //   - final verifier verdict: pass or pass-with-warnings — the
+  //     repair must actually leave the run in a known-good verified
+  //     state, not just stop at AWAITING_APPROVAL with no checks.
+  {
+    id: "burn-in-10-repair-loop",
+    prompt:
+      "Create tmp/burn-in/rotate-string.ts and tmp/burn-in/rotate-string.test.ts. " +
+      "In rotate-string.ts, export a function " +
+      "`rotateString(s: string, n: number): string` that rotates `s` " +
+      "left by `n` characters. Negative `n` rotates right. When `|n|` " +
+      "exceeds s.length the rotation MUST wrap around (e.g. " +
+      "rotateString('abc', 7) === 'bca'). Empty string returns empty. " +
+      "n=0 returns input unchanged. " +
+      "In rotate-string.test.ts, add four focused tests covering: " +
+      "(1) rotateString('abcdef', 2) === 'cdefab', " +
+      "(2) rotateString('abcdef', -1) === 'fabcde', " +
+      "(3) rotateString('abc', 7) === 'bca' (wraparound), " +
+      "(4) rotateString('', 5) === ''. " +
+      "After making the changes, run `npm test` to validate. If any " +
+      "test fails, inspect the failure, fix the implementation, and " +
+      "rerun `npm test` until all four tests pass. " +
+      "Only create/modify the two files under tmp/burn-in/ — do not " +
+      "touch any other file.",
+    expected: {
+      classification: ["PARTIAL_SUCCESS", "SUCCESS", "EXECUTION_ERROR"],
+      minFilesChanged: 2,
+      maxCostUsd: 0.50,
+      minRepairAttempts: 1,
+      requireCommandEvidence: true,
+      requireFinalVerifierPass: true,
+    },
+  },
   ];
 }
 
@@ -412,6 +480,28 @@ async function main(): Promise<void> {
       result.filesChanged < scenario.expected.minFilesChanged
     ) {
       result.notes.push(`⚠️ Only ${result.filesChanged} files changed, expected ≥ ${scenario.expected.minFilesChanged}`);
+    }
+    if (scenario.expected.requireCommandEvidence === true && result.commandEvidence !== true) {
+      result.notes.push(
+        `⚠️ Repair-loop scenario requires command evidence (verifier completed at least once); none recorded`,
+      );
+    }
+    if (
+      scenario.expected.minRepairAttempts !== undefined &&
+      (result.repairAttempts ?? 0) < scenario.expected.minRepairAttempts
+    ) {
+      result.notes.push(
+        `⚠️ Only ${result.repairAttempts ?? 0} repair attempt(s) recorded, expected ≥ ${scenario.expected.minRepairAttempts}`,
+      );
+    }
+    if (
+      scenario.expected.requireFinalVerifierPass === true &&
+      result.finalVerifierVerdict !== "pass" &&
+      result.finalVerifierVerdict !== "pass-with-warnings"
+    ) {
+      result.notes.push(
+        `⚠️ Repair-loop scenario requires final verifier pass/pass-with-warnings; got "${result.finalVerifierVerdict ?? "unknown"}"`,
+      );
     }
 
     logResult(result, invocationId);
