@@ -58,9 +58,8 @@ test("buildScenarios with no tag still produces a usable burn-in-01 prompt", () 
   );
 });
 
-test("buildScenarios returns 10 scenarios", () => {
+test("buildScenarios id-list contract — pin exact order so a future insert is intentional", () => {
   const scenarios = buildScenarios({ tag: "t" });
-  assert.equal(scenarios.length, 10);
   assert.deepEqual(
     scenarios.map((s) => s.id),
     [
@@ -74,6 +73,7 @@ test("buildScenarios returns 10 scenarios", () => {
       "burn-in-08-external-repo",
       "burn-in-09-command-loop",
       "burn-in-10-repair-loop",
+      "burn-in-11-lane-rescue",
     ],
   );
 });
@@ -399,4 +399,138 @@ test("burn-in: imports the shared assessStaleness helper", async () => {
   );
   assert.match(src, /assessStaleness/);
   assert.match(src, /detectSourceNewerThanDist/);
+});
+
+// ─── Lane-rescue scenario + cost guard ──────────────────────────────
+
+test("buildScenarios returns 11 scenarios", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  assert.equal(scenarios.length, 11);
+  assert.ok(scenarios.some((s) => s.id === "burn-in-11-lane-rescue"));
+});
+
+test("burn-in-11: prompt enforces strict error-message contract that 9B local often misses", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  const s11 = scenarios.find((s) => s.id === "burn-in-11-lane-rescue");
+  assert.ok(s11);
+  // The exact-string error-message contracts are the trip wires that
+  // make the local primary likely to fail verification on first try.
+  assert.match(s11.prompt, /'parseFraction: zero denominator'/);
+  assert.match(s11.prompt, /'parseFraction: invalid format'/);
+  assert.match(s11.prompt, /MUST throw/);
+});
+
+test("burn-in-11: scope-locked to tmp/burn-in/", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  const s11 = scenarios.find((s) => s.id === "burn-in-11-lane-rescue");
+  assert.ok(s11);
+  assert.match(s11.prompt, /tmp\/burn-in\/parse-fraction\.ts/);
+  assert.match(s11.prompt, /do not touch any other file/i);
+});
+
+test("burn-in-11: expectation block sets a higher cost cap to cover cloud-shadow spend", () => {
+  const scenarios = buildScenarios({ tag: "t" });
+  const s11 = scenarios.find((s) => s.id === "burn-in-11-lane-rescue");
+  assert.ok(s11);
+  assert.equal(s11.expected.minFilesChanged, 2);
+  // Cloud-shadow runs cost more than purely local repair-loop runs.
+  assert.ok((s11.expected.maxCostUsd ?? 0) >= 1.0);
+  assert.equal(s11.expected.requireCommandEvidence, true);
+});
+
+// ─── shouldRunLaneRescue (cost guard) ───────────────────────────────
+
+test("shouldRunLaneRescue: skips when lane mode is not local_then_cloud", async () => {
+  const { shouldRunLaneRescue } = await import("./harness.js");
+  for (const mode of ["primary_only", "local_vs_cloud", "cloud_with_local_check", undefined]) {
+    const r = shouldRunLaneRescue({
+      ...(mode ? { laneMode: mode } : {}),
+      shadowProvider: "openrouter",
+      allowShadowCost: true,
+    });
+    assert.equal(r.run, false, `mode ${JSON.stringify(mode)} must skip`);
+    assert.match((r as { reason: string }).reason, /local_then_cloud/);
+  }
+});
+
+test("shouldRunLaneRescue: skips when no shadow provider is configured", async () => {
+  const { shouldRunLaneRescue } = await import("./harness.js");
+  const r = shouldRunLaneRescue({
+    laneMode: "local_then_cloud",
+    allowShadowCost: true,
+  });
+  assert.equal(r.run, false);
+  assert.match((r as { reason: string }).reason, /no shadow lane configured/);
+});
+
+test("shouldRunLaneRescue: cloud shadow without --allow-shadow-cost SKIPS (not fails)", async () => {
+  const { shouldRunLaneRescue } = await import("./harness.js");
+  const r = shouldRunLaneRescue({
+    laneMode: "local_then_cloud",
+    shadowProvider: "openrouter",
+    allowShadowCost: false,
+  });
+  assert.equal(r.run, false);
+  assert.match((r as { reason: string }).reason, /paid cloud/);
+  assert.match((r as { reason: string }).reason, /--allow-shadow-cost/);
+});
+
+test("shouldRunLaneRescue: cloud shadow WITH --allow-shadow-cost runs", async () => {
+  const { shouldRunLaneRescue } = await import("./harness.js");
+  for (const provider of [
+    "openrouter", "anthropic", "openai", "minimax", "modelstudio", "zai",
+    "glm-5.1-openrouter", "glm-5.1-direct",
+  ]) {
+    const r = shouldRunLaneRescue({
+      laneMode: "local_then_cloud",
+      shadowProvider: provider,
+      allowShadowCost: true,
+    });
+    assert.equal(r.run, true, `cloud provider ${provider} with flag must run`);
+  }
+});
+
+test("shouldRunLaneRescue: local shadow runs WITHOUT --allow-shadow-cost (no spend)", async () => {
+  const { shouldRunLaneRescue } = await import("./harness.js");
+  for (const provider of ["ollama", "local"]) {
+    const r = shouldRunLaneRescue({
+      laneMode: "local_then_cloud",
+      shadowProvider: provider,
+      allowShadowCost: false,
+    });
+    assert.equal(r.run, true, `local provider ${provider} should not need the flag`);
+  }
+});
+
+test("isCloudShadowProvider: known cloud providers true, others false", async () => {
+  const { isCloudShadowProvider } = await import("./harness.js");
+  assert.equal(isCloudShadowProvider("openrouter"), true);
+  assert.equal(isCloudShadowProvider("anthropic"), true);
+  assert.equal(isCloudShadowProvider("ollama"), false);
+  assert.equal(isCloudShadowProvider("local"), false);
+  assert.equal(isCloudShadowProvider(undefined), false);
+  assert.equal(isCloudShadowProvider(""), false);
+});
+
+// ─── Skip wiring exists in main() ───────────────────────────────────
+
+test("burn-in: --allow-shadow-cost flag is recognised in main()", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(
+    new URL("./test-burn-in.ts", import.meta.url),
+    "utf-8",
+  );
+  assert.match(src, /--allow-shadow-cost/);
+  assert.match(src, /allowShadowCost/);
+  assert.match(src, /shouldRunLaneRescue/);
+});
+
+test("burn-in: lane-rescue skip emits a SKIPPED line with the gate reason", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(
+    new URL("./test-burn-in.ts", import.meta.url),
+    "utf-8",
+  );
+  assert.match(src, /burn-in-11-lane-rescue.*!laneRescueGate\.run/s);
+  assert.match(src, /⏭ SKIPPED:/);
 });

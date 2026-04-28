@@ -901,3 +901,110 @@ test("receipt actualModel === intentModel when no fallback fired (convergent cas
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ─── Lane rescue — hard-assert proof ────────────────────────────────
+//
+// Stronger pin than the earlier "primary fails, shadow succeeds —
+// selection picks shadow with correct model attribution" test. That
+// one used `if (final.selectedCandidateWorkspaceId)` guards which
+// would silently degrade to a no-op if selection ever stopped firing.
+// These tests hard-assert the rescue contract end-to-end:
+//
+//   - selectedCandidateWorkspaceId === shadow.workspaceId
+//   - selected candidate has role="shadow"
+//   - both candidates appear in the manifest with distinct lanes
+//   - primary's disqualification is recorded (so the operator can see
+//     WHY the rescue fired)
+
+test("lane-rescue: primary verification fails → shadow is HARD-selected", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    // Primary fails verification (typecheckPasses: false). Shadow
+    // re-uses the same RegisteredBuilder via factory→null fallback —
+    // shadow's runShadowBuilder doesn't run verification, so its
+    // candidate qualifies and selection MUST pick it.
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: () => null,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    assert.ok(final, "finalReceipt must exist");
+    assert.equal(final.laneMode, "local_then_cloud");
+
+    // Hard contract: selectedCandidateWorkspaceId is set.
+    assert.ok(
+      final.selectedCandidateWorkspaceId,
+      "selectedCandidateWorkspaceId MUST be set when shadow rescues primary",
+    );
+
+    // The selected candidate has role=shadow.
+    const selected = final.candidates.find(
+      (c: any) => c.workspaceId === final.selectedCandidateWorkspaceId,
+    );
+    assert.ok(selected, "selected candidate must be in the manifest");
+    assert.equal(selected.role, "shadow", "rescue MUST select the shadow lane, not primary");
+    assert.equal(selected.lane, "cloud");
+    assert.equal(selected.provider, "openrouter");
+    assert.equal(selected.model, "xiaomi/mimo-v2.5");
+
+    // Manifest records BOTH candidates with distinct lanes.
+    assert.equal(final.candidates.length, 2, "manifest must record both lanes");
+    const primary = final.candidates.find((c: any) => c.role === "primary");
+    const shadow = final.candidates.find((c: any) => c.role === "shadow");
+    assert.ok(primary, "primary candidate present");
+    assert.ok(shadow, "shadow candidate present");
+    assert.equal(primary.lane, "local");
+    assert.equal(shadow.lane, "cloud");
+
+    // Primary's disqualification reason is preserved so the operator
+    // can audit why the rescue fired.
+    assert.ok(primary.disqualification, "primary must carry a disqualification reason");
+    assert.match(primary.disqualification, /failed|verifierVerdict|tests|typecheck/i);
+
+    // Shadow has no disqualification (it's the qualified one).
+    assert.equal(shadow.disqualification, null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("lane-rescue: receipt records intent vs actual model on the rescued shadow", async () => {
+  // Phase D contract pinned earlier: intentModel = lane ask;
+  // actualModel = WorkerResult.cost.model. When the rescue's selected
+  // candidate is the shadow, both fields must survive into the
+  // persisted receipt — operator-facing audit trail must NOT lose the
+  // distinction even when selection swapped lanes.
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: () => null,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+    const persisted = await harness.receiptStore.listRuns(1);
+    const final = (await harness.receiptStore.getRun(persisted[0].runId) as any)
+      .finalReceipt;
+    const shadow = final.candidates.find((c: any) => c.role === "shadow");
+    // intentModel mirrors the lane-config ask.
+    assert.equal(shadow.intentModel, "xiaomi/mimo-v2.5");
+    // actualModel reflects what the WorkerResult.cost.model was.
+    // RegisteredBuilder uses zeroCost() with model:"", so actualModel
+    // is undefined here — the assertion is that the FIELD HONESTLY
+    // omits a value rather than lying with the intent.
+    assert.equal(shadow.actualModel, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

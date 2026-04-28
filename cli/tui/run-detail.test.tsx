@@ -291,3 +291,129 @@ test("tui run-detail: switching panels replaces previous panel", async () => {
     unmount();
   }
 });
+
+// ─── Lane rescue rendering — selected shadow ─────────────────────────
+
+test("run-detail Candidate Lanes panel: selected SHADOW renders ★ marker and 'selected' line", async () => {
+  // Lane-rescue scenario: primary failed verification, shadow took
+  // over and was selected. The Candidate Lanes panel must clearly
+  // mark the shadow with a ★ so the operator can tell at a glance
+  // which lane produced the change they're about to approve.
+  const detail = mkDetail({
+    laneMode: "local_then_cloud",
+    selectedCandidateWorkspaceId: "shadow-1",
+    candidates: [
+      {
+        workspaceId: "primary",
+        role: "primary",
+        lane: "local",
+        provider: "ollama",
+        model: "qwen3.5:9b",
+        status: "failed",
+        disqualification: "verifierVerdict=fail",
+        verifierVerdict: "fail",
+        costUsd: 0,
+        latencyMs: 100,
+        criticalFindings: 1,
+      },
+      {
+        workspaceId: "shadow-1",
+        role: "shadow",
+        lane: "cloud",
+        provider: "openrouter",
+        model: "xiaomi/mimo-v2.5",
+        status: "passed",
+        disqualification: null,
+        verifierVerdict: null,
+        costUsd: 0.01,
+        latencyMs: 200,
+      },
+    ],
+  });
+  const { stdin, lastFrame, unmount } = render(
+    <RunDetailScreen
+      runId="run-abc123"
+      onBack={() => {}}
+      getRunDetail={async () => detail}
+    />,
+  );
+  try {
+    await wait(40);
+    stdin.write("c");
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /Candidate Lanes/, "panel header must render");
+    assert.match(frame, /selectedCandidate:\s+shadow-1/);
+    // Both rows render, primary first (input order), then shadow.
+    assert.match(frame, /primary/);
+    assert.match(frame, /shadow/);
+    // Shadow row must carry the ★ marker.
+    assert.match(frame, /★\s+shadow/, "selected shadow MUST be marked with ★");
+    // The "selected" annotation appears under the chosen row.
+    assert.match(frame, /selected/);
+    // Primary's disqualification reason is surfaced so the operator
+    // can audit the rescue.
+    assert.match(frame, /disqualified:\s*verifierVerdict=fail/);
+  } finally {
+    unmount();
+  }
+});
+
+test("run-detail Candidate Lanes panel: when shadow is selected, primary row is NOT bolded", async () => {
+  // The bold/marker is the visual "this is the one" — accidentally
+  // bolding the primary too would make the rescue ambiguous. Soft
+  // pin: each row's bold attribute stays attached to selection only.
+  const detail = mkDetail({
+    laneMode: "local_then_cloud",
+    selectedCandidateWorkspaceId: "shadow-1",
+    candidates: [
+      {
+        workspaceId: "primary",
+        role: "primary",
+        lane: "local",
+        provider: "ollama",
+        model: "qwen3.5:9b",
+        status: "failed",
+        disqualification: "status=failed",
+        verifierVerdict: "fail",
+        costUsd: 0,
+        latencyMs: 1,
+      },
+      {
+        workspaceId: "shadow-1",
+        role: "shadow",
+        lane: "cloud",
+        provider: "openrouter",
+        model: "xiaomi/mimo-v2.5",
+        status: "passed",
+        disqualification: null,
+        costUsd: 0.01,
+        latencyMs: 1,
+      },
+    ],
+  });
+  const { stdin, lastFrame, unmount } = render(
+    <RunDetailScreen
+      runId="run-abc123"
+      onBack={() => {}}
+      getRunDetail={async () => detail}
+    />,
+  );
+  try {
+    await wait(40);
+    stdin.write("c");
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    // Only the shadow row carries the ★. The primary row gets the
+    // two-space prefix used for unselected rows.
+    const lines = frame.split("\n");
+    const primaryLine = lines.find((l) => l.includes("primary") && /local/.test(l));
+    const shadowLine = lines.find((l) => l.includes("shadow") && /cloud/.test(l));
+    assert.ok(primaryLine, "primary row must render");
+    assert.ok(shadowLine, "shadow row must render");
+    assert.doesNotMatch(primaryLine, /★/, "unselected primary row must NOT carry ★");
+    assert.match(shadowLine, /★/, "selected shadow row MUST carry ★");
+  } finally {
+    unmount();
+  }
+});

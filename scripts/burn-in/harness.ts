@@ -1188,6 +1188,81 @@ export function resolveTimeoutMs(
 
 // ─── Scenario filter ─────────────────────────────────────────────────
 
+// ─── Lane-rescue cost guard ─────────────────────────────────────────
+//
+// burn-in-11-lane-rescue is the only scenario that intentionally
+// triggers a paid cloud-shadow dispatch. Three guards must clear
+// before it runs:
+//   1. lane-config mode is "local_then_cloud" (the only mode that
+//      can rescue via shadow); other modes have nothing to prove.
+//   2. shadow lane provider is a *cloud* provider (real spend); a
+//      shadow on a local provider is free and the guard relaxes.
+//   3. operator passed `--allow-shadow-cost` to acknowledge cost.
+//
+// Returns a discriminated union so the burn-in loop can either run
+// the scenario or log a clear SKIPPED reason.
+
+const CLOUD_PROVIDERS: ReadonlySet<string> = new Set([
+  "openrouter",
+  "anthropic",
+  "openai",
+  "minimax",
+  "modelstudio",
+  "zai",
+  "glm-5.1-openrouter",
+  "glm-5.1-direct",
+]);
+
+export function isCloudShadowProvider(provider: string | undefined): boolean {
+  return typeof provider === "string" && CLOUD_PROVIDERS.has(provider);
+}
+
+export interface LaneRescueGuardInput {
+  /** Lane mode read from .aedis/lane-config.json (or "primary_only" default). */
+  readonly laneMode?: string;
+  /** Configured shadow provider (e.g. "openrouter"); undefined when no shadow. */
+  readonly shadowProvider?: string;
+  /** True when the operator passed --allow-shadow-cost. */
+  readonly allowShadowCost: boolean;
+}
+
+export type LaneRescueGuard =
+  | { readonly run: true }
+  | { readonly run: false; readonly reason: string };
+
+/**
+ * Pure projection — decide whether to run burn-in-11. Two no-cost
+ * skips (lane mode mismatch, no shadow configured) plus one cost
+ * skip (cloud shadow without --allow-shadow-cost). Local shadows
+ * pass through without the flag because there's no spend to gate.
+ */
+export function shouldRunLaneRescue(input: LaneRescueGuardInput): LaneRescueGuard {
+  if (input.laneMode !== "local_then_cloud") {
+    return {
+      run: false,
+      reason:
+        `lane mode is ${JSON.stringify(input.laneMode ?? "unset")}; ` +
+        `lane-rescue only runs under "local_then_cloud"`,
+    };
+  }
+  if (!input.shadowProvider) {
+    return {
+      run: false,
+      reason:
+        `lane-config has no shadow lane configured — nothing to rescue with`,
+    };
+  }
+  if (isCloudShadowProvider(input.shadowProvider) && !input.allowShadowCost) {
+    return {
+      run: false,
+      reason:
+        `shadow provider "${input.shadowProvider}" is a paid cloud — ` +
+        `pass --allow-shadow-cost to authorise the spend`,
+    };
+  }
+  return { run: true };
+}
+
 /**
  * Parse `--scenario <id>` from argv and return the filtered list.
  * Exits with code 1 and a helpful message when the id doesn't match.

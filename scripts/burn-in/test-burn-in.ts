@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { redactObject } from "../../core/redaction.js";
 import { detectSourceNewerThanDist, getBuildMetadata } from "../../core/build-metadata.js";
 import { assessStaleness } from "../../core/staleness.js";
+import { loadLaneConfigFromDisk } from "../../core/lane-config.js";
 
 import {
   type BurnResultRow,
@@ -35,6 +36,7 @@ import {
   runScenarioOnce,
   safePad,
   safeStr,
+  shouldRunLaneRescue,
 } from "./harness.js";
 
 const AEDIS_BASE = process.env["AEDIS_BASE"] ?? "http://localhost:18796";
@@ -342,6 +344,39 @@ export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
       requireFinalVerifierPass: true,
     },
   },
+
+  // ── 11. Lane rescue (local_then_cloud only) ─────────────────────────
+  // Designed to FORCE the local primary to fail so the cloud shadow
+  // takes over and is selected. The prompt asks for a tiny addition
+  // that the local 9B model commonly mis-handles on edge cases — same
+  // shape as burn-in-10's rotateString trip wire — combined with a
+  // strict-mode test so verification fails on primary's first attempt.
+  // Skipped by default unless lane-config is local_then_cloud AND the
+  // operator passes --allow-shadow-cost (cloud spend gate).
+  {
+    id: "burn-in-11-lane-rescue",
+    prompt:
+      "Create tmp/burn-in/parse-fraction.ts and tmp/burn-in/parse-fraction.test.ts. " +
+      "In parse-fraction.ts, export `parseFraction(s: string): { numerator: number, denominator: number }` " +
+      "that parses 'a/b' strings. Requirements: " +
+      "(1) parseFraction('1/2') === { numerator: 1, denominator: 2 }, " +
+      "(2) parseFraction('-3/4') === { numerator: -3, denominator: 4 } (negative numerator), " +
+      "(3) parseFraction('1/0') MUST throw an Error whose message starts EXACTLY with " +
+      "the literal string 'parseFraction: zero denominator', " +
+      "(4) parseFraction('not-a-fraction') MUST throw an Error whose message starts EXACTLY with " +
+      "'parseFraction: invalid format'. " +
+      "Add four focused tests covering each case. Run `npm test` to " +
+      "validate. If any test fails, fix and rerun until all pass. " +
+      "Only create/modify the two files under tmp/burn-in/ — do not " +
+      "touch any other file.",
+    expected: {
+      classification: ["PARTIAL_SUCCESS", "SUCCESS", "EXECUTION_ERROR"],
+      minFilesChanged: 2,
+      // Cloud-shadow dispatch costs more than purely local repair-loop.
+      maxCostUsd: 1.00,
+      requireCommandEvidence: true,
+    },
+  },
   ];
 }
 
@@ -402,6 +437,7 @@ async function main(): Promise<void> {
   const allowPromote = process.argv.includes("--allow-promote");
   const showHistory = process.argv.includes("--history");
   const allowStaleServer = process.argv.includes("--allow-stale-server");
+  const allowShadowCost = process.argv.includes("--allow-shadow-cost");
   if (summaryOnly) {
     summariseResults(undefined, showHistory);
     return;
@@ -409,6 +445,14 @@ async function main(): Promise<void> {
 
   const activeScenarios = filterScenarios(buildScenarios());
   const invocationId = defaultBurnInRunTag();
+  // Lane-rescue gate — read lane-config once at startup so the
+  // skip-with-reason decision is stable across the whole invocation.
+  const laneCfg = loadLaneConfigFromDisk(PROJECT_ROOT);
+  const laneRescueGate = shouldRunLaneRescue({
+    laneMode: laneCfg.mode,
+    ...(laneCfg.shadow?.provider ? { shadowProvider: laneCfg.shadow.provider } : {}),
+    allowShadowCost,
+  });
 
   console.log(`\n🔬 AEDIS BURN-IN HARNESS (soft)`);
   console.log(`Target:  ${AEDIS_BASE}`);
@@ -491,6 +535,15 @@ async function main(): Promise<void> {
     console.log(`Prompt:   ${scenario.prompt.slice(0, 90)}${scenario.prompt.length > 90 ? "…" : ""}`);
     console.log(`Repo:     ${repo}`);
     console.log(`${"═".repeat(70)}`);
+
+    // Lane-rescue gate: skip burn-in-11 (with reason logged) when the
+    // lane-config + cost guards aren't met. Logged as SKIPPED rather
+    // than failed so post-hoc summaries can distinguish "intentionally
+    // not run" from "failed to run".
+    if (scenario.id === "burn-in-11-lane-rescue" && !laneRescueGate.run) {
+      console.log(`  ⏭ SKIPPED: ${laneRescueGate.reason}`);
+      continue;
+    }
 
     const extraNotes: string[] = [];
     const result = await runScenarioOnce({
