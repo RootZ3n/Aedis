@@ -56,6 +56,20 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
       // to do without having to read env vars or coordinator config.
       const policy = context.getRuntimePolicy();
 
+      // Auth mode — exposes the runtime auth configuration so the doctor
+      // and TUI can surface auth status without re-implementing the logic.
+      // Never includes secrets. The `mode` field is human-readable.
+      const authEnabled = !context.config.disableAuth;
+      const auth: {
+        readonly enabled: boolean;
+        readonly mode: "tailscale-only" | "open";
+        readonly tailscaleOnly: boolean;
+      } = {
+        enabled: authEnabled,
+        mode: authEnabled ? "tailscale-only" : "open",
+        tailscaleOnly: authEnabled,
+      };
+
       reply.send({
         status,
         timestamp: new Date().toISOString(),
@@ -64,10 +78,6 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
         uptime_human: formatUptime(uptimeMs),
         port: context.config.port,
         policy,
-        // pid + startedAt + build let operators distinguish a stale
-        // process from a fresh one (and `aedis doctor` from a duplicate
-        // listener). Without these, the burn-in BLOCKED race could not
-        // be diagnosed from /health alone.
         pid: context.pid,
         startedAt: context.startedAt,
         build: {
@@ -83,6 +93,7 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
           connected_clients: wsClients,
           endpoint: `/ws`,
         },
+        auth,
         crucibulum: {
           connected: false, // TODO: wire up when Crucibulum is integrated
           last_sync: null,

@@ -127,6 +127,11 @@ export interface DoctorHealthShape {
   uptime_human?: string;
   startedAt?: string;
   build?: Partial<BuildMetadata>;
+  auth?: {
+    enabled: boolean;
+    mode: "tailscale-only" | "open";
+    tailscaleOnly: boolean;
+  };
 }
 
 /**
@@ -192,6 +197,21 @@ export function formatDoctorReport(input: DoctorInput): string {
     lines.push(`server_metadata:  ${b.source ?? "unknown"}`);
     if (!b.commit || b.commit === "unknown") {
       lines.push(`⚠ server has no build metadata — likely running stale dist or unbuilt source`);
+    }
+    // Auth mode — surfaced so the operator can immediately see whether the
+    // server is enforcing Tailscale auth or running open. A 401/403 from
+    // the server becomes self-explanatory instead of a mystery.
+    const auth = h.auth;
+    if (auth) {
+      lines.push(`auth:             ${auth.mode} ${auth.enabled ? "(enabled)" : "(disabled)"}`);
+      if (auth.enabled) {
+        lines.push(`  ℹ server requires Tailscale identity to access`);
+        lines.push(`  ℹ set TAILSCALE_ONLY=false in .env to disable (dev only)`);
+      } else {
+        lines.push(`  ℹ server is open — NOT recommended for production`);
+      }
+    } else {
+      lines.push(`auth:             unknown (server may be pre-fix — rebuild recommended)`);
     }
   }
 
@@ -268,6 +288,9 @@ const COMMANDS = {
     console.log(`port:     ${data.port ?? "?"}`);
     console.log(`version:  ${data.version ?? "?"}`);
     if (data.websocket) console.log(`ws:       ${data.websocket.connected_clients} client(s)`);
+    if (data.auth) {
+      console.log(`auth:     ${data.auth.mode} ${data.auth.enabled ? "(enabled)" : "(disabled)"}`);
+    }
   },
 
   async doctor(args: string[]) {

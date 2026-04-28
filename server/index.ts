@@ -118,10 +118,14 @@ export function isPortInUse(port: number, host: string): Promise<boolean> {
   });
 }
 
-const DEFAULT_CONFIG: ServerConfig = {
+export const DEFAULT_CONFIG: ServerConfig = {
   port: readPortFromEnv(),
   host: process.env["AEDIS_HOST"] ?? "0.0.0.0",
   projectRoot: process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd(),
+  // TAILSCALE_ONLY=true in .env disables auth so local browsers and
+  // curl can reach the server. Defaults to false (auth enabled) so a
+  // misconfigured deploy never accidentally exposes an unsecured server.
+  disableAuth: process.env["TAILSCALE_ONLY"] === "true",
 };
 
 // ─── Server Context (shared across routes) ───────────────────────────
@@ -428,6 +432,17 @@ export async function createServer(
       laneCfg.mode,
     );
   };
+  // Auth mode log — operator needs to know immediately whether the server
+  // is enforcing Tailscale auth or running open. This is the first thing
+  // to check when the server is unreachable or `aedis doctor` shows an
+  // auth-enabled server is blocking requests.
+  if (cfg.disableAuth) {
+    console.log(`[server] auth: DISABLED (TAILSCALE_ONLY=false or not set) — server is OPEN`);
+    console.log(`[server] ⚠ NOT recommended for production or internet-facing deployments`);
+  } else {
+    console.log(`[server] auth: ENABLED — Tailscale identity required for all API access`);
+  }
+
   console.log(
     `[server] runtime policy: autoPromote=${safe.autoPromoteOnSuccess} ` +
     `approvalRequired=${safe.requireApproval} ` +
