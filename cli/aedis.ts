@@ -24,6 +24,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import dotenv from "dotenv";
+
 import {
   detectSourceNewerThanDist,
   getBuildMetadata,
@@ -42,6 +44,8 @@ import {
 } from "../core/reliability-harness.js";
 import { HttpTaskRunner } from "../core/reliability-runner.js";
 import { checkOpenRouterHealth } from "../core/openrouter-client.js";
+
+dotenv.config();
 
 const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://localhost:18796";
 const PROJECT_ROOT = process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd();
