@@ -3,10 +3,12 @@ import { Box, Text, useApp, useInput } from "ink";
 
 import {
   approveRun as defaultApproveRun,
+  getRuntimePolicy as defaultGetRuntimePolicy,
   listRuns as defaultListRuns,
   rejectRun as defaultRejectRun,
   submitRun as defaultSubmitRun,
   type RunListEntry,
+  type RuntimePolicySummary,
 } from "../api.js";
 
 const DEFAULT_POLL_MS = 1000;
@@ -108,6 +110,7 @@ interface ApiSurface {
   readonly submitRun: typeof defaultSubmitRun;
   readonly approveRun: typeof defaultApproveRun;
   readonly rejectRun: typeof defaultRejectRun;
+  readonly getRuntimePolicy: typeof defaultGetRuntimePolicy;
 }
 
 const defaultApi: ApiSurface = {
@@ -115,6 +118,7 @@ const defaultApi: ApiSurface = {
   submitRun: defaultSubmitRun,
   approveRun: defaultApproveRun,
   rejectRun: defaultRejectRun,
+  getRuntimePolicy: defaultGetRuntimePolicy,
 };
 
 type Mode = "dashboard" | "submit" | "detail";
@@ -145,7 +149,20 @@ export function RunsScreen({
   const [showHistory, setShowHistory] = useState(false);
   const [action, setAction] = useState<ActionMessage | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
+  const [policy, setPolicy] = useState<RuntimePolicySummary | null>(null);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Fetch the runtime safety policy once on mount and refresh on each
+  // poll tick. The operator wants to see this BEFORE acting on a run,
+  // not after — render is unconditional and degrades to a "policy
+  // unknown" line when /health is unreachable.
+  useEffect(() => {
+    let alive = true;
+    void api.getRuntimePolicy().then((p) => {
+      if (alive) setPolicy(p);
+    });
+    return () => { alive = false; };
+  }, [api]);
 
   const filteredRuns = useMemo(
     () => filterRuns(allRuns, showHistory, TERMINAL_LIMIT),
@@ -341,6 +358,30 @@ export function RunsScreen({
     <Box flexDirection="column">
       <Box>
         <Text bold color="cyan">Aedis TUI — Runs Dashboard</Text>
+      </Box>
+
+      <Box>
+        <Text dimColor>policy: </Text>
+        {policy === null ? (
+          <Text color="yellow">unknown (server unreachable)</Text>
+        ) : (
+          <Text>
+            <Text color={policy.autoPromote ? "yellow" : "green"}>
+              autoPromote={policy.autoPromote ? "on" : "off"}
+            </Text>
+            <Text dimColor> · </Text>
+            <Text color={policy.approvalRequired ? "green" : "yellow"}>
+              approval={policy.approvalRequired ? "required" : "skipped"}
+            </Text>
+            <Text dimColor> · </Text>
+            <Text color={policy.destructiveOps === "blocked" ? "green" : "red"}>
+              destructive={policy.destructiveOps}
+            </Text>
+            <Text dimColor> · </Text>
+            <Text>lane={policy.laneMode}</Text>
+            <Text dimColor> · shadowPromote=blocked</Text>
+          </Text>
+        )}
       </Box>
 
       <Box marginTop={1} flexDirection="column">

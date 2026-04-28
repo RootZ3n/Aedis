@@ -41,6 +41,7 @@ interface MockApi {
   submitRun: (prompt: string, repoPath: string) => Promise<SubmitResponse>;
   approveRun: (runId: string) => Promise<unknown>;
   rejectRun: (runId: string) => Promise<unknown>;
+  getRuntimePolicy: () => Promise<import("./api.js").RuntimePolicySummary | null>;
 }
 
 function staticApi(runs: readonly RunListEntry[]): MockApi {
@@ -49,6 +50,7 @@ function staticApi(runs: readonly RunListEntry[]): MockApi {
     submitRun: async () => ({ run_id: "sub", status: "running" }),
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => null,
   };
 }
 

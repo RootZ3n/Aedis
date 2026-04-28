@@ -43,6 +43,10 @@ export interface CandidateManifestRow {
   readonly lane?: CandidateLane;
   readonly provider?: string;
   readonly model?: string;
+  /** Lane-config requested model (mirrors `model`). */
+  readonly intentModel?: string;
+  /** Model that actually answered (from cost.model); diverges on fallback. */
+  readonly actualModel?: string;
   readonly status: string;
   readonly disqualification?: string | null;
   readonly costUsd?: number;
@@ -53,6 +57,20 @@ export interface CandidateManifestRow {
   readonly advisoryFindings?: number;
   readonly testsPassed?: boolean;
   readonly typecheckPassed?: boolean;
+}
+
+/**
+ * Runtime safety policy — mirror of core/runtime-policy.ts. Surfaced
+ * by /health and rendered in the TUI dashboard so the operator can
+ * see at a glance whether the running server can mutate source.
+ */
+export interface RuntimePolicySummary {
+  readonly autoPromote: boolean;
+  readonly approvalRequired: boolean;
+  readonly destructiveOps: "blocked" | "allowed";
+  readonly laneMode: string;
+  readonly shadowPromoteAllowed: boolean; // always false at the source
+  readonly requireWorkspace: boolean;
 }
 
 export interface RunListEntry {
@@ -98,6 +116,20 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listRuns(limit = 20): Promise<RunListEntry[]> {
   const data = await fetchJson<{ runs?: RunListEntry[] }>(`/runs?limit=${limit}`);
   return data.runs ?? [];
+}
+
+/**
+ * Fetch the runtime safety policy from /health. Returns null on
+ * fetch error so the TUI can render a "policy unknown" banner
+ * instead of crashing when the server is unreachable.
+ */
+export async function getRuntimePolicy(): Promise<RuntimePolicySummary | null> {
+  try {
+    const data = await fetchJson<{ policy?: RuntimePolicySummary }>("/health");
+    return data.policy ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function submitRun(prompt: string, repoPath: string): Promise<SubmitResponse> {

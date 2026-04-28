@@ -54,6 +54,8 @@ import { campaignRoutes } from "./routes/campaign.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { planRoutes } from "./routes/plans.js";
+import { safeDefaults, policyFromCoordinatorConfig, type RuntimePolicy } from "../core/runtime-policy.js";
+import { loadLaneConfigFromDisk } from "../core/lane-config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -120,6 +122,12 @@ export interface ServerContext {
   startedAt: string;
   build: BuildMetadata;
   pid: number;
+  /**
+   * Snapshot of the runtime safety policy (auto-promote, approval,
+   * lane mode). Re-computed on demand so a runtime config edit shows
+   * up on the next /health request without a server restart.
+   */
+  getRuntimePolicy: () => RuntimePolicy;
 }
 
 // ─── Defaults for standalone boot ────────────────────────────────────
@@ -345,27 +353,52 @@ export async function createServer(
     }
   }
 
-  // Auto-promote is opt-in via env (AEDIS_AUTO_PROMOTE=true). When set,
-  // a run that finishes with a clean VERIFIED_SUCCESS classification
-  // has its workspace commit automatically applied to the source repo
-  // as a real commit. Without it, runs land in the workspace only and
-  // require an explicit POST /tasks/:id/promote.
-  const autoPromoteOnSuccess = process.env["AEDIS_AUTO_PROMOTE"] === "true";
-  if (autoPromoteOnSuccess) {
+  // Safe Default Mode — applied at server boot regardless of test
+  // defaults. Approval is REQUIRED unless AEDIS_REQUIRE_APPROVAL=false
+  // is set; auto-promote stays OFF unless AEDIS_AUTO_PROMOTE=true is
+  // set. The double-negative on approval is intentional: the operator
+  // has to type "false" to disable a guard, never the other way.
+  const safe = safeDefaults();
+  if (safe.source.autoPromoteOnSuccess === "env-override") {
     console.log("[server] AEDIS_AUTO_PROMOTE=true — clean runs will auto-promote to source repo");
+  }
+  if (safe.source.requireApproval === "env-override") {
+    console.warn("[server] AEDIS_REQUIRE_APPROVAL=false — approval gate disabled (unsafe)");
   }
 
   const coordinator = new Coordinator(
     {
       projectRoot: cfg.projectRoot,
       verificationConfig,
-      autoPromoteOnSuccess,
+      autoPromoteOnSuccess: safe.autoPromoteOnSuccess,
+      requireApproval: safe.requireApproval,
+      requireWorkspace: safe.requireWorkspace,
       ...cfg.coordinatorConfig,
     },
     profile,
     registry,
     eventBus,
     receiptStore,
+  );
+
+  // Read lane mode from disk for the policy summary. Re-read by /health
+  // on every request so a config edit during runtime shows up without
+  // a server restart. Falls back to "unset" when the file is absent.
+  const computeRuntimePolicy = (): RuntimePolicy => {
+    const laneCfg = loadLaneConfigFromDisk(cfg.projectRoot);
+    return policyFromCoordinatorConfig(
+      {
+        autoPromoteOnSuccess: safe.autoPromoteOnSuccess,
+        requireApproval: safe.requireApproval,
+        requireWorkspace: safe.requireWorkspace,
+      },
+      laneCfg.mode,
+    );
+  };
+  console.log(
+    `[server] runtime policy: autoPromote=${safe.autoPromoteOnSuccess} ` +
+    `approvalRequired=${safe.requireApproval} ` +
+    `requireWorkspace=${safe.requireWorkspace}`,
   );
 
   const ctx: ServerContext = {
@@ -377,6 +410,7 @@ export async function createServer(
     startedAt: new Date().toISOString(),
     build: getBuildMetadata({ projectRoot: cfg.projectRoot }),
     pid: process.pid,
+    getRuntimePolicy: computeRuntimePolicy,
   };
 
   // ─── Fastify instance ──────────────────────────────────────────

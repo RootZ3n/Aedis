@@ -51,6 +51,11 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
       // Overall status
       const status = allWorkersAvailable ? "healthy" : "degraded";
 
+      // Runtime safety policy — derived snapshot. Lets `aedis doctor`
+      // and TUI users see exactly what the running server is allowed
+      // to do without having to read env vars or coordinator config.
+      const policy = context.getRuntimePolicy();
+
       reply.send({
         status,
         timestamp: new Date().toISOString(),
@@ -58,6 +63,7 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
         uptime_seconds: Math.floor(uptimeMs / 1000),
         uptime_human: formatUptime(uptimeMs),
         port: context.config.port,
+        policy,
         // pid + startedAt + build let operators distinguish a stale
         // process from a fresh one (and `aedis doctor` from a duplicate
         // listener). Without these, the burn-in BLOCKED race could not

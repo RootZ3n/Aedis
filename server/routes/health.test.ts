@@ -11,7 +11,7 @@ const STUB_BUILD = {
   source: "build-info" as const,
 };
 
-async function buildApp() {
+async function buildApp(policy?: unknown) {
   const fastify = (await import("fastify")).default;
   const app = fastify();
   (app as any).decorate("ctx", {
@@ -25,6 +25,14 @@ async function buildApp() {
     startedAt: "2026-04-27T22:00:00.000Z",
     pid: 4242,
     build: STUB_BUILD,
+    getRuntimePolicy: () => policy ?? {
+      autoPromote: false,
+      approvalRequired: true,
+      destructiveOps: "blocked",
+      laneMode: "unset",
+      shadowPromoteAllowed: false,
+      requireWorkspace: true,
+    },
   });
   await app.register(healthRoutes);
   return app;
@@ -59,6 +67,49 @@ test("GET /health remains backwards-compatible: existing fields are unchanged", 
     assert.ok(typeof body.uptime_human === "string");
     assert.ok(body.workers && body.workers.builder.available === true);
     assert.equal(body.websocket.endpoint, "/ws");
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /health surfaces the runtime safety policy block (safe defaults)", async () => {
+  // The policy panel is the operator-facing summary of what the
+  // running server is allowed to do. Without it on /health, the TUI
+  // and `aedis doctor` have no source of truth. Pin the safe shape.
+  const app = await buildApp();
+  try {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    const body = res.json();
+    assert.ok(body.policy, "/health response must include a policy block");
+    assert.equal(body.policy.autoPromote, false);
+    assert.equal(body.policy.approvalRequired, true);
+    assert.equal(body.policy.destructiveOps, "blocked");
+    assert.equal(body.policy.shadowPromoteAllowed, false);
+    assert.equal(body.policy.requireWorkspace, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /health: policy reflects an unsafe override when one is supplied", async () => {
+  // When the operator explicitly disables a guard, /health must show
+  // it — silent unsafe behavior is the bug we're guarding against.
+  const app = await buildApp({
+    autoPromote: true,
+    approvalRequired: false,
+    destructiveOps: "allowed",
+    laneMode: "primary_only",
+    shadowPromoteAllowed: false,
+    requireWorkspace: true,
+  });
+  try {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    const body = res.json();
+    assert.equal(body.policy.autoPromote, true);
+    assert.equal(body.policy.approvalRequired, false);
+    assert.equal(body.policy.destructiveOps, "allowed");
+    assert.equal(body.policy.laneMode, "primary_only");
+    assert.equal(body.policy.shadowPromoteAllowed, false, "structural invariant survives unsafe overrides");
   } finally {
     await app.close();
   }

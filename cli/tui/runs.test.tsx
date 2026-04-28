@@ -32,6 +32,7 @@ interface MockApi {
   submitRun: (prompt: string, repoPath: string) => Promise<SubmitResponse>;
   approveRun: (runId: string) => Promise<unknown>;
   rejectRun: (runId: string) => Promise<unknown>;
+  getRuntimePolicy: () => Promise<import("./api.js").RuntimePolicySummary | null>;
 }
 
 function staticApi(runs: readonly RunListEntry[]): MockApi {
@@ -40,6 +41,7 @@ function staticApi(runs: readonly RunListEntry[]): MockApi {
     submitRun: async () => ({ run_id: "sub-1234", status: "running" }),
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => null,
   };
 }
 
@@ -282,6 +284,7 @@ test("tui runs: selection is clamped when the visible list shrinks", async () =>
     submitRun: async () => ({ run_id: "x" }),
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => null,
   };
   const { stdin, lastFrame, unmount } = render(
     <RunsScreen api={api} pollMs={300} />,
@@ -317,4 +320,96 @@ test("isTerminalStatus / isApprovableStatus are wired to the right enum members"
   assert.equal(isTerminalStatus("REJECTED"), true);
   assert.equal(isTerminalStatus("EXECUTING_IN_WORKSPACE"), false);
   assert.equal(isTerminalStatus("AWAITING_APPROVAL"), false);
+});
+
+// ─── Runtime safety policy panel ─────────────────────────────────────
+//
+// The dashboard shows an at-a-glance summary of what the running
+// server is allowed to do. Without this row the operator can't tell
+// whether they're about to auto-promote, whether approval is in the
+// loop, or which lane mode is in effect.
+
+test("tui runs: policy panel renders the safe-default values from /health", async () => {
+  const safe = {
+    autoPromote: false,
+    approvalRequired: true,
+    destructiveOps: "blocked" as const,
+    laneMode: "primary_only",
+    shadowPromoteAllowed: false,
+    requireWorkspace: true,
+  };
+  const api: MockApi = {
+    listRuns: async () => [],
+    submitRun: async () => ({ run_id: "x" }),
+    approveRun: async () => ({ ok: true }),
+    rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => safe,
+  };
+  const { lastFrame, unmount } = render(
+    <RunsScreen api={api} pollMs={99_999} />,
+  );
+  try {
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /policy:/, "policy line must render");
+    assert.match(frame, /autoPromote=off/);
+    assert.match(frame, /approval=required/);
+    assert.match(frame, /destructive=blocked/);
+    assert.match(frame, /lane=primary_only/);
+    assert.match(frame, /shadowPromote=blocked/);
+  } finally {
+    unmount();
+  }
+});
+
+test("tui runs: policy panel surfaces an unsafe config so the operator sees it", async () => {
+  const unsafe = {
+    autoPromote: true,
+    approvalRequired: false,
+    destructiveOps: "allowed" as const,
+    laneMode: "local_then_cloud",
+    shadowPromoteAllowed: false,
+    requireWorkspace: true,
+  };
+  const api: MockApi = {
+    listRuns: async () => [],
+    submitRun: async () => ({ run_id: "x" }),
+    approveRun: async () => ({ ok: true }),
+    rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => unsafe,
+  };
+  const { lastFrame, unmount } = render(
+    <RunsScreen api={api} pollMs={99_999} />,
+  );
+  try {
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /autoPromote=on/);
+    assert.match(frame, /approval=skipped/);
+    assert.match(frame, /destructive=allowed/);
+    assert.match(frame, /lane=local_then_cloud/);
+  } finally {
+    unmount();
+  }
+});
+
+test("tui runs: policy panel falls back to 'unknown' when /health is unreachable", async () => {
+  const api: MockApi = {
+    listRuns: async () => [],
+    submitRun: async () => ({ run_id: "x" }),
+    approveRun: async () => ({ ok: true }),
+    rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => null,
+  };
+  const { lastFrame, unmount } = render(
+    <RunsScreen api={api} pollMs={99_999} />,
+  );
+  try {
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /policy:/);
+    assert.match(frame, /unknown/);
+  } finally {
+    unmount();
+  }
 });
