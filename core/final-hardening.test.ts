@@ -449,6 +449,10 @@ test("submit gate: explicit new file path is concrete, vague create remains clar
     needsAmbiguousCreateClarification("Create hello-aedis.txt containing exactly: Aedis RC smoke test."),
     false,
   );
+  assert.equal(
+    needsAmbiguousCreateClarification("Create the repository root file hello-aedis.txt containing exactly: Aedis RC smoke test."),
+    false,
+  );
   assert.equal(needsAmbiguousCreateClarification("Create a useful file."), true);
   assert.equal(needsAmbiguousCreateClarification("Improve the repo."), false);
 });
