@@ -83,7 +83,7 @@ ProjectMemory          DiffApplier                        git commit / rollback
 
 **Vision** (`core/vision.ts`) — Optional post-build self-check. Captures a screenshot of the running UI and analyzes it for visible errors. Strict opt-in: enabled via `AEDIS_VISION=true` AND a configured model via `AEDIS_VISION_MODEL=<ollama-vision-model>` (e.g. `qwen3-vl:4b`). If `AEDIS_VISION_MODEL` is unset OR the model isn't installed in Ollama, the check skips cleanly with a logged reason — no auto-pull, no implicit default.
 
-**Portum** — Universal last-resort gateway. Local HTTP proxy at `localhost:18797`. Tried once after the caller-provided fallback chain is exhausted, skipped if Portum was already in the chain or is blacklisted. Per-run timeout blacklisting and a cross-run circuit breaker (`.aedis/circuit-breaker-state.json`) sit in front of every chain step.
+**Fallback chains** — Per-role fallback chains are declared in `.aedis/model-config.json`. The runtime walks the chain in order on timeout or error. Per-run timeout blacklisting and a cross-run circuit breaker (`.aedis/circuit-breaker-state.json`) sit in front of every chain step. There is **no** universal safety-net provider — lane attribution stays honest, and a model is only ever invoked if the caller named it explicitly.
 
 **TrustRouter** (`router/trust-router.ts`) — Routes Builder tasks to tiers (fast/standard/premium) from complexity + blast radius + quality bar. Capability-floor and weak-output retry escalate the tier when the brief demands more or the model produced empty/raw/prose/critic-rejected output. *Non-Builder workers (Critic, Integrator, Scout, Verifier) read static `model-config[<role>]` assignments and are not yet tier-routed* — see `DOCTRINE.md` "Trust Boundaries."
 
@@ -109,7 +109,7 @@ ProjectMemory          DiffApplier                        git commit / rollback
 
 **Vision self-check.** Post-build screenshot analysis catches visual regressions that type checks miss. Strict opt-in: requires both `AEDIS_VISION=true` and `AEDIS_VISION_MODEL=<installed-ollama-vision-model>`. Skips cleanly when not configured or when the model is missing — never auto-pulls, never falls back to a default.
 
-**Portum universal fallback.** Never stuck on one provider. The fallback chain tries the next provider on timeout or error, with per-run blacklisting so a flaky provider doesn't slow down every task.
+**Declared fallback chains.** Never stuck on one provider. The chain in `.aedis/model-config.json` is walked on timeout or error, with per-run blacklisting so a flaky provider doesn't slow down every task. No hidden fallback — the chain is the contract.
 
 **Human-readable receipts.** Every run produces a structured receipt with: classification, headline, confidence breakdown (planning/execution/verification), blast radius, cost, file list, failure explanation, and next steps. The UI renders this — users never read logs.
 
@@ -153,7 +153,7 @@ WebSocket at `ws://localhost:18796/ws` for live events. Send `{"type":"subscribe
 
 TypeScript. Fastify. WebSocket. No framework. No ORM. No build step beyond `tsc`.
 
-Models: per-repo selection via `.aedis/model-config.json` with declarative `chain[]` fallbacks. The default in-repo configuration is `xiaomi/mimo-v2.5` on OpenRouter for hot-path roles, with the local Portum gateway as the universal last-resort. Qwen 3.5 4B (local via Ollama) for prompt normalization. See `DOCTRINE.md` "Model Assignments" for the full picture, including the no-Anthropic-in-hot-path rule.
+Models: per-repo selection via `.aedis/model-config.json` with declarative `chain[]` fallbacks. The default in-repo configuration is `xiaomi/mimo-v2.5` on OpenRouter for hot-path roles. Qwen 3.5 4B (local via Ollama) for prompt normalization. There is no hidden last-resort provider; the chain in model-config is the contract. See `DOCTRINE.md` "Model Assignments" for the full picture, including the no-Anthropic-in-hot-path rule.
 
 ## Status
 

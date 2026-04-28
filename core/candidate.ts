@@ -133,6 +133,21 @@ export interface Candidate {
   readonly provider?: string;
   /** Model id (e.g. "qwen3.5:9b", "xiaomi/mimo-v2.5"). */
   readonly model?: string;
+  /**
+   * Model the lane *intended* to dispatch to (from `.aedis/lane-config.json`).
+   * Mirrors `model` and is populated whenever lane attribution is recorded.
+   * Kept as a separate field so receipts can compare intent vs. actual when
+   * a chain entry past the primary ended up answering.
+   */
+  readonly intentModel?: string;
+  /**
+   * Model that *actually* produced the candidate's output, taken from
+   * `WorkerResult.cost.model` after the dispatch returns. When the chain's
+   * first entry succeeded, `actualModel === intentModel`. When a fallback
+   * fired, the two diverge — the receipt reader sees both, so lane
+   * attribution stays honest.
+   */
+  readonly actualModel?: string;
   /** Number of ADVISORY findings. Lower is better at the tiebreaker level. */
   readonly advisoryFindings?: number;
   /** True when the run produced every required deliverable. False disqualifies. */

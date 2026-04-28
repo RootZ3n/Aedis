@@ -636,6 +636,10 @@ export interface CandidateManifestEntry {
   readonly lane?: import("./candidate.js").Lane;
   readonly provider?: string;
   readonly model?: string;
+  /** Lane-config requested model (mirrors `model`; surfaced for clarity). */
+  readonly intentModel?: string;
+  /** Model that actually answered (from cost.model); diverges on fallback. */
+  readonly actualModel?: string;
   readonly status: CandidateStatus;
   readonly disqualification: string | null;
   readonly costUsd: number;
@@ -6655,6 +6659,15 @@ export class Coordinator {
       );
     }
 
+    // Lane attribution honesty: `intentModel` is what the lane asked
+    // for; `actualModel` is what `WorkerResult.cost.model` reports
+    // actually answered. They diverge when a fallback fired (e.g. the
+    // pinned cloud model returned empty content and a chain entry
+    // produced the diff). The receipt records both so the operator
+    // sees the gap rather than reading intent and assuming dispatch.
+    const intentModel = opts.model;
+    const actualModel = result?.cost?.model || undefined;
+
     const candidate: Candidate = {
       workspaceId: shadow.workspaceId,
       role: "shadow",
@@ -6673,6 +6686,8 @@ export class Coordinator {
       ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
       ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(intentModel !== undefined ? { intentModel } : {}),
+      ...(actualModel ? { actualModel } : {}),
     };
     active.candidates.push(candidate);
     console.log(
@@ -6680,7 +6695,8 @@ export class Coordinator {
       `status=${candidate.status} cost=$${costUsd.toFixed(4)} latency=${latencyMs}ms ` +
       `patchBytes=${patchArtifact?.diff?.length ?? 0}` +
       (opts.lane ? ` lane=${opts.lane}` : "") +
-      (opts.provider && opts.model ? ` ${opts.provider}/${opts.model}` : ""),
+      (opts.provider && opts.model ? ` intent=${opts.provider}/${opts.model}` : "") +
+      (actualModel && actualModel !== intentModel ? ` actual=${actualModel}` : ""),
     );
     return candidate;
   }
@@ -6782,6 +6798,14 @@ export class Coordinator {
       }
     }
 
+    // Lane attribution honesty: `intentModel` is what the lane asked
+    // for; `actualModel` is what the run's aggregated cost says actually
+    // answered. They diverge when a chain entry past the primary fired,
+    // and the receipt should make that visible instead of pretending
+    // the intent was the dispatch.
+    const intentModel = inputs.model;
+    const actualModel = active.run.totalCost?.model || undefined;
+
     const candidate: Candidate = {
       workspaceId: "primary",
       role: "primary",
@@ -6797,6 +6821,8 @@ export class Coordinator {
       ...(inputs.lane !== undefined ? { lane: inputs.lane } : {}),
       ...(inputs.provider !== undefined ? { provider: inputs.provider } : {}),
       ...(inputs.model !== undefined ? { model: inputs.model } : {}),
+      ...(intentModel !== undefined ? { intentModel } : {}),
+      ...(actualModel ? { actualModel } : {}),
       ...(testsPassed !== undefined ? { testsPassed } : {}),
       ...(typecheckPassed !== undefined ? { typecheckPassed } : {}),
       changedFiles: active.changes.map((c) => c.path),
@@ -6903,6 +6929,8 @@ export class Coordinator {
       ...(c.lane !== undefined ? { lane: c.lane } : {}),
       ...(c.provider !== undefined ? { provider: c.provider } : {}),
       ...(c.model !== undefined ? { model: c.model } : {}),
+      ...(c.intentModel !== undefined ? { intentModel: c.intentModel } : {}),
+      ...(c.actualModel !== undefined ? { actualModel: c.actualModel } : {}),
       status: c.status,
       disqualification: candidateDisqualification(c),
       costUsd: c.costUsd,

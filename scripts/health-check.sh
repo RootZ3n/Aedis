@@ -8,7 +8,6 @@ NC='\033[0m' # No Color
 
 services=(
   "Aedis:18796:/health"
-  "Portum:18797:/health"
   "Squidley API:18791:/health"
   "Crucibulum:18795:/"
 )

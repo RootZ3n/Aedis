@@ -42,7 +42,6 @@ const SUPPORTED_PROVIDERS: ReadonlySet<Provider> = new Set([
   "zai",
   "glm-5.1-openrouter",
   "glm-5.1-direct",
-  "portum",
   "local",
 ] as const);
 

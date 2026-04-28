@@ -1261,11 +1261,11 @@ body .app::before{
     const ROLE_PROVIDERS = {
       scout:       ['local'],
       verifier:    ['local'],
-      builder:     ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'anthropic', 'portum'],
-      critic:      ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'portum'],
-      integrator:  ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'anthropic', 'portum'],
-      escalation:  ['ollama', 'anthropic', 'openai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'portum', 'minimax'],
-      coordinator: ['ollama', 'openrouter', 'glm-5.1-openrouter', 'glm-5.1-direct', 'anthropic', 'openai', 'portum'],
+      builder:     ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'anthropic'],
+      critic:      ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct'],
+      integrator:  ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'anthropic'],
+      escalation:  ['ollama', 'anthropic', 'openai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'minimax'],
+      coordinator: ['ollama', 'openrouter', 'glm-5.1-openrouter', 'glm-5.1-direct', 'anthropic', 'openai'],
     };
 
     // Seeded fallback — used if /config/providers is unreachable at
@@ -1280,7 +1280,6 @@ body .app::before{
         { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'minimax-coding', provider: 'minimax', label: 'minimax-coding' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
-        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       critic: [
         { model: 'qwen3.5:9b', provider: 'ollama', label: 'qwen3.5:9b' },
@@ -1288,7 +1287,6 @@ body .app::before{
         { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
         { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
         { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
-        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       verifier: [{ model: 'local', provider: 'local', label: 'local' }],
       integrator: [
@@ -1297,7 +1295,6 @@ body .app::before{
         { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
-        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       escalation: [
         { model: 'claude-opus-4-6', provider: 'anthropic', label: 'claude-opus-4-6' },
@@ -1305,7 +1302,6 @@ body .app::before{
         { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
         { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
-        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ],
       coordinator: [
         { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
@@ -1313,7 +1309,6 @@ body .app::before{
         { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
         { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
         { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
-        { model: 'qwen3.6-plus', provider: 'portum', label: 'qwen3.6-plus [portum]' }
       ]
     };
     const DEFAULT_MODEL_CONFIG = {
@@ -2710,9 +2705,8 @@ body .app::before{
 
     // Rebuild MODEL_OPTIONS from the server's provider registry. Labels
     // disambiguate when the same model name appears on multiple
-    // providers for the same role (e.g. qwen3.6-plus on modelstudio AND
-    // portum). Unknown providers in ROLE_PROVIDERS[role] are silently
-    // skipped.
+    // providers for the same role. Unknown providers in
+    // ROLE_PROVIDERS[role] are silently skipped.
     function rebuildModelOptions(registry) {
       const next = {};
       for (const role of CONFIG_ROLE_ORDER) {
@@ -2871,7 +2865,7 @@ body .app::before{
 
     function findProvider(role, model) {
       // Returns the FIRST option whose model name matches. Now that
-      // qwen3.6-plus appears twice (modelstudio + portum), this is only
+      // qwen3.6-plus appears multiple times, this is only
       // safe as a fallback when the caller has no provider hint at all —
       // readSetting() uses the option index instead, and mergeModelConfig
       // prefers an explicit input.provider before falling back here.
@@ -2884,7 +2878,7 @@ body .app::before{
       const select = document.getElementById(`model-${role}`);
       const opts = MODEL_OPTIONS[role] || [];
       // The <option> values are now indices into MODEL_OPTIONS[role] so
-      // duplicate model names (qwen3.6-plus on modelstudio AND portum) can
+      // duplicate model names (qwen3.6-plus across providers) can
       // be distinguished. Falls back to the current state if the select
       // element isn't mounted yet.
       if (select) {
@@ -3390,7 +3384,7 @@ body .app::before{
       }
       // Fixed order so the block is stable across renders; OpenRouter
       // gets its own connection row above its model list.
-      const order = ['anthropic', 'openai', 'openrouter', 'modelstudio', 'zai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'ollama', 'portum', 'local'];
+      const order = ['anthropic', 'openai', 'openrouter', 'modelstudio', 'zai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'ollama', 'local'];
       const parts = order.filter((p) => registry[p]).map((provider) => {
         const entry = registry[provider];
         const keyStatus = entry.apiKeyEnv
@@ -3443,7 +3437,7 @@ body .app::before{
         const options = MODEL_OPTIONS[role] || [];
         const fixed = role === 'scout' || role === 'verifier';
         // <option value> is the index into MODEL_OPTIONS[role] so duplicate
-        // model names (qwen3.6-plus appears on both modelstudio and portum)
+        // model names (qwen3.6-plus may appear across providers)
         // are distinguishable. The "selected" check matches BOTH model and
         // provider so the right entry is highlighted on render.
         return `

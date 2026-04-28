@@ -1,6 +1,6 @@
 /**
  * Integration tests for the deterministic-transform → Coordinator
- * path. Spins up a tmp git repo containing a Portum-shaped Fastify
+ * path. Spins up a tmp git repo containing a router-shaped Fastify
  * server, runs `coordinator.submit({ input: "add a GET /models …" })`,
  * and asserts:
  *   - the LLM Builder was NOT called (no Builder model attempts that
@@ -34,7 +34,7 @@ import type { CostEntry } from "../runstate.js";
 import type { TrustProfile } from "../../router/trust-router.js";
 import type { AedisEvent, EventBus } from "../../server/websocket.js";
 
-const PORTUM_SERVER = `
+const SERVER_FIXTURE = `
 import Fastify from "fastify";
 import { routeRequest } from "./router.js";
 
@@ -53,7 +53,7 @@ export async function startServer() {
 }
 `.trimStart();
 
-const PORTUM_ROUTER = `
+const ROUTER_FIXTURE = `
 export type ProviderName = "openai" | "anthropic" | "minimax";
 export interface RouteResult { provider: ProviderName }
 export function getAllProviders(): ProviderName[] { return ["openai", "anthropic", "minimax"]; }
@@ -166,12 +166,12 @@ function buildHarness(projectRoot: string) {
   return { coordinator, events, receiptStore, builder };
 }
 
-function makePortumRepo(): string {
+function makeRouterRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "aedis-det-"));
   mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src/server.ts"), PORTUM_SERVER, "utf-8");
-  writeFileSync(join(dir, "src/router.ts"), PORTUM_ROUTER, "utf-8");
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "portum-fixture", version: "0.0.0" }), "utf-8");
+  writeFileSync(join(dir, "src/server.ts"), SERVER_FIXTURE, "utf-8");
+  writeFileSync(join(dir, "src/router.ts"), ROUTER_FIXTURE, "utf-8");
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "router-fixture", version: "0.0.0" }), "utf-8");
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "p@p.local"], { cwd: dir });
   execFileSync("git", ["config", "user.name", "P"], { cwd: dir });
@@ -183,7 +183,7 @@ function makePortumRepo(): string {
 // ─── Tests ────────────────────────────────────────────────────────
 
 test("integration: GET /models on Fastify server applies deterministically — Builder NEVER invoked", async () => {
-  const repo = makePortumRepo();
+  const repo = makeRouterRepo();
   try {
     const { coordinator, events, receiptStore, builder } = buildHarness(repo);
     await coordinator.submit({
@@ -223,7 +223,7 @@ test("integration: existing route (/health) prompt is refused and falls through 
   // ultimately fails (expected). The point is to assert the
   // deterministic layer correctly refused — the receipt should
   // carry a worker_step checkpoint mentioning duplicate/refused.
-  const repo = makePortumRepo();
+  const repo = makeRouterRepo();
   try {
     const { coordinator, events } = buildHarness(repo);
     await coordinator.submit({
@@ -244,7 +244,7 @@ test("integration: existing route (/health) prompt is refused and falls through 
 });
 
 test("integration: route insertion preserves all existing exports on src/server.ts", async () => {
-  const repo = makePortumRepo();
+  const repo = makeRouterRepo();
   try {
     const { coordinator } = buildHarness(repo);
     await coordinator.submit({
@@ -252,7 +252,7 @@ test("integration: route insertion preserves all existing exports on src/server.
     });
     // The source repo must be byte-identical (mutations land in workspace).
     const original = readFileSync(join(repo, "src/server.ts"), "utf-8");
-    assert.equal(original, PORTUM_SERVER, "source repo must be untouched");
+    assert.equal(original, SERVER_FIXTURE, "source repo must be untouched");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

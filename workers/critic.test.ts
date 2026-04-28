@@ -1,20 +1,12 @@
 /**
  * Critic worker — declared fallback chain regression.
  *
- * Run 2b2b71d9 surfaced this gap on a real provider failure:
- *   - .aedis/model-config.json declared:
- *       critic: {
- *         provider: "ollama", model: "qwen3.5:9b",
- *         chain: [
- *           { provider: "ollama",     model: "qwen3.5:9b" },
- *           { provider: "openrouter", model: "xiaomi/mimo-v2.5" }
- *         ]
- *       }
- *   - Ollama was stopped; the primary failed.
- *   - Critic fell back — but to portum/qwen3.6-plus (the constructor-
- *     level legacy default), NOT the declared openrouter entry.
- *   - Live log "[critic] dispatching with fallback chain (1 entries)"
- *     was the smoking gun: only the primary made it through.
+ * Run 2b2b71d9 surfaced this gap on a real provider failure: the
+ * declared per-repo chain in .aedis/model-config.json was silently
+ * dropped because critic only consulted its constructor-level default,
+ * so fallback fired against the wrong target instead of the declared
+ * openrouter entry. Live log "[critic] dispatching with fallback chain
+ * (1 entries)" was the smoking gun.
  *
  * Root cause: workers/critic.ts:buildInvocationChain only consulted
  * `this.fallbackModel` (constructor default). It never read the
@@ -27,8 +19,8 @@
  *      appended when a chain is declared.
  *   2. No declared chain → legacy constructor `fallbackModel` is
  *      preserved (back-compat for single-entry configs).
- *   3. Declared chain is passed through verbatim — portum is NOT
- *      silently appended unless portum appears in the chain.
+ *   3. Declared chain is passed through verbatim — no provider is
+ *      silently appended unless it appears in the chain.
  *   4. Chain entries that duplicate the primary are deduped.
  */
 
@@ -101,9 +93,9 @@ function callGetDeclaredChain(worker: CriticWorker, configRoot: string): Array<{
 
 test("critic buildInvocationChain: declared chain wins; constructor fallbackModel is NOT appended", () => {
   // The exact run-2b2b71d9 shape: ollama primary, declared openrouter
-  // chain entry. portum (the constructor default) must NOT appear.
+  // chain entry. The legacy constructor default must NOT appear.
   const worker = new CriticWorker({
-    fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" },
+    fallbackModel: { provider: "local", model: "local" },
   });
   const chain = callBuildChain(worker, "ollama", "qwen3.5:9b", [
     { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
@@ -111,7 +103,7 @@ test("critic buildInvocationChain: declared chain wins; constructor fallbackMode
   assert.deepEqual(
     chain.map((c) => `${c.provider}/${c.model}`),
     ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
-    "declared openrouter must follow primary; portum must NOT be silently appended",
+    "declared openrouter must follow primary; constructor default must NOT be silently appended",
   );
 });
 
@@ -147,7 +139,7 @@ test("critic buildInvocationChain: chain entry that duplicates the primary is de
   // A self-referencing declaration (e.g. user listed primary in chain)
   // must NOT cause an immediate retry of the same provider/model.
   const worker = new CriticWorker({
-    fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" },
+    fallbackModel: { provider: "local", model: "local" },
   });
   const chain = callBuildChain(worker, "ollama", "qwen3.5:9b", [
     { provider: "ollama", model: "qwen3.5:9b" }, // dup of primary
@@ -177,31 +169,35 @@ test("critic buildInvocationChain: declared chain with multiple entries threads 
   );
 });
 
-test("critic buildInvocationChain: portum is only present if portum is declared in the chain", () => {
-  // Defense: prove portum is data-driven, not a hidden default. The
-  // run-2b2b71d9 surprise was portum showing up despite never being
-  // declared. With the fix, portum only appears when the user puts it
-  // in the chain explicitly.
+test("critic buildInvocationChain: chain is data-driven; constructor default never sneaks in", () => {
+  // Defense: prove the chain is purely data-driven. The run-2b2b71d9
+  // surprise was a constructor-default fallback showing up despite
+  // never being declared. With the fix, only declared entries appear.
   const worker = new CriticWorker({
-    fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" }, // legacy default
+    fallbackModel: { provider: "local", model: "local" }, // legacy default
   });
-  const chainNoPortum = callBuildChain(worker, "ollama", "qwen3.5:9b", [
+  const chainDeclared = callBuildChain(worker, "ollama", "qwen3.5:9b", [
     { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   ]);
+  assert.deepEqual(
+    chainDeclared.map((c) => `${c.provider}/${c.model}`),
+    ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
+    "declared chain must contain ONLY the primary + the user's declared entries; constructor default suppressed",
+  );
   assert.equal(
-    chainNoPortum.some((c) => c.provider === "portum"),
+    chainDeclared.some((c) => c.provider === "local"),
     false,
-    "portum must NOT appear when not declared (constructor default is suppressed by the declared chain)",
+    "constructor-default 'local' must NOT appear when not declared",
   );
 
-  const chainWithPortum = callBuildChain(worker, "ollama", "qwen3.5:9b", [
-    { provider: "portum" as Provider, model: "qwen3.6-plus" },
+  const chainWithExplicit = callBuildChain(worker, "ollama", "qwen3.5:9b", [
+    { provider: "local", model: "local" },
     { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   ]);
   assert.equal(
-    chainWithPortum.some((c) => c.provider === "portum"),
+    chainWithExplicit.some((c) => c.provider === "local"),
     true,
-    "portum must appear when explicitly declared in the chain",
+    "an explicitly declared entry must appear in the chain",
   );
 });
 
@@ -373,8 +369,8 @@ test("CriticWorker.execute: pre-aborted signal still surfaces cancelled attempt 
 test("critic getDeclaredFallbackChain: end-to-end matches run-2b2b71d9 expected shape", () => {
   // Compose the two pieces: read the chain from a real config file,
   // then thread it through buildInvocationChain. Result must be the
-  // exact 2-entry chain the run-2b2b71d9 config asked for. No portum,
-  // no surprises.
+  // exact 2-entry chain the run-2b2b71d9 config asked for. No
+  // constructor-default sneak-in, no surprises.
   const repo = makeRepoWithCriticConfig({
     provider: "ollama",
     model: "qwen3.5:9b",
@@ -385,16 +381,16 @@ test("critic getDeclaredFallbackChain: end-to-end matches run-2b2b71d9 expected 
   });
   try {
     const worker = new CriticWorker({
-      // Constructor default deliberately set to portum to prove the
-      // declared chain suppresses it (this is the fix's whole point).
-      fallbackModel: { provider: "portum" as Provider, model: "qwen3.6-plus" },
+      // Constructor default deliberately set to a non-declared provider
+      // to prove the declared chain suppresses it (the fix's whole point).
+      fallbackModel: { provider: "local", model: "local" },
     });
     const tail = callGetDeclaredChain(worker, repo);
     const chain = callBuildChain(worker, "ollama", "qwen3.5:9b", tail);
     assert.deepEqual(
       chain.map((c) => `${c.provider}/${c.model}`),
       ["ollama/qwen3.5:9b", "openrouter/xiaomi/mimo-v2.5"],
-      "end-to-end chain must be exactly the 2 entries the user declared — no portum",
+      "end-to-end chain must be exactly the 2 entries the user declared — no constructor-default sneak-in",
     );
   } finally {
     rmSync(repo, { recursive: true, force: true });

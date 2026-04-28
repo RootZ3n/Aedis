@@ -5,7 +5,7 @@
 import type { ExportDiff } from "../../workers/builder-diagnostics.js";
 
 export type RouteFramework =
-  | "fastify"   // fastify.get(...) / fastify.post(...) — most common in Portum
+  | "fastify"   // fastify.get(...) / fastify.post(...) — most common pattern
   | "express-app" // app.get(...) where app is an Express instance
   | "express-router"; // router.get(...) on an Express Router
 

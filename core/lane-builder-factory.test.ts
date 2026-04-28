@@ -80,7 +80,7 @@ test("isSupportedProvider type-guards string against the Provider union", () => 
   for (const p of [
     "ollama", "openrouter", "anthropic", "openai", "minimax",
     "modelstudio", "zai", "glm-5.1-openrouter", "glm-5.1-direct",
-    "portum", "local",
+    "local",
   ] as Provider[]) {
     assert.equal(isSupportedProvider(p), true, `expected ${p} to be supported`);
   }
@@ -790,6 +790,113 @@ test("integration: cost-surfacing log fires on shadow dispatch", async () => {
     );
     assert.ok(surfaced, `cost-surfacing log line must mention SHADOW LANE + provider/model; got: ${JSON.stringify(lines.filter((l) => /SHADOW/.test(l)))}`);
     assert.match(surfaced, /SECOND model call/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ─── Lane attribution honesty: intentModel vs actualModel ───────────
+//
+// Phase D (model purity): the receipt records BOTH the model the lane
+// asked for (`intentModel`) and the model the run's cost says actually
+// answered (`actualModel`). The two diverge when a fallback fired —
+// previously this was hidden behind opaque lane attribution. Pin both
+// the convergent case and the divergent case here.
+
+class CostfulBuilder extends AbstractWorker {
+  readonly type: WorkerType = "builder";
+  readonly name = "CostfulBuilder";
+  constructor(public readonly costModel: string) { super(); }
+  async execute(a: WorkerAssignment): Promise<WorkerResult> {
+    const { writeFile, readFile } = await import("node:fs/promises");
+    const { resolve } = await import("node:path");
+    const root = a.projectRoot ?? process.cwd();
+    const path = "core/widget.ts";
+    const abs = resolve(root, path);
+    const originalContent = await readFile(abs, "utf-8").catch(() => "");
+    await writeFile(abs, "export const widget = 7;\n", "utf-8");
+    const output: BuilderOutput = {
+      kind: "builder",
+      changes: [{
+        path, operation: "modify",
+        content: "export const widget = 7;\n",
+        originalContent,
+      }],
+      decisions: [], needsCriticReview: false,
+    };
+    return this.success(a, output, {
+      cost: {
+        model: this.costModel,
+        inputTokens: 100, outputTokens: 50, estimatedCostUsd: 0,
+      },
+      confidence: 0.9,
+      touchedFiles: [{ path, operation: "modify" }],
+      durationMs: 1,
+    });
+  }
+  async estimateCost(): Promise<CostEntry> { return this.zeroCost(); }
+  protected emptyOutput(): WorkerOutput {
+    return { kind: "builder", changes: [], decisions: [], needsCriticReview: false };
+  }
+}
+
+test("receipt records actualModel from WorkerResult.cost.model when shadow runs", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    // Lane-pinned shadow builder reports cost.model="actually-this-one".
+    // intentModel must stay "xiaomi/mimo-v2.5" (the lane ask);
+    // actualModel must reflect cost.model.
+    const sneakyBuilder = new CostfulBuilder("actually-this-one");
+    const stubFactory: typeof createBuilderForLane = () =>
+      sneakyBuilder as unknown as BuilderWorker;
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: stubFactory,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    const shadow = final.candidates.find((c: any) => c.role === "shadow");
+    assert.ok(shadow, "shadow candidate must exist");
+    assert.equal(shadow.intentModel, "xiaomi/mimo-v2.5",
+      "intentModel must be the lane-config requested model");
+    assert.equal(shadow.actualModel, "actually-this-one",
+      "actualModel must mirror WorkerResult.cost.model — receipts cannot lie about which model answered");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("receipt actualModel === intentModel when no fallback fired (convergent case)", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    // The dispatched model matches the lane's pin — common case,
+    // intent and actual converge, but BOTH fields should still appear.
+    const honestBuilder = new CostfulBuilder("xiaomi/mimo-v2.5");
+    const stubFactory: typeof createBuilderForLane = () =>
+      honestBuilder as unknown as BuilderWorker;
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: stubFactory,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    const shadow = final.candidates.find((c: any) => c.role === "shadow");
+    assert.equal(shadow.intentModel, "xiaomi/mimo-v2.5");
+    assert.equal(shadow.actualModel, "xiaomi/mimo-v2.5");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

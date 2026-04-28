@@ -58,7 +58,6 @@ const VALID_PROVIDERS = new Set([
   "zai",
   "glm-5.1-openrouter",
   "glm-5.1-direct",
-  "portum",
 ]);
 
 // ─── Seeded Defaults ─────────────────────────────────────────────────
@@ -80,7 +79,6 @@ const DEFAULT_REGISTRY: ProviderRegistry = {
     zai:                   { label: "Z.ai",                   apiKeyEnv: "ZAI_API_KEY",         models: ["glm-5.1"] },
     "glm-5.1-openrouter":  { label: "GLM-5.1 via OpenRouter", apiKeyEnv: "OPENROUTER_API_KEY",  models: ["z-ai/glm-5.1"] },
     "glm-5.1-direct":      { label: "GLM-5.1 direct",         apiKeyEnv: "ZAI_API_KEY",         models: ["glm-5.1"] },
-    portum:                { label: "Portum (local gateway)", models: ["qwen3.6-plus"] },
   },
 };
 

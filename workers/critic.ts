@@ -251,11 +251,10 @@ export class CriticWorker extends AbstractWorker {
         // Read the per-repo declared chain from .aedis/model-config.json.
         // When present, it REPLACES the constructor-level legacy
         // `this.fallbackModel` — see buildInvocationChain for the merge
-        // rule. Run 2b2b71d9 surfaced this gap: the declared
-        //   critic.chain = [ollama/qwen3.5:9b, openrouter/xiaomi/mimo-v2.5]
-        // was silently dropped because critic only knew about the
-        // constructor default (portum/qwen3.6-plus). Fallback fired but
-        // hit the wrong target. Mirrors workers/builder.ts:1532.
+        // rule. Run 2b2b71d9 surfaced this gap: a declared chain was
+        // silently dropped because critic only used its constructor
+        // default; fallback fired against the wrong target. Mirrors
+        // workers/builder.ts:1532.
         const declaredChain = this.getDeclaredFallbackChain(configRoot);
 
         // Build fallback chain: primary first, then declared chain

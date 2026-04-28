@@ -37,15 +37,15 @@ test("loadModelConfig returns saved assignments from .aedis/model-config.json", 
       join(aedisDir, "model-config.json"),
       JSON.stringify({
         builder: { model: "claude-sonnet-4-6", provider: "anthropic" },
-        critic: { model: "qwen3.6-plus", provider: "portum" },
+        critic: { model: "qwen3.5:9b", provider: "ollama" },
       }),
     );
 
     const config = loadModelConfig(projectRoot);
     assert.equal(config.builder.model, "claude-sonnet-4-6");
     assert.equal(config.builder.provider, "anthropic");
-    assert.equal(config.critic.model, "qwen3.6-plus");
-    assert.equal(config.critic.provider, "portum");
+    assert.equal(config.critic.model, "qwen3.5:9b");
+    assert.equal(config.critic.provider, "ollama");
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -117,7 +117,7 @@ test("POST body envelope: unwraps { models } and persists flat config to disk", 
       payload: {
         models: {
           builder: { model: "claude-sonnet-4-6", provider: "anthropic" },
-          critic: { model: "qwen3.6-plus", provider: "portum" },
+          critic: { model: "qwen3.5:9b", provider: "ollama" },
         },
       },
     });
@@ -125,7 +125,7 @@ test("POST body envelope: unwraps { models } and persists flat config to disk", 
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.equal(body.models.builder.model, "claude-sonnet-4-6");
-    assert.equal(body.models.critic.provider, "portum");
+    assert.equal(body.models.critic.provider, "ollama");
     assert.deepEqual(body.updated_roles.sort(), ["builder", "critic"]);
 
     // Verify it actually hit disk — the previous bug was a silent no-op.
@@ -133,12 +133,12 @@ test("POST body envelope: unwraps { models } and persists flat config to disk", 
       readFileSync(join(projectRoot, ".aedis", "model-config.json"), "utf-8"),
     );
     assert.equal(persisted.builder.model, "claude-sonnet-4-6");
-    assert.equal(persisted.critic.model, "qwen3.6-plus");
+    assert.equal(persisted.critic.model, "qwen3.5:9b");
 
     // And a follow-up load returns what we just saved.
     const reloaded = loadModelConfig(projectRoot);
     assert.equal(reloaded.builder.model, "claude-sonnet-4-6");
-    assert.equal(reloaded.critic.provider, "portum");
+    assert.equal(reloaded.critic.provider, "ollama");
 
     await app.close();
   } finally {

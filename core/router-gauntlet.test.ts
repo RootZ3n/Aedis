@@ -1,7 +1,7 @@
 /**
- * Portum-shaped gauntlet — exercises the export-safe builder, cost
+ * router-shaped gauntlet — exercises the export-safe builder, cost
  * accounting, and stale-result guard with stub workers against a tmp
- * git repo seeded with Portum-like router/server files. Real model
+ * git repo seeded with router-like router/server files. Real model
  * calls are out of scope for the test suite (they cost money and
  * require live providers); this gauntlet validates the wiring such
  * that when a real model emits the failure modes we observed live
@@ -31,7 +31,7 @@ import type { TrustProfile } from "../router/trust-router.js";
 import type { AedisEvent, EventBus } from "../server/websocket.js";
 import { writeFile } from "node:fs/promises";
 
-const PORTUM_ROUTER = `
+const ROUTER_FIXTURE = `
 export interface ChatRequest {
   model: string;
   messages: { role: string; content: string }[];
@@ -58,7 +58,7 @@ export async function routeRequest(req: ChatRequest): Promise<RouteResult> {
 }
 `.trim() + "\n";
 
-const PORTUM_SERVER = `
+const SERVER_FIXTURE = `
 import { routeRequest, getAllProviders } from "./router.js";
 
 export const port = 18797;
@@ -243,12 +243,12 @@ function buildHarness(projectRoot: string, builder: FaultyBuilder) {
   return { coordinator, events, receiptStore };
 }
 
-function makePortumRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "aedis-portum-"));
+function makeRouterRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-router-"));
   mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src/router.ts"), PORTUM_ROUTER, "utf-8");
-  writeFileSync(join(dir, "src/server.ts"), PORTUM_SERVER, "utf-8");
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "portum-fixture", version: "0.0.0" }), "utf-8");
+  writeFileSync(join(dir, "src/router.ts"), ROUTER_FIXTURE, "utf-8");
+  writeFileSync(join(dir, "src/server.ts"), SERVER_FIXTURE, "utf-8");
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "router-fixture", version: "0.0.0" }), "utf-8");
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "p@p.local"], { cwd: dir });
   execFileSync("git", ["config", "user.name", "P"], { cwd: dir });
@@ -259,8 +259,8 @@ function makePortumRepo(): string {
 
 // ─── Live-shaped scenarios ──────────────────────────────────────────
 
-test("portum-A: 'add GET /models endpoint' on src/server.ts — task-shape route-add reaches builder via brief", async () => {
-  const repo = makePortumRepo();
+test("router-A: 'add GET /models endpoint' on src/server.ts — task-shape route-add reaches builder via brief", async () => {
+  const repo = makeRouterRepo();
   try {
     const builder = new FaultyBuilder("good-route-add");
     const { coordinator, receiptStore } = buildHarness(repo, builder);
@@ -290,8 +290,8 @@ test("portum-A: 'add GET /models endpoint' on src/server.ts — task-shape route
   }
 });
 
-test("portum-B: empty-diff failure path records model + cost on receipt totals", async () => {
-  const repo = makePortumRepo();
+test("router-B: empty-diff failure path records model + cost on receipt totals", async () => {
+  const repo = makeRouterRepo();
   try {
     const builder = new FaultyBuilder("always-empty");
     const { coordinator, receiptStore } = buildHarness(repo, builder);
@@ -317,8 +317,8 @@ test("portum-B: empty-diff failure path records model + cost on receipt totals",
   }
 });
 
-test("portum-C: export-loss-shape failure — failed attempt cost is recorded", async () => {
-  const repo = makePortumRepo();
+test("router-C: export-loss-shape failure — failed attempt cost is recorded", async () => {
+  const repo = makeRouterRepo();
   try {
     const builder = new FaultyBuilder("export-loss-then-success");
     const { coordinator, receiptStore } = buildHarness(repo, builder);
@@ -349,8 +349,8 @@ test("portum-C: export-loss-shape failure — failed attempt cost is recorded", 
   }
 });
 
-test("portum-D: stale generation set is empty on a clean run (no false-positive cancellation)", async () => {
-  const repo = makePortumRepo();
+test("router-D: stale generation set is empty on a clean run (no false-positive cancellation)", async () => {
+  const repo = makeRouterRepo();
   try {
     const builder = new FaultyBuilder("good-route-add");
     const { coordinator } = buildHarness(repo, builder);

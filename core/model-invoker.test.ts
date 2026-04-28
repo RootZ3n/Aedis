@@ -335,10 +335,6 @@ test("InvokerError on total failure carries the full attempts log", async () => 
         if (url.includes("api.minimax.chat")) {
           return jsonResponse(openAiChoiceBody("")); // empty
         }
-        if (url.includes("localhost:18797")) {
-          // Portum last-resort — also empty
-          return jsonResponse(openAiChoiceBody(""));
-        }
         throw new Error(`unexpected URL ${url}`);
       },
       async () => {
@@ -353,12 +349,102 @@ test("InvokerError on total failure carries the full attempts log", async () => 
             assert.ok(err instanceof InvokerError);
             const ie = err as InvokerError;
             assert.ok(Array.isArray(ie.attempts));
-            // chain (2) + portum last-resort (1)
-            assert.equal(ie.attempts!.length, 3);
+            // chain (2) — no auto-appended last-resort entry
+            assert.equal(ie.attempts!.length, 2);
             assert.ok(
               ie.attempts!.every((a) => a.outcome === "empty_response"),
               "every attempt should be classified empty_response",
             );
+            return true;
+          },
+        );
+      },
+    ),
+  );
+});
+
+// ─── Lane purity: no hidden last-resort ─────────────────────────────
+//
+// Previously the invoker auto-appended a Portum last-resort entry
+// after the caller's chain, which let lane-pinned dispatches reach a
+// provider the caller never named. That broke lane attribution
+// honesty (receipt said one model, the dispatch was a different one)
+// and is the entire reason the auto-fallback got removed. These
+// tests pin the post-removal contract: a single-entry chain that
+// fails throws — full stop.
+
+test("single-entry chain that fails throws without substituting another provider", async () => {
+  process.env.OPENROUTER_API_KEY = "test";
+
+  await withFreshCwd(() =>
+    withStubbedFetch(
+      async (url) => {
+        if (url.includes("openrouter.ai")) {
+          // Empty content — empty_response, fall-through territory.
+          return jsonResponse(openAiChoiceBody(""));
+        }
+        // Any other URL = lane-pinned chain leaked. Throwing here
+        // would surface as a different InvokerError kind, but the
+        // assertion below is the real backstop.
+        throw new Error(`lane-pinned chain reached ${url} — should not happen`);
+      },
+      async () => {
+        const chain: InvokeConfig[] = [
+          { provider: "openrouter", model: "xiaomi/mimo-v2.5", prompt: "hi" },
+        ];
+
+        await assert.rejects(
+          () => invokeModelWithFallback(chain, createRunInvocationContext()),
+          (err: unknown) => {
+            assert.ok(err instanceof InvokerError);
+            const ie = err as InvokerError;
+            assert.ok(Array.isArray(ie.attempts));
+            // Exactly ONE attempt — only the lane-pinned entry.
+            assert.equal(
+              ie.attempts!.length,
+              1,
+              "pinned single-entry chain must not append a hidden retry",
+            );
+            assert.equal(ie.attempts![0]!.provider, "openrouter");
+            assert.equal(ie.attempts![0]!.outcome, "empty_response");
+            // Error message must NOT mention any extra provider.
+            assert.ok(
+              !/portum|qwen3\.6-plus|last-resort/i.test(ie.message),
+              `error must not advertise a hidden fallback: ${ie.message}`,
+            );
+            return true;
+          },
+        );
+      },
+    ),
+  );
+});
+
+test("two-entry chain that both fail does not append a third hidden attempt", async () => {
+  process.env.OPENROUTER_API_KEY = "test";
+  process.env.MINIMAX_API_KEY = "test";
+
+  await withFreshCwd(() =>
+    withStubbedFetch(
+      async (url) => {
+        if (url.includes("openrouter.ai")) return jsonResponse(openAiChoiceBody(""));
+        if (url.includes("api.minimax.chat")) return jsonResponse(openAiChoiceBody(""));
+        throw new Error(`unexpected URL ${url}`);
+      },
+      async () => {
+        const chain: InvokeConfig[] = [
+          { provider: "openrouter", model: "xiaomi/mimo-v2.5", prompt: "hi" },
+          { provider: "minimax", model: "minimax-coding", prompt: "hi" },
+        ];
+
+        await assert.rejects(
+          () => invokeModelWithFallback(chain, createRunInvocationContext()),
+          (err: unknown) => {
+            const ie = err as InvokerError;
+            // Exactly TWO attempts — exactly the chain length.
+            assert.equal(ie.attempts!.length, 2);
+            const names = ie.attempts!.map((a) => a.provider);
+            assert.deepEqual(names, ["openrouter", "minimax"]);
             return true;
           },
         );
