@@ -22,7 +22,7 @@
  */
 
 import { randomUUID } from "crypto";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { ShellReceipt, ShellExecutionInput, ShellStatus } from "./shell-receipt.js";
 
 // ─── Allowlist ───────────────────────────────────────────────────────
@@ -437,8 +437,9 @@ export class TerminalExecutor {
       }
 
       // ── Step 5: Environment sanitization ────────────────────────
-      // Build clean env — strip API keys and secrets
-      const rawEnv = input.env ?? {};
+      // Build clean env — strip API keys and secrets. Start from the
+      // parent env so PATH still exists, but only copy known-safe keys.
+      const rawEnv = { ...process.env, ...(input.env ?? {}) };
       const cleanEnv: Record<string, string> = {};
       const envKeys: string[] = [];
 
@@ -537,48 +538,69 @@ export class TerminalExecutor {
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let child: ChildProcess | null = null;
+      let killTimer: NodeJS.Timeout | null = null;
+      let timedOut = false;
+
+      const cleanupTimers = () => {
+        clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
+      };
+
       const timeout = setTimeout(() => {
         if (!settled) {
-          settled = true;
-          reject(new TimeoutError(`Command timed out after ${opts.timeoutMs}ms`));
+          timedOut = true;
+          if (child) terminateChild(child);
+          killTimer = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              reject(new TimeoutError(`Command timed out after ${opts.timeoutMs}ms; child did not exit after termination`));
+            }
+          }, 2_000);
         }
       }, opts.timeoutMs);
 
-      const child = spawn(cmd, args, {
+      child = spawn(cmd, args, {
         cwd: opts.cwd,
-        env: { ...process.env, ...opts.env },
+        env: opts.env,
+        detached: process.platform !== "win32",
         // Don't inherit stdin — we don't have a TTY
         stdio: ["ignore", "pipe", "pipe"],
       });
+      const runningChild = child;
 
       let stdout = "";
       let stderr = "";
 
-      child.stdout?.on("data", (chunk) => {
+      runningChild.stdout?.on("data", (chunk) => {
         // Limit stdout to prevent memory exhaustion
         if (stdout.length < 2 * 1024 * 1024) {
           stdout += chunk.toString();
         }
       });
 
-      child.stderr?.on("data", (chunk) => {
+      runningChild.stderr?.on("data", (chunk) => {
         if (stderr.length < 512 * 1024) {
           stderr += chunk.toString();
         }
       });
 
-      child.on("error", (err) => {
+      runningChild.on("error", (err) => {
         if (!settled) {
           settled = true;
-          clearTimeout(timeout);
+          cleanupTimers();
           reject(err);
         }
       });
 
-      child.on("close", (code) => {
+      runningChild.on("close", (code) => {
         if (!settled) {
           settled = true;
-          clearTimeout(timeout);
+          cleanupTimers();
+          if (timedOut) {
+            reject(new TimeoutError(`Command timed out after ${opts.timeoutMs}ms`));
+            return;
+          }
           resolve({ stdout, stderr, exitCode: code ?? 0 });
         }
       });
@@ -653,6 +675,25 @@ export class TerminalExecutor {
       () => undefined,
     );
     return next;
+  }
+}
+
+function terminateChild(child: ChildProcess): void {
+  try {
+    if (process.platform !== "win32" && child.pid) {
+      // Negative PID targets the process group created by detached:true.
+      process.kill(-child.pid, "SIGTERM");
+      setTimeout(() => {
+        try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }, 500).unref?.();
+      return;
+    }
+    child.kill("SIGTERM");
+    setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    }, 500).unref?.();
+  } catch {
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
   }
 }
 

@@ -89,6 +89,31 @@ test("ReceiptStore writes per-run receipts incrementally and updates the index",
   }
 });
 
+test("ReceiptStore concurrent writers keep a valid complete index", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aedis-receipts-concurrent-"));
+  try {
+    const stores = Array.from({ length: 8 }, () => new ReceiptStore(root));
+    await Promise.all(stores.map((store, i) =>
+      store.patchRun(`run-${i}`, {
+        prompt: `prompt ${i}`,
+        taskSummary: `summary ${i}`,
+        status: "COMPLETE",
+        completedAt: `2026-04-11T10:00:0${i}.000Z`,
+      }),
+    ));
+
+    const indexPath = join(root, "state", "receipts", "index.json");
+    const index = JSON.parse(readFileSync(indexPath, "utf-8"));
+    assert.equal(index.runs.length, 8);
+    assert.deepEqual(
+      new Set(index.runs.map((run: any) => run.runId)),
+      new Set(Array.from({ length: 8 }, (_, i) => `run-${i}`)),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("ReceiptStore marks unfinished runs as crashed on startup", async () => {
   const root = mkdtempSync(join(tmpdir(), "aedis-receipts-"));
   try {

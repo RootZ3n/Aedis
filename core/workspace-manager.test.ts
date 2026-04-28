@@ -216,3 +216,23 @@ test("generatePatch: when ONLY runtime artifacts changed, returns empty changedF
     rmSync(sourceRepo, { recursive: true, force: true });
   }
 });
+
+test("generatePatch: untracked new file appears in patch body and changedFiles", async () => {
+  const sourceRepo = makeSourceRepo();
+  let handle: Awaited<ReturnType<typeof createWorkspace>> | null = null;
+  try {
+    handle = await createWorkspace(sourceRepo, "test-run-gggggggg");
+
+    writeFileSync(join(handle.workspacePath, "src/new-file.ts"), "export const y = 2;\n", "utf-8");
+
+    const patch = await generatePatch(handle);
+
+    assert.deepEqual(patch.changedFiles, ["src/new-file.ts"]);
+    assert.ok(patch.diff.includes("diff --git a/src/new-file.ts b/src/new-file.ts"));
+    assert.ok(patch.diff.includes("new file mode"));
+    assert.ok(patch.diff.includes("+export const y = 2;"));
+  } finally {
+    if (handle) await discardWorkspace(handle);
+    rmSync(sourceRepo, { recursive: true, force: true });
+  }
+});

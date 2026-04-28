@@ -1,10 +1,15 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import type { RunReceipt } from "./coordinator.js";
 import type { CostEntry } from "./runstate.js";
 import { redactForReceipt } from "./redaction.js";
+import { withRepoLock, writeJsonAtomicLocked } from "./file-lock.js";
+
+const exec = promisify(execFile);
 
 /**
  * Workspace reference persisted on the run receipt. Used by startup
@@ -427,10 +432,14 @@ export class ReceiptStore {
   async patchRun(runId: string, patch: ReceiptPatch): Promise<PersistentRunReceipt> {
     return this.enqueue(async () => {
       await this.ensureDirs();
-      const current = await this.readRunFile(runId);
-      const now = new Date().toISOString();
-      const next = this.applyPatch(current ?? this.emptyReceipt(runId, now), patch, now);
-      await this.writeRunFile(next);
+      const runPath = this.runPath(runId);
+      const next = await withRepoLock(runPath, async () => {
+        const current = await this.readRunFile(runId);
+        const now = new Date().toISOString();
+        const updated = this.applyPatch(current ?? this.emptyReceipt(runId, now), patch, now);
+        await writeJsonAtomicLocked(runPath, redactForReceipt(updated));
+        return updated;
+      });
       await this.writeIndexEntry(this.toIndexEntry(next));
       return next;
     });
@@ -462,26 +471,28 @@ export class ReceiptStore {
   }): Promise<TaskRunMapping> {
     return this.enqueue(async () => {
       await this.ensureDirs();
-      const index = await this.readTaskIndexFile();
-      const next: TaskRunMapping = {
-        taskId: input.taskId,
-        runId: input.runId,
-        prompt: input.prompt,
-        submittedAt: input.submittedAt,
-        completedAt: null,
-        status: "queued",
-        error: null,
-      };
-      const existing = index.tasks.findIndex((entry) => entry.taskId === input.taskId);
-      if (existing >= 0) {
-        index.tasks[existing] = next;
-      } else {
-        index.tasks.push(next);
-      }
-      index.updatedAt = new Date().toISOString();
-      index.tasks.sort((a, b) => compareDesc(a.submittedAt, b.submittedAt));
-      await this.writeTaskIndexFile(index);
-      return next;
+      return withRepoLock(this.taskIndexPath(), async () => {
+        const index = await this.readTaskIndexFile();
+        const next: TaskRunMapping = {
+          taskId: input.taskId,
+          runId: input.runId,
+          prompt: input.prompt,
+          submittedAt: input.submittedAt,
+          completedAt: null,
+          status: "queued",
+          error: null,
+        };
+        const existing = index.tasks.findIndex((entry) => entry.taskId === input.taskId);
+        if (existing >= 0) {
+          index.tasks[existing] = next;
+        } else {
+          index.tasks.push(next);
+        }
+        index.updatedAt = new Date().toISOString();
+        index.tasks.sort((a, b) => compareDesc(a.submittedAt, b.submittedAt));
+        await writeJsonAtomicLocked(this.taskIndexPath(), index);
+        return next;
+      });
     });
   }
 
@@ -491,26 +502,28 @@ export class ReceiptStore {
   ): Promise<TaskRunMapping | null> {
     return this.enqueue(async () => {
       await this.ensureDirs();
-      const index = await this.readTaskIndexFile();
-      const existingIndex = index.tasks.findIndex((entry) => entry.taskId === taskId);
-      if (existingIndex < 0) return null;
-      const existing = index.tasks[existingIndex];
-      const at = new Date().toISOString();
-      const next: TaskRunMapping = {
-        ...existing,
-        ...patch,
-        completedAt:
-          patch.completedAt !== undefined
-            ? patch.completedAt
-            : patch.status === "complete" || patch.status === "failed" || patch.status === "cancelled"
-              ? existing.completedAt ?? at
-              : existing.completedAt,
-      };
-      index.tasks[existingIndex] = next;
-      index.updatedAt = at;
-      index.tasks.sort((a, b) => compareDesc(a.submittedAt, b.submittedAt));
-      await this.writeTaskIndexFile(index);
-      return next;
+      return withRepoLock(this.taskIndexPath(), async () => {
+        const index = await this.readTaskIndexFile();
+        const existingIndex = index.tasks.findIndex((entry) => entry.taskId === taskId);
+        if (existingIndex < 0) return null;
+        const existing = index.tasks[existingIndex];
+        const at = new Date().toISOString();
+        const next: TaskRunMapping = {
+          ...existing,
+          ...patch,
+          completedAt:
+            patch.completedAt !== undefined
+              ? patch.completedAt
+              : patch.status === "complete" || patch.status === "failed" || patch.status === "cancelled"
+                ? existing.completedAt ?? at
+                : existing.completedAt,
+        };
+        index.tasks[existingIndex] = next;
+        index.updatedAt = at;
+        index.tasks.sort((a, b) => compareDesc(a.submittedAt, b.submittedAt));
+        await writeJsonAtomicLocked(this.taskIndexPath(), index);
+        return next;
+      });
     });
   }
 
@@ -632,10 +645,21 @@ export class ReceiptStore {
     }
     try {
       if (existsSync(ws.workspacePath)) {
-        await rm(ws.workspacePath, { recursive: true, force: true });
+        if (ws.method === "worktree" && ws.sourceRepo && existsSync(ws.sourceRepo)) {
+          await exec("git", ["worktree", "remove", "--force", ws.workspacePath], {
+            cwd: ws.sourceRepo,
+            timeout: 30_000,
+          });
+          if (ws.worktreeBranch) {
+            await exec("git", ["branch", "-D", ws.worktreeBranch], {
+              cwd: ws.sourceRepo,
+              timeout: 10_000,
+            }).catch(() => undefined);
+          }
+        } else {
+          await rm(ws.workspacePath, { recursive: true, force: true });
+        }
       }
-      // If the workspace was a worktree, best-effort clean the branch.
-      // Branch cleanup failure is non-fatal.
       return {
         workspacePath: ws.workspacePath,
         removed: true,
@@ -783,16 +807,18 @@ export class ReceiptStore {
   }
 
   private async writeIndexEntry(entry: ReceiptIndexEntry): Promise<void> {
-    const index = await this.readIndexFile();
-    const existing = index.runs.findIndex((run) => run.runId === entry.runId);
-    if (existing >= 0) {
-      index.runs[existing] = entry;
-    } else {
-      index.runs.push(entry);
-    }
-    index.updatedAt = new Date().toISOString();
-    index.runs.sort((a, b) => compareDesc(a.updatedAt, b.updatedAt));
-    await this.writeIndexFile(index);
+    await withRepoLock(this.indexPath(), async () => {
+      const index = await this.readIndexFile();
+      const existing = index.runs.findIndex((run) => run.runId === entry.runId);
+      if (existing >= 0) {
+        index.runs[existing] = entry;
+      } else {
+        index.runs.push(entry);
+      }
+      index.updatedAt = new Date().toISOString();
+      index.runs.sort((a, b) => compareDesc(a.updatedAt, b.updatedAt));
+      await writeJsonAtomicLocked(this.indexPath(), index);
+    });
   }
 
   private async ensureDirs(): Promise<void> {
@@ -868,12 +894,16 @@ export class ReceiptStore {
 }
 
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
-  const tempPath = `${path}.tmp`;
+  const tempPath = `${path}.tmp.${process.pid}.${randomSuffix()}`;
   await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
   await rename(tempPath, path);
   if (existsSync(`${path}.bak`)) {
     await rm(`${path}.bak`, { force: true }).catch(() => undefined);
   }
+}
+
+function randomSuffix(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function dedupeStrings(values: readonly string[]): string[] {

@@ -1557,6 +1557,7 @@ export function createCustomHook(config: {
   args?: string[];
   passFiles?: boolean;
   kind?: VerificationCheckKind;
+  projectRoot?: string;
 }): ToolHook {
   return {
     name: config.name,
@@ -1573,7 +1574,10 @@ export function createCustomHook(config: {
           ...(config.args ?? []),
           ...(config.passFiles ? changedFiles : []),
         ];
-        const result = await exec(config.command, args, { timeout: 60_000 });
+        const result = await exec(config.command, args, {
+          timeout: 60_000,
+          cwd: config.projectRoot ?? process.cwd(),
+        });
 
         return {
           passed: true,

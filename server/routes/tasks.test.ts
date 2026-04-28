@@ -79,3 +79,97 @@ test("GET / returns recent tasks for callers that probe /tasks", async () => {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
+
+test("POST /:id/promote resolves persisted task after restart-like state reload", async () => {
+  const fastify = (await import("fastify")).default;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-tasks-promote-"));
+
+  try {
+    const receiptStore = new ReceiptStore(projectRoot);
+    await receiptStore.patchRun("run-promote", {
+      prompt: "promote persisted run",
+      taskSummary: "ready",
+      status: "READY_FOR_PROMOTION",
+    });
+    await receiptStore.registerTask({
+      taskId: "task-promote",
+      runId: "run-promote",
+      prompt: "promote persisted run",
+      submittedAt: "2026-04-22T18:00:00.000Z",
+    });
+    await receiptStore.updateTask("task-promote", { status: "complete" });
+
+    let promotedRunId: string | null = null;
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator: {
+        promoteToSource: async (runId: string) => {
+          promotedRunId = runId;
+          return { ok: true, commitSha: "abc123" };
+        },
+      },
+      eventBus: { emit: () => {} },
+      config: { projectRoot },
+    });
+    await app.register(taskRoutes);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/task-promote/promote",
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(promotedRunId, "run-promote");
+    const body = res.json();
+    assert.equal(body.task_id, "task-promote");
+    assert.equal(body.run_id, "run-promote");
+    assert.equal(body.commit_sha, "abc123");
+
+    await app.close();
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("POST /:id/promote returns clear failure for bad persisted artifact", async () => {
+  const fastify = (await import("fastify")).default;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-tasks-promote-bad-"));
+
+  try {
+    const receiptStore = new ReceiptStore(projectRoot);
+    await receiptStore.patchRun("run-bad", {
+      prompt: "bad promote",
+      taskSummary: "ready",
+      status: "READY_FOR_PROMOTION",
+    });
+
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator: {
+        promoteToSource: async () => ({ ok: false, error: "No patch artifact and no workspace path in receipt" }),
+      },
+      eventBus: { emit: () => {} },
+      config: { projectRoot },
+    });
+    await app.register(taskRoutes);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/run-bad/promote",
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 400);
+    const body = res.json();
+    assert.equal(body.error, "Promotion failed");
+    assert.match(body.message, /No patch artifact/);
+    assert.match(body.action, /Re-run the task|receipt/i);
+
+    await app.close();
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});

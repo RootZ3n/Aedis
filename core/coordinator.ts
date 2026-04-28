@@ -215,6 +215,7 @@ import { scanInput as velumScanInput } from "./velum-input.js";
 import { scanDiff as velumScanDiff, type VelumResult } from "./velum-output.js";
 import { classifyTask, type ImpactClassification, type ImpactLevel } from "./impact-classifier.js";
 import { scoreConfidence, type ConfidenceLevel, type ConfidenceResult } from "./confidence-gate.js";
+import { withRepoLock } from "./file-lock.js";
 import {
   createWorkspace,
   discardWorkspace,
@@ -6577,27 +6578,57 @@ export class Coordinator {
     if (after === null) return { ok: true };
     const newErrors = [...after].filter((e) => !before.has(e));
     if (newErrors.length === 0) return { ok: true };
-    // Revert the working-tree apply so the source repo is left clean.
-    // We checkout HEAD for the changed files only (not git reset --hard,
-    // which would clobber any unrelated unstaged work the user has).
-    const restorable = paths.filter((p) => p && p.length > 0);
-    if (restorable.length > 0) {
-      try {
-        await exec("git", ["checkout", "HEAD", "--", ...restorable], { cwd: sourceRepo });
-      } catch (err) {
-        // Best-effort rollback — surface the original gate failure
-        // even if checkout itself errored.
-        console.warn(
-          `[coordinator] promote-gate: checkout-rollback failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
     const summary = newErrors.slice(0, 3).join(" | ") + (newErrors.length > 3 ? " | …" : "");
     return {
       ok: false,
       newErrors,
       error: `Promote refused: ${newErrors.length} new TypeScript error(s) introduced — ${summary}`,
     };
+  }
+
+  private async rollbackAppliedPromotionPatch(
+    sourceRepo: string,
+    patchPath: string,
+    changedFiles: readonly string[],
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    try {
+      await exec("git", ["apply", "-R", patchPath], { cwd: sourceRepo });
+    } catch (err) {
+      const reverseMsg = err instanceof Error ? err.message : String(err);
+      try {
+        const files = filterRuntimeArtifacts(changedFiles).map((f) => resolve(sourceRepo, f));
+        if (files.length > 0) {
+          await exec("git", ["checkout", "HEAD", "--", ...files], { cwd: sourceRepo }).catch(() => undefined);
+          await exec("git", ["clean", "-f", "--", ...files], { cwd: sourceRepo }).catch(() => undefined);
+        }
+      } catch { /* best-effort fallback */ }
+      try {
+        const { stdout } = await exec("git", ["status", "--porcelain"], { cwd: sourceRepo });
+        const dirty = stdout.trim();
+        if (dirty) {
+          return { ok: false, error: `${reverseMsg}; source repo still dirty: ${dirty.split("\n").slice(0, 5).join(", ")}` };
+        }
+      } catch (statusErr) {
+        return { ok: false, error: `${reverseMsg}; status check failed: ${statusErr instanceof Error ? statusErr.message : String(statusErr)}` };
+      }
+    }
+    return { ok: true };
+  }
+
+  private async recordPromotionFailure(
+    runId: string,
+    error: string,
+    rollbackSucceeded: boolean,
+  ): Promise<void> {
+    await this.receiptStore.patchRun(runId, {
+      status: rollbackSucceeded ? "EXECUTION_ERROR" : "CLEANUP_ERROR",
+      taskSummary: rollbackSucceeded
+        ? "Promotion failed — source rollback completed"
+        : "Promotion failed — source rollback failed",
+      appendErrors: [error],
+    }).catch((err) => {
+      console.warn(`[coordinator] recordPromotionFailure failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   }
 
   // ─── Shadow Workspace API ──────────────────────────────────────────
@@ -7174,25 +7205,24 @@ export class Coordinator {
       persistentWorkspaceSourceRepo ??
       this.config.projectRoot;
 
-    // Capture the pre-apply tsc error baseline for the promote-time
-    // gate. Snapshot is per-promote, not per-run, so two promotes
-    // against an evolving source repo each get a fresh comparison
-    // point.
-    const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
-
     // Try patch artifact first (survives workspace cleanup)
     if (patchArtifact?.diff && patchArtifact.diff.trim()) {
-      try {
+      const patchDiff = patchArtifact.diff;
+      return withRepoLock(resolve(sourceRepo, ".aedis", "promotion"), async () => {
+        const alreadyPromoted = await this.refuseAlreadyPromoted(runId);
+        if (alreadyPromoted) return alreadyPromoted;
+        const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
         const { writeFile: writeTmp, unlink: rmTmp } = await import("node:fs/promises");
-        const patchTmp = resolve(sourceRepo, ".aedis-promote-patch.tmp");
-        await writeTmp(patchTmp, patchArtifact.diff, "utf-8");
+        const patchTmp = resolve(sourceRepo, `.aedis-promote-${runId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${randomUUID()}.patch.tmp`);
+        let applied = false;
+        try {
+        await writeTmp(patchTmp, patchDiff, "utf-8");
         try {
           await exec("git", ["apply", patchTmp], { cwd: sourceRepo });
         } catch {
           await exec("git", ["apply", "--3way", patchTmp], { cwd: sourceRepo });
-        } finally {
-          await rmTmp(patchTmp).catch(() => {});
         }
+        applied = true;
 
         // Promote-time typecheck gate: refuse to commit if the patch
         // introduced any NEW tsc error compared to promoteTscBaseline.
@@ -7212,7 +7242,12 @@ export class Coordinator {
         );
         if (!gateResult.ok) {
           console.error(`[coordinator] PROMOTE (patch) REFUSED for ${runId}: ${gateResult.error}`);
-          return { ok: false, error: gateResult.error };
+          const rollback = await this.rollbackAppliedPromotionPatch(sourceRepo, patchTmp, patchArtifact.changedFiles ?? []);
+          const error = rollback.ok
+            ? `${gateResult.error}; promotion rollback completed`
+            : `${gateResult.error}; promotion rollback FAILED: ${rollback.error}`;
+          await this.recordPromotionFailure(runId, error, rollback.ok);
+          return { ok: false, error };
         }
 
         // Defense-in-depth: even though generatePatch already filters
@@ -7253,8 +7288,21 @@ export class Coordinator {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[coordinator] PROMOTE (patch) FAILED for " + runId + ": " + msg);
-        return { ok: false, error: "Patch apply failed: " + msg };
+        if (applied) {
+          const rollback = await this.rollbackAppliedPromotionPatch(sourceRepo, patchTmp, patchArtifact.changedFiles ?? []);
+          const error = rollback.ok
+            ? `Patch promotion failed: ${msg}; promotion rollback completed`
+            : `Patch promotion failed: ${msg}; promotion rollback FAILED: ${rollback.error}`;
+          await this.recordPromotionFailure(runId, error, rollback.ok);
+          return { ok: false, error };
+        }
+        const error = "Patch apply failed: " + msg;
+        await this.recordPromotionFailure(runId, error, true);
+        return { ok: false, error };
+      } finally {
+        await rmTmp(patchTmp).catch(() => {});
       }
+      });
     }
 
     // Fallback: workspace-based promotion (if workspace still exists)
@@ -7268,27 +7316,32 @@ export class Coordinator {
     const { existsSync } = await import("node:fs");
     if (!existsSync(workspacePath)) return { ok: false, error: "Workspace not found: " + workspacePath + " and no patch artifact saved" };
 
-    try {
-      const { stdout: patch } = await exec("git", ["format-patch", "--stdout", commitSha + "^.." + commitSha], { cwd: workspacePath });
-      if (!patch.trim()) return { ok: false, error: "Empty patch — nothing to promote" };
-
+    return withRepoLock(resolve(sourceRepo, ".aedis", "promotion"), async () => {
+      const alreadyPromoted = await this.refuseAlreadyPromoted(runId);
+      if (alreadyPromoted) return alreadyPromoted;
+      const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
       const { writeFile: writeTmp, unlink: rmTmp } = await import("node:fs/promises");
-      const patchTmp = resolve(sourceRepo, ".aedis-promote-patch.tmp");
-      await writeTmp(patchTmp, patch, "utf-8");
+      const patchTmp = resolve(sourceRepo, `.aedis-promote-${runId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${randomUUID()}.patch.tmp`);
+      let applied = false;
+      let files: string[] = [];
       try {
-        await exec("git", ["apply", patchTmp], { cwd: sourceRepo });
-      } catch {
-        await exec("git", ["apply", "--3way", patchTmp], { cwd: sourceRepo });
-      } finally {
-        await rmTmp(patchTmp).catch(() => {});
-      }
+        const { stdout: patch } = await exec("git", ["format-patch", "--stdout", commitSha + "^.." + commitSha], { cwd: workspacePath });
+        if (!patch.trim()) return { ok: false, error: "Empty patch — nothing to promote" };
 
-      const { stdout: diffOut } = await exec(
-        "git",
-        ["diff", "--name-only", "HEAD", "--", ".", ...PROMOTION_EXCLUDE_PATHSPECS],
-        { cwd: workspacePath },
-      );
-      const files = filterRuntimeArtifacts(diffOut.trim().split("\n").filter(Boolean));
+        await writeTmp(patchTmp, patch, "utf-8");
+        try {
+          await exec("git", ["apply", patchTmp], { cwd: sourceRepo });
+        } catch {
+          await exec("git", ["apply", "--3way", patchTmp], { cwd: sourceRepo });
+        }
+        applied = true;
+
+        const { stdout: diffOut } = await exec(
+          "git",
+          ["diff", "--name-only", "HEAD", "--", ".", ...PROMOTION_EXCLUDE_PATHSPECS],
+          { cwd: workspacePath },
+        );
+        files = filterRuntimeArtifacts(diffOut.trim().split("\n").filter(Boolean));
 
       // Promote-time typecheck gate (workspace-fallback path). Same
       // contract as the patch-artifact path above: refuse to commit if
@@ -7301,7 +7354,12 @@ export class Coordinator {
       );
       if (!gateResult.ok) {
         console.error(`[coordinator] PROMOTE (workspace) REFUSED for ${runId}: ${gateResult.error}`);
-        return { ok: false, error: gateResult.error };
+        const rollback = await this.rollbackAppliedPromotionPatch(sourceRepo, patchTmp, files);
+        const error = rollback.ok
+          ? `${gateResult.error}; promotion rollback completed`
+          : `${gateResult.error}; promotion rollback FAILED: ${rollback.error}`;
+        await this.recordPromotionFailure(runId, error, rollback.ok);
+        return { ok: false, error };
       }
 
       if (files.length > 0) {
@@ -7322,8 +7380,29 @@ export class Coordinator {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[coordinator] PROMOTE FAILED for " + runId + ": " + msg);
+      if (applied) {
+        const rollback = await this.rollbackAppliedPromotionPatch(sourceRepo, patchTmp, files);
+        const error = rollback.ok
+          ? `${msg}; promotion rollback completed`
+          : `${msg}; promotion rollback FAILED: ${rollback.error}`;
+        await this.recordPromotionFailure(runId, error, rollback.ok);
+        return { ok: false, error };
+      }
+      await this.recordPromotionFailure(runId, msg, true);
       return { ok: false, error: msg };
+    } finally {
+      await rmTmp(patchTmp).catch(() => {});
     }
+    });
+  }
+
+  private async refuseAlreadyPromoted(runId: string): Promise<{ ok: false; error: string } | null> {
+    const latest = await this.receiptStore.getRun(runId);
+    if (latest?.status !== "PROMOTED") return null;
+    return {
+      ok: false,
+      error: "Run is already promoted; refresh run status before retrying promotion",
+    };
   }
 
   // ─── Change Collection ─────────────────────────────────────────────

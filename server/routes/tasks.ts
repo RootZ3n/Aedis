@@ -1226,20 +1226,35 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     "/:id/promote",
     async (request: FastifyRequest<{ Params: TaskParams; Body: { source_repo?: string } }>, reply: FastifyReply) => {
       const { id } = request.params;
-      // Find the runId from the tracked task
       const tracked = trackedRuns.get(id);
-      if (!tracked) {
-        reply.code(404).send({ error: "Not found", message: `No task "${id}"` });
+      const persistedTask = tracked
+        ? null
+        : await ctx().receiptStore.getTask(id) ?? await ctx().receiptStore.getTaskByRunId(id);
+      const persistedRun = tracked || persistedTask
+        ? null
+        : await ctx().receiptStore.getRun(id);
+      const runId = tracked?.runId ?? persistedTask?.runId ?? persistedRun?.runId ?? null;
+      const taskId = tracked?.taskId ?? persistedTask?.taskId ?? id;
+      if (!runId) {
+        reply.code(404).send({
+          error: "Not found",
+          message: `No task or persisted run "${id}" is available for promotion`,
+        });
         return;
       }
-      const result = await ctx().coordinator.promoteToSource(tracked.runId, request.body?.source_repo);
+      const result = await ctx().coordinator.promoteToSource(runId, request.body?.source_repo);
       if (!result.ok) {
-        reply.code(400).send({ error: "Promotion failed", message: result.error });
+        reply.code(400).send({
+          error: "Promotion failed",
+          message: result.error,
+          run_id: runId,
+          action: "Re-run the task if the receipt is missing a patch artifact or inspect the persisted receipt for rollback details.",
+        });
         return;
       }
       reply.send({
-        task_id: id,
-        run_id: tracked.runId,
+        task_id: taskId,
+        run_id: runId,
         status: "promoted",
         commit_sha: result.commitSha,
         message: "Changes promoted to source repository",

@@ -12,7 +12,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TerminalExecutor, ShellTool } from "../core/terminal-executor.js";
@@ -159,6 +159,62 @@ test("times out sleep command with shorter timeout — not hang", async () => {
     assert.equal(receipt.exitCode, null);
     assert.ok(receipt.durationMs >= 3_000, "duration should be at least 3s");
     assert.ok(receipt.durationMs < 8_000, "should not run way over");
+  } finally {
+    await cleanupSandbox(sandbox);
+  }
+});
+
+test("timed-out child process is terminated and reports timeout clearly", async () => {
+  const sandbox = await makeSandbox();
+  try {
+    await writeFile(
+      join(sandbox, "sleeper.js"),
+      [
+        "const fs = require('fs');",
+        "process.on('SIGTERM', () => { fs.writeFileSync('terminated.txt', 'yes'); process.exit(0); });",
+        "setTimeout(() => fs.writeFileSync('still-running.txt', 'yes'), 1500);",
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+      "utf-8",
+    );
+    const executor = new TerminalExecutor(sandbox, 250);
+    const receipt = await executor.execute({
+      command: "node sleeper.js",
+      cwd: sandbox,
+      timeoutMs: 250,
+    });
+
+    assert.equal(receipt.status, "timeout");
+    assert.match(receipt.reason, /timed out/i);
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    await assert.rejects(readFile(join(sandbox, "still-running.txt"), "utf-8"));
+  } finally {
+    await cleanupSandbox(sandbox);
+  }
+});
+
+test("sanitized env does not pass secret-like variables to child commands", async () => {
+  const sandbox = await makeSandbox();
+  try {
+    await writeFile(
+      join(sandbox, "env-check.js"),
+      "process.stdout.write(JSON.stringify({ secret: process.env.AEDIS_SECRET_TOKEN ?? null, path: Boolean(process.env.PATH) }));\n",
+      "utf-8",
+    );
+    const executor = new TerminalExecutor(sandbox, 5_000);
+    const receipt = await executor.execute({
+      command: "node env-check.js",
+      cwd: sandbox,
+      env: {
+        PATH: process.env.PATH ?? "",
+        AEDIS_SECRET_TOKEN: "must-not-leak",
+      },
+    });
+
+    assert.equal(receipt.status, "success");
+    const parsed = JSON.parse(receipt.stdout ?? "{}");
+    assert.equal(parsed.secret, null);
+    assert.equal(parsed.path, true);
   } finally {
     await cleanupSandbox(sandbox);
   }

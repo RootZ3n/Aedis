@@ -110,7 +110,7 @@ export async function withRepoLock<T>(
  * on partial write, the original file is left intact.
  */
 export async function writeJsonAtomicLocked(path: string, value: unknown): Promise<void> {
-  const tmp = `${path}.tmp.${process.pid}`;
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
   await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(tmp, path);
 }

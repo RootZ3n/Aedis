@@ -164,7 +164,7 @@ function cbScore(e: CbEntry): number {
 function cbOpen(p: Provider, s: CbState): boolean {
   const e = s.providers[p];
   if (!e) return false;
-  return e.failures * (1 - cbScore(e)) >= CB_MAX;
+  return e.failures * cbScore(e) >= CB_MAX;
 }
 function cbFail(p: Provider, s: CbState): void {
   const ex = s.providers[p];
@@ -184,7 +184,23 @@ const DEF_MAX_RETRIES = 2;
 const DEF_BASE_DELAY = 1000;
 const DEF_MAX_DELAY = 32_000;
 
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new InvokerError("sleep cancelled", "cancelled"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new InvokerError("sleep cancelled", "cancelled"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 function retryDelay(attempt: number, retryAfterSec?: number): number {
   if (retryAfterSec !== undefined) return Math.min(retryAfterSec * 1000, DEF_MAX_DELAY);
@@ -610,8 +626,12 @@ async function invokeOllama(
   }, undefined, undefined, signal);
 
   if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    const hint = res.status === 404
+      ? `\nModel "${model}" not found in Ollama. Install with: ollama pull ${model}`
+      : "";
     throw new InvokerError(
-      `Ollama ${model}: ${res.status} ${await res.text().catch(() => "")}`,
+      `Ollama ${model}: ${res.status} ${errBody}${hint}`,
       "http",
     );
   }
@@ -657,8 +677,11 @@ async function invokeOpenAICompatible(
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
+    const hint = (res.status === 401 || res.status === 403)
+      ? `\nCheck your API key for ${baseUrl}. It may be missing, expired, or revoked. See docs/PROVIDER-SETUP.md.`
+      : "";
     throw new InvokerError(
-      `${model} via ${baseUrl}: ${res.status} ${res.statusText}\n${errBody}`,
+      `${model} via ${baseUrl}: ${res.status} ${res.statusText}\n${errBody}${hint}`,
       "http",
     );
   }
@@ -701,8 +724,11 @@ async function invokeAnthropic(
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
+    const hint = (res.status === 401 || res.status === 403)
+      ? "\nCheck your ANTHROPIC_API_KEY in .env. It may be missing, expired, or revoked."
+      : "";
     throw new InvokerError(
-      `Anthropic ${model}: ${res.status} ${res.statusText}\n${errBody}`,
+      `Anthropic ${model}: ${res.status} ${res.statusText}\n${errBody}${hint}`,
       "http",
     );
   }
@@ -771,7 +797,7 @@ async function fetchWithRetry(
       const delay = retryDelay(attempt, retryAfterSec);
       if (attempt < maxRetries) {
         console.warn(`[model-invoker] fetchWithRetry: ${url} HTTP ${res.status} -- retry in ${Math.round(delay)}ms (attempt ${attempt+1}/${maxRetries})${retryAfterSec !== undefined ? ` (Retry-After: ${retryAfterSec}s)` : ""}`);
-        await sleep(delay);
+        await sleep(delay, externalSignal);
         continue;
       }
       return res;
@@ -794,7 +820,7 @@ async function fetchWithRetry(
       }
       const delay = retryDelay(attempt);
       console.warn(`[model-invoker] fetchWithRetry: ${url} network error (${err.code ?? err.message}) -- retry in ${Math.round(delay)}ms (attempt ${attempt+1}/${maxRetries})`);
-      await sleep(delay);
+      await sleep(delay, externalSignal);
     }
   }
   throw lastErr ?? new InvokerError(`fetchWithRetry exhausted for ${url}`, "network");

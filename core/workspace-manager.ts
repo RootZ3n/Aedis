@@ -245,13 +245,6 @@ export async function generatePatch(
       diff = workingDiff;
     }
 
-    // Also include untracked files
-    const { stdout: untrackedDiff } = await exec(
-      "git",
-      ["diff", "--no-index", "/dev/null", "."],
-      { cwd: handle.workspacePath, timeout: 10_000, maxBuffer: 10 * 1024 * 1024 },
-    ).catch(() => ({ stdout: "" }));
-
     // Source the file list from the SAME range as the diff. When the
     // workspace has committed, `git status --porcelain` is empty (the
     // index matches HEAD), so we need `git diff --name-only` against
@@ -284,6 +277,30 @@ export async function generatePatch(
     // denylist in case the underlying git treats exclude pathspecs
     // differently on this host.
     const changedFiles = filterRuntimeArtifacts(rawFiles);
+    const changedSet = new Set(changedFiles);
+
+    // `git diff HEAD` does not include untracked files. Generate a
+    // normal file-creation patch for each untracked file that survived
+    // the promotion filter so `changedFiles` and `diff` describe the
+    // same artifact. `git diff --no-index` exits 1 when differences are
+    // found, so capture stdout from both resolve and reject paths.
+    let untrackedDiff = "";
+    if (!workspaceHead) {
+      const { stdout: untrackedOut } = await exec(
+        "git",
+        ["ls-files", "--others", "--exclude-standard", "--", ...excludePathspecs],
+        { cwd: handle.workspacePath, timeout: 10_000 },
+      );
+      const untrackedFiles = filterRuntimeArtifacts(
+        untrackedOut.split("\n").filter(Boolean).map((s) => s.trim()),
+      ).filter((file) => changedSet.has(file));
+      const chunks: string[] = [];
+      for (const file of untrackedFiles) {
+        const stdout = await diffFileAgainstNull(handle.workspacePath, file);
+        if (stdout.trim()) chunks.push(stdout);
+      }
+      untrackedDiff = chunks.join("\n");
+    }
 
     const commitSha: string | null = workspaceHead;
 
@@ -306,6 +323,20 @@ export async function generatePatch(
       commitSha: null,
       generatedAt,
     };
+  }
+}
+
+async function diffFileAgainstNull(cwd: string, file: string): Promise<string> {
+  try {
+    const { stdout } = await exec(
+      "git",
+      ["diff", "--no-index", "--", "/dev/null", file],
+      { cwd, timeout: 10_000, maxBuffer: 10 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch (err) {
+    const stdout = (err as { stdout?: string })?.stdout;
+    return typeof stdout === "string" ? stdout : "";
   }
 }
 

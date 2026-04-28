@@ -625,6 +625,37 @@ test("approval flow: promoteToSource succeeds end-to-end after approveRun (round
   }
 });
 
+test("approval flow: concurrent promoteToSource calls serialize without replaying the patch", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 77; // concurrent\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true);
+
+    const results = await Promise.all([
+      coordinator.promoteToSource(receipt.runId),
+      coordinator.promoteToSource(receipt.runId),
+    ]);
+    const successes = results.filter((result) => result.ok);
+    const failures = results.filter((result) => !result.ok);
+
+    assert.equal(successes.length, 1, `exactly one promotion should commit; got ${JSON.stringify(results)}`);
+    assert.equal(failures.length, 1, `second promotion should fail clearly; got ${JSON.stringify(results)}`);
+    assert.match(failures[0]?.error ?? "", /already promoted|Patch apply failed|already exists/i);
+    const trackedStatus = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: repo })
+      .toString()
+      .trim();
+    assert.equal(trackedStatus, "", "source repo must not have tracked dirt after concurrent promote attempts");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("approval flow: auto-promote path (requireApproval=false) still captures patchArtifact during submit()", async () => {
   // Defense: the fix must not regress the auto-promote path. A run that
   // never pauses must still produce the same patchArtifact shape that
