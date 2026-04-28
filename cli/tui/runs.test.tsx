@@ -9,6 +9,7 @@ import {
   isTerminalStatus,
 } from "./screens/runs.js";
 import type { RunListEntry, SubmitResponse } from "./api.js";
+import { waitForFrame } from "./test-utils.js";
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -353,8 +354,9 @@ test("tui runs: policy panel renders the safe-default values from /health", asyn
     <RunsScreen api={api} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    // Race fix: policy panel renders only after getRuntimePolicy()
+    // resolves. Poll for the panel itself rather than racing react.
+    const frame = await waitForFrame(lastFrame, /autoPromote=off/, { message: "policy panel must render with safe defaults" });
     assert.match(frame, /policy:/, "policy line must render");
     assert.match(frame, /autoPromote=off/);
     assert.match(frame, /approval=required/);
@@ -387,8 +389,9 @@ test("tui runs: policy panel surfaces an unsafe config so the operator sees it",
     <RunsScreen api={api} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    // Same async-resolution race as above — wait for the unsafe marker
+    // we're going to assert on.
+    const frame = await waitForFrame(lastFrame, /autoPromote=on/, { message: "unsafe policy panel must render" });
     assert.match(frame, /autoPromote=on/);
     assert.match(frame, /approval=skipped/);
     assert.match(frame, /destructive=allowed/);
@@ -411,8 +414,9 @@ test("tui runs: policy panel falls back to 'unknown' when /health is unreachable
     <RunsScreen api={api} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    // Wait for the unknown-fallback line specifically. The "policy:"
+    // header renders synchronously so it's not a useful gating marker.
+    const frame = await waitForFrame(lastFrame, /unknown.*server unreachable/, { message: "unknown-policy fallback line must render" });
     assert.match(frame, /policy:/);
     assert.match(frame, /unknown/);
   } finally {
@@ -435,9 +439,9 @@ test("tui runs: stale banner renders when server has no commit metadata", async 
     <RunsScreen api={api} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
-    assert.match(frame, /STALE SERVER/);
+    // Banner renders only after getServerHealth() resolves and
+    // deriveTuiStaleness flags the missing commit. Poll for it.
+    const frame = await waitForFrame(lastFrame, /STALE SERVER/, { message: "stale banner must render for missing build metadata" });
     assert.match(frame, /no build metadata/);
   } finally {
     unmount();
@@ -463,9 +467,7 @@ test("tui runs: stale banner renders when server is running from non-build-info 
     <RunsScreen api={api} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
-    assert.match(frame, /STALE SERVER/);
+    const frame = await waitForFrame(lastFrame, /STALE SERVER/, { message: "stale banner must render for git-runtime source" });
     assert.match(frame, /git-runtime/);
   } finally {
     unmount();
@@ -491,9 +493,17 @@ test("tui runs: NO stale banner when server reports a clean built dist", async (
     <RunsScreen api={api} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
-    assert.doesNotMatch(frame, /STALE SERVER/);
+    // Negative-case race: must wait until getServerHealth() has
+    // resolved AND deriveTuiStaleness has decided not to render the
+    // banner. Wait for any marker that implies the policy effect ran;
+    // policy is null in this test so the "unknown" line is what
+    // appears once the policy fetch resolves. Then assert no stale
+    // banner.
+    const frame = await waitForFrame(lastFrame, /policy:/, { message: "policy line must render" });
+    // Give the staleness derivation a tick to render its absence
+    // (state updates from two parallel useEffects may interleave).
+    await new Promise((r) => setTimeout(r, 20));
+    assert.doesNotMatch(lastFrame() ?? frame, /STALE SERVER/);
   } finally {
     unmount();
   }

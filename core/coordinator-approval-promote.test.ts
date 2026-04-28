@@ -423,6 +423,16 @@ test("approval flow: task route reports active_run=false after approval-stage ca
 });
 
 test("approval flow: normal in-flight cancellation remains active until submit unwinds", async () => {
+  // Race fix: previously waited only for runId via listActiveRunIds(),
+  // which is set the moment the run is registered — that's BEFORE the
+  // BlockingBuilder.execute() actually runs. Under parallel-runner
+  // load, scout / charter / context phases could race past the
+  // capture and the assert below saw an empty activeRuns list because
+  // submit() had already entered finally{} on a fast-fail path.
+  // Awaiting builder.ready guarantees submit is parked inside
+  // BlockingBuilder.execute() (waiting on release) — no other phase
+  // can advance until builder.unblock() fires, which makes the
+  // "still active after cancel" assertion deterministic.
   const repo = makeTempRepo();
   try {
     const builder = new BlockingBuilderWorker([
@@ -431,7 +441,10 @@ test("approval flow: normal in-flight cancellation remains active until submit u
     const { coordinator } = buildHarness(repo, { builder, requireApproval: false });
 
     const submit = coordinator.submit({ input: "modify widget in core" });
-    const runId = await waitFor(() => coordinator.listActiveRunIds()[0] ?? null, "run should become active");
+    await builder.ready;
+    const activeIds = coordinator.listActiveRunIds();
+    assert.equal(activeIds.length, 1, "exactly one run should be active when builder is parked");
+    const runId = activeIds[0]!;
     assert.equal(coordinator.cancel(runId), true);
     assert.deepEqual(coordinator.listActiveRunIds(), [runId], "ordinary in-flight cancellation should remain active until finally cleanup");
 

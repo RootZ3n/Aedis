@@ -16,6 +16,7 @@ import { render } from "ink-testing-library";
 import { RunsScreen, formatLaneIndicator } from "./screens/runs.js";
 import { RunDetailScreen } from "./screens/run-detail.js";
 import type { CandidateManifestRow, RunDetailData, RunListEntry, SubmitResponse } from "./api.js";
+import { waitForFrame } from "./test-utils.js";
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -173,8 +174,15 @@ test("tui runs dashboard: row shows lane indicator when candidate metadata exist
     <RunsScreen api={staticApi(runs)} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    // Race fix: dashboard render is gated on api.listRuns() resolving.
+    // 40ms wait was racing react/ink's update cycle under parallel-runner
+    // load. Poll for the actual indicator instead — succeeds in ms when
+    // healthy, throws with last-seen frame on real failure.
+    const frame = await waitForFrame(
+      lastFrame,
+      /\[L→C 2c sel:shadow-1\]/,
+      { message: "dashboard must render the lane indicator" },
+    );
     assert.match(frame, /\[L→C 2c sel:shadow-1\]/, "dashboard must render the lane indicator");
   } finally {
     unmount();
@@ -189,9 +197,12 @@ test("tui runs dashboard: row without candidate metadata renders no lane indicat
     <RunsScreen api={staticApi(runs)} pollMs={99_999} />,
   );
   try {
-    await wait(40);
-    const frame = lastFrame() ?? "";
-    // No square-bracketed L→C / L|C / C+L token should leak in.
+    // Wait for the run row to actually render before asserting absence
+    // of a lane indicator — otherwise this test passes spuriously by
+    // checking before listRuns() resolved. Match on the row's status
+    // (the runId is truncated to 8 chars in the row, so /run-plain/
+    // would never match).
+    const frame = await waitForFrame(lastFrame, /AWAITING_APPROVAL/, { message: "run row must render" });
     assert.doesNotMatch(frame, /\[L→C/);
     assert.doesNotMatch(frame, /\[L\|C/);
     assert.doesNotMatch(frame, /\[C\+L/);
@@ -212,10 +223,12 @@ test("tui run-detail: [c] reveals the Candidate Lanes panel with mode and select
     <RunDetailScreen runId="run-abc123" onBack={() => {}} getRunDetail={async () => detail} />,
   );
   try {
-    await wait(60);
+    // Wait for the async getRunDetail to resolve and render — runId:
+    // line only appears after data loads (Loading state has a different
+    // shape). Then send the [c] toggle and poll for the panel switch.
+    await waitForFrame(lastFrame, /runId:\s+run-abc123/, { message: "detail must load" });
     stdin.write("c");
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    const frame = await waitForFrame(lastFrame, /Panel: candidates/, { message: "[c] must switch to candidates panel" });
     assert.match(frame, /Candidate Lanes/);
     assert.match(frame, /laneMode:\s+local_then_cloud/);
     assert.match(frame, /selectedCandidate:\s+shadow-1/);
@@ -235,10 +248,9 @@ test("tui run-detail: candidate table shows role/lane/provider/model/status for 
     <RunDetailScreen runId="run-abc123" onBack={() => {}} getRunDetail={async () => detail} />,
   );
   try {
-    await wait(60);
+    await waitForFrame(lastFrame, /runId:\s+run-abc123/, { message: "detail must load" });
     stdin.write("c");
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    const frame = await waitForFrame(lastFrame, /Panel: candidates/, { message: "[c] must switch to candidates panel" });
     // Primary row
     assert.match(frame, /primary/);
     assert.match(frame, /local/);
@@ -264,10 +276,9 @@ test("tui run-detail: selected candidate is marked and labeled", async () => {
     <RunDetailScreen runId="run-abc123" onBack={() => {}} getRunDetail={async () => detail} />,
   );
   try {
-    await wait(60);
+    await waitForFrame(lastFrame, /runId:\s+run-abc123/, { message: "detail must load" });
     stdin.write("c");
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    const frame = await waitForFrame(lastFrame, /Panel: candidates/, { message: "[c] must switch to candidates panel" });
     // The ★ marker only appears next to the selected workspace.
     // The role/lane/provider rendering uses padded fields so the
     // line is `★ shadow  cloud openrouter  …`. Match on a single
@@ -294,10 +305,9 @@ test("tui run-detail: disqualified candidate renders the disqualification reason
     <RunDetailScreen runId="run-abc123" onBack={() => {}} getRunDetail={async () => detail} />,
   );
   try {
-    await wait(60);
+    await waitForFrame(lastFrame, /runId:\s+run-abc123/, { message: "detail must load" });
     stdin.write("c");
-    await wait(40);
-    const frame = lastFrame() ?? "";
+    const frame = await waitForFrame(lastFrame, /Panel: candidates/, { message: "[c] must switch to candidates panel" });
     assert.match(frame, /disqualified: status=failed/, "primary's disqualification reason must render");
     // The disqualification line should appear exactly once — for
     // the failing primary. The passing shadow must not produce a
@@ -316,11 +326,9 @@ test("tui run-detail: empty candidates produces the empty-state message", async 
     <RunDetailScreen runId="run-abc123" onBack={() => {}} getRunDetail={async () => detail} />,
   );
   try {
-    await wait(60);
+    await waitForFrame(lastFrame, /runId:\s+run-abc123/, { message: "detail must load" });
     stdin.write("c");
-    await wait(40);
-    const frame = lastFrame() ?? "";
-    assert.match(frame, /Candidate Lanes/);
+    const frame = await waitForFrame(lastFrame, /Candidate Lanes/, { message: "[c] must reveal candidate panel" });
     assert.match(frame, /No candidate lane data for this run\./);
   } finally {
     unmount();
@@ -337,14 +345,11 @@ test("tui run-detail: [c] toggles back to summary when pressed twice", async () 
     <RunDetailScreen runId="run-abc123" onBack={() => {}} getRunDetail={async () => detail} />,
   );
   try {
-    await wait(60);
+    await waitForFrame(lastFrame, /runId:\s+run-abc123/, { message: "detail must load" });
     stdin.write("c");
-    await wait(40);
-    assert.match(lastFrame() ?? "", /Panel: candidates/);
+    await waitForFrame(lastFrame, /Panel: candidates/, { message: "first [c] must open candidates" });
     stdin.write("c");
-    await wait(40);
-    const frame = lastFrame() ?? "";
-    assert.match(frame, /Panel: summary/, "second [c] press must close the panel");
+    const frame = await waitForFrame(lastFrame, /Panel: summary/, { message: "second [c] must close back to summary" });
     assert.doesNotMatch(frame, /Candidate Lanes/);
   } finally {
     unmount();
@@ -361,15 +366,13 @@ test("tui run-detail: existing toggles still work alongside [c] (no regression)"
     <RunDetailScreen runId="run-abc123" onBack={() => {}} getRunDetail={async () => detail} />,
   );
   try {
-    await wait(60);
+    await waitForFrame(lastFrame, /runId:\s+run-abc123/, { message: "detail must load" });
     stdin.write("c");
-    await wait(40);
+    await waitForFrame(lastFrame, /Panel: candidates/, { message: "[c] must open candidates" });
     stdin.write("d");
-    await wait(40);
-    assert.match(lastFrame() ?? "", /Panel: diff/, "[d] must still switch to diff after [c] was used");
+    await waitForFrame(lastFrame, /Panel: diff/, { message: "[d] must still switch to diff after [c] was used" });
     stdin.write("v");
-    await wait(40);
-    assert.match(lastFrame() ?? "", /Panel: verifier/, "[v] must still switch to verifier");
+    await waitForFrame(lastFrame, /Panel: verifier/, { message: "[v] must still switch to verifier" });
   } finally {
     unmount();
   }
