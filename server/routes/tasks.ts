@@ -155,7 +155,8 @@ export function registerTrackedPlanRun(
 type BuildSubmitResult =
   | { kind: "running"; taskId: string; runId: string; prompt: string; repoPath: string | null }
   | { kind: "needs_clarification"; question: string }
-  | { kind: "needs_decomposition"; taskId: string; plan: unknown; message: string };
+  | { kind: "needs_decomposition"; taskId: string; plan: unknown; message: string }
+  | { kind: "blocked"; reason: string; flags: readonly string[] };
 
 /**
  * Build a needs_decomposition API response with approval instructions.
@@ -200,6 +201,13 @@ async function submitBuildTask(
     exclusions,
     ...(repoPath ? { projectRoot: repoPath } : {}),
   });
+
+  if (gateResult.kind === "blocked") {
+    console.warn(
+      `[tasks] BLOCKED at submit gate — reason="${gateResult.reason}" flags=[${gateResult.flags.join(", ")}]`,
+    );
+    return { kind: "blocked", reason: gateResult.reason, flags: gateResult.flags };
+  }
 
   if (gateResult.kind === "needs_clarification") {
     console.log(`[tasks] clarification needed for prompt: "${prompt.slice(0, 80)}"`);
@@ -723,6 +731,16 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       switch (decision.action) {
         case "build": {
           const result = await submitBuildTask(ctx(), decision.effectivePrompt, repoPath, undefined);
+          if (result.kind === "blocked") {
+            reply.code(400).send({
+              ...envelope,
+              route: "blocked",
+              status: "blocked",
+              reason: result.reason,
+              flags: [...result.flags],
+            });
+            return;
+          }
           if (result.kind === "needs_clarification") {
             reply.send({
               ...envelope,
@@ -767,6 +785,16 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
             ? `Continue the prior build (${prior.runId}): "${prior.prompt}". Follow-up instruction: ${decision.originalInput}`
             : decision.originalInput;
           const result = await submitBuildTask(ctx(), stitched, repoPath, undefined);
+          if (result.kind === "blocked") {
+            reply.code(400).send({
+              ...envelope,
+              route: "blocked",
+              status: "blocked",
+              reason: result.reason,
+              flags: [...result.flags],
+            });
+            return;
+          }
           if (result.kind === "needs_clarification") {
             reply.send({
               ...envelope,
@@ -923,6 +951,15 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const result = await submitBuildTask(ctx(), prompt.trim(), repoPath, request.body.exclusions);
+
+      if (result.kind === "blocked") {
+        reply.code(400).send({
+          status: "blocked",
+          reason: result.reason,
+          flags: [...result.flags],
+        });
+        return;
+      }
 
       if (result.kind === "needs_clarification") {
         reply.code(202).send({

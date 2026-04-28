@@ -65,6 +65,18 @@ const PATTERNS: readonly Pattern[] = [
     reason: "Request to expose secrets or environment variables",
     severity: "block",
   },
+  // Same intent, different shape: a verb followed (within ~40 chars
+  // of intervening words) by a SHOUTY env-var name. Catches "print
+  // OPENAI_API_KEY" / "reveal AWS_SECRET" / "exfiltrate the
+  // DATABASE_URL value", which the strict-adjacent verb→noun pattern
+  // above misses because the noun is the SCREAMING_CASE name itself,
+  // not a generic word like "secret".
+  {
+    regex: /\b(?:print|echo|log|output|show|display|reveal|dump|expose|exfiltrate|leak)\b[^\n]{0,40}\b(?:[A-Z_][A-Z0-9_]{2,})*(?:API[_-]?KEY|SECRET|TOKEN|PASSWORD|PRIVATE[_-]?KEY|DATABASE[_-]?URL)\b/,
+    flag: "exfiltration:env_var_name",
+    reason: "Request to print a SHOUTY env-var name (likely a secret)",
+    severity: "block",
+  },
   {
     regex: /process\.env/i,
     flag: "exfiltration:process_env",
@@ -108,6 +120,85 @@ const PATTERNS: readonly Pattern[] = [
     flag: "jailbreak:mode_switch",
     reason: "Attempt to switch to privileged mode",
     severity: "review",
+  },
+  // ── Approval / promote bypass ─────────────────────────────────────
+  // Loqui-specific. Aedis's safety contract is "operator approves
+  // final apply"; any prompt that asks to skip that gate is a
+  // jailbreak attempt regardless of how friendly the wording is.
+  {
+    regex: /\b(skip|bypass|disable|ignore|turn\s+off)\s+(the\s+)?(approval|approve|promote|promotion|review)\s*(gate|step|check)?\b/i,
+    flag: "jailbreak:approval_bypass",
+    reason: "Attempt to bypass the operator approval / promote gate",
+    severity: "block",
+  },
+  {
+    regex: /\b(auto[-\s]?(promote|approve|commit)|allowed\s+to\s+(promote|commit|push))\b/i,
+    flag: "jailbreak:auto_promote",
+    reason: "Attempt to grant automatic promote/approve permission",
+    severity: "block",
+  },
+  // ── Hidden / quiet mutation hijacks ───────────────────────────────
+  // Loqui must surface every file the user is asking to touch. A
+  // request to "quietly", "silently", "without telling", "don't
+  // mention" something is a transparency attack on the operator —
+  // even if the file itself is innocuous.
+  {
+    regex: /\b(quietly|silently|secretly|without\s+telling|without\s+(?:my\s+|a\s+|any\s+)?(?:mention|notice)|don'?t\s+mention|do\s+not\s+mention|hide\s+the\s+fact)\b/i,
+    flag: "stealth:hidden_mutation",
+    reason: "Request to perform a change without telling the operator",
+    severity: "block",
+  },
+  // ── Dangerous shell command requests ──────────────────────────────
+  // Verifier runs `npm test` / `tsc` / similar, but a user prompt that
+  // asks Aedis to run a destructive shell command is a different ask.
+  // These never represent legitimate dev workflow; block them at the
+  // input gate so the Builder never sees them.
+  {
+    regex: /\brm\s+-rf?\s+(\/(?!tmp\b)|~|\$HOME)/i,
+    flag: "shell:rm_rf_root",
+    reason: "Request to recursively delete the root or home tree",
+    severity: "block",
+  },
+  {
+    regex: /\b(curl|wget|fetch)\b[^\n]{0,200}\|\s*(?:sh|bash|zsh|ksh|fish|sudo)/i,
+    flag: "shell:remote_pipe_to_shell",
+    reason: "Request to pipe a remote download into a shell",
+    severity: "block",
+  },
+  {
+    regex: /\b(?:nc|ncat|netcat|bash)\s+[^\n]{0,80}(?:-e\s+\/bin\/sh|>\s*&?\s*\/dev\/tcp\/)/i,
+    flag: "shell:reverse_shell",
+    reason: "Reverse-shell pattern detected",
+    severity: "block",
+  },
+  // ── Sensitive file / secret access ────────────────────────────────
+  {
+    // `\b` before `.env` would need a word char on its left — but a
+    // space is non-word, so the boundary fails on "cat .env". The
+    // outer `\s+` after the verb already consumes the only space,
+    // so use a lookahead-style trailing boundary that matches a
+    // non-word terminator OR end of string. Captures the simple
+    // `cat .env`, `cat the .env file`, and `read .env <description>`
+    // shapes without requiring a leading word-boundary on `.env`.
+    regex: /\b(?:cat|less|more|head|tail|read|open|print|show|display|dump|exfiltrate)\s+(?:[^\n]{0,200}\s)?\.env(?=[\s/'"`):;,.?!]|$)/i,
+    flag: "exfiltration:dotenv",
+    reason: "Request to read .env (likely secrets)",
+    severity: "block",
+  },
+  {
+    // Same boundary issue as above: `~/.ssh/id_rsa` has `/.ssh` with
+    // `/` before the `.`, which kills `\b\.ssh\b`. Match on the
+    // characteristic path segments without a leading word boundary.
+    regex: /(?:^|[\s/~'"`])\.(?:ssh|aws|gnupg)[\\/][^\s'"`]{0,40}(?:id_(?:rsa|ed25519|ecdsa)|credentials|secret)/i,
+    flag: "exfiltration:keypair",
+    reason: "Request touching SSH/AWS/GPG keypairs or credentials",
+    severity: "block",
+  },
+  {
+    regex: /\b(?:cat|read|print|show|display|dump|exfiltrate)\s+[^\n]{0,200}(?:\/etc\/(?:passwd|shadow)|\/root\/|~root\/)/i,
+    flag: "exfiltration:system_secrets",
+    reason: "Request to read system secrets",
+    severity: "block",
   },
 ];
 
@@ -170,18 +261,72 @@ export function scanInput(task: string, context?: string[]): VelumResult {
     }
   }
 
-  for (const view of views) {
+  // ── Two-pass scan: full text + literal-stripped text ───────────────
+  //
+  // For each view, we want to know:
+  //   1. Did the pattern match the FULL view? (audit signal)
+  //   2. Did the pattern match the LITERAL-STRIPPED view? (instruction-
+  //      position signal — only this escalates severity)
+  //
+  // A pattern that matches the full text but disappears after stripping
+  // every fenced / quoted region is in literal-position — the user
+  // asked Aedis to USE that string, not to obey it. Such matches
+  // surface as `:literal-only` warnings instead of blocking the run.
+  //
+  // Threat-model note: an attacker who hides every injection inside
+  // quotes evades the BLOCK via this downgrade, but the run still
+  // surfaces a `warn` flag on the receipt and the Builder's system
+  // prompt is responsible for not obeying instructions inside literal
+  // data anyway. The downgrade is a UX fix for the false-positive on
+  // benign quoted requests; it is not the only line of defense.
+  type ViewWithStripped = { text: string; stripped: string; tag: string };
+  const dualViews: ViewWithStripped[] = views.map((v) => ({
+    text: v.text,
+    stripped: stripLiterals(v.text),
+    tag: v.tag,
+  }));
+
+  for (const view of dualViews) {
     for (const pattern of PATTERNS) {
-      if (pattern.regex.test(view.text)) {
+      const matchedFull = pattern.regex.test(view.text);
+      if (!matchedFull) continue;
+      const matchedStripped = pattern.regex.test(view.stripped);
+      if (matchedStripped) {
+        // Instruction-position — keep severity as authored.
         flags.push(pattern.flag + view.tag);
         reasons.push(pattern.reason + (view.tag ? ` (${view.tag.slice(1)})` : ""));
         maxSeverity = escalate(maxSeverity, pattern.severity);
+      } else {
+        // Literal-position — record the attempt without escalating
+        // beyond warn so a benign "test that contains <hostile string>"
+        // request stays actionable.
+        flags.push(pattern.flag + view.tag + ":literal-only");
+        reasons.push(
+          pattern.reason +
+          (view.tag ? ` (${view.tag.slice(1)}, literal-only)` : " (literal-only)"),
+        );
+        // Don't pull severity above the existing max via a literal
+        // match; if `maxSeverity` is already block/review from a
+        // genuine instruction-position hit, this no-ops.
+        maxSeverity = escalate(maxSeverity, "warn");
       }
     }
   }
 
   return { decision: maxSeverity, reasons: dedupe(reasons), flags: dedupe(flags) };
 }
+
+function stripLiterals(text: string): string {
+  return LITERAL_STRIPS.reduce((acc, re) => acc.replace(re, ""), text);
+}
+
+const LITERAL_STRIPS: ReadonlyArray<RegExp> = [
+  /```[\s\S]*?```/g,
+  /"[^"]*"/g,
+  /`[^`]*`/g,
+  /(?<![A-Za-z0-9])'[^']*'(?![A-Za-z0-9])/g,
+];
+
 
 /**
  * Pull base64 and percent-encoded spans out of `text` and decode them

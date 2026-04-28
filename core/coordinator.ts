@@ -407,12 +407,18 @@ export function needsBroadCleanupClarification(input: string): boolean {
 
 /**
  * Result of a task submission — may be immediate execution, a
- * clarification request, or a decomposition plan requiring approval.
+ * clarification request, a decomposition plan requiring approval,
+ * or a hard block from Velum's input guard. The `blocked` outcome
+ * never creates an active run, never allocates a workspace, and
+ * never reaches the Builder. The `reasons` and `flags` arrays mirror
+ * Velum's `VelumResult` so the receipt can record exactly what
+ * tripped the guard.
  */
 export type TaskSubmissionResult =
   | { kind: "executing"; receipt: Promise<RunReceipt> }
   | { kind: "needs_clarification"; question: string }
-  | { kind: "needs_decomposition"; taskId: string; plan: Plan; message: string };
+  | { kind: "needs_decomposition"; taskId: string; plan: Plan; message: string }
+  | { kind: "blocked"; reason: string; flags: readonly string[] };
 
 /**
  * Normalized build result for session-coordinator cycles.
@@ -832,6 +838,22 @@ export class Coordinator {
    */
   async submitWithGates(submission: TaskSubmission): Promise<TaskSubmissionResult> {
     const input = submission.input.trim();
+
+    // GAP 0 — Velum input guard at the entry. The deeper Velum scan in
+    // submit() catches the same patterns, but by then an intent + run
+    // + workspace have already been created. Running the guard here
+    // means a blocked prompt never allocates state. The downgrade-on-
+    // -literal-only logic inside scanInput keeps benign quoted
+    // requests alive (decision === "warn"); only true instruction-
+    // position injection reaches the BLOCK branch.
+    const earlyGuard = velumScanInput(input);
+    if (earlyGuard.decision === "block") {
+      const reason = earlyGuard.reasons.join("; ");
+      console.warn(
+        `[coordinator] submitWithGates: BLOCKED at entry — flags=[${earlyGuard.flags.join(", ")}] reasons="${reason}"`,
+      );
+      return { kind: "blocked", reason, flags: earlyGuard.flags };
+    }
 
     // GAP 1 — Ambiguity detection
     if (detectAmbiguity(input)) {
