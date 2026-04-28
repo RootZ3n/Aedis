@@ -26,7 +26,7 @@ Anthropic Hot Path."
 2. Generate an API key from the dashboard.
 3. Add to `.env`:
    ```
-   OPENROUTER_API_KEY=sk-or-v1-...
+   OPENROUTER_API_KEY=<your-openrouter-api-key>
    ```
 4. Verify:
    ```bash
