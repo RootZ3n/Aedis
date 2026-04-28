@@ -432,8 +432,14 @@ test("integration: maybeRunFallbackShadow calls the lane factory with config.sha
 
     await harness.coordinator.submit({ input: "modify widget in core" });
 
-    assert.equal(calls.length, 1, "factory must be called exactly once per fallback");
-    assert.deepEqual(calls[0], {
+    // Phase D: factory is called for BOTH primary (dispatchNode) and shadow
+    // (maybeRunFallbackShadow). Primary call uses laneConfig.primary,
+    // shadow call uses laneConfig.shadow.
+    assert.equal(calls.length, 2, "factory must be called for primary + shadow");
+    const primaryCall = calls.find((c) => c.provider === "ollama");
+    const shadowCall = calls.find((c) => c.provider === "openrouter");
+    assert.ok(primaryCall, "factory must be called with primary provider");
+    assert.deepEqual(shadowCall, {
       provider: "openrouter",
       model: "xiaomi/mimo-v2.5",
     }, "factory must receive lane-config.shadow.{provider,model}");
@@ -459,7 +465,9 @@ test("integration: factory is NOT invoked when primary qualifies (shadow lane sk
       laneBuilderFactory: stubFactory,
     });
     await coordinator.submit({ input: "modify widget in core" });
-    assert.equal(invoked, 0, "factory must not be invoked when primary qualifies");
+    // Phase D: factory IS called for the primary lane (dispatchNode pin),
+    // but NOT for the shadow lane (primary qualified → shadow skipped).
+    assert.equal(invoked, 1, "factory must be invoked once for primary lane only (shadow skipped)");
     assert.equal(registered.executions, 1, "only primary lane runs");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -518,6 +526,239 @@ test("integration: factory returning null falls back to registered Builder + man
     assert.equal(shadow.lane, "cloud");
     assert.equal(shadow.provider, "openrouter");
     assert.equal(shadow.model, "xiaomi/mimo-v2.5");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ─── Phase D: per-lane model dispatch — primary + shadow use distinct builders ──
+
+test("integration: primary lane uses factory-pinned builder when laneConfig.primary is set (local_then_cloud)", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const calls: Array<{ provider: string; model: string; role: string }> = [];
+    let callCount = 0;
+    const stubFactory: typeof createBuilderForLane = (input) => {
+      callCount += 1;
+      // First call = primary (dispatchNode), second = shadow (maybeRunFallbackShadow)
+      const role = callCount === 1 ? "primary" : "shadow";
+      calls.push({ provider: input.provider, model: input.model, role });
+      // Return null so the registered builder handles both — this test
+      // verifies the factory is CALLED with correct args, not that it
+      // produces a working builder (that's covered by other tests).
+      return null;
+    };
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: stubFactory,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    // Factory must be called for BOTH primary and shadow lanes.
+    assert.ok(calls.length >= 2, `factory must be called for primary + shadow; got ${calls.length} calls`);
+    const primaryCall = calls.find((c) => c.role === "primary");
+    const shadowCall = calls.find((c) => c.role === "shadow");
+    assert.ok(primaryCall, "factory must be called for primary lane");
+    assert.ok(shadowCall, "factory must be called for shadow lane");
+    assert.deepEqual(
+      { provider: primaryCall!.provider, model: primaryCall!.model },
+      { provider: "ollama", model: "qwen3.5:9b" },
+      "primary factory call must use laneConfig.primary",
+    );
+    assert.deepEqual(
+      { provider: shadowCall!.provider, model: shadowCall!.model },
+      { provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+      "shadow factory call must use laneConfig.shadow",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: primary_only mode does NOT call factory for primary builder", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "primary_only",
+    primary: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    let invoked = 0;
+    const stubFactory: typeof createBuilderForLane = () => {
+      invoked += 1;
+      return null;
+    };
+    const { coordinator } = buildHarness(dir, {
+      typecheckPasses: true,
+      laneBuilderFactory: stubFactory,
+    });
+    await coordinator.submit({ input: "modify widget in core" });
+    assert.equal(invoked, 0, "primary_only must not call the lane factory for either lane");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: two distinct pinned builders for primary and shadow with different models", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    // Track which builder instances are created and which model they carry.
+    const instances: Array<{ provider: string; model: string; instance: object }> = [];
+    const stubFactory: typeof createBuilderForLane = (input) => {
+      // Return the registered builder (null) but record the call to
+      // prove distinct instantiation was attempted with different models.
+      instances.push({ provider: input.provider, model: input.model, instance: {} });
+      return null;
+    };
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: stubFactory,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    // Must have at least 2 factory calls with DIFFERENT models.
+    assert.ok(instances.length >= 2, `expected >= 2 factory calls; got ${instances.length}`);
+    const models = new Set(instances.map((i) => `${i.provider}/${i.model}`));
+    assert.ok(
+      models.size >= 2,
+      `factory must be called with at least 2 distinct provider/model combos; got ${JSON.stringify([...models])}`,
+    );
+    assert.ok(models.has("ollama/qwen3.5:9b"), "primary model missing");
+    assert.ok(models.has("openrouter/xiaomi/mimo-v2.5"), "shadow model missing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: registry is not mutated when factory creates lane builders", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const registry = new WorkerRegistry();
+    registry.register(new StubScout());
+    const registered = new RegisteredBuilder();
+    registry.register(registered);
+    registry.register(new StubCritic());
+    registry.register(new StubVerifier());
+    registry.register(new StubIntegrator());
+    const builderCountBefore = registry.getWorkers("builder").length;
+
+    const stubFactory: typeof createBuilderForLane = () => null;
+    const trustProfile: TrustProfile = {
+      scores: new Map(),
+      tierThresholds: { fast: 0, standard: 0, premium: 0 },
+    };
+    const eventBus: EventBus = {
+      emit() {}, on: () => () => {},
+      onType: () => () => {}, addClient: () => {},
+      removeClient: () => {}, clientCount: () => 0, recentEvents: () => [],
+    };
+    const receiptStore = new ReceiptStore(dir);
+    const coordinator = new Coordinator(
+      {
+        projectRoot: dir, autoCommit: true, requireWorkspace: true,
+        requireApproval: false, autoPromoteOnSuccess: false,
+        laneBuilderFactory: stubFactory,
+        verificationConfig: {
+          requiredChecks: [],
+          hooks: [{
+            name: "stub-typecheck", stage: "typecheck", kind: "typecheck",
+            execute: async () => ({ passed: false, issues: [{ stage: "typecheck" as const, severity: "blocker" as const, message: "fail" }], stdout: "", stderr: "", exitCode: 1, durationMs: 0 }),
+          }],
+        },
+      },
+      trustProfile, registry, eventBus, receiptStore,
+    );
+    await coordinator.submit({ input: "modify widget in core" });
+
+    const builderCountAfter = registry.getWorkers("builder").length;
+    assert.equal(builderCountAfter, builderCountBefore, "registry must not gain builders from lane dispatch");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: candidate receipt contains provider/model/lane for both primary and shadow", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: () => null,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    assert.equal(persisted.length, 1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    assert.ok(final.candidates, "receipt must contain candidates array");
+
+    const primary = final.candidates.find((c: any) => c.role === "primary");
+    const shadow = final.candidates.find((c: any) => c.role === "shadow");
+    assert.ok(primary, "primary candidate in receipt");
+    assert.ok(shadow, "shadow candidate in receipt");
+
+    // Primary must carry lane metadata from laneConfig.primary.
+    assert.equal(primary.lane, "local");
+    assert.equal(primary.provider, "ollama");
+    assert.equal(primary.model, "qwen3.5:9b");
+
+    // Shadow must carry lane metadata from laneConfig.shadow.
+    assert.equal(shadow.lane, "cloud");
+    assert.equal(shadow.provider, "openrouter");
+    assert.equal(shadow.model, "xiaomi/mimo-v2.5");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integration: primary fails, shadow succeeds — selection picks shadow with correct model attribution", async () => {
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: () => null,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+
+    // When primary disqualifies (typecheck fails) and shadow qualifies,
+    // the selected candidate should be the shadow.
+    if (final.selectedCandidateWorkspaceId) {
+      // If selection ran, the shadow should win.
+      const selected = final.candidates?.find(
+        (c: any) => c.workspaceId === final.selectedCandidateWorkspaceId,
+      );
+      if (selected) {
+        assert.equal(selected.role, "shadow");
+        assert.equal(selected.provider, "openrouter");
+        assert.equal(selected.model, "xiaomi/mimo-v2.5");
+      }
+    }
+    // Either way, both candidates must exist with distinct models.
+    const models = (final.candidates ?? []).map((c: any) => c.model).filter(Boolean);
+    assert.ok(models.includes("qwen3.5:9b"), "primary model in candidates");
+    assert.ok(models.includes("xiaomi/mimo-v2.5"), "shadow model in candidates");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

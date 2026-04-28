@@ -4749,7 +4749,40 @@ export class Coordinator {
         this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),
     });
 
-    const worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
+    // ── Phase D: per-lane model dispatch for the primary builder ────
+    // When the lane config specifies a primary provider/model and the
+    // mode is not primary_only (which uses whatever the registry has),
+    // create a transient lane-pinned builder so the primary lane
+    // actually executes on the configured model instead of the
+    // registry default. Non-builder nodes always use the registry.
+    let worker = this.workerRegistry.getWorker(node.workerType as WorkerType);
+    if (
+      node.workerType === "builder" &&
+      active.laneConfig.mode !== "primary_only" &&
+      active.laneConfig.primary?.provider &&
+      active.laneConfig.primary?.model
+    ) {
+      const factory = this.config.laneBuilderFactory ?? createBuilderForLane;
+      const pinnedPrimary = factory({
+        projectRoot: active.projectRoot,
+        provider: active.laneConfig.primary.provider,
+        model: active.laneConfig.primary.model,
+        runState: active.run,
+      });
+      if (pinnedPrimary) {
+        worker = pinnedPrimary;
+        console.log(
+          `[coordinator] dispatchNode: primary builder pinned to ` +
+          `${active.laneConfig.primary.provider}/${active.laneConfig.primary.model} ` +
+          `(lane=${active.laneConfig.primary.lane}, mode=${active.laneConfig.mode})`,
+        );
+      } else {
+        console.warn(
+          `[coordinator] dispatchNode: lane-config.primary.provider="${active.laneConfig.primary.provider}" ` +
+          `unsupported — primary builder falls back to registry default`,
+        );
+      }
+    }
     if (!worker) {
       console.error(`[coordinator] dispatchNode: NO WORKER REGISTERED for type "${node.workerType}". This is a hidden silent-failure path — runPreBuildCoherence may have used hasWorker() which disagrees with getWorker().`);
       const failResult: WorkerResult = {
