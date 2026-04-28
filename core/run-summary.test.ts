@@ -551,7 +551,19 @@ function receipt(o: ReceiptOverrides): RunReceipt {
         allIssues: [],
         blockers: [],
         requiredChecks: ["lint", "typecheck", "tests"],
-        checks: [],
+        // Populate one executed required check matching the verdict.
+        // Without it, computeVerificationNoSignal flags the receipt
+        // as "no signal" — correct in production, wrong for fixtures
+        // that explicitly declare a verification.verdict. Production
+        // verdict="pass" always has at least one executed check.
+        checks: [{
+          kind: "typecheck",
+          name: "stub-typecheck",
+          executed: true,
+          passed: o.verification.verdict !== "fail",
+          required: true,
+          details: "",
+        }],
         summary: `verification ${o.verification.verdict}`,
         totalDurationMs: 10,
         fileCoverage: null,

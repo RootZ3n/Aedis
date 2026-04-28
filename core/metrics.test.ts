@@ -351,7 +351,18 @@ function baseReceipt(opts: BaseReceiptOpts): RunReceipt {
         allIssues: [],
         blockers: [],
         requiredChecks: ["lint", "typecheck", "tests"],
-        checks: [],
+        // Stub one executed required check matching the declared verdict.
+        // Fixtures used to leave checks: [] which made
+        // computeVerificationNoSignal report "no signal" — production
+        // verdict="pass" always has at least one executed check.
+        checks: [{
+          kind: "typecheck",
+          name: "stub-typecheck",
+          executed: true,
+          passed: opts.verification.verdict !== "fail",
+          required: true,
+          details: "",
+        }],
         summary: `verification ${opts.verification.verdict}`,
         totalDurationMs: 10,
         fileCoverage: null,

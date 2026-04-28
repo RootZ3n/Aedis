@@ -50,10 +50,41 @@ export interface ExecutionClassificationResult {
 // ─── Public API ──────────────────────────────────────────────────────
 
 /**
+ * Extra signals not present on RunReceipt itself but computed in
+ * higher layers (run-summary). Letting classifyExecution see them
+ * keeps the no-silent-success guarantees in one place rather than
+ * scattering them across narrative + headline + classification.
+ *
+ * Every field is optional. Callers from older paths or unit tests
+ * can pass an empty `{}` and behavior matches the legacy receipt-only
+ * signature exactly.
+ */
+export interface ClassifyExtraSignals {
+  /**
+   * Files the planner declared as required deliverables but the
+   * builder did not produce. When non-empty, a "success" verdict is
+   * downgraded to FAILED with reasonCode "missing-deliverable" — a
+   * run that didn't deliver what was asked for cannot be a success.
+   */
+  readonly missingRequiredDeliverables?: readonly string[];
+  /**
+   * True when the verification pipeline produced no real signal
+   * (no required checks configured AND no file was actively
+   * validated). When true, a "success" verdict is downgraded to
+   * FAILED with reasonCode "verification-not-run" — silently
+   * unchecked code cannot be a verified success.
+   */
+  readonly verificationNoSignal?: boolean;
+}
+
+/**
  * Classify a RunReceipt into one of the four user-facing labels.
  * Pure function — no side effects, no network, no state.
  */
-export function classifyExecution(receipt: RunReceipt): ExecutionClassificationResult {
+export function classifyExecution(
+  receipt: RunReceipt,
+  extra: ClassifyExtraSignals = {},
+): ExecutionClassificationResult {
   const factors: string[] = [];
 
   const verdict = receipt.verdict;
@@ -170,6 +201,83 @@ export function classifyExecution(receipt: RunReceipt): ExecutionClassificationR
       classification: "NO_OP",
       reasonCode: "unverified-verdict",
       reason: "Run finished without verifiable evidence of real work",
+      factors,
+    };
+  }
+
+  // ── Rule 5a: missing required deliverable → FAILED ────────────────
+  // The planner declared one or more deliverable files; the builder
+  // did not produce them. A run that didn't deliver what was asked
+  // for cannot be reported as success — even when every gate passed
+  // on the files that DID change. Caught the regression where a
+  // single-file edit was accepted while the requested test file was
+  // never created.
+  const missingDeliverables = extra.missingRequiredDeliverables ?? [];
+  if (
+    (verdict === "success" || verdict === "partial") &&
+    missingDeliverables.length > 0
+  ) {
+    factors.push(`missing:${missingDeliverables.join(",")}`);
+    const list = missingDeliverables.slice(0, 3).join(", ");
+    const more = missingDeliverables.length > 3
+      ? ` (+${missingDeliverables.length - 3} more)`
+      : "";
+    return {
+      classification: "FAILED",
+      reasonCode: "missing-deliverable",
+      reason: `Required deliverable(s) not produced: ${list}${more}`,
+      factors,
+    };
+  }
+
+  // ── Rule 5b: verification did not run → FAILED ────────────────────
+  // The verification pipeline produced no real signal — no required
+  // checks configured AND no file was actively validated. Without
+  // verification we cannot honestly call a run a verified success;
+  // claiming so would let a bare repo with no lint/typecheck/tests
+  // pass as clean. Map to FAILED rather than NO_OP because the
+  // run DID write files; the failure is the missing assurance.
+  if (
+    (verdict === "success" || verdict === "partial") &&
+    extra.verificationNoSignal === true
+  ) {
+    factors.push("verification:no-signal");
+    return {
+      classification: "FAILED",
+      reasonCode: "verification-not-run",
+      reason:
+        "Verification produced no signal — no required checks configured " +
+        "and no file was actively validated. Changes are not a verified success.",
+      factors,
+    };
+  }
+
+  // ── Rule 5c: shadow selected but no source commit → FAILED ────────
+  // The local-vs-cloud selection picked a shadow candidate, but no
+  // commit landed on the source repo (commitSha is null). The shadow
+  // workspace can never promote — the workspace-role guard in
+  // promoteToSource enforces that. So a "selected shadow with no
+  // commit" run is reporting work that never reached the operator's
+  // repo. Surface it explicitly so the operator can re-run rather
+  // than believing the changes are live.
+  const candidates = receipt.candidates ?? [];
+  const selectedId = receipt.selectedCandidateWorkspaceId ?? null;
+  const selectedCandidate = selectedId
+    ? candidates.find((c) => c.workspaceId === selectedId) ?? null
+    : null;
+  if (
+    (verdict === "success" || verdict === "partial") &&
+    selectedCandidate?.role === "shadow" &&
+    !receipt.commitSha
+  ) {
+    factors.push(`selection:shadow-no-commit:${selectedId}`);
+    return {
+      classification: "FAILED",
+      reasonCode: "shadow-selected-not-applied",
+      reason:
+        `Shadow candidate ${selectedId} was selected but no commit was applied ` +
+        "to the source repo — shadow workspaces can never promote, so this run " +
+        "produced no live changes.",
       factors,
     };
   }

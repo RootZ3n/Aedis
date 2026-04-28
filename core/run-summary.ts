@@ -237,7 +237,9 @@ export interface RunSummaryInput {
 export function generateRunSummary(input: RunSummaryInput): RunSummary {
   const { receipt, userPrompt } = input;
 
-  const classificationResult = classifyExecution(receipt);
+  // Classification needs missingRequiredDeliverables + verificationNoSignal
+  // to enforce the no-silent-success rules. Both are computed below;
+  // the call moved past their computation. Defer classifyExecution.
 
   // Extract real verification/execution signals from the receipt to
   // feed into confidence scoring. Without this, the scorer falls back
@@ -358,6 +360,17 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
   const requiredFiles = unique(input.requiredFiles ?? []);
   const touchedFiles = new Set(changedFiles.map((change) => change.path));
   const missingRequiredFiles = requiredFiles.filter((file) => !touchedFiles.has(file));
+
+  // Classification consumes the no-silent-success signals computed
+  // above. Two paths feed FAILED here that legacy callers without
+  // these inputs never reached: missing-deliverable when the planner
+  // declared a file the builder didn't produce, and verification-not-run
+  // when no checks ran. Both are guarded inside classifyExecution so a
+  // legacy receipt with verdict="success" still classifies correctly.
+  const classificationResult = classifyExecution(receipt, {
+    missingRequiredDeliverables: missingRequiredFiles,
+    verificationNoSignal,
+  });
   const filesByRole = groupFilesByRole(changedFiles.map((change) => change.path));
   const typeScriptErrors = countTypeScriptErrors(vReceipt);
   const waveSummary = summarizeWaves(receipt);
@@ -383,6 +396,7 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
 
   const headline = buildHeadline({
     classification: classificationResult.classification,
+    reasonCode: classificationResult.reasonCode,
     whatChanged,
     confidence,
     receipt,
@@ -472,11 +486,12 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
 
 function buildHeadline(input: {
   classification: ExecutionClassification;
+  reasonCode: string;
   whatChanged: readonly FileChangeSummary[];
   confidence: ConfidenceBreakdown;
   receipt: RunReceipt;
 }): string {
-  const { classification, whatChanged, confidence } = input;
+  const { classification, reasonCode, whatChanged, confidence } = input;
   const fileCount = whatChanged.length;
   const percent = Math.round(confidence.overall * 100);
   const sha = input.receipt.commitSha ? ` (${input.receipt.commitSha.slice(0, 8)})` : "";
@@ -489,7 +504,28 @@ function buildHeadline(input: {
     case "NO_OP":
       return `Aedis did not change any files. Confidence: ${percent}%.`;
     case "FAILED":
-      return `Aedis failed to complete the task. Confidence: ${percent}%.`;
+      // The reasonCode lets the headline name the actual failure
+      // class instead of the generic "failed". Each variant matches
+      // a no-silent-success rule in classifyExecution — if any of
+      // these fire the headline must NOT advertise success.
+      switch (reasonCode) {
+        case "missing-deliverable":
+          return `Aedis did not produce the required file(s). Confidence: ${percent}%.`;
+        case "verification-not-run":
+          return `Aedis applied changes but verification did not run — not a verified success. Confidence: ${percent}%.`;
+        case "shadow-selected-not-applied":
+          return `Aedis selected a candidate from the shadow lane but the change was not applied to source. Confidence: ${percent}%.`;
+        case "merge-blocked":
+          return `Aedis blocked the commit at the merge gate. Confidence: ${percent}%.`;
+        case "scope-violation":
+          return `Aedis blocked the run for a scope violation. Confidence: ${percent}%.`;
+        case "verification-fail":
+          return `Aedis blocked the run — verification rejected the changes. Confidence: ${percent}%.`;
+        case "aborted":
+          return `Aedis run was cancelled before completion. Confidence: ${percent}%.`;
+        default:
+          return `Aedis failed to complete the task. Confidence: ${percent}%.`;
+      }
   }
 }
 
