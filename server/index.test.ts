@@ -65,3 +65,44 @@ test("createServer refuses to start when port is bound (skips startup recovery r
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
+
+// ─── parseApprovalTimeoutHours (env-parse contract) ─────────────────
+//
+// AEDIS_APPROVAL_TIMEOUT_HOURS is opt-in. Bad values (typos, "off",
+// non-numeric, negative, zero) must resolve to null so the boot path
+// doesn't start a sweeper that does nothing or crashes.
+
+test("parseApprovalTimeoutHours: undefined / empty → null (env disabled)", async () => {
+  const { parseApprovalTimeoutHours } = await import("./index.js");
+  assert.equal(parseApprovalTimeoutHours(undefined), null);
+  assert.equal(parseApprovalTimeoutHours(""), null);
+});
+
+test("parseApprovalTimeoutHours: positive number → number (env enabled)", async () => {
+  const { parseApprovalTimeoutHours } = await import("./index.js");
+  assert.equal(parseApprovalTimeoutHours("24"), 24);
+  assert.equal(parseApprovalTimeoutHours("0.5"), 0.5);
+  assert.equal(parseApprovalTimeoutHours("168"), 168);
+});
+
+test("parseApprovalTimeoutHours: zero / negative / non-finite → null (no sweep on bad value)", async () => {
+  const { parseApprovalTimeoutHours } = await import("./index.js");
+  for (const v of ["0", "-1", "-24", "Infinity", "NaN"]) {
+    assert.equal(
+      parseApprovalTimeoutHours(v),
+      null,
+      `value ${JSON.stringify(v)} must resolve to null`,
+    );
+  }
+});
+
+test("parseApprovalTimeoutHours: non-numeric strings → null", async () => {
+  const { parseApprovalTimeoutHours } = await import("./index.js");
+  for (const v of ["off", "true", "24h", "yes", "abc"]) {
+    assert.equal(
+      parseApprovalTimeoutHours(v),
+      null,
+      `value ${JSON.stringify(v)} must resolve to null`,
+    );
+  }
+});

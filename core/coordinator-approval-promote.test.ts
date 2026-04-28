@@ -931,3 +931,189 @@ test("approval flow: promoteToSource fails honestly when finalReceipt is missing
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// ─── Approval-timeout sweeper (rejectExpiredApprovals) ──────────────
+//
+// The optional approval-timeout cleanup auto-rejects abandoned
+// AWAITING_APPROVAL runs so a forgotten approval doesn't hold a
+// workspace forever. Pin the contract:
+//   - timeoutMs <= 0 / non-finite → no-op (env opt-in only)
+//   - empty pendingApproval → no-op
+//   - run not yet old enough → untouched
+//   - expired run → auto-rejected via the same rollback path as
+//     manual rejection (workspace cleaned, source untouched, terminal
+//     receipt with reason naming "approval timed out")
+//   - manual rejectRun keeps its existing behavior verbatim
+
+test("approval timeout: unset/zero/negative timeoutMs is a hard no-op (env disabled)", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 800;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+    await coordinator.submit({ input: "modify widget in core" });
+    assert.equal(coordinator.getPendingApprovals().length, 1);
+
+    for (const t of [0, -1, NaN, Infinity]) {
+      const r = await coordinator.rejectExpiredApprovals(t);
+      assert.equal(r.count, 0, `timeoutMs=${t} must skip the sweep`);
+      assert.deepEqual([...r.runIds], []);
+    }
+    assert.equal(
+      coordinator.getPendingApprovals().length,
+      1,
+      "approval must remain pending when timeoutMs disables the sweep",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("approval timeout: fresh approval (newer than threshold) is NOT rejected", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 801;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+    await coordinator.submit({ input: "modify widget in core" });
+    // A 1-hour timeout against a freshly-paused approval — must be a no-op.
+    const r = await coordinator.rejectExpiredApprovals(60 * 60 * 1000);
+    assert.equal(r.count, 0);
+    assert.equal(
+      coordinator.getPendingApprovals().length,
+      1,
+      "fresh approval must remain pending",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("approval timeout: expired approval is auto-rejected with reason on receipt + workspace cleaned + source unchanged", async () => {
+  const repo = makeTempRepo();
+  try {
+    const original = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 802;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const awaiting = await receiptStore.getRun(receipt.runId);
+    const workspacePath = awaiting?.workspace?.workspacePath;
+    assert.ok(workspacePath, "approval run must persist workspace path before timeout");
+    assert.equal(coordinator.getPendingApprovals().length, 1);
+
+    // Sweep with a tiny timeout AND a forced future "now" so the run
+    // looks ancient even though it was just registered. Mirrors what
+    // a real production sweep sees an hour later.
+    const r = await coordinator.rejectExpiredApprovals(
+      60 * 60 * 1000,                             // 1 hour timeout
+      Date.now() + 2 * 60 * 60 * 1000,            // pretend it's 2 hours from now
+    );
+    assert.equal(r.count, 1, "expired approval must be auto-rejected");
+    assert.deepEqual([...r.runIds], [receipt.runId]);
+    assert.equal(
+      coordinator.getPendingApprovals().length,
+      0,
+      "pendingApproval must be cleared after auto-rejection",
+    );
+
+    const persisted = await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.workspace?.cleanedUp === true ? current : null;
+    }, "auto-rejection should persist workspace cleanup");
+
+    // Same terminal-receipt shape as a manual rejection (REJECTED +
+    // phase=rejected + finalReceipt.summary.phase=rejected) so post-hoc
+    // analysis can use one path for both.
+    assert.equal(persisted.status, "REJECTED");
+    assert.equal(persisted.phase, "rejected");
+    assert.equal((persisted.runSummary as any)?.phase, "rejected");
+    assert.equal(
+      persisted.finalReceipt?.summary.phase,
+      "rejected",
+      "finalReceipt.summary.phase must reflect the rejected terminal state",
+    );
+    assert.equal(persisted.finalReceipt?.verdict, "failed");
+
+    // The reason is the discriminator between manual and auto-rejection.
+    // It MUST mention "approval timed out" so post-hoc grep can find
+    // these distinct from operator rejections.
+    assert.ok(
+      Array.isArray(persisted.errors) && persisted.errors.some(
+        (e: string) => /approval timed out after/i.test(e),
+      ),
+      `errors must record the timeout reason; got ${JSON.stringify(persisted.errors)}`,
+    );
+    assert.match(
+      persisted.taskSummary ?? "",
+      /Auto-rejected.*approval timed out/i,
+      "taskSummary must surface the auto-reject + reason for TUI/list views",
+    );
+
+    // Workspace gone, source repo untouched.
+    assert.equal(existsSync(workspacePath), false, "approval workspace must be removed after auto-rejection");
+    assert.equal(
+      readFileSync(join(repo, "core/widget.ts"), "utf-8"),
+      original,
+      "source repo must not be mutated by approval timeout",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("approval timeout: manual rejectRun (no opts) keeps the legacy human-rejection reason verbatim", async () => {
+  // Back-compat — the existing rejectRun() callers (TUI, /approvals/:runId/reject)
+  // pass no opts. The reason on the persisted receipt MUST stay the
+  // human-facing wording; the new auto-reject vocabulary is opt-in only.
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 803;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+
+    const result = await coordinator.rejectRun(receipt.runId);
+    assert.equal(result.ok, true);
+    const persisted = await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.workspace?.cleanedUp === true ? current : null;
+    }, "manual rejection should persist workspace cleanup");
+
+    assert.match(persisted.taskSummary ?? "", /Rejected by human/);
+    assert.ok(
+      Array.isArray(persisted.errors) && persisted.errors.some(
+        (e: string) => /Rejected by human/.test(e),
+      ),
+      `manual rejection must record the human-rejection reason verbatim; got ${JSON.stringify(persisted.errors)}`,
+    );
+    // Critically — the auto-reject phrasing must NOT appear on a manual reject.
+    assert.ok(
+      !persisted.errors?.some((e: string) => /approval timed out/i.test(e)),
+      "manual rejection must NOT carry the timeout reason",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("approval timeout: empty pendingApproval is a no-op even with an aggressive timeout", async () => {
+  // No runs in flight — sweep must return cleanly without throwing or
+  // touching anything. The server timer fires every 5 minutes; on a
+  // mostly-idle server it'll hit this code path constantly.
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+    const r = await coordinator.rejectExpiredApprovals(1);
+    assert.equal(r.count, 0);
+    assert.deepEqual([...r.runIds], []);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

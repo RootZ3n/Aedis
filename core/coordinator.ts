@@ -2140,6 +2140,11 @@ export class Coordinator {
           rationale: "DOCTRINE: user approves final apply",
         });
         // Store the active run for later approval via approveRun()
+        // Stamp the moment the run entered AWAITING_APPROVAL so the
+        // optional approval-timeout sweeper (rejectExpiredApprovals)
+        // can age it. Set HERE instead of at construction so a long
+        // build doesn't count toward the approval-pending clock.
+        active.awaitingApprovalSinceMs = Date.now();
         this.pendingApproval.set(run.id, active);
         // Build the awaiting-approval receipt FIRST so we can persist it
         // into finalReceipt below. Run ffe132ed/4b3ec065 surfaced the bug:
@@ -6092,12 +6097,30 @@ export class Coordinator {
   /**
    * Reject a run that is paused in "awaiting_approval" state.
    * Rolls back all changes and marks the run as failed.
+   *
+   * `opts.reason` overrides the default "rejected by human" reason —
+   * used by rejectExpiredApprovals to surface approval-timeout
+   * causality on the receipt. `opts.auto` flips the log line so the
+   * operator can grep auto-rejections in the server log.
    */
-  async rejectRun(runId: string): Promise<{ ok: boolean; error?: string }> {
+  async rejectRun(
+    runId: string,
+    opts: { reason?: string; auto?: boolean } = {},
+  ): Promise<{ ok: boolean; error?: string }> {
     const active = this.pendingApproval.get(runId);
     if (!active) return { ok: false, error: `No pending approval for run ${runId}` };
 
-    console.log(`[coordinator] REJECTION received for run ${runId} — rolling back...`);
+    const reason = opts.reason ?? "Rejected by human during approval gate";
+    const isAuto = opts.auto === true;
+    const summary = isAuto
+      ? `AUTO-REJECTED — ${reason}`
+      : "REJECTED — human rejected during approval gate";
+
+    console.log(
+      isAuto
+        ? `[coordinator] AUTO-REJECT for run ${runId} — ${reason} — rolling back...`
+        : `[coordinator] REJECTION received for run ${runId} — rolling back...`,
+    );
     this.pendingApproval.delete(runId);
 
     // Roll back all builder changes symmetrically (create/modify/delete)
@@ -6107,24 +6130,28 @@ export class Coordinator {
       critical: [{
         source: "coordinator",
         severity: "critical",
-        code: "coordinator:rejected",
-        message: "Run rejected by human during approval",
+        code: isAuto ? "coordinator:auto-rejected" : "coordinator:rejected",
+        message: reason,
       }],
       advisory: [],
-      primaryBlockReason: "Run rejected by human during approval",
-      summary: "REJECTED — human rejected during approval gate",
+      primaryBlockReason: reason,
+      summary,
     });
 
     // Set the explicit rejected terminal state
     advancePhase(active.run, "rejected");
-    active.run.failureReason = "Rejected by human during approval gate";
+    active.run.failureReason = reason;
 
     recordDecision(active.run, {
-      description: "Run rejected by human during approval",
-      madeBy: "human",
+      description: isAuto
+        ? "Run auto-rejected (approval timed out)"
+        : "Run rejected by human during approval",
+      madeBy: isAuto ? "system" : "human",
       taskId: null,
-      alternatives: ["Approve and commit"],
-      rationale: "Human rejected the run at the approval gate. All changes rolled back.",
+      alternatives: isAuto ? ["Approve before timeout"] : ["Approve and commit"],
+      rationale: isAuto
+        ? `Auto-rejected by approval-timeout sweeper. ${reason}. All changes rolled back.`
+        : "Human rejected the run at the approval gate. All changes rolled back.",
     });
 
     // Persist a terminal-shaped receipt: phase, runSummary, and a merged
@@ -6141,18 +6168,26 @@ export class Coordinator {
 
     await this.receiptStore.patchRun(runId, {
       status: "REJECTED",
-      taskSummary: "Rejected by human — all changes rolled back",
+      taskSummary: isAuto
+        ? `Auto-rejected — ${reason}`
+        : "Rejected by human — all changes rolled back",
       phase: active.run.phase,
       completedAt: new Date().toISOString(),
       runSummary,
       ...(mergedFinalReceipt ? { finalReceipt: mergedFinalReceipt } : {}),
-      appendErrors: ["Run rejected by human during approval gate"],
+      appendErrors: [reason],
     });
 
     console.log(`[coordinator] Run ${runId} rejected and rolled back — terminal state: rejected`);
     this.emit({
       type: "run_complete",
-      payload: { runId, verdict: "failed", executionVerified: false, executionReason: "Rejected by human", classification: null },
+      payload: {
+        runId,
+        verdict: "failed",
+        executionVerified: false,
+        executionReason: reason,
+        classification: null,
+      },
     });
 
     // Workspace cleanup after rejection
@@ -6160,6 +6195,48 @@ export class Coordinator {
     this.activeRuns.delete(runId);
 
     return { ok: true };
+  }
+
+  /**
+   * Bulk-reject every pending approval whose age exceeds `timeoutMs`.
+   * Returns the list of run ids that were auto-rejected. Each rejected
+   * run goes through the same rollback path as a manual rejection;
+   * source repo stays untouched, workspaces are cleaned, receipts
+   * carry the explicit "approval timed out after X" reason.
+   *
+   * Pure on the no-op path: when nothing has expired, returns
+   * `{ count: 0, runIds: [] }` without touching any state. Safe to
+   * call on a fixed timer.
+   */
+  async rejectExpiredApprovals(
+    timeoutMs: number,
+    nowMs: number = Date.now(),
+  ): Promise<{ count: number; runIds: readonly string[] }> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return { count: 0, runIds: [] };
+    }
+    // Snapshot first — rejectRun mutates pendingApproval, so iterating
+    // it directly while rejecting would skip entries.
+    const expired: string[] = [];
+    for (const [runId, active] of this.pendingApproval) {
+      const since = active.awaitingApprovalSinceMs;
+      if (typeof since !== "number") continue;
+      if (nowMs - since >= timeoutMs) expired.push(runId);
+    }
+    if (expired.length === 0) return { count: 0, runIds: [] };
+    const hours = (timeoutMs / (60 * 60 * 1000)).toFixed(1).replace(/\.0$/, "");
+    const reason = `approval timed out after ${hours} hour${hours === "1" ? "" : "s"}`;
+    const rejected: string[] = [];
+    for (const runId of expired) {
+      const result = await this.rejectRun(runId, { reason, auto: true });
+      if (result.ok) rejected.push(runId);
+    }
+    if (rejected.length > 0) {
+      console.log(
+        `[coordinator] approval-timeout sweep: auto-rejected ${rejected.length} run(s) older than ${hours}h — ${rejected.join(", ")}`,
+      );
+    }
+    return { count: rejected.length, runIds: rejected };
   }
 
   /** Get list of runs awaiting approval */
@@ -8128,6 +8205,13 @@ interface ActiveRun {
   changes: FileChange[];
   workerResults: WorkerResult[];
   cancelled: boolean;
+  /**
+   * Wall-clock ms since epoch when the run entered AWAITING_APPROVAL.
+   * Set in the await-gate immediately before pendingApproval registration;
+   * undefined for runs that never paused for approval. Read by
+   * rejectExpiredApprovals to age abandoned approvals.
+   */
+  awaitingApprovalSinceMs?: number;
   /**
    * Effective project root for this run. In isolated workspace mode,
    * this points to the WORKSPACE path, not the source repo. All file

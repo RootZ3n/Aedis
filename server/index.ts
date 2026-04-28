@@ -57,6 +57,19 @@ import { planRoutes } from "./routes/plans.js";
 import { safeDefaults, policyFromCoordinatorConfig, type RuntimePolicy } from "../core/runtime-policy.js";
 import { loadLaneConfigFromDisk } from "../core/lane-config.js";
 
+/**
+ * Parse AEDIS_APPROVAL_TIMEOUT_HOURS into a positive number, or null
+ * when unset / invalid. Exported for test coverage of the env-parse
+ * contract — sweeps must be opt-in and tolerant of bad input rather
+ * than crashing the boot path.
+ */
+export function parseApprovalTimeoutHours(raw: string | undefined): number | null {
+  if (raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────
 
 export interface ServerConfig {
@@ -380,6 +393,26 @@ export async function createServer(
     eventBus,
     receiptStore,
   );
+
+  // Optional approval-timeout sweeper. Default off — opt in by setting
+  // AEDIS_APPROVAL_TIMEOUT_HOURS to a positive number. When set, runs
+  // that have been AWAITING_APPROVAL longer than the threshold are
+  // auto-rejected on the same path as a manual rejection (rollback,
+  // workspace cleanup, terminal receipt). The timer is intentionally
+  // server-scoped so a config change takes effect at next restart.
+  const timeoutHours = parseApprovalTimeoutHours(process.env["AEDIS_APPROVAL_TIMEOUT_HOURS"]);
+  if (timeoutHours !== null) {
+    const timeoutMs = Math.round(timeoutHours * 60 * 60 * 1000);
+    console.log(
+      `[server] AEDIS_APPROVAL_TIMEOUT_HOURS=${timeoutHours} — abandoned approvals auto-reject after ${timeoutHours}h`,
+    );
+    const sweepIntervalMs = Math.min(5 * 60 * 1000, Math.max(60_000, Math.floor(timeoutMs / 4)));
+    setInterval(() => {
+      coordinator.rejectExpiredApprovals(timeoutMs).catch((err) => {
+        console.error(`[server] approval-timeout sweep error: ${err}`);
+      });
+    }, sweepIntervalMs).unref();
+  }
 
   // Read lane mode from disk for the policy summary. Re-read by /health
   // on every request so a config edit during runtime shows up without
