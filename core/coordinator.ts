@@ -640,6 +640,10 @@ export interface CandidateManifestEntry {
   readonly intentModel?: string;
   /** Model that actually answered (from cost.model); diverges on fallback. */
   readonly actualModel?: string;
+  /** Alias for actualModel — kept for receipt-schema symmetry with providerUsed. */
+  readonly modelUsed?: string;
+  /** Provider that actually answered (only when intent==actual; see Candidate doc). */
+  readonly providerUsed?: string;
   readonly status: CandidateStatus;
   readonly disqualification: string | null;
   readonly costUsd: number;
@@ -6727,6 +6731,21 @@ export class Coordinator {
     const latencyMs = Date.now() - t0;
     const costUsd = result?.cost?.estimatedCostUsd ?? 0;
 
+    // Cost attribution: accrue the shadow dispatch into run.totalCost
+    // so the run total includes the shadow's spend. Without this, the
+    // sum of candidate costs > run total, which makes post-hoc analysis
+    // lie about either per-candidate cost or run total. The shadow's
+    // cost is purely additive — the primary path already finished
+    // accruing before runShadowBuilder fires.
+    if (result?.cost) {
+      active.run.totalCost = {
+        model: result.cost.model || active.run.totalCost.model,
+        inputTokens: active.run.totalCost.inputTokens + result.cost.inputTokens,
+        outputTokens: active.run.totalCost.outputTokens + result.cost.outputTokens,
+        estimatedCostUsd: active.run.totalCost.estimatedCostUsd + result.cost.estimatedCostUsd,
+      };
+    }
+
     let patchArtifact: PatchArtifact | null = null;
     try {
       patchArtifact = await generatePatch(shadow.handle);
@@ -6737,13 +6756,15 @@ export class Coordinator {
     }
 
     // Lane attribution honesty: `intentModel` is what the lane asked
-    // for; `actualModel` is what `WorkerResult.cost.model` reports
-    // actually answered. They diverge when a fallback fired (e.g. the
-    // pinned cloud model returned empty content and a chain entry
-    // produced the diff). The receipt records both so the operator
-    // sees the gap rather than reading intent and assuming dispatch.
+    // for; `actualModel` / `modelUsed` is what `WorkerResult.cost.model`
+    // reports actually answered. Lane purity (pinnedModel + null
+    // fallback at the factory) makes them structurally identical for
+    // pinned shadow builders; the fields stay distinct so a non-pinned
+    // shadow (legacy chain) can still surface divergence.
     const intentModel = opts.model;
     const actualModel = result?.cost?.model || undefined;
+    const providerUsed =
+      actualModel && actualModel === intentModel ? opts.provider : undefined;
 
     const candidate: Candidate = {
       workspaceId: shadow.workspaceId,
@@ -6764,7 +6785,8 @@ export class Coordinator {
       ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(intentModel !== undefined ? { intentModel } : {}),
-      ...(actualModel ? { actualModel } : {}),
+      ...(actualModel ? { actualModel, modelUsed: actualModel } : {}),
+      ...(providerUsed ? { providerUsed } : {}),
     };
     active.candidates.push(candidate);
     console.log(
@@ -6876,12 +6898,26 @@ export class Coordinator {
     }
 
     // Lane attribution honesty: `intentModel` is what the lane asked
-    // for; `actualModel` is what the run's aggregated cost says actually
-    // answered. They diverge when a chain entry past the primary fired,
-    // and the receipt should make that visible instead of pretending
-    // the intent was the dispatch.
+    // for; `actualModel` / `modelUsed` is what the BUILDER's WorkerResult
+    // says actually produced the diff. Reading from active.run.totalCost
+    // was wrong — that field gets overwritten by every accrueCost
+    // (scout / critic / verifier / integrator), so by the time the
+    // primary candidate is recorded the model field reflects whichever
+    // worker ran LAST, not the builder. The fix: pluck the builder's
+    // own WorkerResult.
     const intentModel = inputs.model;
-    const actualModel = active.run.totalCost?.model || undefined;
+    const builderResult = active.workerResults.find(
+      (r) => r.workerType === "builder",
+    );
+    const actualModel = builderResult?.cost?.model || undefined;
+    // For lane-pinned builders the chain is structurally a single
+    // entry (pinnedModel + fallbackModel: null), so providerUsed is
+    // identical to the lane's intent provider when actualModel matches
+    // intentModel. When they diverge (non-pinned legacy chain), we
+    // can't know the provider without extending CostEntry — leave it
+    // undefined rather than guessing.
+    const providerUsed =
+      actualModel && actualModel === intentModel ? inputs.provider : undefined;
 
     const candidate: Candidate = {
       workspaceId: "primary",
@@ -6899,7 +6935,8 @@ export class Coordinator {
       ...(inputs.provider !== undefined ? { provider: inputs.provider } : {}),
       ...(inputs.model !== undefined ? { model: inputs.model } : {}),
       ...(intentModel !== undefined ? { intentModel } : {}),
-      ...(actualModel ? { actualModel } : {}),
+      ...(actualModel ? { actualModel, modelUsed: actualModel } : {}),
+      ...(providerUsed ? { providerUsed } : {}),
       ...(testsPassed !== undefined ? { testsPassed } : {}),
       ...(typecheckPassed !== undefined ? { typecheckPassed } : {}),
       changedFiles: active.changes.map((c) => c.path),
@@ -7008,6 +7045,8 @@ export class Coordinator {
       ...(c.model !== undefined ? { model: c.model } : {}),
       ...(c.intentModel !== undefined ? { intentModel: c.intentModel } : {}),
       ...(c.actualModel !== undefined ? { actualModel: c.actualModel } : {}),
+      ...(c.modelUsed !== undefined ? { modelUsed: c.modelUsed } : {}),
+      ...(c.providerUsed !== undefined ? { providerUsed: c.providerUsed } : {}),
       status: c.status,
       disqualification: candidateDisqualification(c),
       costUsd: c.costUsd,

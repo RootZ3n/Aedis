@@ -1008,3 +1008,201 @@ test("lane-rescue: receipt records intent vs actual model on the rescued shadow"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ─── Lane purity & cost attribution ─────────────────────────────────
+//
+// Three contracts the integrity pass pins explicitly:
+//   1. Lane-pinned builder fails as the pinned model — no fallback,
+//      no silent substitution. Already structurally enforced by the
+//      factory (pinnedModel + fallbackModel: null) but kept loud here.
+//   2. providerUsed / modelUsed populated on lane-pinned candidates
+//      with the values from the worker result (and matching intent).
+//   3. Shadow's cost is accrued into run.totalCost so the run total
+//      equals the sum of candidate costs (no $0 hole, no double-count).
+
+test("lane purity: pinned builder reports an empty fallback chain (no auto-substitution)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aedis-laneD-purity-"));
+  try {
+    const builder = createBuilderForLane({
+      projectRoot: dir,
+      provider: "openrouter",
+      model: "xiaomi/mimo-v2.5",
+    });
+    assert.ok(builder);
+    // Cast through index access — getDeclaredFallbackChain is private.
+    // The empty chain is the structural guarantee that the only model
+    // a pinned dispatch will EVER hit is the one the lane requested.
+    const chain = (builder as any).getDeclaredFallbackChain(dir, "standard");
+    assert.deepEqual(
+      chain,
+      [],
+      "lane-pinned builder must report an empty fallback chain — no model substitution possible",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attribution: lane-pinned shadow records modelUsed + providerUsed when actual matches intent", async () => {
+  // Lane purity → actualModel === intentModel always. providerUsed
+  // therefore equals the lane's intent provider. Test pins both fields
+  // appearing on the persisted manifest entry.
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const honest = new CostfulBuilder("xiaomi/mimo-v2.5");
+    const stubFactory: typeof createBuilderForLane = () =>
+      honest as unknown as BuilderWorker;
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: stubFactory,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    const shadow = final.candidates.find((c: any) => c.role === "shadow");
+    assert.ok(shadow);
+    assert.equal(shadow.intentModel, "xiaomi/mimo-v2.5");
+    assert.equal(shadow.actualModel, "xiaomi/mimo-v2.5");
+    assert.equal(shadow.modelUsed, "xiaomi/mimo-v2.5", "modelUsed must be populated alongside actualModel");
+    assert.equal(
+      shadow.providerUsed,
+      "openrouter",
+      "lane purity guarantees providerUsed == intent provider for pinned shadow",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attribution: when actualModel diverges from intentModel, providerUsed is omitted (no guessing)", async () => {
+  // Lane purity normally prevents this case, but the test factory can
+  // sneak a divergent cost.model through. The contract: providerUsed
+  // must NOT be set in this case — we don't know which provider
+  // actually answered, and guessing would lie.
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const sneaky = new CostfulBuilder("actually-something-else");
+    const stubFactory: typeof createBuilderForLane = () =>
+      sneaky as unknown as BuilderWorker;
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: stubFactory,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    const shadow = final.candidates.find((c: any) => c.role === "shadow");
+    assert.equal(shadow.intentModel, "xiaomi/mimo-v2.5");
+    assert.equal(shadow.actualModel, "actually-something-else");
+    assert.equal(shadow.modelUsed, "actually-something-else");
+    assert.equal(
+      shadow.providerUsed,
+      undefined,
+      "providerUsed must be omitted when actualModel != intentModel",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cost attribution: shadow cost is accrued into run.totalCost (sum of candidates == run total)", async () => {
+  // Pre-fix, runShadowBuilder set candidate.costUsd from result.cost
+  // but did NOT call accrueCost — so the run total was the primary
+  // path's spend only and the sum of candidates exceeded the run total
+  // by exactly the shadow's cost. Fix accrues into run.totalCost so
+  // the two reconcile; this test pins that they agree.
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    // CostfulBuilder reports a non-zero cost in the WorkerResult so
+    // the accrual path has something to actually accrue.
+    const shadowBuilder = new CostfulBuilder("xiaomi/mimo-v2.5");
+    // Override estimatedCostUsd so the shadow has a measurable spend.
+    const originalExecute = shadowBuilder.execute.bind(shadowBuilder);
+    (shadowBuilder as any).execute = async (a: WorkerAssignment) => {
+      const r = await originalExecute(a);
+      return {
+        ...r,
+        cost: { ...r.cost, estimatedCostUsd: 0.0123 },
+      };
+    };
+    const stubFactory: typeof createBuilderForLane = () =>
+      shadowBuilder as unknown as BuilderWorker;
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: stubFactory,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    const candidates = final.candidates ?? [];
+    assert.ok(candidates.length >= 2, `expected primary + shadow candidates; got ${candidates.length}`);
+    const sum = candidates.reduce((acc: number, c: any) => acc + (c.costUsd ?? 0), 0);
+    const runTotal = final.totalCost?.estimatedCostUsd ?? 0;
+    // Sum of candidates must equal run total — within a tiny epsilon
+    // for floating-point math. Pre-fix this assertion failed by
+    // exactly the shadow's cost (sum > total).
+    assert.ok(
+      Math.abs(sum - runTotal) < 1e-6,
+      `sum of candidate costs ($${sum.toFixed(6)}) must equal run total ($${runTotal.toFixed(6)})`,
+    );
+    // And the run total must include the shadow's spend (ie. > 0
+    // even though primary was a stub builder with zeroCost()).
+    assert.ok(
+      runTotal >= 0.0123,
+      `run total must include shadow spend; expected >= 0.0123, got $${runTotal.toFixed(6)}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cost attribution: shadow with zero cost is a no-op on run.totalCost (no false accrual)", async () => {
+  // Defense: when the shadow worker returns zeroCost(), the run total
+  // must NOT change. Catches the case where the accrual code added a
+  // phantom row.
+  const dir = makeRepoWithLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    const harness = buildHarness(dir, {
+      typecheckPasses: false,
+      laneBuilderFactory: () => null,
+    });
+    await harness.coordinator.submit({ input: "modify widget in core" });
+
+    const persisted = await harness.receiptStore.listRuns(1);
+    const detail = await harness.receiptStore.getRun(persisted[0].runId);
+    const final = (detail as any).finalReceipt;
+    const sum = (final.candidates ?? []).reduce(
+      (acc: number, c: any) => acc + (c.costUsd ?? 0),
+      0,
+    );
+    const runTotal = final.totalCost?.estimatedCostUsd ?? 0;
+    assert.ok(
+      Math.abs(sum - runTotal) < 1e-6,
+      `zero-cost shadow must not break the sum-equals-total invariant`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

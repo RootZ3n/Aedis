@@ -148,6 +148,24 @@ export interface Candidate {
    * attribution stays honest.
    */
   readonly actualModel?: string;
+  /**
+   * Alias for `actualModel`, kept distinct so the receipt schema can
+   * carry the operator-friendly name. Always populated together with
+   * `actualModel`; same value, surfaced for symmetry with the
+   * `providerUsed` field below.
+   */
+  readonly modelUsed?: string;
+  /**
+   * Provider that actually answered. Populated only when `actualModel`
+   * equals `intentModel` — for lane-pinned dispatches that's
+   * structurally guaranteed (single-entry chain, no auto-fallback), so
+   * providerUsed equals the lane's intent provider. When the two
+   * models diverge (non-pinned legacy chain) the provider can't be
+   * inferred from the cost entry and the field is omitted rather than
+   * guessed; the operator can still see the model divergence on
+   * `actualModel`.
+   */
+  readonly providerUsed?: string;
   /** Number of ADVISORY findings. Lower is better at the tiebreaker level. */
   readonly advisoryFindings?: number;
   /** True when the run produced every required deliverable. False disqualifies. */
