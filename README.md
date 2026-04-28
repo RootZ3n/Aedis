@@ -6,9 +6,9 @@
 
 ---
 
-Aedis takes a natural language prompt, decomposes it into a governed execution plan, dispatches it through a 5-worker pipeline, verifies the output against hard contracts, and commits real code changes to a git repo — or rolls everything back if any gate fails.
+Aedis takes a natural language prompt, decomposes it into a governed execution plan, dispatches it through a 5-worker pipeline, verifies the output against hard contracts, and — with operator approval — commits real code changes to a git repo. If any gate fails, everything rolls back.
 
-Not a chatbot wrapper. Not a prompt-and-pray loop. A build system with receipts, rollback, and a merge gate that means it.
+Not a chatbot wrapper. Not a prompt-and-pray loop. Not autonomous. A supervised build system with receipts, rollback, approval gates, and a merge gate that means it.
 
 ## Benchmark
 
@@ -119,6 +119,21 @@ ProjectMemory          DiffApplier                        git commit / rollback
 git clone https://github.com/RootZ3n/aedis
 cd aedis
 cp .env.example .env
+```
+
+Edit `.env` and configure:
+
+1. **Provider keys** — the default config requires `OPENROUTER_API_KEY` and `ZAI_API_KEY`. See [docs/PROVIDER-SETUP.md](docs/PROVIDER-SETUP.md) for details.
+2. **Ollama** — the default critic and prompt normalizer use local Ollama models. Install and start Ollama, then pull the required models:
+   ```bash
+   ollama pull qwen3.5:9b    # critic
+   ollama pull qwen3.5:4b    # prompt normalizer
+   ```
+3. **Auth** — auth is enabled by default (Tailscale identity required). For local development, set `TAILSCALE_ONLY=true` in `.env` to disable auth.
+
+Then build and run:
+
+```bash
 npm ci
 npm run build
 npm run start:dist
@@ -127,6 +142,8 @@ npm run start:dist
 Open [http://localhost:18796](http://localhost:18796).
 
 Type a prompt. Watch the worker grid light up. Read the receipt.
+
+Run `aedis doctor` to verify your setup — it checks server health and build staleness. Aedis stores runtime receipts under `AEDIS_STATE_ROOT` (default: the Aedis install directory), not in the target repo.
 
 **Using Aedis as your primary repo tool with approval in the loop?**
 See [docs/SUPERVISED-QUICKSTART.md](docs/SUPERVISED-QUICKSTART.md) — a
@@ -163,7 +180,15 @@ Models: per-repo selection via `.aedis/model-config.json` with declarative `chai
 
 ## Status
 
-Active development. Running in production on TypeScript monorepos. Building itself for $0.024 per task.
+Active development. Running in supervised production on TypeScript monorepos. Building itself for $0.024 per task.
+
+## Docs
+
+- [Provider Setup](docs/PROVIDER-SETUP.md) — configure OpenRouter, Ollama, Z.ai, and optional providers
+- [Supervised Quickstart](docs/SUPERVISED-QUICKSTART.md) — approval flow, doctor, TUI, burn-in, lane config
+- [FAQ](FAQ.md) — common questions about safety, providers, and setup
+- [Contributing](CONTRIBUTING.md) — how to build, test, and submit PRs
+- [License](LICENSE) — MIT
 
 ---
 

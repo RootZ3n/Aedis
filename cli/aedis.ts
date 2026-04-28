@@ -41,6 +41,7 @@ import {
   type ReliabilityTask,
 } from "../core/reliability-harness.js";
 import { HttpTaskRunner } from "../core/reliability-runner.js";
+import { checkOpenRouterHealth } from "../core/openrouter-client.js";
 
 const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://localhost:18796";
 const PROJECT_ROOT = process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd();
@@ -244,6 +245,68 @@ export function formatDoctorReport(input: DoctorInput): string {
   return lines.join("\n");
 }
 
+// ─── Provider pre-flight checks ───────────────────────────────────────
+
+interface ProviderCheckResult {
+  provider: string;
+  ok: boolean;
+  detail: string;
+}
+
+async function checkOllamaReachable(): Promise<ProviderCheckResult> {
+  const base = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+  try {
+    const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return { provider: "ollama", ok: false, detail: `HTTP ${res.status} from ${base}` };
+    const data = (await res.json()) as { models?: Array<{ name?: string }> };
+    const names = (data.models ?? []).map((m) => m.name ?? "");
+    const required = ["qwen3.5:9b", "qwen3.5:4b"];
+    const missing = required.filter((m) => !names.some((n) => n === m || n.startsWith(m + ":")));
+    if (missing.length > 0) {
+      return { provider: "ollama", ok: false, detail: `reachable at ${base} but missing models: ${missing.join(", ")}. Fix: ${missing.map((m) => `ollama pull ${m}`).join(" && ")}` };
+    }
+    return { provider: "ollama", ok: true, detail: `reachable at ${base} — ${names.length} model(s) installed` };
+  } catch {
+    return { provider: "ollama", ok: false, detail: `unreachable at ${base}. Is Ollama running? Start with: ollama serve` };
+  }
+}
+
+async function checkRequiredKeys(): Promise<ProviderCheckResult[]> {
+  const results: ProviderCheckResult[] = [];
+  const orKey = process.env.OPENROUTER_API_KEY;
+  if (!orKey) {
+    results.push({ provider: "openrouter", ok: false, detail: "OPENROUTER_API_KEY not set in environment" });
+  } else {
+    const health = await checkOpenRouterHealth();
+    results.push({ provider: "openrouter", ok: health.ok, detail: health.reason + (health.creditRemaining !== undefined ? ` ($${health.creditRemaining.toFixed(2)} remaining)` : "") });
+  }
+  const zaiKey = process.env.ZAI_API_KEY;
+  if (!zaiKey) {
+    results.push({ provider: "zai", ok: false, detail: "ZAI_API_KEY not set in environment" });
+  } else {
+    results.push({ provider: "zai", ok: true, detail: "key present" });
+  }
+  return results;
+}
+
+async function runProviderChecks(): Promise<string[]> {
+  const lines: string[] = [];
+  lines.push("");
+  lines.push("── PROVIDER CHECKS ──────────────────────────────────────────");
+  const [ollama, keys] = await Promise.all([checkOllamaReachable(), checkRequiredKeys()]);
+  const all = [ollama, ...keys];
+  for (const r of all) {
+    const icon = r.ok ? "ok" : "FAIL";
+    lines.push(`${r.provider.padEnd(14)} ${icon.padEnd(6)} ${r.detail}`);
+  }
+  const failures = all.filter((r) => !r.ok);
+  if (failures.length > 0) {
+    lines.push("");
+    lines.push(`${failures.length} provider issue(s). See docs/PROVIDER-SETUP.md for setup instructions.`);
+  }
+  return lines;
+}
+
 async function fetchHealthSafe(apiBase: string): Promise<{ health: DoctorHealthShape | null; error: string | null }> {
   try {
     const res = await fetch(`${apiBase}/health`);
@@ -306,6 +369,11 @@ const COMMANDS = {
     };
     const report = formatDoctorReport(input);
     console.log(report);
+
+    // Provider connectivity checks — always run regardless of server state.
+    const providerLines = await runProviderChecks();
+    console.log(providerLines.join("\n"));
+
     if (!health) {
       process.exitCode = 1;
       return;
