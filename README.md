@@ -128,6 +128,12 @@ Open [http://localhost:18796](http://localhost:18796).
 
 Type a prompt. Watch the worker grid light up. Read the receipt.
 
+**Using Aedis as your primary repo tool with approval in the loop?**
+See [docs/SUPERVISED-QUICKSTART.md](docs/SUPERVISED-QUICKSTART.md) — a
+one-page walkthrough covering doctor, the safe default policy, TUI
+review, approve/reject, burn-in, lane config, stale-server warnings,
+and cleanup/recovery.
+
 ## API
 
 ```bash
