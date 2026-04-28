@@ -667,11 +667,12 @@ test("local smoke profile: tiny supervised task reaches approval and promotion w
   delete process.env.ZAI_API_KEY;
 
   const repo = makeTempRepo();
+  const stateRoot = mkdtempSync(join(tmpdir(), "aedis-local-smoke-state-"));
   try {
     const builder = new RealBuilderWorker([
       { path: "hello-aedis.txt", content: "Aedis RC smoke test.\n" },
     ]);
-    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true, stateRoot });
 
     const receipt = await coordinator.submit({
       input: "Create the repository root file hello-aedis.txt containing exactly: Aedis RC smoke test.",
@@ -691,6 +692,8 @@ test("local smoke profile: tiny supervised task reaches approval and promotion w
     const promote = await coordinator.promoteToSource(receipt.runId);
     assert.equal(promote.ok, true, `promoteToSource must succeed; got error=${promote.error}`);
     assert.equal(readFileSync(join(repo, "hello-aedis.txt"), "utf-8"), "Aedis RC smoke test.\n");
+    assert.equal(existsSync(join(repo, ".aedis")), false, "promotion locks must not create target repo .aedis state");
+    assert.equal(existsSync(join(stateRoot, "state", "promotion-locks")), true);
   } finally {
     if (prevProfile === undefined) delete process.env.AEDIS_MODEL_PROFILE;
     else process.env.AEDIS_MODEL_PROFILE = prevProfile;
@@ -699,6 +702,7 @@ test("local smoke profile: tiny supervised task reaches approval and promotion w
     if (prevZai === undefined) delete process.env.ZAI_API_KEY;
     else process.env.ZAI_API_KEY = prevZai;
     rmSync(repo, { recursive: true, force: true });
+    rmSync(stateRoot, { recursive: true, force: true });
   }
 });
 

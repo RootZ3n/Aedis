@@ -38,7 +38,7 @@
  * exit branch is logged with the [coordinator] prefix.
  */
 
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { resolve } from "path";
@@ -7230,7 +7230,7 @@ export class Coordinator {
     // Try patch artifact first (survives workspace cleanup)
     if (patchArtifact?.diff && patchArtifact.diff.trim()) {
       const patchDiff = patchArtifact.diff;
-      return withRepoLock(resolve(sourceRepo, ".aedis", "promotion"), async () => {
+      return withRepoLock(this.promotionLockPath(sourceRepo), async () => {
         const alreadyPromoted = await this.refuseAlreadyPromoted(runId);
         if (alreadyPromoted) return alreadyPromoted;
         const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
@@ -7338,7 +7338,7 @@ export class Coordinator {
     const { existsSync } = await import("node:fs");
     if (!existsSync(workspacePath)) return { ok: false, error: "Workspace not found: " + workspacePath + " and no patch artifact saved" };
 
-    return withRepoLock(resolve(sourceRepo, ".aedis", "promotion"), async () => {
+    return withRepoLock(this.promotionLockPath(sourceRepo), async () => {
       const alreadyPromoted = await this.refuseAlreadyPromoted(runId);
       if (alreadyPromoted) return alreadyPromoted;
       const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
@@ -7425,6 +7425,14 @@ export class Coordinator {
       ok: false,
       error: "Run is already promoted; refresh run status before retrying promotion",
     };
+  }
+
+  private promotionLockPath(sourceRepo: string): string {
+    const repoHash = createHash("sha256")
+      .update(resolve(sourceRepo))
+      .digest("hex")
+      .slice(0, 16);
+    return resolve(this.config.stateRoot ?? this.config.projectRoot, "state", "promotion-locks", `${repoHash}.promotion`);
   }
 
   // ─── Change Collection ─────────────────────────────────────────────
