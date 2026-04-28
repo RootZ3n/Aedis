@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import type { RunReceipt } from "./coordinator.js";
 import type { CostEntry } from "./runstate.js";
+import { redactForReceipt } from "./redaction.js";
 
 /**
  * Workspace reference persisted on the run receipt. Used by startup
@@ -821,7 +822,7 @@ export class ReceiptStore {
   }
 
   private async writeRunFile(run: PersistentRunReceipt): Promise<void> {
-    await writeJsonAtomic(this.runPath(run.runId), run);
+    await writeJsonAtomic(this.runPath(run.runId), redactForReceipt(run));
   }
 
   private async readIndexFile(): Promise<ReceiptIndexFile> {

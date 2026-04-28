@@ -161,6 +161,7 @@ import { buildRunSummaryPayload, persistentStatusForReceipt } from "./coordinato
 import { buildDispatchAssignment, workerCompleteEventType } from "./coordinator-dispatch.js";
 import { determineRunVerdict } from "./coordinator-lifecycle.js";
 import { estimateBlastRadius, type BlastRadiusEstimate } from "./blast-radius.js";
+import { redactText } from "./redaction.js";
 import { normalizePrompt } from "./prompt-normalizer.js";
 import {
   classifyScope,
@@ -1070,7 +1071,7 @@ export class Coordinator {
 
     // Phase 1: Charter
     console.log(`[coordinator] PHASE 1: Charter — analyzing request`);
-    this.emit({ type: "run_started", payload: { runId: submission.runId ?? null, input: normalizedInput } });
+    this.emit({ type: "run_started", payload: { runId: submission.runId ?? null, input: redactText(normalizedInput) } });
 
     const baseAnalysis = this.charterGen.analyzeRequest(normalizedInput);
     const preparedTargets = prepareTargetsForPrompt({

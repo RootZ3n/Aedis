@@ -18,6 +18,7 @@
 
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { redactObject } from "../../core/redaction.js";
 
 import {
   type BurnResultRow,
@@ -276,7 +277,7 @@ export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
 
 function logResult(result: BurnResultRow, invocationId?: string): void {
   if (invocationId) result.invocationId = invocationId;
-  appendFileSync(RESULTS_FILE, JSON.stringify(result) + "\n", "utf-8");
+  appendFileSync(RESULTS_FILE, JSON.stringify(redactObject(result)) + "\n", "utf-8");
   const cost = result.costUsd?.toFixed(4) ?? "?.????";
   const cleanup = result.cleanup === "none" ? "" : ` cleanup=${result.cleanup}(${result.cleanupOk ? "ok" : "fail"})`;
   console.log(

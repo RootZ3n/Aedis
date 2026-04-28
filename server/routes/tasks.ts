@@ -13,6 +13,7 @@ import { existsSync } from "fs";
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import { askLoqui } from "../../core/loqui.js";
 import { routeLoquiInput, type LoquiRouteDecision } from "../../core/loqui-router.js";
+import { redactText, redactError } from "../../core/redaction.js";
 import type { LoquiIntentContext } from "../../core/loqui-intent.js";
 import { generateDryRun } from "../../core/dry-run.js";
 import type { RunReceipt } from "../../core/coordinator.js";
@@ -142,7 +143,7 @@ export function registerTrackedPlanRun(
   }).catch((err) => {
     tracked.status = "failed";
     tracked.completedAt = new Date().toISOString();
-    tracked.error = err instanceof Error ? err.message : String(err);
+    tracked.error = redactText(err instanceof Error ? err.message : String(err));
   });
 
   return { taskId, runId };
@@ -210,7 +211,7 @@ async function submitBuildTask(
   }
 
   if (gateResult.kind === "needs_clarification") {
-    console.log(`[tasks] clarification needed for prompt: "${prompt.slice(0, 80)}"`);
+    console.log(`[tasks] clarification needed for prompt: "${redactText(prompt.slice(0, 80))}"`);;
     return { kind: "needs_clarification", question: gateResult.question };
   }
 
@@ -293,15 +294,14 @@ async function submitBuildTask(
   }).catch((err) => {
     console.error("═══ COORDINATOR SUBMIT FAILED ═══");
     console.error("taskId:", taskId);
-    console.error("prompt:", tracked.prompt.slice(0, 200));
+    console.error("prompt:", redactText(tracked.prompt.slice(0, 200)));
     console.error("repoPath:", repoPath ?? "(default)");
-    console.error("error:", err instanceof Error ? err.message : err);
-    console.error("stack:", err instanceof Error ? err.stack : "");
+    console.error("error:", redactError(err));
     console.error("═════════════════════════════════");
 
     tracked.status = "failed";
     tracked.completedAt = new Date().toISOString();
-    tracked.error = err instanceof Error ? err.message : String(err);
+    tracked.error = redactText(err instanceof Error ? err.message : String(err));
     void ctx.receiptStore.updateTask(taskId, {
       status: "failed",
       completedAt: tracked.completedAt,
@@ -924,7 +924,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     async (request: FastifyRequest<{ Body: SubmitBody }>, reply: FastifyReply) => {
       const prompt = request.body.prompt || request.body.input;
       const repoPath = request.body.repoPath;
-      console.log("[tasks] POST /tasks received:", { prompt: prompt?.slice(0, 80), repoPath });
+      console.log("[tasks] POST /tasks received:", { prompt: redactText(prompt?.slice(0, 80) ?? ""), repoPath });
 
       if (!prompt || !prompt.trim()) {
         reply.code(400).send({

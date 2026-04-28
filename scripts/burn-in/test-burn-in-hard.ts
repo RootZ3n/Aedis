@@ -11,6 +11,7 @@
  */
 
 import { writeFileSync } from "node:fs";
+import { redactObject } from "../../core/redaction.js";
 
 import {
   type BurnResultRow,
@@ -222,7 +223,7 @@ async function main(): Promise<void> {
     );
     const errors = Array.isArray(r.errors) ? r.errors : [];
     if (errors.length > 0) console.log(`       ↳ ${safeStr(errors[0]).slice(0, 120)}`);
-    writeFileSync(RESULTS_FILE, JSON.stringify(r) + "\n", { flag: "a" });
+    writeFileSync(RESULTS_FILE, JSON.stringify(redactObject(r)) + "\n", { flag: "a" });
     await new Promise((res) => setTimeout(res, 2000));
   }
 
