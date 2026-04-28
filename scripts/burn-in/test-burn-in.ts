@@ -19,6 +19,8 @@
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { redactObject } from "../../core/redaction.js";
+import { detectSourceNewerThanDist, getBuildMetadata } from "../../core/build-metadata.js";
+import { assessStaleness } from "../../core/staleness.js";
 
 import {
   type BurnResultRow,
@@ -399,6 +401,7 @@ async function main(): Promise<void> {
   const summaryOnly = process.argv.includes("--summary");
   const allowPromote = process.argv.includes("--allow-promote");
   const showHistory = process.argv.includes("--history");
+  const allowStaleServer = process.argv.includes("--allow-stale-server");
   if (summaryOnly) {
     summariseResults(undefined, showHistory);
     return;
@@ -412,6 +415,7 @@ async function main(): Promise<void> {
   console.log(`Project: ${PROJECT_ROOT}`);
   console.log(`Timeout: ${TIMEOUT_MS}ms${process.env["AEDIS_BURN_TIMEOUT_MS"] ? " (env override)" : " (default)"}`);
   console.log(`Allow promote: ${allowPromote ? "yes" : "no"}`);
+  console.log(`Allow stale server: ${allowStaleServer ? "yes" : "no"}`);
   console.log(`Results: ${RESULTS_FILE}`);
   console.log(`Scenarios: ${activeScenarios.length}\n`);
 
@@ -436,6 +440,42 @@ async function main(): Promise<void> {
     if (!allUp) {
       console.log(`Workers: ${JSON.stringify(res.body.workers ?? {})}`);
       process.exit(1);
+    }
+    // Stale-server gate. Computed locally because the server can't
+    // know whether the running operator just edited source. Refuse by
+    // default — wasting 10 min running scenarios against a stale build
+    // is the trap this commit exists to prevent. Override with
+    // --allow-stale-server when the staleness is intentional (e.g.
+    // running last-known-good against a current checkout).
+    const localBuild = getBuildMetadata({ projectRoot: PROJECT_ROOT, fresh: true });
+    const freshness = detectSourceNewerThanDist(PROJECT_ROOT);
+    const staleness = assessStaleness({
+      ...(localBuild.commit && localBuild.commit !== "unknown"
+        ? { localCommit: localBuild.commit }
+        : {}),
+      ...(res.body.build?.commit ? { serverCommit: res.body.build.commit } : {}),
+      ...(freshness
+        ? {
+            distBuildTimeMs: freshness.distBuildTime,
+            newestSourceMtimeMs: freshness.newestSourceMtime,
+            newestSourcePath: freshness.newestSourcePath,
+          }
+        : {}),
+      ...(res.body.startedAt ? { serverStartedAtIso: res.body.startedAt } : {}),
+    });
+    if (staleness.stale) {
+      console.log("");
+      console.log("══ STALE SERVER ══════════════════════════════════════════");
+      for (const r of staleness.reasons) console.log(`✗ ${r.code}: ${r.message}`);
+      if (allowStaleServer) {
+        console.log("--allow-stale-server set — proceeding against stale server.");
+      } else {
+        console.error(
+          "Refusing to run burn-in against a stale server. " +
+          "Rebuild + restart, or pass --allow-stale-server.",
+        );
+        process.exit(1);
+      }
     }
   } catch (err) {
     console.error(`❌ Cannot reach Aedis at ${AEDIS_BASE}: ${(err as Error).message}`);

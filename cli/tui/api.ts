@@ -119,6 +119,27 @@ export async function listRuns(limit = 20): Promise<RunListEntry[]> {
 }
 
 /**
+ * Subset of /health used by the TUI staleness banner. The TUI can't
+ * read the operator's local filesystem, so it can only flag stale
+ * server states it can derive from the response (no build metadata,
+ * not built from a real dist). Source-newer-than-dist + commit
+ * mismatch are caught by `aedis doctor` and the burn-in preamble,
+ * which both have filesystem access.
+ */
+export interface ServerBuildInfo {
+  readonly commit?: string;
+  readonly commitShort?: string;
+  readonly buildTime?: string;
+  /** "build-info" when running an artifact built by `npm run build`. */
+  readonly source?: string;
+}
+
+export interface ServerHealth {
+  readonly build: ServerBuildInfo;
+  readonly startedAt?: string;
+}
+
+/**
  * Fetch the runtime safety policy from /health. Returns null on
  * fetch error so the TUI can render a "policy unknown" banner
  * instead of crashing when the server is unreachable.
@@ -130,6 +151,53 @@ export async function getRuntimePolicy(): Promise<RuntimePolicySummary | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetch the server's build metadata so the TUI can render a stale
+ * banner. Null on fetch error.
+ */
+export async function getServerHealth(): Promise<ServerHealth | null> {
+  try {
+    const data = await fetchJson<{ build?: ServerBuildInfo; startedAt?: string }>(
+      "/health",
+    );
+    return {
+      build: data.build ?? {},
+      ...(data.startedAt ? { startedAt: data.startedAt } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pure-function staleness verdict for a server-only view (no
+ * filesystem). Two signals: missing commit metadata (likely stale
+ * dist or pre-build-metadata server) and a non-build-info source
+ * (running tsx or env fallback). Returns null when there's nothing
+ * to flag.
+ */
+export function deriveTuiStaleness(
+  health: ServerHealth | null,
+): { reason: string } | null {
+  if (!health) return null; // unreachable handled separately
+  const { build } = health;
+  if (!build.commit || build.commit === "unknown") {
+    return {
+      reason:
+        "server has no build metadata — likely a stale dist or unbuilt source. " +
+        "Rebuild + restart.",
+    };
+  }
+  if (build.source && build.source !== "build-info") {
+    return {
+      reason:
+        `server build metadata source is "${build.source}" — running from tsx ` +
+        `or fallback, not a built dist`,
+    };
+  }
+  return null;
 }
 
 export async function submitRun(prompt: string, repoPath: string): Promise<SubmitResponse> {

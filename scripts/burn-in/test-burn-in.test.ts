@@ -356,3 +356,47 @@ test("finalVerifierVerdict: defaults to 'not-run' when nothing reports a verdict
     "not-run",
   );
 });
+
+// ─── Stale-server gate ──────────────────────────────────────────────
+//
+// The full refusal path inside main() can't be exercised without a
+// live server, but the contract has three parts the harness can pin
+// directly:
+//   1. assessStaleness fires when the inputs match a stale condition
+//      (covered in core/staleness.test.ts)
+//   2. The flag --allow-stale-server is recognised by argv parsing
+//   3. Burn-in's preamble logging mentions "Allow stale server"
+//
+// (2) and (3) are static-string tests against the source so a future
+// refactor can't silently drop the flag.
+
+test("burn-in: --allow-stale-server flag is recognised in main()", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(
+    new URL("./test-burn-in.ts", import.meta.url),
+    "utf-8",
+  );
+  assert.match(src, /--allow-stale-server/);
+  assert.match(src, /Allow stale server:/);
+});
+
+test("burn-in: refusal path exists with explicit error message", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(
+    new URL("./test-burn-in.ts", import.meta.url),
+    "utf-8",
+  );
+  // The refusal block must be present and must mention the override.
+  assert.match(src, /Refusing to run burn-in against a stale server/);
+  assert.match(src, /pass --allow-stale-server/);
+});
+
+test("burn-in: imports the shared assessStaleness helper", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(
+    new URL("./test-burn-in.ts", import.meta.url),
+    "utf-8",
+  );
+  assert.match(src, /assessStaleness/);
+  assert.match(src, /detectSourceNewerThanDist/);
+});

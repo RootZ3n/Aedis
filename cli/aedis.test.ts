@@ -73,7 +73,12 @@ test("doctor: warns when server commit differs from local checkout", () => {
     localBuild: KNOWN_LOCAL,
     freshness: null,
   });
-  assert.match(report, /server commit 11111111 differs from local abcdef01/);
+  // Phrasing now lives in the STALE SERVER block (the same wording
+  // is shared with the burn-in preamble via assessStaleness).
+  assert.match(report, /STALE SERVER/);
+  assert.match(report, /commit-mismatch/);
+  assert.match(report, /11111111/);
+  assert.match(report, /abcdef01/);
 });
 
 test("doctor: warns when server reports no build metadata at all", () => {
@@ -111,9 +116,11 @@ test("doctor: warns when source is newer than dist", () => {
       distBuildTime: 1_000_000,
     },
   });
-  assert.match(report, /source newer than dist/);
+  // Phrasing now lives in the STALE SERVER block (shared with burn-in).
+  assert.match(report, /STALE SERVER/);
+  assert.match(report, /dist-older-than-source/);
   assert.match(report, /\/repo\/core\/foo\.ts/);
-  assert.match(report, /run `npm run build` and restart/);
+  assert.match(report, /npm run build/);
 });
 
 test("doctor: source-newer warning is suppressed when freshness reports no drift", () => {
@@ -134,5 +141,74 @@ test("doctor: source-newer warning is suppressed when freshness reports no drift
       distBuildTime: 2_000_000,
     },
   });
-  assert.doesNotMatch(report, /source newer than dist/);
+  // The new STALE block likewise stays out of the report when there's no drift.
+  assert.doesNotMatch(report, /STALE SERVER/);
+  assert.doesNotMatch(report, /dist-older-than-source/);
+});
+
+// ─── STALE SERVER block — uptime predates latest build ──────────────
+
+test("doctor: STALE block fires when server uptime predates the latest dist build", () => {
+  // Server started 60s before the build that produced dist/build-info.
+  // A fresh build landed AFTER the server started → server is now
+  // running an older dist than what's on disk. Restart needed.
+  const startedAt = "2026-04-28T10:00:00.000Z";
+  const distBuildTime = Date.parse(startedAt) + 60_000; // build 60s after start
+  const report = formatDoctorReport({
+    apiBase: "http://localhost:18796",
+    health: {
+      pid: 1,
+      port: 18796,
+      uptime_human: "1m",
+      startedAt,
+      build: {
+        version: "1.0.0",
+        commit: "abcdef0123456789abcdef0123456789abcdef01",
+        commitShort: "abcdef01",
+        buildTime: "2026-04-28T09:59:00.000Z",
+        source: "build-info",
+      },
+    },
+    fetchError: null,
+    localBuild: {
+      version: "1.0.0",
+      commit: "abcdef0123456789abcdef0123456789abcdef01",
+      commitShort: "abcdef01",
+      buildTime: "2026-04-28T10:01:00.000Z",
+      source: "build-info",
+    },
+    freshness: {
+      sourceNewerThanDist: false,
+      newestSourcePath: "/repo/core/x.ts",
+      newestSourceMtime: distBuildTime - 60_000,
+      distBuildTime,
+    },
+  });
+  assert.match(report, /STALE SERVER/);
+  assert.match(report, /uptime-predates-build/);
+  assert.match(report, /restart the server/);
+});
+
+test("doctor: clean checkout + matching commit + fresh dist → no STALE block", () => {
+  const t = Date.now();
+  const startedAt = new Date(t).toISOString();
+  const report = formatDoctorReport({
+    apiBase: "http://localhost:18796",
+    health: {
+      pid: 1,
+      port: 18796,
+      uptime_human: "1m",
+      startedAt,
+      build: { ...KNOWN_LOCAL },
+    },
+    fetchError: null,
+    localBuild: KNOWN_LOCAL,
+    freshness: {
+      sourceNewerThanDist: false,
+      newestSourcePath: "/repo/core/x.ts",
+      newestSourceMtime: t - 60_000,
+      distBuildTime: t - 30_000, // dist built before server started, source older
+    },
+  });
+  assert.doesNotMatch(report, /STALE SERVER/);
 });

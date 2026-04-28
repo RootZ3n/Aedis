@@ -33,6 +33,7 @@ interface MockApi {
   approveRun: (runId: string) => Promise<unknown>;
   rejectRun: (runId: string) => Promise<unknown>;
   getRuntimePolicy: () => Promise<import("./api.js").RuntimePolicySummary | null>;
+  getServerHealth: () => Promise<import("./api.js").ServerHealth | null>;
 }
 
 function staticApi(runs: readonly RunListEntry[]): MockApi {
@@ -42,6 +43,7 @@ function staticApi(runs: readonly RunListEntry[]): MockApi {
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
     getRuntimePolicy: async () => null,
+    getServerHealth: async () => null,
   };
 }
 
@@ -285,6 +287,7 @@ test("tui runs: selection is clamped when the visible list shrinks", async () =>
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
     getRuntimePolicy: async () => null,
+    getServerHealth: async () => null,
   };
   const { stdin, lastFrame, unmount } = render(
     <RunsScreen api={api} pollMs={300} />,
@@ -344,6 +347,7 @@ test("tui runs: policy panel renders the safe-default values from /health", asyn
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
     getRuntimePolicy: async () => safe,
+    getServerHealth: async () => null,
   };
   const { lastFrame, unmount } = render(
     <RunsScreen api={api} pollMs={99_999} />,
@@ -377,6 +381,7 @@ test("tui runs: policy panel surfaces an unsafe config so the operator sees it",
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
     getRuntimePolicy: async () => unsafe,
+    getServerHealth: async () => null,
   };
   const { lastFrame, unmount } = render(
     <RunsScreen api={api} pollMs={99_999} />,
@@ -400,6 +405,7 @@ test("tui runs: policy panel falls back to 'unknown' when /health is unreachable
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
     getRuntimePolicy: async () => null,
+    getServerHealth: async () => null,
   };
   const { lastFrame, unmount } = render(
     <RunsScreen api={api} pollMs={99_999} />,
@@ -412,4 +418,111 @@ test("tui runs: policy panel falls back to 'unknown' when /health is unreachable
   } finally {
     unmount();
   }
+});
+
+// ─── Stale-server banner ────────────────────────────────────────────
+
+test("tui runs: stale banner renders when server has no commit metadata", async () => {
+  const api: MockApi = {
+    listRuns: async () => [],
+    submitRun: async () => ({ run_id: "x" }),
+    approveRun: async () => ({ ok: true }),
+    rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => null,
+    getServerHealth: async () => ({ build: {} }),
+  };
+  const { lastFrame, unmount } = render(
+    <RunsScreen api={api} pollMs={99_999} />,
+  );
+  try {
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /STALE SERVER/);
+    assert.match(frame, /no build metadata/);
+  } finally {
+    unmount();
+  }
+});
+
+test("tui runs: stale banner renders when server is running from non-build-info source", async () => {
+  const api: MockApi = {
+    listRuns: async () => [],
+    submitRun: async () => ({ run_id: "x" }),
+    approveRun: async () => ({ ok: true }),
+    rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => null,
+    getServerHealth: async () => ({
+      build: {
+        commit: "abc12345",
+        commitShort: "abc12345",
+        source: "git-runtime",
+      },
+    }),
+  };
+  const { lastFrame, unmount } = render(
+    <RunsScreen api={api} pollMs={99_999} />,
+  );
+  try {
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    assert.match(frame, /STALE SERVER/);
+    assert.match(frame, /git-runtime/);
+  } finally {
+    unmount();
+  }
+});
+
+test("tui runs: NO stale banner when server reports a clean built dist", async () => {
+  const api: MockApi = {
+    listRuns: async () => [],
+    submitRun: async () => ({ run_id: "x" }),
+    approveRun: async () => ({ ok: true }),
+    rejectRun: async () => ({ ok: true }),
+    getRuntimePolicy: async () => null,
+    getServerHealth: async () => ({
+      build: {
+        commit: "abc12345",
+        commitShort: "abc12345",
+        source: "build-info",
+      },
+    }),
+  };
+  const { lastFrame, unmount } = render(
+    <RunsScreen api={api} pollMs={99_999} />,
+  );
+  try {
+    await wait(40);
+    const frame = lastFrame() ?? "";
+    assert.doesNotMatch(frame, /STALE SERVER/);
+  } finally {
+    unmount();
+  }
+});
+
+// deriveTuiStaleness pure-function tests
+test("deriveTuiStaleness: null health returns null", async () => {
+  const { deriveTuiStaleness } = await import("./api.js");
+  assert.equal(deriveTuiStaleness(null), null);
+});
+
+test("deriveTuiStaleness: missing commit fires", async () => {
+  const { deriveTuiStaleness } = await import("./api.js");
+  const r = deriveTuiStaleness({ build: {} });
+  assert.ok(r);
+  assert.match(r.reason, /no build metadata/);
+});
+
+test("deriveTuiStaleness: 'unknown' commit also fires", async () => {
+  const { deriveTuiStaleness } = await import("./api.js");
+  const r = deriveTuiStaleness({ build: { commit: "unknown" } });
+  assert.ok(r);
+  assert.match(r.reason, /no build metadata/);
+});
+
+test("deriveTuiStaleness: build-info source with commit returns null (clean)", async () => {
+  const { deriveTuiStaleness } = await import("./api.js");
+  const r = deriveTuiStaleness({
+    build: { commit: "abc123", source: "build-info" },
+  });
+  assert.equal(r, null);
 });

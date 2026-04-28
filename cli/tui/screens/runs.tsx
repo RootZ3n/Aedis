@@ -3,12 +3,15 @@ import { Box, Text, useApp, useInput } from "ink";
 
 import {
   approveRun as defaultApproveRun,
+  deriveTuiStaleness,
   getRuntimePolicy as defaultGetRuntimePolicy,
+  getServerHealth as defaultGetServerHealth,
   listRuns as defaultListRuns,
   rejectRun as defaultRejectRun,
   submitRun as defaultSubmitRun,
   type RunListEntry,
   type RuntimePolicySummary,
+  type ServerHealth,
 } from "../api.js";
 
 const DEFAULT_POLL_MS = 1000;
@@ -111,6 +114,7 @@ interface ApiSurface {
   readonly approveRun: typeof defaultApproveRun;
   readonly rejectRun: typeof defaultRejectRun;
   readonly getRuntimePolicy: typeof defaultGetRuntimePolicy;
+  readonly getServerHealth: typeof defaultGetServerHealth;
 }
 
 const defaultApi: ApiSurface = {
@@ -119,6 +123,7 @@ const defaultApi: ApiSurface = {
   approveRun: defaultApproveRun,
   rejectRun: defaultRejectRun,
   getRuntimePolicy: defaultGetRuntimePolicy,
+  getServerHealth: defaultGetServerHealth,
 };
 
 type Mode = "dashboard" | "submit" | "detail";
@@ -150,19 +155,20 @@ export function RunsScreen({
   const [action, setAction] = useState<ActionMessage | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
   const [policy, setPolicy] = useState<RuntimePolicySummary | null>(null);
+  const [health, setHealth] = useState<ServerHealth | null>(null);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
 
-  // Fetch the runtime safety policy once on mount and refresh on each
-  // poll tick. The operator wants to see this BEFORE acting on a run,
-  // not after — render is unconditional and degrades to a "policy
-  // unknown" line when /health is unreachable.
+  // Fetch the runtime safety policy + server health on mount. Both
+  // sit at the top of the dashboard so the operator sees policy and
+  // staleness BEFORE acting on a run. Render degrades to "unknown"
+  // when /health is unreachable.
   useEffect(() => {
     let alive = true;
-    void api.getRuntimePolicy().then((p) => {
-      if (alive) setPolicy(p);
-    });
+    void api.getRuntimePolicy().then((p) => { if (alive) setPolicy(p); });
+    void api.getServerHealth().then((h) => { if (alive) setHealth(h); });
     return () => { alive = false; };
   }, [api]);
+  const stale = deriveTuiStaleness(health);
 
   const filteredRuns = useMemo(
     () => filterRuns(allRuns, showHistory, TERMINAL_LIMIT),
@@ -359,6 +365,13 @@ export function RunsScreen({
       <Box>
         <Text bold color="cyan">Aedis TUI — Runs Dashboard</Text>
       </Box>
+
+      {stale && (
+        <Box>
+          <Text bold color="red">⚠ STALE SERVER: </Text>
+          <Text color="red">{stale.reason}</Text>
+        </Box>
+      )}
 
       <Box>
         <Text dimColor>policy: </Text>

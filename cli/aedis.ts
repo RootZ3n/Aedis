@@ -29,6 +29,7 @@ import {
   getBuildMetadata,
   type BuildMetadata,
 } from "../core/build-metadata.js";
+import { assessStaleness, type StalenessResult } from "../core/staleness.js";
 import {
   detectRegressions,
   loadLatestTrial,
@@ -128,6 +129,31 @@ export interface DoctorHealthShape {
   build?: Partial<BuildMetadata>;
 }
 
+/**
+ * Compute a single staleness verdict from the doctor's already-collected
+ * inputs. Pure projection so the burn-in preamble and TUI use the same
+ * derivation. Returns `{ stale: false, reasons: [] }` when there's not
+ * enough data to decide — caller surfaces a separate "metadata missing"
+ * line in that case.
+ */
+export function computeDoctorStaleness(input: DoctorInput): StalenessResult {
+  const h = input.health ?? null;
+  return assessStaleness({
+    ...(input.localBuild.commit && input.localBuild.commit !== "unknown"
+      ? { localCommit: input.localBuild.commit }
+      : {}),
+    ...(h?.build?.commit ? { serverCommit: h.build.commit } : {}),
+    ...(input.freshness
+      ? {
+          distBuildTimeMs: input.freshness.distBuildTime,
+          newestSourceMtimeMs: input.freshness.newestSourceMtime,
+          newestSourcePath: input.freshness.newestSourcePath,
+        }
+      : {}),
+    ...(h?.startedAt ? { serverStartedAtIso: h.startedAt } : {}),
+  });
+}
+
 export interface DoctorInput {
   apiBase: string;
   /** /health response, or null if unreachable. */
@@ -167,12 +193,6 @@ export function formatDoctorReport(input: DoctorInput): string {
     if (!b.commit || b.commit === "unknown") {
       lines.push(`⚠ server has no build metadata — likely running stale dist or unbuilt source`);
     }
-    if (b.commit && input.localBuild.commit !== "unknown" && b.commit !== input.localBuild.commit) {
-      lines.push(
-        `⚠ server commit ${b.commitShort} differs from local ${input.localBuild.commitShort} — ` +
-        `the running server is not built from this checkout`,
-      );
-    }
   }
 
   lines.push("");
@@ -181,18 +201,24 @@ export function formatDoctorReport(input: DoctorInput): string {
   lines.push(`local_built:      ${input.localBuild.buildTime}`);
   lines.push(`local_metadata:   ${input.localBuild.source}`);
 
-  if (input.freshness) {
-    const f = input.freshness;
-    if (f.sourceNewerThanDist) {
-      const lagSec = Math.max(0, Math.round((f.newestSourceMtime - f.distBuildTime) / 1000));
-      lines.push("");
-      lines.push(
-        `⚠ source newer than dist: ${f.newestSourcePath} is ${lagSec}s ahead of dist/build-info.json — run \`npm run build\` and restart`,
-      );
-    }
-  } else if (input.localBuild.source !== "build-info") {
+  if (!input.freshness && input.localBuild.source !== "build-info") {
     lines.push("");
     lines.push("ℹ no dist/build-info.json — running from source (tsx) or no build has been produced");
+  }
+
+  // ── STALE block ─────────────────────────────────────────────────
+  // Hard-warning surface — surfaced together at the bottom so a
+  // distracted operator sees one block instead of having to reason
+  // about scattered ⚠ lines. Caller (the doctor command) reads
+  // computeDoctorStaleness().stale to decide the exit code.
+  const staleness = computeDoctorStaleness(input);
+  if (staleness.stale) {
+    lines.push("");
+    lines.push("══ STALE SERVER ══════════════════════════════════════════");
+    for (const r of staleness.reasons) {
+      lines.push(`✗ ${r.code}: ${r.message}`);
+    }
+    lines.push("Fix: rebuild + restart, or pass --allow-stale-server when intentional.");
   }
 
   return lines.join("\n");
@@ -244,19 +270,30 @@ const COMMANDS = {
     if (data.websocket) console.log(`ws:       ${data.websocket.connected_clients} client(s)`);
   },
 
-  async doctor(_args: string[]) {
+  async doctor(args: string[]) {
     const { health, error } = await fetchHealthSafe(API_BASE);
     const localBuild = getBuildMetadata({ projectRoot: PROJECT_ROOT, fresh: true });
     const freshness = detectSourceNewerThanDist(PROJECT_ROOT);
-    const report = formatDoctorReport({
+    const input: DoctorInput = {
       apiBase: API_BASE,
       health,
       fetchError: error,
       localBuild,
       freshness,
-    });
+    };
+    const report = formatDoctorReport(input);
     console.log(report);
-    if (!health) process.exitCode = 1;
+    if (!health) {
+      process.exitCode = 1;
+      return;
+    }
+    // Non-zero exit on stale conditions so CI / scripts can act on it.
+    // --allow-stale lets the operator opt out (matches burn-in's flag).
+    const allowStale = args.includes("--allow-stale-server") || args.includes("--allow-stale");
+    const staleness = computeDoctorStaleness(input);
+    if (staleness.stale && !allowStale) {
+      process.exitCode = 2;
+    }
   },
 
   async status(args: string[]) {

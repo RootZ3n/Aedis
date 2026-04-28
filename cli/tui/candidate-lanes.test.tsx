@@ -42,6 +42,7 @@ interface MockApi {
   approveRun: (runId: string) => Promise<unknown>;
   rejectRun: (runId: string) => Promise<unknown>;
   getRuntimePolicy: () => Promise<import("./api.js").RuntimePolicySummary | null>;
+  getServerHealth: () => Promise<import("./api.js").ServerHealth | null>;
 }
 
 function staticApi(runs: readonly RunListEntry[]): MockApi {
@@ -51,6 +52,7 @@ function staticApi(runs: readonly RunListEntry[]): MockApi {
     approveRun: async () => ({ ok: true }),
     rejectRun: async () => ({ ok: true }),
     getRuntimePolicy: async () => null,
+    getServerHealth: async () => null,
   };
 }
 
