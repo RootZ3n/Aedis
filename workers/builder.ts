@@ -1,6 +1,6 @@
 // Builder worker module
-import { readFile, unlink, writeFile } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -1804,6 +1804,14 @@ export class BuilderWorker extends AbstractWorker {
       );
     }
 
+    // Create-then-write: when fileExistsBefore is false the target may
+    // live under a directory the workspace doesn't have yet (e.g. a
+    // shadow workspace cloned from source where git didn't track an
+    // empty parent dir). Without this mkdir, writeFile threw
+    // `ENOENT: no such file or directory` on the first create — both
+    // primary and shadow lanes hit it. mkdir is idempotent so the
+    // unconditional call is safe for the modify case too.
+    await mkdir(dirname(targetPath), { recursive: true });
     await writeFile(targetPath, updatedContent, "utf8");
     const operation: FileChange["operation"] = fileExistsBefore ? "modify" : "create";
     this.logFileTouch(taskId, relativePath, operation);
