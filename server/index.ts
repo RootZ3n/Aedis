@@ -75,6 +75,11 @@ export function parseApprovalTimeoutHours(raw: string | undefined): number | nul
 export interface ServerConfig {
   port: number;
   host: string;
+  /**
+   * Aedis runtime state root. This is intentionally separate from
+   * projectRoot so receipts do not dirty the target source repository.
+   */
+  stateRoot: string;
   projectRoot: string;
   coordinatorConfig?: Partial<CoordinatorConfig>;
   /** Disable Tailscale auth (for local dev) */
@@ -121,6 +126,7 @@ export function isPortInUse(port: number, host: string): Promise<boolean> {
 export const DEFAULT_CONFIG: ServerConfig = {
   port: readPortFromEnv(),
   host: process.env["AEDIS_HOST"] ?? "0.0.0.0",
+  stateRoot: process.env["AEDIS_STATE_ROOT"] ?? process.cwd(),
   projectRoot: process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd(),
   // TAILSCALE_ONLY=true in .env disables auth so local browsers and
   // curl can reach the server. Defaults to false (auth enabled) so a
@@ -337,7 +343,7 @@ export async function createServer(
   const profile = trustProfile ?? defaultTrustProfile();
 
   const eventBus = createEventBus();
-  const receiptStore = new ReceiptStore(cfg.projectRoot);
+  const receiptStore = new ReceiptStore(cfg.stateRoot);
 
   // Bail before startup recovery if another aedis server already owns
   // the port. `markIncompleteRunsCrashed` rewrites every RUNNING run to

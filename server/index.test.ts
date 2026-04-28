@@ -162,6 +162,33 @@ async function getDisableAuthFromEnv(tailcaleOnly: string): Promise<boolean> {
   return false;
 }
 
+async function getConfigRootsFromEnv(projectRoot: string, stateRoot: string): Promise<{ projectRoot: string; stateRoot: string }> {
+  const { execSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const distPath = join(process.cwd(), "dist/server/index.js");
+  const tmpDir = mkdtempSync(join(tmpdir(), "aedis-test-"));
+  const scriptPath = join(tmpDir, "check-roots.mjs");
+
+  writeFileSync(
+    scriptPath,
+    `import { DEFAULT_CONFIG } from ${JSON.stringify(distPath)};\n` +
+      `console.log(JSON.stringify({ projectRoot: DEFAULT_CONFIG.projectRoot, stateRoot: DEFAULT_CONFIG.stateRoot }));\n`,
+  );
+
+  try {
+    const stdout = String(execSync(`node ${scriptPath}`, {
+      env: { ...process.env, AEDIS_PROJECT_ROOT: projectRoot, AEDIS_STATE_ROOT: stateRoot },
+      encoding: "utf8",
+    })).trim();
+    return JSON.parse(stdout) as { projectRoot: string; stateRoot: string };
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 test("TAILSCALE_ONLY=true sets disableAuth=true in DEFAULT_CONFIG", async () => {
   const disabled = await getDisableAuthFromEnv("true");
   assert.equal(disabled, true, "TAILSCALE_ONLY=true must set disableAuth=true");
@@ -175,4 +202,10 @@ test("TAILSCALE_ONLY=false sets disableAuth=false in DEFAULT_CONFIG", async () =
 test("TAILSCALE_ONLY unset defaults to disableAuth=false (auth enabled)", async () => {
   const disabled = await getDisableAuthFromEnv("");
   assert.equal(disabled, false, "unset TAILSCALE_ONLY must default to disableAuth=false");
+});
+
+test("DEFAULT_CONFIG keeps AEDIS_STATE_ROOT separate from AEDIS_PROJECT_ROOT", async () => {
+  const roots = await getConfigRootsFromEnv("/tmp/aedis-target-repo", "/tmp/aedis-runtime-state");
+  assert.equal(roots.projectRoot, "/tmp/aedis-target-repo");
+  assert.equal(roots.stateRoot, "/tmp/aedis-runtime-state");
 });
