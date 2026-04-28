@@ -14,7 +14,7 @@
  *   POST /approvals/:runId/reject        → reject an awaiting run
  */
 
-const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://localhost:18796";
+const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://127.0.0.1:18796";
 
 /**
  * Lane id and workspace role mirror the server-side `Lane` and

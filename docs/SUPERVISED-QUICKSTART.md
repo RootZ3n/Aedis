@@ -15,7 +15,7 @@ npm run build
 node dist/server/index.js > /tmp/aedis.log 2>&1 &
 ```
 
-Server listens on `http://localhost:18796`. Logs land in `/tmp/aedis.log`.
+Server listens on `http://127.0.0.1:18796`. Logs land in `/tmp/aedis.log`.
 
 For development against source (auto-reload, slower startup, no built dist):
 
@@ -37,7 +37,7 @@ server uptime predates latest build). **Exit 2 on stale.** Override with
 ## 3. Verify the safe default policy
 
 ```bash
-curl -s http://localhost:18796/health | jq .policy
+curl -s http://127.0.0.1:18796/health | jq .policy
 ```
 
 Expected on a fresh boot:
@@ -66,7 +66,7 @@ have to type the unsafe value verbatim.
 ## 4. Submit a task
 
 ```bash
-curl -X POST http://localhost:18796/tasks \
+curl -X POST http://127.0.0.1:18796/tasks \
   -H 'Content-Type: application/json' \
   -d '{
     "prompt": "add a doc comment to formatVerdictBadge in core/run-summary.ts",
@@ -109,8 +109,8 @@ From the TUI: select the run, press `a` (approve) or `r` (reject).
 From curl:
 
 ```bash
-curl -X POST http://localhost:18796/approvals/$RUN_ID/approve
-curl -X POST http://localhost:18796/approvals/$RUN_ID/reject
+curl -X POST http://127.0.0.1:18796/approvals/$RUN_ID/approve
+curl -X POST http://127.0.0.1:18796/approvals/$RUN_ID/reject
 ```
 
 Approval applies the workspace commit to your source repo; rejection
@@ -205,7 +205,7 @@ last-known-good behavior), pass `--allow-stale-server` to burn-in or
   ```
 
 - **Receipts.** All runs persist to `state/receipts/<runId>.json` (gitignored)
-  and stream over WebSocket at `ws://localhost:18796/ws`.
+  and stream over WebSocket at `ws://127.0.0.1:18796/ws`.
 - **Reset everything (destructive).** Stop the server, then:
 
   ```bash

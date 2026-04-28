@@ -17,7 +17,7 @@
  *   aedis tui                               Open the interactive TUI dashboard
  *
  * Environment:
- *   AEDIS_API_BASE      HTTP base URL (default: http://localhost:18796)
+ *   AEDIS_API_BASE      HTTP base URL (default: http://127.0.0.1:18796)
  *   AEDIS_PROJECT_ROOT  Where state/reliability/ is written (default: cwd)
  */
 
@@ -47,7 +47,7 @@ import { checkOpenRouterHealth } from "../core/openrouter-client.js";
 
 dotenv.config();
 
-const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://localhost:18796";
+const API_BASE = process.env["AEDIS_API_BASE"] ?? "http://127.0.0.1:18796";
 const PROJECT_ROOT = process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd();
 
 // ─── HTTP helpers ────────────────────────────────────────────────────

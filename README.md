@@ -139,7 +139,7 @@ npm run build
 npm run start:dist
 ```
 
-Open [http://localhost:18796](http://localhost:18796).
+Open [http://127.0.0.1:18796](http://127.0.0.1:18796).
 
 Type a prompt. Watch the worker grid light up. Read the receipt.
 
@@ -155,22 +155,22 @@ and cleanup/recovery.
 
 ```bash
 # Submit a build task
-curl -X POST http://localhost:18796/tasks \
+curl -X POST http://127.0.0.1:18796/tasks \
   -H 'Content-Type: application/json' \
   -d '{"prompt": "add error handling to server/index.ts", "repoPath": "/path/to/repo"}'
 
 # Ask Loqui a question
-curl -X POST http://localhost:18796/tasks/loqui/unified \
+curl -X POST http://127.0.0.1:18796/tasks/loqui/unified \
   -H 'Content-Type: application/json' \
   -d '{"input": "what does the merge gate do?", "repoPath": "/path/to/repo"}'
 
 # Dry run (no execution)
-curl -X POST http://localhost:18796/tasks/dry-run \
+curl -X POST http://127.0.0.1:18796/tasks/dry-run \
   -H 'Content-Type: application/json' \
   -d '{"input": "refactor the context gate", "repoPath": "/path/to/repo"}'
 ```
 
-WebSocket at `ws://localhost:18796/ws` for live events. Send `{"type":"subscribe","runId":"..."}` after connect.
+WebSocket at `ws://127.0.0.1:18796/ws` for live events. Send `{"type":"subscribe","runId":"..."}` after connect.
 
 ## Stack
 

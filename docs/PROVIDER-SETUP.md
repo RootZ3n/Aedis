@@ -108,7 +108,7 @@ After starting the server:
 aedis doctor
 
 # Or check /health endpoint
-curl -s http://localhost:18796/health | jq '.policy'
+curl -s http://127.0.0.1:18796/health | jq '.policy'
 ```
 
 `aedis doctor` reports connectivity for OpenRouter and Ollama, lists
