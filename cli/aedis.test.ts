@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { formatDoctorReport, type DoctorInput } from "./aedis.js";
+import { formatDoctorReport, formatProviderCheckReport, type DoctorInput } from "./aedis.js";
 
 const KNOWN_LOCAL: DoctorInput["localBuild"] = {
   version: "1.0.0",
@@ -26,6 +26,14 @@ test("doctor: server reachable + matching commit prints expected fields with no 
         projectRoot: "/tmp/target-repo",
         isolatedFromProject: true,
       },
+      providerContract: {
+        profile: "default",
+        localSmokeCapable: true,
+        localSmokeEnv: "AEDIS_MODEL_PROFILE=local-smoke",
+        localSmokeModel: "qwen3.5:9b",
+        requiredCloudKeys: ["OPENROUTER_API_KEY", "ZAI_API_KEY"],
+        cloudRequired: true,
+      },
     },
     fetchError: null,
     localBuild: KNOWN_LOCAL,
@@ -40,11 +48,44 @@ test("doctor: server reachable + matching commit prints expected fields with no 
   assert.match(report, /state_root:\s+\/tmp\/aedis-state/);
   assert.match(report, /receipts:\s+\/tmp\/aedis-state\/state\/receipts/);
   assert.match(report, /state_isolated:\s+yes/);
+  assert.match(report, /model_profile:\s+default/);
+  assert.match(report, /cloud_required:\s+yes/);
+  assert.match(report, /cloud_keys:\s+OPENROUTER_API_KEY, ZAI_API_KEY/);
+  assert.match(report, /local_smoke:\s+available \(AEDIS_MODEL_PROFILE=local-smoke, model qwen3\.5:9b\)/);
   assert.match(report, /server_built:\s+2026-04-27T22:00:00\.000Z/);
   assert.match(report, /local_commit:\s+abcdef01/);
   // No drift warnings expected on a matched checkout.
   assert.doesNotMatch(report, /differs from local/);
   assert.doesNotMatch(report, /no build metadata/);
+});
+
+test("doctor provider report points missing cloud-key users at local smoke when Ollama is ready", () => {
+  const lines = formatProviderCheckReport(
+    { provider: "ollama", ok: true, detail: "reachable at http://localhost:11434 — 2 model(s) installed" },
+    [
+      { provider: "openrouter", ok: false, detail: "OPENROUTER_API_KEY not set in environment" },
+      { provider: "zai", ok: false, detail: "ZAI_API_KEY not set in environment" },
+    ],
+    "default",
+  ).join("\n");
+
+  assert.match(lines, /openrouter\s+FAIL\s+OPENROUTER_API_KEY not set/);
+  assert.match(lines, /zai\s+FAIL\s+ZAI_API_KEY not set/);
+  assert.match(lines, /local smoke mode is available with Ollama only/);
+  assert.match(lines, /AEDIS_MODEL_PROFILE=local-smoke npm run start:dist/);
+});
+
+test("doctor provider report does not treat missing cloud keys as local-smoke blockers", () => {
+  const lines = formatProviderCheckReport(
+    { provider: "ollama", ok: true, detail: "reachable at http://localhost:11434 — 2 model(s) installed" },
+    [
+      { provider: "openrouter", ok: false, detail: "OPENROUTER_API_KEY not set in environment" },
+      { provider: "zai", ok: false, detail: "ZAI_API_KEY not set in environment" },
+    ],
+    "local-smoke",
+  ).join("\n");
+
+  assert.match(lines, /local smoke mode is active; cloud keys are not required/);
 });
 
 test("doctor: server unreachable emits a clear failure line and the local build context", () => {

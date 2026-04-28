@@ -121,15 +121,41 @@ cd aedis
 cp .env.example .env
 ```
 
-Edit `.env` and configure:
+Edit `.env` and choose one provider path:
 
-1. **Provider keys** — the default config requires `OPENROUTER_API_KEY` and `ZAI_API_KEY`. See [docs/PROVIDER-SETUP.md](docs/PROVIDER-SETUP.md) for details.
-2. **Ollama** — the default critic and prompt normalizer use local Ollama models. Install and start Ollama, then pull the required models:
-   ```bash
-   ollama pull qwen3.5:9b    # critic
-   ollama pull qwen3.5:4b    # prompt normalizer
-   ```
-3. **Auth** — auth is enabled by default (Tailscale identity required). For local development, set `TAILSCALE_ONLY=true` in `.env` to disable auth.
+### A. Local smoke test (Ollama only)
+
+Use this to prove Aedis can complete one tiny supervised task without cloud keys.
+It is slower/lower quality than full mode and is only intended for first-run
+verification.
+
+```bash
+AEDIS_MODEL_PROFILE=local-smoke
+```
+
+Install and start Ollama, then pull the required local models:
+
+```bash
+ollama pull qwen3.5:9b    # critic and local smoke worker
+ollama pull qwen3.5:4b    # prompt normalizer
+```
+
+### B. Full recommended mode
+
+Use this for real work:
+
+```bash
+AEDIS_MODEL_PROFILE=default
+OPENROUTER_API_KEY=<your-openrouter-key>
+ZAI_API_KEY=<your-zai-key>
+```
+
+The default/full config uses OpenRouter for the builder/coordinator hot path,
+Z.ai for integrator/escalation assignments, and Ollama for critic/prompt normalization. See
+[docs/PROVIDER-SETUP.md](docs/PROVIDER-SETUP.md) for details.
+
+Auth is enabled by default (Tailscale identity required). For local development,
+set `TAILSCALE_ONLY=true` in `.env` to disable auth.
 
 Then build and run:
 
@@ -144,6 +170,8 @@ Open [http://127.0.0.1:18796](http://127.0.0.1:18796).
 Type a prompt. Watch the worker grid light up. Read the receipt.
 
 Run `aedis doctor` to verify your setup — it checks server health and build staleness. Aedis stores runtime receipts under `AEDIS_STATE_ROOT` (default: the Aedis install directory), not in the target repo.
+If cloud keys are missing and Ollama is ready, doctor prints the exact
+`AEDIS_MODEL_PROFILE=local-smoke` command for the local smoke path.
 
 **Using Aedis as your primary repo tool with approval in the loop?**
 See [docs/SUPERVISED-QUICKSTART.md](docs/SUPERVISED-QUICKSTART.md) — a

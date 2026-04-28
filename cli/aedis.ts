@@ -44,6 +44,7 @@ import {
 } from "../core/reliability-harness.js";
 import { HttpTaskRunner } from "../core/reliability-runner.js";
 import { checkOpenRouterHealth } from "../core/openrouter-client.js";
+import { getActiveModelProfile, getLocalSmokeModel } from "../server/routes/config.js";
 
 dotenv.config();
 
@@ -143,6 +144,14 @@ export interface DoctorHealthShape {
     projectRoot?: string;
     isolatedFromProject?: boolean;
   };
+  providerContract?: {
+    profile?: string;
+    localSmokeCapable?: boolean;
+    localSmokeEnv?: string;
+    localSmokeModel?: string;
+    requiredCloudKeys?: readonly string[];
+    cloudRequired?: boolean;
+  };
 }
 
 /**
@@ -233,6 +242,18 @@ export function formatDoctorReport(input: DoctorInput): string {
     } else {
       lines.push(`state_root:       unknown (server may be pre-fix — rebuild recommended)`);
     }
+    const contract = h.providerContract;
+    if (contract) {
+      const required = contract.requiredCloudKeys?.length
+        ? contract.requiredCloudKeys.join(", ")
+        : "none";
+      lines.push(`model_profile:    ${contract.profile ?? "unknown"}`);
+      lines.push(`cloud_required:   ${contract.cloudRequired ? "yes" : "no"}`);
+      lines.push(`cloud_keys:       ${required}`);
+      if (contract.localSmokeCapable) {
+        lines.push(`local_smoke:      available (${contract.localSmokeEnv ?? "AEDIS_MODEL_PROFILE=local-smoke"}, model ${contract.localSmokeModel ?? getLocalSmokeModel()})`);
+      }
+    }
   }
 
   lines.push("");
@@ -308,11 +329,14 @@ async function checkRequiredKeys(): Promise<ProviderCheckResult[]> {
   return results;
 }
 
-async function runProviderChecks(): Promise<string[]> {
+export function formatProviderCheckReport(
+  ollama: ProviderCheckResult,
+  keys: readonly ProviderCheckResult[],
+  profile = getActiveModelProfile(),
+): string[] {
   const lines: string[] = [];
   lines.push("");
   lines.push("── PROVIDER CHECKS ──────────────────────────────────────────");
-  const [ollama, keys] = await Promise.all([checkOllamaReachable(), checkRequiredKeys()]);
   const all = [ollama, ...keys];
   for (const r of all) {
     const icon = r.ok ? "ok" : "FAIL";
@@ -322,8 +346,21 @@ async function runProviderChecks(): Promise<string[]> {
   if (failures.length > 0) {
     lines.push("");
     lines.push(`${failures.length} provider issue(s). See docs/PROVIDER-SETUP.md for setup instructions.`);
+    if (!keys.every((r) => r.ok) && ollama.ok) {
+      if (profile === "local-smoke") {
+        lines.push(`local smoke mode is active; cloud keys are not required for the first-run smoke task.`);
+      } else {
+        lines.push(`local smoke mode is available with Ollama only. Run: AEDIS_MODEL_PROFILE=local-smoke npm run start:dist`);
+        lines.push(`or set AEDIS_MODEL_PROFILE=local-smoke in .env, then restart Aedis.`);
+      }
+    }
   }
   return lines;
+}
+
+async function runProviderChecks(): Promise<string[]> {
+  const [ollama, keys] = await Promise.all([checkOllamaReachable(), checkRequiredKeys()]);
+  return formatProviderCheckReport(ollama, keys);
 }
 
 async function fetchHealthSafe(apiBase: string): Promise<{ health: DoctorHealthShape | null; error: string | null }> {

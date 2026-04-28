@@ -66,8 +66,44 @@ test("GET /health surfaces runtime state root without secrets", async () => {
     assert.equal(body.state.receipts, "/tmp/aedis-health-state/state/receipts");
     assert.equal(body.state.projectRoot, "/tmp/health-test");
     assert.equal(body.state.isolatedFromProject, true);
-    assert.equal(JSON.stringify(body).includes("API_KEY"), false);
+    assert.equal(JSON.stringify(body).includes("super-secret"), false);
   } finally {
+    await app.close();
+  }
+});
+
+test("GET /health surfaces provider contract for default cloud-required mode", async () => {
+  const prev = process.env.AEDIS_MODEL_PROFILE;
+  delete process.env.AEDIS_MODEL_PROFILE;
+  const app = await buildApp();
+  try {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    const body = res.json();
+    assert.equal(body.providerContract.profile, "default");
+    assert.equal(body.providerContract.cloudRequired, true);
+    assert.deepEqual(body.providerContract.requiredCloudKeys, ["OPENROUTER_API_KEY", "ZAI_API_KEY"]);
+    assert.equal(body.providerContract.localSmokeEnv, "AEDIS_MODEL_PROFILE=local-smoke");
+    assert.equal(JSON.stringify(body).includes("SECRET"), false);
+  } finally {
+    if (prev !== undefined) process.env.AEDIS_MODEL_PROFILE = prev;
+    await app.close();
+  }
+});
+
+test("GET /health surfaces provider contract for local smoke mode", async () => {
+  const prev = process.env.AEDIS_MODEL_PROFILE;
+  process.env.AEDIS_MODEL_PROFILE = "local-smoke";
+  const app = await buildApp();
+  try {
+    const res = await app.inject({ method: "GET", url: "/health" });
+    const body = res.json();
+    assert.equal(body.providerContract.profile, "local-smoke");
+    assert.equal(body.providerContract.cloudRequired, false);
+    assert.deepEqual(body.providerContract.requiredCloudKeys, []);
+    assert.equal(body.providerContract.localSmokeModel, "qwen3.5:9b");
+  } finally {
+    if (prev === undefined) delete process.env.AEDIS_MODEL_PROFILE;
+    else process.env.AEDIS_MODEL_PROFILE = prev;
     await app.close();
   }
 });

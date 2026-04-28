@@ -1,10 +1,38 @@
 # Provider Setup
 
-Aedis uses multiple model providers. The default configuration requires
-**OpenRouter**, **Z.ai**, and **Ollama**. All other providers are optional
-and only needed if you customize `.aedis/model-config.json`.
+Aedis has two public first-run paths:
 
-## Default provider roles
+1. **Local smoke mode** (`AEDIS_MODEL_PROFILE=local-smoke`) uses Ollama only.
+   It is intended to prove the install can complete one tiny supervised task.
+   It is slower/lower quality than cloud-backed mode and is not the recommended
+   daily profile.
+2. **Full mode** (`AEDIS_MODEL_PROFILE=default`) uses OpenRouter, Z.ai, and
+   Ollama. This is the recommended mode for real work.
+
+All other providers are optional and only needed if you customize
+`.aedis/model-config.json`.
+
+## Local smoke mode
+
+Set:
+
+```bash
+AEDIS_MODEL_PROFILE=local-smoke
+```
+
+Required:
+
+```bash
+ollama serve
+ollama pull qwen3.5:9b
+ollama pull qwen3.5:4b
+```
+
+Cloud keys are not required in this mode. `aedis doctor` will still report
+missing cloud keys so you know full mode is not ready, but it will also say
+local smoke mode is active/available when Ollama is reachable.
+
+## Full/default provider roles
 
 | Role | Provider | Model | Env var |
 |------|----------|-------|---------|
@@ -20,7 +48,7 @@ and only needed if you customize `.aedis/model-config.json`.
 Anthropic is **not** in the hot path by default. See `DOCTRINE.md` "No
 Anthropic Hot Path."
 
-## 1. OpenRouter (required)
+## 1. OpenRouter (required for full/default mode)
 
 1. Create an account at [openrouter.ai](https://openrouter.ai).
 2. Generate an API key from the dashboard.
@@ -43,7 +71,7 @@ Anthropic Hot Path."
    ZAI_API_KEY=...
    ```
 
-## 3. Ollama (required for default critic + prompt normalizer)
+## 3. Ollama (required for full/default mode and local smoke mode)
 
 Ollama runs models locally. No API key needed, but models must be
 installed.
@@ -68,7 +96,7 @@ Ollama listens on `http://localhost:11434` by default. Override with
 ### Pull required models
 
 ```bash
-ollama pull qwen3.5:9b    # used by: critic
+ollama pull qwen3.5:9b    # used by: critic and local smoke worker
 ollama pull qwen3.5:4b    # used by: prompt normalizer
 ```
 
@@ -111,8 +139,9 @@ aedis doctor
 curl -s http://127.0.0.1:18796/health | jq '.policy'
 ```
 
-`aedis doctor` reports connectivity for OpenRouter and Ollama, lists
-installed Ollama models, and flags missing required API keys.
+`aedis doctor` reports the active model profile, state root, OpenRouter/Z.ai
+key status, Ollama reachability, installed Ollama models, and exact local-smoke
+instructions when cloud keys are missing but Ollama is ready.
 
 ## Custom model configuration
 

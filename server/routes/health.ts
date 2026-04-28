@@ -13,6 +13,12 @@ import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import { join, resolve } from "node:path";
 import type { ServerContext } from "../index.js";
 import type { WorkerType } from "../../workers/base.js";
+import {
+  getActiveModelProfile,
+  getLocalSmokeModel,
+  loadModelConfig,
+  modelConfigRequiresCloudKeys,
+} from "./config.js";
 
 // ─── Routes ──────────────────────────────────────────────────────────
 
@@ -78,6 +84,17 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
         projectRoot,
         isolatedFromProject: resolve(stateRoot) !== resolve(projectRoot),
       };
+      const modelProfile = getActiveModelProfile();
+      const modelConfig = loadModelConfig(projectRoot);
+      const requiredCloudKeys = modelConfigRequiresCloudKeys(modelConfig);
+      const providerContract = {
+        profile: modelProfile,
+        localSmokeCapable: true,
+        localSmokeEnv: "AEDIS_MODEL_PROFILE=local-smoke",
+        localSmokeModel: getLocalSmokeModel(),
+        requiredCloudKeys,
+        cloudRequired: requiredCloudKeys.length > 0,
+      };
 
       reply.send({
         status,
@@ -104,6 +121,7 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
         },
         auth,
         state,
+        providerContract,
         crucibulum: {
           connected: false, // TODO: wire up when Crucibulum is integrated
           last_sync: null,

@@ -66,11 +66,12 @@ class RealBuilderWorker extends AbstractWorker {
       // diff — cannot rollback" and PHASE 10 never reaches the approval
       // gate, which makes this whole test bypass the path it's testing.
       const abs = resolve(root, w.path);
+      const existed = existsSync(abs);
       const originalContent = await readFile(abs, "utf-8").catch(() => "");
       await writeFile(abs, w.content, "utf-8");
       changes.push({
         path: w.path,
-        operation: "modify" as const,
+        operation: existed ? "modify" as const : "create" as const,
         content: w.content,
         originalContent,
       });
@@ -653,6 +654,50 @@ test("approval flow: promoteToSource succeeds end-to-end after approveRun (round
     const widgetContent = readFileSync(join(repo, "core/widget.ts"), "utf-8");
     assert.match(widgetContent, /widget = 42/, "promoted file content must contain the approved change");
   } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("local smoke profile: tiny supervised task reaches approval and promotion without cloud model config", async () => {
+  const prevProfile = process.env.AEDIS_MODEL_PROFILE;
+  const prevOpenRouter = process.env.OPENROUTER_API_KEY;
+  const prevZai = process.env.ZAI_API_KEY;
+  process.env.AEDIS_MODEL_PROFILE = "local-smoke";
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.ZAI_API_KEY;
+
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "hello-aedis.txt", content: "Aedis RC smoke test.\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({
+      input: "Create the repository root file hello-aedis.txt containing exactly: Aedis RC smoke test.",
+    });
+
+    assert.equal(receipt.verdict, "partial");
+    assert.equal(coordinator.getPendingApprovals().some((approval) => approval.runId === receipt.runId), true);
+    assert.equal(existsSync(join(repo, "hello-aedis.txt")), false, "source repo must stay clean before approval");
+
+    const persistedBefore = await receiptStore.getRun(receipt.runId);
+    const modelCheckpoint = persistedBefore?.checkpoints.find((c) => c.summary.includes("worker models resolved"));
+    assert.equal(modelCheckpoint?.details?.source, "local-smoke");
+    assert.equal((modelCheckpoint?.details as any)?.workerModels?.builder, "ollama/qwen3.5:9b");
+
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true, `approveRun must succeed; got error=${approve.error}`);
+    const promote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(promote.ok, true, `promoteToSource must succeed; got error=${promote.error}`);
+    assert.equal(readFileSync(join(repo, "hello-aedis.txt"), "utf-8"), "Aedis RC smoke test.\n");
+  } finally {
+    if (prevProfile === undefined) delete process.env.AEDIS_MODEL_PROFILE;
+    else process.env.AEDIS_MODEL_PROFILE = prevProfile;
+    if (prevOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = prevOpenRouter;
+    if (prevZai === undefined) delete process.env.ZAI_API_KEY;
+    else process.env.ZAI_API_KEY = prevZai;
     rmSync(repo, { recursive: true, force: true });
   }
 });

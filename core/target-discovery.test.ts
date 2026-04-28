@@ -118,6 +118,29 @@ test("target discovery: explicit root new-file task accepts exact file creation"
   }
 });
 
+test("target discovery: explicit repository-root new-file task accepts exact file creation", () => {
+  const projectRoot = makeBackendRepo();
+  try {
+    const generator = new CharterGenerator();
+    const analysis = generator.analyzeRequest(
+      "Create the repository root file hello-aedis.txt containing exactly: Aedis RC smoke test.",
+    );
+    const prepared = prepareTargetsForPrompt({
+      projectRoot,
+      prompt: analysis.raw,
+      analysis,
+    });
+
+    assert.ok(
+      prepared.targets.includes("hello-aedis.txt"),
+      `expected new root file in targets, got ${JSON.stringify(prepared.targets)}`,
+    );
+    assert.equal(prepared.clarification, null);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("target discovery: vague repo improvement stays unscoped", () => {
   const projectRoot = makeBackendRepo();
   try {

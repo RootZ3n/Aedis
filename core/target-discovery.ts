@@ -667,9 +667,10 @@ const CREATION_VERBS = "create|scaffold|generate|write|introduce|add";
 function hasCreationIntent(sanitized: string, target: string): boolean {
   // Escape dots/slashes in the path for regex safety.
   const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // "create <target>", "Then create <target>", "add a new <target>"
+  // "create <target>", "create the repository root file <target>",
+  // "Then create <target>", "add a new <target>"
   const before = new RegExp(
-    `\\b(?:${CREATION_VERBS})\\s+(?:a\\s+)?(?:new\\s+)?(?:file\\s+)?${escaped}\\b`,
+    `\\b(?:${CREATION_VERBS})\\s+(?:a\\s+|the\\s+)?(?:new\\s+)?(?:(?:repository\\s+)?root\\s+)?(?:file\\s+)?${escaped}\\b`,
     "i",
   );
   if (before.test(sanitized)) return true;

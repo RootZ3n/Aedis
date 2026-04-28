@@ -8,9 +8,11 @@ import {
   builderTierCollapseWarning,
   findNextStrongerBuilderTier,
   loadModelConfig,
+  modelConfigRequiresCloudKeys,
   resolveBuilderModelForTier,
   resolveBuilderChainForTier,
   resolveAssignmentChain,
+  getActiveModelProfile,
   checkAnthropicHotPathDoctrine,
   _resetDoctrineWarningCache,
 } from "./config.js";
@@ -63,6 +65,38 @@ test("loadModelConfig falls back to defaults when no config file exists (fallbac
     assert.equal(config.critic.model, "qwen3.5:9b");
     assert.equal(config.integrator.model, "glm-5.1");
   } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("AEDIS_MODEL_PROFILE=local-smoke uses Ollama only and does not require cloud keys", () => {
+  const prev = process.env.AEDIS_MODEL_PROFILE;
+  process.env.AEDIS_MODEL_PROFILE = "local-smoke";
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-local-smoke-config-"));
+  try {
+    const config = loadModelConfig(projectRoot);
+    assert.equal(getActiveModelProfile(), "local-smoke");
+    assert.equal(config.builder.provider, "ollama");
+    assert.equal(config.builder.model, "qwen3.5:9b");
+    assert.equal(config.critic.provider, "ollama");
+    assert.equal(config.escalation.provider, "ollama");
+    assert.deepEqual(modelConfigRequiresCloudKeys(config), []);
+  } finally {
+    if (prev === undefined) delete process.env.AEDIS_MODEL_PROFILE;
+    else process.env.AEDIS_MODEL_PROFILE = prev;
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("default model profile still reports required cloud keys clearly", () => {
+  const prev = process.env.AEDIS_MODEL_PROFILE;
+  delete process.env.AEDIS_MODEL_PROFILE;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-default-cloud-"));
+  try {
+    const config = loadModelConfig(projectRoot);
+    assert.deepEqual(modelConfigRequiresCloudKeys(config), ["OPENROUTER_API_KEY", "ZAI_API_KEY"]);
+  } finally {
+    if (prev !== undefined) process.env.AEDIS_MODEL_PROFILE = prev;
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });

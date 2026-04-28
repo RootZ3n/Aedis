@@ -100,6 +100,55 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
   builderTiers: {},
 };
 
+const LOCAL_SMOKE_MODEL = "qwen3.5:9b";
+
+const LOCAL_SMOKE_MODEL_CONFIG: ModelConfig = {
+  scout: { model: "local", provider: "local" },
+  builder: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
+  critic: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
+  verifier: { model: "local", provider: "local" },
+  // Integrator is deterministic today, but keep the profile complete
+  // so receipts and future role checks do not imply cloud is required.
+  integrator: { model: "integration-judge", provider: "local" },
+  escalation: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
+  coordinator: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
+  builderTiers: {
+    fast: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
+    standard: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
+    premium: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
+  },
+};
+
+export type ModelProfile = "default" | "local-smoke";
+
+export function getActiveModelProfile(env: NodeJS.ProcessEnv = process.env): ModelProfile {
+  return env["AEDIS_MODEL_PROFILE"] === "local-smoke" ? "local-smoke" : "default";
+}
+
+export function getLocalSmokeModel(): string {
+  return LOCAL_SMOKE_MODEL;
+}
+
+export function getModelProfileConfig(profile: ModelProfile): ModelConfig {
+  return normalizeModelConfig(
+    profile === "local-smoke" ? LOCAL_SMOKE_MODEL_CONFIG : DEFAULT_MODEL_CONFIG,
+  );
+}
+
+export function modelConfigRequiresCloudKeys(config: ModelConfig): readonly string[] {
+  const required = new Set<string>();
+  const inspect = (assignment: ModelAssignment | undefined) => {
+    if (!assignment) return;
+    for (const entry of resolveAssignmentChain(assignment)) {
+      if (entry.provider === "openrouter") required.add("OPENROUTER_API_KEY");
+      if (entry.provider === "zai") required.add("ZAI_API_KEY");
+    }
+  };
+  for (const role of VALID_ROLES) inspect(config[role]);
+  for (const tier of VALID_TIERS) inspect(config.builderTiers?.[tier]);
+  return [...required].sort();
+}
+
 const VALID_ROLES = [
   "scout", "builder", "critic", "verifier",
   "integrator", "escalation", "coordinator",
@@ -425,6 +474,11 @@ function legacyConfigPath(projectRoot: string): string {
 const doctrineWarnedRoots = new Set<string>();
 
 export function loadModelConfig(projectRoot: string): ModelConfig {
+  const profile = getActiveModelProfile();
+  if (profile === "local-smoke") {
+    return getModelProfileConfig("local-smoke");
+  }
+
   // Prefer the canonical .aedis/ path. Fall back to the legacy
   // .zendorium/ path so installs that were configured before the
   // rename still load their saved assignments. Writes always go to

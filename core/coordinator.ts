@@ -256,6 +256,7 @@ import {
   loadModelConfig as loadModelConfigFromDisk,
   builderTierCollapseWarning,
   findNextStrongerBuilderTier,
+  getActiveModelProfile,
   resolveAllBuilderTierModels,
 } from "../server/routes/config.js";
 
@@ -1545,9 +1546,12 @@ export class Coordinator {
     // ground truth.
     {
       const configPath = resolve(active.sourceRepo, ".aedis", "model-config.json");
-      const configSource: "user-config" | "fallback" = existsSync(configPath)
-        ? "user-config"
-        : "fallback";
+      const profile = getActiveModelProfile();
+      const configSource: "user-config" | "fallback" | "local-smoke" = profile === "local-smoke"
+        ? "local-smoke"
+        : existsSync(configPath)
+          ? "user-config"
+          : "fallback";
       const resolved = loadModelConfigFromDisk(active.sourceRepo);
       const builderTierModels = resolveAllBuilderTierModels(resolved);
       const tierWarning = builderTierCollapseWarning(resolved);
