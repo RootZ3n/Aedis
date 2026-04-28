@@ -6967,6 +6967,18 @@ export class Coordinator {
     if (active.laneConfig.mode !== "local_then_cloud") return null;
     if (!laneConfigRunsShadow(active.laneConfig)) return null;
 
+    // Defensive dispatch gate — these modes are scaffolded but not yet
+    // dispatched by the main lane routing. If one somehow reaches here,
+    // treat it as an explicit no-op rather than silently falling through
+    // to local_then_cloud behavior.
+    const UNREACHABLE_MODES = ["cloud_with_local_check", "local_vs_cloud"] as const;
+    if (UNREACHABLE_MODES.includes(active.laneConfig.mode as typeof UNREACHABLE_MODES[number])) {
+      console.warn(
+        `[coordinator] maybeRunFallbackShadow: mode=${active.laneConfig.mode} is scaffolded but not yet dispatched — skipping fallback`,
+      );
+      return null;
+    }
+
     // Find the primary candidate this fallback evaluates against.
     const primary = active.candidates.find((c) => c.workspaceId === "primary");
     if (!primary) {

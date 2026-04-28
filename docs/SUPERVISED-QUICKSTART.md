@@ -139,15 +139,29 @@ npx tsx scripts/burn-in/test-burn-in.ts --summary
 
 ## 8. Lane config — opt into local-then-cloud rescue
 
-Per-repo `.aedis/lane-config.json` controls multi-lane execution:
+Per-repo `.aedis/lane-config.json` controls multi-lane execution.
+Four `mode` values are defined, but only one is currently dispatched:
 
 ```json
 {
-  "mode": "local_then_cloud",
+  "mode": "local_then_cloud",   // ✅ active — local primary, cloud shadow on fallback
   "primary": { "lane": "local",  "provider": "ollama",     "model": "qwen3.5:9b" },
   "shadow":  { "lane": "cloud",  "provider": "openrouter", "model": "xiaomi/mimo-v2.5" }
 }
 ```
+
+The following modes are **scaffolded but not yet dispatched** — they are
+accepted by the parser (so config files are valid) but have no live code path:
+
+| mode | what it does | status |
+|------|-------------|--------|
+| `primary_only` | single lane, no shadow | ✅ active (default) |
+| `local_then_cloud` | local primary; cloud shadow fires only if primary fails verification | ✅ active |
+| `local_vs_cloud` | parallel primary+shadow, pick best | 🔧 scaffolded |
+| `cloud_with_local_check` | cloud primary; local shadow validates output | 🔧 scaffolded |
+
+To register a shadow intent today, use `local_then_cloud`. When the
+scaffolded modes are wired, this table will be updated to mark them active.
 
 **Cost warning.** `local_then_cloud` only fires the cloud shadow when
 the local primary fails verification. When it fires, you get a single
