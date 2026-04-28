@@ -33,6 +33,9 @@
  * that need a tighter bound can pass an explicit timeoutMs.
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
 // ─── Types ───────────────────────────────────────────────────────────
 
 export type Provider =
@@ -143,11 +146,7 @@ const CB_PATH = ".aedis/circuit-breaker-state.json";
 function cbPath(): string {
   const stateRoot = process.env["AEDIS_STATE_ROOT"];
   if (!stateRoot) return CB_PATH;
-  return require("node:path").join(
-    require("node:path").resolve(stateRoot),
-    "state",
-    "circuit-breaker-state.json",
-  );
+  return join(resolve(stateRoot), "state", "circuit-breaker-state.json");
 }
 
 interface CbEntry { failures: number; lastFailure: number; }
@@ -159,12 +158,10 @@ const CB_HALF_LIFE_MS = 5 * 60 * 1000;
 
 function cbRead(): CbState {
   try {
-    return JSON.parse(String(require("fs").readFileSync(cbPath()))) as CbState;
+    return JSON.parse(String(readFileSync(cbPath()))) as CbState;
   } catch { return { providers: {} }; }
 }
 function cbWrite(s: CbState): void {
-  const { writeFileSync, mkdirSync } = require("fs") as typeof import("fs");
-  const { dirname } = require("node:path") as typeof import("node:path");
   const path = cbPath();
   try { mkdirSync(dirname(path), { recursive: true }); } catch { /* exists */ }
   writeFileSync(path, JSON.stringify(s, null, 2));
