@@ -1346,7 +1346,7 @@ test("promote-time typecheck gate: refuses to commit a tsc-breaking patch and le
     const builder = new RealBuilderWorker([
       { path: "core/widget.ts", content: breakingContent },
     ]);
-    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
 
     const submitReceipt = await coordinator.submit({ input: "modify widget in core", projectRoot: repo });
     const approve = await coordinator.approveRun(submitReceipt.runId);
@@ -1382,6 +1382,23 @@ test("promote-time typecheck gate: refuses to commit a tsc-breaking patch and le
       existsSync(join(repo, ".aedis-promote-patch.tmp")),
       false,
       "promote temp patch file must be cleaned up regardless of gate outcome",
+    );
+
+    const persisted = await receiptStore.getRun(submitReceipt.runId);
+    assert.equal(
+      persisted?.status,
+      "EXECUTION_ERROR",
+      "persisted run status must be failure/blocked, not success, when promote-time typecheck refuses",
+    );
+    assert.match(
+      persisted?.taskSummary ?? "",
+      /Promotion blocked by typecheck/i,
+      "persisted task summary must clearly report a typecheck promotion block",
+    );
+    assert.match(
+      (persisted?.errors ?? []).join("\n"),
+      /Promote refused.*TypeScript error|typecheck/i,
+      "receipt errors must clearly report the typecheck block",
     );
   } finally {
     rmSync(repo, { recursive: true, force: true });

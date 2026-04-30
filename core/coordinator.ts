@@ -7168,7 +7168,13 @@ export class Coordinator {
       return new Set<string>();
     } catch (err) {
       const stdout: string = (err as { stdout?: string })?.stdout ?? "";
-      const issues = parseTscOutput(stdout);
+      const stderr: string = (err as { stderr?: string })?.stderr ?? "";
+      const combinedOutput = [stdout, stderr].filter(Boolean).join("\n");
+      const issues = parseTscOutput(combinedOutput);
+      if (issues.length === 0) {
+        const message = combinedOutput.trim() || (err instanceof Error ? err.message : String(err));
+        return new Set([`?:?:TSC_FAILED:${message.slice(0, 500)}`]);
+      }
       return new Set(
         issues.map((i) => `${i.file ?? "?"}:${i.line ?? "?"}:${i.rule ?? "?"}:${i.message}`),
       );
@@ -7263,7 +7269,9 @@ export class Coordinator {
     await this.receiptStore.patchRun(runId, {
       status: rollbackSucceeded ? "EXECUTION_ERROR" : "ROLLBACK_FAILED",
       taskSummary: rollbackSucceeded
-        ? "Promotion failed — source rollback completed"
+        ? error.toLowerCase().includes("typescript") || error.toLowerCase().includes("typecheck")
+          ? "Promotion blocked by typecheck — source rollback completed"
+          : "Promotion failed — source rollback completed"
         : rollback!.summary,
       ...(finalReceipt ? { finalReceipt } : {}),
       appendErrors: rollback ? [error, rollback.summary] : [error],
@@ -8095,7 +8103,10 @@ export class Coordinator {
         );
         if (!gateResult.ok) {
           console.error(`[coordinator] PROMOTE (patch) REFUSED for ${runId}: ${gateResult.error}`);
-          const rollback = await this.rollbackAppliedPromotionPatch(sourceRepo, patchTmp, patchArtifact.changedFiles ?? []);
+          const rollback = await this.rollbackAppliedPromotionPatch(sourceRepo, patchTmp, [
+            ...(patchArtifact.changedFiles ?? []),
+            ...appliedFiles,
+          ]);
           const error = rollback.ok
             ? `${gateResult.error}; promotion rollback completed`
             : `${gateResult.error}; promotion rollback FAILED: ${rollback.error}`;
