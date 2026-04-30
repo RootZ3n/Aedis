@@ -12,7 +12,7 @@ import type { ToolHook } from "../core/verification-pipeline.js";
 import type { TrustProfile } from "../router/trust-router.js";
 import type { AedisEvent, EventBus } from "../server/websocket.js";
 
-const PORTUM = "/mnt/ai/portum";
+const PORTUM = process.env["PORTUM_REPO"] ?? process.env["AEDIS_PORTUM_REPO"] ?? "";
 
 class SentinelBuilder extends AbstractWorker {
   readonly type: WorkerType = "builder";
@@ -215,6 +215,10 @@ const scenarios = [
 ] as const;
 
 async function main() {
+  if (!PORTUM) {
+    console.error("Set PORTUM_REPO=/path/to/portum before running this validation script.");
+    process.exit(1);
+  }
   const portumHead = execFileSync("git", ["-C", PORTUM, "rev-parse", "HEAD"], { encoding: "utf-8" }).trim();
   const reports = [];
   const only = process.env.SCENARIO;

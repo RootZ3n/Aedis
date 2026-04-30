@@ -427,6 +427,10 @@ export function generateRunSummary(input: RunSummaryInput): RunSummary {
   if (input.confidenceDampening != null && input.confidenceDampening < 1.0) trustExplanation.push("Historical dampening applied (" + Math.round(input.confidenceDampening * 100) + "%) — adjusted for past overconfidence");
   if (input.historicalReliabilityTier === "reliable") trustExplanation.push("Task archetype historically reliable");
   if (repoReadiness.level === "normal") trustExplanation.push("Repo in normal state — no readiness issues");
+  if (receipt.rollback && receipt.rollback.status !== "clean") {
+    trustExplanation.unshift(receipt.rollback.summary);
+    trustExplanation.unshift("Manual inspection required before trusting the workspace state");
+  }
   if (confidence.overall < 0.5) trustExplanation.push("LOW confidence — manual review strongly recommended");
   if (verification === "fail") trustExplanation.push("VERIFICATION FAILED — do not trust without review");
   if (receipt.evaluation?.disagreement?.direction === "aedis-overconfident") trustExplanation.push("Crucibulum disagrees — Aedis was overconfident");
@@ -496,6 +500,16 @@ function buildHeadline(input: {
   const percent = Math.round(confidence.overall * 100);
   const sha = input.receipt.commitSha ? ` (${input.receipt.commitSha.slice(0, 8)})` : "";
 
+  if (input.receipt.rollback && input.receipt.rollback.status !== "clean") {
+    return `${input.receipt.rollback.summary}. Verification evidence is retained, but rollback failure is the final result.`;
+  }
+  if (input.receipt.providerLaneTruth?.status === "not_run") {
+    return `Aedis did not run a builder because provider/model/lane config is unsupported. Confidence: ${percent}%.`;
+  }
+  if (input.receipt.providerLaneTruth?.status === "fallback_used") {
+    return `Aedis used an explicitly allowed provider/model/lane fallback. Confidence: ${percent}%${sha}.`;
+  }
+
   switch (classification) {
     case "VERIFIED_SUCCESS":
       return `Aedis updated ${fileCount} file${plural(fileCount)} and all changes passed verification. Confidence: ${percent}%${sha}.`;
@@ -557,6 +571,16 @@ function buildNarrative(input: {
 
   const percent = Math.round(confidence.overall * 100);
   const lines: string[] = [];
+  const rollback = input.receipt.rollback;
+  if (rollback && rollback.status !== "clean") {
+    lines.push(`${rollback.summary}. Verification/build evidence may be present in this receipt, but rollback integrity dominates the final verdict.`);
+  }
+  const providerLaneTruth = input.receipt.providerLaneTruth;
+  if (providerLaneTruth?.status === "not_run") {
+    lines.push(`${providerLaneTruth.reason} No default builder was run.`);
+  } else if (providerLaneTruth?.status === "fallback_used") {
+    lines.push(`${providerLaneTruth.reason}. The receipt preserves the intended provider/model/lane separately from the actual charged provider/model.`);
+  }
 
   switch (classificationResult.classification) {
     case "VERIFIED_SUCCESS": {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Debug trace for stress-01 and stress-09
-# Run from /mnt/ai/aedis directory
+# Run from the Aedis repository root.
 
 set -x
 
@@ -15,7 +15,7 @@ import('./dist/cli/index.js').then(async (m) => {
 echo "---"
 echo "Checking coordinator logs for stress-01 submit path..."
 # Look for submit entry logs
-grep -n "submit() entry\|scope:\|charter produced no targets\|large scope detected\|PHASE 4 done\|PHASE 4 FAIL\|prepareDeliverablesForGraph" /mnt/ai/aedis/dist/core/coordinator.js 2>/dev/null | head -20 || echo "No compiled dist found — run from source"
+grep -n "submit() entry\|scope:\|charter produced no targets\|large scope detected\|PHASE 4 done\|PHASE 4 FAIL\|prepareDeliverablesForGraph" "${AEDIS_REPO_ROOT:-$PWD}/dist/core/coordinator.js" 2>/dev/null | head -20 || echo "No compiled dist found — run from source"
 
 echo "---"
 echo "Key lines to instrument in coordinator.ts:"

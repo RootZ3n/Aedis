@@ -45,6 +45,8 @@ export interface PersistedWorkspaceRef {
  *     but the run is held for human review — treated as BLOCKED
  *   - "EXECUTION_ERROR" replaces "CRASHED" — explicit error state
  *   - "CLEANUP_ERROR" means workspace cleanup failed — SEVERE
+ *   - "UNSUPPORTED_CONFIG" means provider/model/lane config failed
+ *     closed before execution; no alternate provider was run
  *   - "READY_FOR_PROMOTION" means all gates passed and the run
  *     is ready to be applied to the source branch — does NOT
  *     imply already applied
@@ -62,6 +64,10 @@ export type PersistentRunStatus =
   | "DISAGREEMENT_HOLD"
   | "EXECUTION_ERROR"
   | "CLEANUP_ERROR"
+  | "UNSUPPORTED_CONFIG"
+  | "ROLLBACK_FAILED"
+  | "ROLLBACK_INCOMPLETE"
+  | "UNSAFE_STATE"
   | "READY_FOR_PROMOTION"
   | "ABORTED"
   | "INTERRUPTED"

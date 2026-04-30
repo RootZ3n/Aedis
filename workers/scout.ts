@@ -185,7 +185,7 @@ export class ScoutWorker extends AbstractWorker {
     // bypass the assignment-based wiring. Threaded through every helper
     // method below so all path operations honor the per-task root.
     const projectRoot = assignment.projectRoot ?? this.projectRoot;
-    // If files come in as absolute paths from the source repo (e.g. /mnt/ai/squidley-v2/...)
+    // If files come in as absolute paths from the source repo (e.g. /path/to/repo/...)
     // but we're operating on a worktree at projectRoot, map them to worktree-relative.
     // The worktree mirrors the source repo's relative structure, so the same file exists at
     // projectRoot + "/apps/api/src/routes/index.ts" even though the absolute path points elsewhere.

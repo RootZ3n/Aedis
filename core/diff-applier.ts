@@ -15,8 +15,12 @@
 
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { spawn } from "child_process";
-import { resolve, dirname, sep } from "path";
+import { dirname } from "path";
 import { existsSync } from "fs";
+import {
+  resolveSafeExistingPath,
+  resolveSafeWritePath,
+} from "./safe-path.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -36,7 +40,7 @@ export class DiffApplier {
    * Returns a rollback snapshot regardless of success/failure.
    */
   async apply(diff: string, repoPath: string): Promise<ApplyResult> {
-    const absRepo = resolve(repoPath);
+    const absRepo = await resolveSafeExistingPath(repoPath, ".");
     const errors: string[] = [];
     const rollbackSnapshot: Record<string, string> = {};
 
@@ -49,15 +53,16 @@ export class DiffApplier {
       return { success: false, filesChanged: [], errors: ["No files found in diff"], rollbackSnapshot };
     }
 
-    // Safety: verify all files are within repoPath
+    // Safety: verify all files are within repoPath and not reachable
+    // through symlink escapes before git apply or manual patching.
     for (const file of changedFiles) {
-      const absFile = resolve(absRepo, file);
-      const normalizedRepo = absRepo.endsWith(sep) ? absRepo : absRepo + sep;
-      if (absFile !== absRepo && !absFile.startsWith(normalizedRepo)) {
+      try {
+        await resolveSafeWritePath(absRepo, file);
+      } catch (err) {
         return {
           success: false,
           filesChanged: [],
-          errors: [`Path traversal blocked: "${file}" resolves outside repo`],
+          errors: [`Path traversal blocked: "${file}" (${err instanceof Error ? err.message : String(err)})`],
           rollbackSnapshot,
         };
       }
@@ -65,7 +70,7 @@ export class DiffApplier {
 
     // Snapshot all existing files before changes
     for (const file of changedFiles) {
-      const absFile = resolve(absRepo, file);
+      const absFile = await resolveSafeWritePath(absRepo, file);
       try {
         const content = await readFile(absFile, "utf-8");
         rollbackSnapshot[file] = content;
@@ -174,7 +179,7 @@ export class DiffApplier {
       try {
         if (content === "") continue; // Was a new file — leave as-is
 
-        const absFile = repoPath ? resolve(repoPath, file) : file;
+        const absFile = repoPath ? await resolveSafeWritePath(repoPath, file) : file;
         const dir = dirname(absFile);
         if (!existsSync(dir)) {
           await mkdir(dir, { recursive: true });
@@ -365,7 +370,7 @@ export class DiffApplier {
     chunk: { file: string; hunks: string[] },
     repoPath: string
   ): Promise<{ file: string; changed: boolean }> {
-    const absFile = resolve(repoPath, chunk.file);
+    const absFile = await resolveSafeWritePath(repoPath, chunk.file);
 
     // Step 1: Read the ORIGINAL file content
     let original: string;
@@ -468,7 +473,7 @@ export class DiffApplier {
     const errors: string[] = [];
 
     for (const file of files) {
-      const absFile = resolve(repoPath, file);
+      const absFile = await resolveSafeWritePath(repoPath, file);
       try {
         const content = await readFile(absFile, "utf-8");
         if (DiffApplier.looksLikeRawDiff(content)) {

@@ -6,17 +6,19 @@
  * — runs that reach AWAITING_APPROVAL get rejected so source stays
  * untouched.
  *
- *   cd /mnt/ai/aedis && npx tsx scripts/burn-in/test-burn-in.ts
+ *   npx tsx scripts/burn-in/test-burn-in.ts
  *   AEDIS_BASE=http://localhost:18796 npx tsx scripts/burn-in/test-burn-in.ts
  *   AEDIS_BURN_TIMEOUT_MS=600000 npx tsx scripts/burn-in/test-burn-in.ts
  *
- * Each row is appended to /mnt/ai/tmp/aedis-burn-in-results.jsonl
+ * Each row is appended to the OS temp directory by default.
  * Run with --summary to print latest invocation results without re-running.
  * Run with --history to include all accumulated JSONL rows in the summary.
  * Run with --allow-promote only when intentionally permitting source commits.
  */
 
 import { readFileSync, appendFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactObject } from "../../core/redaction.js";
 import { detectSourceNewerThanDist, getBuildMetadata } from "../../core/build-metadata.js";
@@ -40,8 +42,9 @@ import {
 } from "./harness.js";
 
 const AEDIS_BASE = process.env["AEDIS_BASE"] ?? "http://localhost:18796";
-const RESULTS_FILE = "/mnt/ai/tmp/aedis-burn-in-results.jsonl";
-const PROJECT_ROOT = "/mnt/ai/aedis";
+const RESULTS_FILE = process.env["AEDIS_BURN_RESULTS"] ?? join(tmpdir(), "aedis-burn-in-results.jsonl");
+const PROJECT_ROOT = process.env["AEDIS_BURN_PROJECT_ROOT"] ?? process.cwd();
+const EXTERNAL_REPO = process.env["AEDIS_BURN_EXTERNAL_REPO"] ?? PROJECT_ROOT;
 const TIMEOUT_MS = resolveTimeoutMs(process.env["AEDIS_BURN_TIMEOUT_MS"], DEFAULT_BURN_TIMEOUT_MS);
 
 export interface Scenario {
@@ -264,7 +267,7 @@ export function buildScenarios(opts: { tag?: string } = {}): Scenario[] {
   // ── 8. External repo (Crucible) ─────────────────────────────────────
   {
     id: "burn-in-08-external-repo",
-    repo: "/mnt/ai/crucible",
+    repo: EXTERNAL_REPO,
     prompt:
       "In core/judge.ts, add a one-line comment above the DETERMINISTIC_JUDGE_METADATA constant explaining what it represents.",
     expected: {

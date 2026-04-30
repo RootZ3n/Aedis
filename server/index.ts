@@ -47,6 +47,7 @@ import { configRoutes } from "./routes/config.js";
 import { providerRoutes } from "./routes/providers.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { loquiRoutes } from "./routes/loqui.js";
+import { loquiOrientationRoutes } from "./routes/loqui-orientation.js";
 import { trustRoutes } from "./routes/trust.js";
 import { proveRoutes } from "./routes/prove.js";
 import { reliabilityRoutes } from "./routes/reliability.js";
@@ -54,6 +55,16 @@ import { campaignRoutes } from "./routes/campaign.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { planRoutes } from "./routes/plans.js";
+import { taskPlanRoutes } from "./routes/task-plans.js";
+import { scoutEvidenceRoutes } from "./routes/scout-evidence.js";
+import { missionRoutes } from "./routes/missions.js";
+import {
+  takeSnapshot,
+  detectTransition,
+  pressureMessage,
+  type PressureLevel,
+  type SystemSnapshot,
+} from "../core/system-monitor.js";
 import { safeDefaults, policyFromCoordinatorConfig, type RuntimePolicy } from "../core/runtime-policy.js";
 import { loadLaneConfigFromDisk } from "../core/lane-config.js";
 
@@ -125,7 +136,9 @@ export function isPortInUse(port: number, host: string): Promise<boolean> {
 
 export const DEFAULT_CONFIG: ServerConfig = {
   port: readPortFromEnv(),
-  host: process.env["AEDIS_HOST"] ?? "0.0.0.0",
+  host: process.env["AEDIS_HOST"] === "0.0.0.0" && process.env["AEDIS_ALLOW_PUBLIC_BIND"] !== "true"
+    ? "127.0.0.1"
+    : process.env["AEDIS_HOST"] ?? "127.0.0.1",
   stateRoot: process.env["AEDIS_STATE_ROOT"] ?? process.cwd(),
   projectRoot: process.env["AEDIS_PROJECT_ROOT"] ?? process.cwd(),
   // TAILSCALE_ONLY=true keeps Tailscale auth enforced. Operators may set
@@ -397,6 +410,8 @@ export async function createServer(
       autoPromoteOnSuccess: safe.autoPromoteOnSuccess,
       requireApproval: safe.requireApproval,
       requireWorkspace: safe.requireWorkspace,
+      allowSourcePromotion: safe.allowSourcePromotion,
+      trustedLocalRepoWrites: safe.trustedLocalRepoWrites,
       ...cfg.coordinatorConfig,
     },
     profile,
@@ -435,6 +450,8 @@ export async function createServer(
         autoPromoteOnSuccess: safe.autoPromoteOnSuccess,
         requireApproval: safe.requireApproval,
         requireWorkspace: safe.requireWorkspace,
+        allowSourcePromotion: safe.allowSourcePromotion,
+        trustedLocalRepoWrites: safe.trustedLocalRepoWrites,
       },
       laneCfg.mode,
     );
@@ -453,7 +470,8 @@ export async function createServer(
   console.log(
     `[server] runtime policy: autoPromote=${safe.autoPromoteOnSuccess} ` +
     `approvalRequired=${safe.requireApproval} ` +
-    `requireWorkspace=${safe.requireWorkspace}`,
+    `requireWorkspace=${safe.requireWorkspace} ` +
+    `sourcePromotion=${safe.allowSourcePromotion && safe.trustedLocalRepoWrites ? "enabled" : "review-only"}`,
   );
 
   const ctx: ServerContext = {
@@ -539,6 +557,8 @@ export async function createServer(
   await server.register(costRoutes, { prefix: "/cost" });
   await server.register(metricsRoutes, { prefix: "/metrics" });
   await server.register(loquiRoutes, { prefix: "/loqui" });
+  await server.register(loquiOrientationRoutes, { prefix: "/loqui" });
+  await server.register(loquiOrientationRoutes, { prefix: "/api/loqui" });
   await server.register(trustRoutes, { prefix: "/trust" });
   await server.register(proveRoutes, { prefix: "/prove" });
   await server.register(reliabilityRoutes, { prefix: "/reliability" });
@@ -547,6 +567,12 @@ export async function createServer(
   await server.register(memoryRoutes, { prefix: "/memory" });
   await server.register(planRoutes, { prefix: "/plans" });
   await server.register(planRoutes, { prefix: "/api/plans" });
+  await server.register(taskPlanRoutes, { prefix: "/task-plans" });
+  await server.register(taskPlanRoutes, { prefix: "/api/task-plans" });
+  await server.register(scoutEvidenceRoutes, { prefix: "/scouts" });
+  await server.register(scoutEvidenceRoutes, { prefix: "/api/scouts" });
+  await server.register(missionRoutes, { prefix: "/missions" });
+  await server.register(missionRoutes, { prefix: "/api/missions" });
 
   // ─── Approval gate endpoints ──────────────────────────────────
 
@@ -634,6 +660,49 @@ export async function createServer(
         }
       });
     });
+  });
+
+  // ─── System Resource Monitor ──────────────────────────────────
+  // Poll every 3 seconds, emit WS events only on level transitions.
+  // Stores the latest snapshot on the server for /health consumers.
+  let latestSnapshot: SystemSnapshot | null = null;
+  let previousLevel: PressureLevel | null = null;
+
+  const monitorInterval = setInterval(() => {
+    try {
+      const snapshot = takeSnapshot();
+      latestSnapshot = snapshot;
+      const transition = detectTransition(previousLevel, snapshot.level);
+      previousLevel = snapshot.level;
+
+      if (transition && transition !== "system_status") {
+        eventBus.emit({
+          type: transition,
+          payload: {
+            percentUsed: snapshot.percentUsed,
+            level: snapshot.level,
+            usedMem: snapshot.usedMem,
+            totalMem: snapshot.totalMem,
+            heapUsedMb: snapshot.heapUsedMb,
+            message: pressureMessage(snapshot),
+            timestamp: snapshot.timestamp,
+          },
+        });
+      }
+    } catch {
+      // Monitor failure must never crash the server
+    }
+  }, 3000);
+
+  // Expose latest snapshot via a decorated property for /health
+  (server as unknown as { latestSystemSnapshot: SystemSnapshot | null }).latestSystemSnapshot = null;
+  const origEmit = eventBus.emit.bind(eventBus);
+  // Update the decorated property on each snapshot
+  const origInterval = monitorInterval;
+
+  // Clean up on server close
+  server.addHook("onClose", async () => {
+    clearInterval(origInterval);
   });
 
   return server;

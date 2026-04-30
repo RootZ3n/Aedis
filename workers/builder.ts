@@ -1,6 +1,6 @@
 // Builder worker module
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -18,6 +18,11 @@ import {
   type RunInvocationContext,
 } from "../core/model-invoker.js";
 import { DiffApplier } from "../core/diff-applier.js";
+import {
+  resolveSafeDeletePath,
+  resolveSafeExistingPath,
+  resolveSafeWritePath,
+} from "../core/safe-path.js";
 import {
   loadModelConfig,
   resolveBuilderModelForTier,
@@ -646,7 +651,7 @@ export class BuilderWorker extends AbstractWorker {
   constructor(config: BuilderWorkerConfig) {
     super();
     // NOTE: this.projectRoot is the constructor-time default. In production
-    // it's the API server's cwd (typically /mnt/ai/aedis). Per-task
+    // it's the API server's cwd. Per-task
     // submissions can override via assignment.projectRoot, which is what
     // execute() and estimateCost() read first; this field is the fallback
     // for tests and stand-alone harnesses that bypass the assignment-based
@@ -1445,20 +1450,15 @@ export class BuilderWorker extends AbstractWorker {
    * Takes projectRoot as a parameter (rather than reading this.projectRoot)
    * so per-task overrides via assignment.projectRoot work correctly.
    */
-  private resolveTarget(file: string, projectRoot: string): string {
-    // If file is an absolute path from the source repo (e.g. /mnt/ai/squidley-v2/...),
+  private async resolveTarget(file: string, projectRoot: string): Promise<string> {
+    // If file is an absolute path from the source repo (e.g. /path/to/repo/...),
     // map it to the corresponding worktree path before boundary checking.
     const sourceRepo = (this as unknown as { projectRoot?: string }).projectRoot;
     if (sourceRepo && file.startsWith(sourceRepo)) {
       const rel = file.slice(sourceRepo.length).replace(/^[\\/]+/, "");
       file = resolve(projectRoot, rel);
     }
-    const abs = resolve(projectRoot, file);
-    const normalizedRoot = projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`;
-    if (abs !== projectRoot && !abs.startsWith(normalizedRoot)) {
-      throw new Error(`Builder refused out-of-scope path: ${file}`);
-    }
-    return abs;
+    return resolveSafeWritePath(projectRoot, file);
   }
 
   /**
@@ -1501,7 +1501,7 @@ export class BuilderWorker extends AbstractWorker {
     const normalizedFile = assignment.sourceRepo && contract.file.startsWith(assignment.sourceRepo)
       ? resolve(projectRoot, contract.file.slice(assignment.sourceRepo.length).replace(/^[\\/]+/, ""))
       : contract.file;
-    const targetPath = this.resolveTarget(normalizedFile, projectRoot);
+    const targetPath = await this.resolveTarget(normalizedFile, projectRoot);
     const relativePath = this.toRelative(targetPath, projectRoot);
 
     let fullContent: string;
@@ -1811,8 +1811,10 @@ export class BuilderWorker extends AbstractWorker {
     // `ENOENT: no such file or directory` on the first create — both
     // primary and shadow lanes hit it. mkdir is idempotent so the
     // unconditional call is safe for the modify case too.
-    await mkdir(dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, updatedContent, "utf8");
+    const safeParent = await resolveSafeWritePath(projectRoot, dirname(relativePath));
+    await mkdir(safeParent, { recursive: true });
+    const safeTargetPath = await resolveSafeWritePath(projectRoot, relativePath);
+    await writeFile(safeTargetPath, updatedContent, "utf8");
     const operation: FileChange["operation"] = fileExistsBefore ? "modify" : "create";
     this.logFileTouch(taskId, relativePath, operation);
     this.noteDecision(taskId, `Applied builder patch to ${relativePath}`, `Contract goal: ${contract.goal}`);
@@ -2134,12 +2136,15 @@ export class BuilderWorker extends AbstractWorker {
     changes: readonly FileChange[],
   ): Promise<void> {
     for (const change of [...changes].reverse()) {
-      const absPath = resolve(projectRoot, change.path);
+      const absPath = change.operation === "create"
+        ? await resolveSafeDeletePath(projectRoot, change.path)
+        : await resolveSafeWritePath(projectRoot, change.path);
       if (change.operation === "create") {
         await unlink(absPath).catch(() => undefined);
         continue;
       }
       if (change.originalContent !== undefined) {
+        await resolveSafeExistingPath(projectRoot, dirname(change.path));
         await writeFile(absPath, change.originalContent, "utf8");
       }
     }

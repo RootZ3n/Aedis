@@ -13,6 +13,21 @@ import type { PersistentRunStatus } from "./receipt-store.js";
 export function persistentStatusForReceipt(receipt: RunReceipt): PersistentRunStatus {
   if (receipt.verdict === "aborted") return "ABORTED";
 
+  if (receipt.rollback && receipt.rollback.status !== "clean") {
+    switch (receipt.rollback.status) {
+      case "failed":
+        return "ROLLBACK_FAILED";
+      case "incomplete":
+        return "ROLLBACK_INCOMPLETE";
+      case "unsafe_state":
+        return "UNSAFE_STATE";
+    }
+  }
+
+  if (receipt.providerLaneTruth?.status === "not_run") {
+    return "UNSUPPORTED_CONFIG";
+  }
+
   // Crucibulum override: disagreement blocks regardless of advisory confidence
   if (
     receipt.evaluation?.disagreement &&

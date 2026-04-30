@@ -81,22 +81,23 @@ test("create flow: nested-deeper missing parents (3 levels) — recursive flag h
 
 // ─── 2. Source-shape pin ────────────────────────────────────────────
 
-test("builder source: writeFile in the create-or-modify path is preceded by mkdir(dirname(targetPath), recursive)", () => {
+test("builder source: writeFile in the create-or-modify path is preceded by safe mkdir", () => {
   // Pin the production wiring directly so a refactor that drops the
   // mkdir would surface here, not in a live shadow run minutes later.
   const builderPath = fileURLToPath(new URL("./builder.ts", import.meta.url));
   const src = readFileSync(builderPath, "utf-8");
 
-  // The mkdir must appear AND must immediately precede the writeFile
-  // for the target. We match a window that includes both calls so a
-  // misplaced mkdir elsewhere in the file doesn't satisfy the test.
+  // The mkdir must use the safe resolved parent and the final write
+  // must use the safe resolved target, so symlink swaps between path
+  // resolution and write stay contained.
   assert.match(
     src,
-    /mkdir\(dirname\(targetPath\),\s*\{\s*recursive:\s*true\s*\}\);\s*\n\s*await writeFile\(targetPath,\s*updatedContent/,
-    "mkdir(dirname(targetPath), recursive: true) must immediately precede writeFile(targetPath, updatedContent)",
+    /const safeParent = await resolveSafeWritePath\(projectRoot,\s*dirname\(relativePath\)\);\s*\n\s*await mkdir\(safeParent,\s*\{\s*recursive:\s*true\s*\}\);\s*\n\s*const safeTargetPath = await resolveSafeWritePath\(projectRoot,\s*relativePath\);\s*\n\s*await writeFile\(safeTargetPath,\s*updatedContent/,
+    "builder writes must resolve both parent and target through safe path checks",
   );
 
-  // The imports must include both mkdir and dirname.
+  // The imports must include mkdir, dirname, and safe path resolution.
   assert.match(src, /import\s+\{[^}]*\bmkdir\b[^}]*\}\s+from\s+"node:fs\/promises"/);
   assert.match(src, /import\s+\{[^}]*\bdirname\b[^}]*\}\s+from\s+"node:path"/);
+  assert.match(src, /resolveSafeWritePath/);
 });

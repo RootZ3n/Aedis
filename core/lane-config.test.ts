@@ -47,6 +47,27 @@ test("parseLaneConfig accepts dual-lane mode with both assignments", () => {
   assert.equal(r.config!.shadow?.label, "local check");
 });
 
+test("parseLaneConfig preserves explicit allowFallback", () => {
+  const r = parseLaneConfig({
+    mode: "local_then_cloud",
+    allowFallback: true,
+    primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  assert.deepEqual(r.errors, []);
+  assert.equal(r.config?.allowFallback, true);
+});
+
+test("parseLaneConfig rejects non-boolean allowFallback", () => {
+  const r = parseLaneConfig({
+    mode: "primary_only",
+    allowFallback: "yes",
+    primary: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  assert.equal(r.config, null);
+  assert.ok(r.errors.some((e) => /allowFallback must be a boolean/.test(e)));
+});
+
 test("parseLaneConfig rejects mismatched lane (primary and shadow on the same lane)", () => {
   const r = parseLaneConfig({
     mode: "local_vs_cloud",

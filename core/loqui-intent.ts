@@ -62,6 +62,20 @@ export interface LoquiIntentContext {
    * "try again" as resume/retry rather than a fresh question.
    */
   readonly previousMessageWasBuild?: boolean;
+  /**
+   * Set when the previous Loqui turn asked the user for a file or
+   * module path before it would build. The value is the original
+   * prompt (the one that was clarification-blocked), so a path-only
+   * follow-up can be merged with it. The classifier itself does not
+   * read this field — the router does, via `resolvePathFollowUp`.
+   */
+  readonly awaitingScopeFor?: string;
+  /**
+   * Project root used to normalize an absolute path-only follow-up
+   * to repo-relative form. Optional; when omitted, the follow-up is
+   * still detected but the path stays absolute.
+   */
+  readonly projectRoot?: string;
 }
 
 export interface LoquiIntentDecision {
@@ -112,6 +126,14 @@ export function classifyLoquiIntent(
 
   const lower = raw.toLowerCase();
   const signals: string[] = [];
+
+  // Detect scope, requirement, and vague-quality evidence up front so
+  // the tie-break + specificity gates can consult them. See the
+  // detector helpers below for the rules.
+  const scope = detectScopeEvidence(raw, lower);
+  const requirement = detectRequirementEvidence(raw, lower);
+  const strongBuild = detectStrongBuildSignal(lower, scope, requirement);
+  const vagueQuality = VAGUE_QUALITY_MARKERS.test(lower);
 
   // Collect raw signal strength for each candidate intent. Each rule
   // contributes a weighted score; the highest-scoring intent wins,
@@ -171,6 +193,22 @@ export function classifyLoquiIntent(
   }
 
   // ── Tie-break rules ─────────────────────────────────────────────
+
+  // Rule 0: scoped-build boost. If the user wrote a clear build
+  // request — explicit action verb, named target (file, repo path,
+  // or identifier), AND requirement evidence (behavior list, "should
+  // X", tests called out, multi-clause spec) — push the build score
+  // past competing intents like `explain` / `plan` that can match
+  // *inside the requirement description*. Without this boost, a
+  // prompt like "add Instructor Mode that explains key lines" gets
+  // hijacked by `explain:explain-verb` (weight 3) and routed to Q&A
+  // instead of execution. Aedis already has approval gates and
+  // workspace isolation, so a clear scoped build request should reach
+  // the build path; the gates handle safety from there.
+  if (strongBuild) {
+    scores.build += 4;
+    signals.push("build:scoped-build-signal");
+  }
 
   // Rule A: dry-run override. If the user mentioned build-ish verbs
   // AND explicit no-op markers ("don't change", "just show", "plan
@@ -241,8 +279,10 @@ export function classifyLoquiIntent(
   // Safe-fallback for `build`: if build won but another
   // non-destructive intent is within 1 point, demand clarification.
   // This blocks the ambiguous "can we just improve this" case from
-  // racing into execution.
-  if (pick.winner === "build") {
+  // racing into execution. Skipped when the prompt has a strong
+  // scoped-build signal — clear-target prompts must not be deflected
+  // by an incidental "module"/"explain"/"propose" word in the spec.
+  if (pick.winner === "build" && !strongBuild) {
     const competitor = nearestCompetitor(scores, "build");
     if (competitor && competitor.score >= pick.score - 1 && competitor.name !== "build") {
       const safe = NON_DESTRUCTIVE_FALLBACK[competitor.name] ?? "question";
@@ -254,59 +294,88 @@ export function classifyLoquiIntent(
         reason: `Ambiguous between build and ${competitor.name}; defaulting to ${safe} for safety`,
         needsClarification: true,
         clarification:
-          `Do you want me to actually build this, or would you rather I ${safe === "plan" ? "show you the plan" : safe === "dry_run" ? "dry-run it" : "answer first"}?`,
+          `This reads as ambiguous — I'd rather ${safe === "plan" ? "show you the plan first" : safe === "dry_run" ? "dry-run it first" : "answer first"} than execute on a guess. If you want me to build, name the target (file path, module, or identifier) and what should change.`,
       };
     }
+  }
 
+  if (pick.winner === "build") {
     // Specificity gate: a build intent MUST name a concrete target
-    // (file path with extension, camelCase / PascalCase / snake_case
-    // identifier, or a specific noun the charter extractor can pick
-    // up). Prompts like "build this", "first test of what you can do",
-    // "try something", "show me what you can build" are meta-language,
-    // not specs — routing them into execution lets the Builder invent
-    // arbitrary changes. Force clarification in that case.
-    const hasFilePath = /[\w-]+\/[\w.\-/]+|\b[\w.\-]+\.(ts|tsx|js|jsx|py|rs|go|md|json|ya?ml|html|css)\b/.test(lower);
-    const hasIdentifier =
-      /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b/.test(raw) ||       // camelCase
-      /\b[A-Z][a-zA-Z0-9]{2,}\b/.test(raw) ||                      // PascalCase
-      /\b[a-z]+_[a-z]+\b/.test(raw);                                // snake_case
-    // Meta-language markers that strongly suggest the user is
-    // exploring, not specifying. If any of these fire AND there's no
-    // file/identifier anchor, the build spec is too thin to execute.
-    const META_MARKERS = [
-      /\bbuild this\b/,
-      /\bfirst test\b/,
-      /\btest of what\b/,
-      /\bshow me what you can\b/,
-      /\btry something\b/,
-      /\btry anything\b/,
-      /\bdo whatever\b/,
-      /\bsurprise me\b/,
-      /\banything you (can|want|like)\b/,
-      /\bwhat can you (do|build|make)\b/,
-    ];
-    const hasMetaMarker = META_MARKERS.some((r) => r.test(lower));
-    if (!hasFilePath && !hasIdentifier && hasMetaMarker) {
-      signals.push("clarify:build-no-concrete-target");
-      return {
-        intent: "question",
-        confidence: 0.3,
-        signals,
-        reason: "Build intent lacks a concrete target (no file/identifier named)",
-        needsClarification: true,
-        clarification:
-          "That reads as exploratory — I need a concrete target before I'll build anything. Name a file (e.g. `core/foo.ts`) or describe the change you want (e.g. \"add input validation to estimateTokens\").",
-      };
+    // (file path with extension, repo/module path, identifier, or a
+    // specific noun the charter extractor can pick up). Prompts like
+    // "build this", "first test of what you can do", "try something",
+    // "show me what you can build" are meta-language, not specs —
+    // routing them into execution lets the Builder invent arbitrary
+    // changes. Force clarification in that case. The strong-scoped-
+    // build signal already implies enough scope evidence to skip
+    // this check.
+    if (!strongBuild) {
+      const hasMetaMarker = META_MARKERS.some((r) => r.test(lower));
+      if (!scope.hasFilePath && !scope.hasRepoPath && !scope.hasIdentifier && hasMetaMarker) {
+        signals.push("clarify:build-no-concrete-target");
+        return {
+          intent: "question",
+          confidence: 0.3,
+          signals,
+          reason: "Build intent lacks a concrete target (no file/identifier named)",
+          needsClarification: true,
+          clarification:
+            "That reads as exploratory — I need a concrete target before I'll build anything. Name a file (e.g. `core/foo.ts`), a module path (e.g. `modules/magister`), or describe the change you want (e.g. \"add input validation to estimateTokens\").",
+        };
+      }
+
+      // Vague-quality gate: build verb + a vague quality marker
+      // ("better", "improve", "cleaner", "nicer") with no concrete
+      // deliverable evidence is a thin spec — the user named a
+      // target but not a change. The Builder would invent arbitrary
+      // edits. Force clarification. Prompts that pair the same
+      // markers with a real spec (file path, "should X", tests, a
+      // multi-clause behavior list) keep their build path because
+      // strongBuild fires and short-circuits this gate.
+      if (vagueQuality && !hasConcreteDeliverable(scope, requirement)) {
+        signals.push("clarify:build-vague-quality-marker");
+        return {
+          intent: "question",
+          confidence: 0.3,
+          signals,
+          reason: "Build verb plus vague quality marker; no concrete deliverable to act on",
+          needsClarification: true,
+          clarification:
+            "\"Better\"/\"improve\" alone isn't enough to act on. What specifically should change — a behavior, a file, a constraint? Name it and I'll plan the build.",
+        };
+      }
+
+      // Broad vague asks in large pasted context often include bullet
+      // lists ("findings", audit notes, logs) that are not actual
+      // deliverables. If the prompt asks for repo/project-wide
+      // quality improvement without a file/module path, keep it on
+      // the clarification path instead of treating the pasted list as
+      // permission to invent edits.
+      if (vagueQuality && !scope.hasFilePath && !scope.hasRepoPath && BROAD_UNSCOPED_MARKERS.test(lower)) {
+        signals.push("clarify:build-broad-vague-scope");
+        return {
+          intent: "question",
+          confidence: 0.3,
+          signals,
+          reason: "Broad vague quality request without concrete file or module scope",
+          needsClarification: true,
+          clarification:
+            "That is too broad to build safely. Name the specific file, module, or behavior you want changed.",
+        };
+      }
     }
   }
 
   // Normal pick.
   const confidence = clamp01(pick.score / 5);
+  const reason = strongBuild && pick.winner === "build"
+    ? "Scoped build request: discovering files, producing plan, awaiting approval before source changes"
+    : REASONS[pick.winner] ?? `Routed to ${pick.winner}`;
   return {
     intent: pick.winner,
     confidence,
     signals,
-    reason: REASONS[pick.winner] ?? `Routed to ${pick.winner}`,
+    reason,
     needsClarification: false,
     clarification: "",
   };
@@ -470,4 +539,132 @@ function clamp01(n: number): number {
   if (n < 0) return 0;
   if (n > 1) return 1;
   return n;
+}
+
+// ─── Scoped-build detection ─────────────────────────────────────────
+//
+// A "scoped build" is the prompt shape Aedis is meant to handle:
+// explicit imperative verb + named target + concrete requirements.
+// These three bits are enough that the Coordinator's existing gates
+// (Velum, target discovery, approval, scope-violation detection) can
+// safely take it from here. Without these signals, the classifier
+// falls back to clarification.
+
+interface ScopeEvidence {
+  /** `core/foo.ts`, `apps/api/src/auth.ts` — extension-bearing path. */
+  readonly hasFilePath: boolean;
+  /**
+   * Repo / module / package path: `modules/magister`,
+   * `/path/to/repo/modules/magister`, `src/foo`, `core/bar`.
+   * No extension required — the charter extractor can resolve it.
+   */
+  readonly hasRepoPath: boolean;
+  /** camelCase / PascalCase / snake_case identifier, ≥ 3 chars. */
+  readonly hasIdentifier: boolean;
+}
+
+interface RequirementEvidence {
+  /** "should", "must", "needs to", "behavior", "requirements". */
+  readonly hasShould: boolean;
+  /** "tests", "test cases", "unit tests", "spec". */
+  readonly hasTests: boolean;
+  /** Numbered or bulleted list (markers at line start). */
+  readonly hasList: boolean;
+  /**
+   * Multi-clause spec: ≥ 2 sentence terminators, OR ", and"
+   * conjunctions joining verbs, OR ≥ 3 commas in the body.
+   */
+  readonly hasMultiClause: boolean;
+  /** Total word count. */
+  readonly wordCount: number;
+}
+
+const STRONG_BUILD_VERBS = /\b(add|implement|build|create|fix|update|modify|wire|refactor|rewrite|write|scaffold|generate|patch|repair|rename|extend)\b/;
+
+// Project-segment heads that strongly indicate a repo/module path
+// even without a leading slash. Kept to common conventions so we
+// don't false-match arbitrary `foo/bar` substrings.
+const REPO_PATH_HEADS = /\b(modules?|src|core|packages?|apps?|libs?|server|client|workers?|services?|tools|scripts|tests?)\/[\w.\-]+/;
+
+const VAGUE_QUALITY_MARKERS = /\b(better|improve(d|ment|ments)?|cleaner|nicer|nice|good|great|smarter|smart|polish(ed)?|refine(d)?|tidier?|tidy|prettier)\b/;
+
+const BROAD_UNSCOPED_MARKERS = /\b(overall|whole repo|entire repo|everything|whatever|anything|wherever|across the repo|repository-wide|repo-wide)\b/;
+
+const META_MARKERS: readonly RegExp[] = [
+  /\bbuild this\b/,
+  /\bfirst test\b/,
+  /\btest of what\b/,
+  /\bshow me what you can\b/,
+  /\btry something\b/,
+  /\btry anything\b/,
+  /\bdo whatever\b/,
+  /\bsurprise me\b/,
+  /\banything you (can|want|like)\b/,
+  /\bwhat can you (do|build|make)\b/,
+];
+
+function detectScopeEvidence(raw: string, lower: string): ScopeEvidence {
+  const hasFilePath = /\b[\w.\-]+\.(ts|tsx|js|jsx|py|rs|go|md|json|ya?ml|html|css|sh|sql|toml)\b/.test(lower);
+  // Absolute path (e.g. /path/to/repo/modules/magister) or a
+  // segment-headed relative path (modules/foo, src/bar, core/baz).
+  // The absolute-path check requires at least two path components so
+  // we don't false-match a leading `/` in casual text.
+  const hasAbsolutePath = /\/[\w.\-]+\/[\w.\-]+(?:\/[\w.\-]+)*/.test(raw);
+  const hasRepoPath = hasAbsolutePath || REPO_PATH_HEADS.test(lower);
+  const hasIdentifier =
+    /\b[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*\b/.test(raw) ||  // camelCase
+    /\b[A-Z][a-zA-Z0-9]{2,}\b/.test(raw) ||                 // PascalCase ≥ 3 chars
+    /\b[a-z]+_[a-z]+\b/.test(raw);                          // snake_case
+  return { hasFilePath, hasRepoPath, hasIdentifier };
+}
+
+function detectRequirementEvidence(raw: string, lower: string): RequirementEvidence {
+  const wordCount = raw.split(/\s+/).filter(Boolean).length;
+  const hasShould =
+    /\b(should|must|need(s)? to|has to|will|behaviou?r|requirements?|constraints?|deliverables?)\b/.test(lower);
+  const hasTests = /\b(tests?|test cases?|unit tests?|spec|specs)\b/.test(lower);
+  const hasList = /^\s*(?:[-*]|\d+[.)])\s+/m.test(raw);
+  const sentenceTerminators = (raw.match(/[.;]/g) ?? []).length;
+  const commaCount = (raw.match(/,/g) ?? []).length;
+  const hasMultiClause =
+    sentenceTerminators >= 2 ||
+    /,\s+and\b/.test(lower) ||
+    commaCount >= 3;
+  return { hasShould, hasTests, hasList, hasMultiClause, wordCount };
+}
+
+function detectStrongBuildSignal(
+  lower: string,
+  scope: ScopeEvidence,
+  requirement: RequirementEvidence,
+): boolean {
+  if (!STRONG_BUILD_VERBS.test(lower)) return false;
+  // A file path or a repo/module path is itself strong scope evidence.
+  // Verb + path is enough — the user has named *where* to act.
+  if (scope.hasFilePath || scope.hasRepoPath) return true;
+  // An identifier alone is weaker; require additional requirement
+  // evidence so prompts like "Make Magister better" don't qualify.
+  if (scope.hasIdentifier) {
+    return (
+      requirement.hasShould ||
+      requirement.hasTests ||
+      requirement.hasList ||
+      requirement.hasMultiClause ||
+      requirement.wordCount >= 15
+    );
+  }
+  return false;
+}
+
+function hasConcreteDeliverable(
+  scope: ScopeEvidence,
+  requirement: RequirementEvidence,
+): boolean {
+  if (scope.hasFilePath || scope.hasRepoPath) return true;
+  return (
+    requirement.hasShould ||
+    requirement.hasTests ||
+    requirement.hasList ||
+    requirement.hasMultiClause
+  );
 }

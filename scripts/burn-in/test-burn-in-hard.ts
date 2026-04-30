@@ -5,12 +5,14 @@
  * scripts/burn-in/harness.ts) — never auto-promotes, always cleans up
  * paused runs, records phase + status + failure summary in JSONL.
  *
- *   cd /mnt/ai/aedis && npx tsx scripts/burn-in/test-burn-in-hard.ts
+ *   npx tsx scripts/burn-in/test-burn-in-hard.ts
  *   AEDIS_BURN_TIMEOUT_MS=1200000 npx tsx scripts/burn-in/test-burn-in-hard.ts
  *   npx tsx scripts/burn-in/test-burn-in-hard.ts --allow-promote
  */
 
 import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { redactObject } from "../../core/redaction.js";
 
 import {
@@ -26,7 +28,9 @@ import {
 } from "./harness.js";
 
 const TARGET = process.env["AEDIS_BASE"] ?? "http://localhost:18796";
-const RESULTS_FILE = "/mnt/ai/tmp/aedis-burn-in-hard.jsonl";
+const RESULTS_FILE = process.env["AEDIS_BURN_HARD_RESULTS"] ?? join(tmpdir(), "aedis-burn-in-hard.jsonl");
+const DEFAULT_REPO = process.env["AEDIS_BURN_PROJECT_ROOT"] ?? process.cwd();
+const EXTERNAL_REPO = process.env["AEDIS_BURN_EXTERNAL_REPO"] ?? DEFAULT_REPO;
 const TIMEOUT_MS = resolveTimeoutMs(process.env["AEDIS_BURN_TIMEOUT_MS"], DEFAULT_BURN_TIMEOUT_MS);
 
 const SCENARIOS = [
@@ -35,139 +39,139 @@ const SCENARIOS = [
     description: "Create a new helper file",
     prompt:
       'Create a new file at src/utils/aedis-test-helper.ts containing a single exported function "helloAedis" that returns the string "hello from Aedis". Do not modify any other files.',
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h02-modify-add-export",
     description: "Add an exported function to an existing file",
     prompt:
       "In core/run-summary.ts, add a new exported helper function 'getAedisVersion()' that returns the string '1.0.0'. Place it before the existing exports.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h03-delete-unused-export",
     description: "Delete a dead export",
     prompt:
       "Delete the function 'buildIntentGraph' from core/multi-file-planner.ts if it exists and is unused. If it is exported and used elsewhere, do nothing.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h04-two-file-refactor",
     description: "Rename a function across two files",
     prompt:
       "Rename the exported function 'buildChangeSet' in core/change-set.ts to 'constructChangeSet'. Update every reference to it in core/change-set.ts and core/coordinator.ts.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h05-cross-file-rename",
     description: "Rename an exported symbol across multiple files",
     prompt:
       "Rename the type 'FileChange' to 'ArtifactChange' in core/change-set.ts. Update all imports and usages in core/change-set.ts, core/coordinator.ts, and core/run-summary.ts.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h06-inject-type-error",
     description: "Introduce a TypeScript error and verify it is caught",
     prompt:
       "In core/run-summary.ts, add this invalid line inside the runSummary function: const x: string = 123; // type error — intentionally wrong",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h07-fix-real-type-error",
     description: "Fix an existing bug (prefer cleaner to hard)",
     prompt:
-      "In core/intent.ts, the Deliverable type is missing a 'test' variant that the coordinator needs. Add 'test' to the Deliverable.type union. Then verify the fix compiles: run tsc --noEmit in /mnt/ai/aedis and confirm no new errors.",
-    repoPath: "/mnt/ai/aedis",
+      "In core/intent.ts, the Deliverable type is missing a 'test' variant that the coordinator needs. Add 'test' to the Deliverable.type union. Then verify the fix compiles: run tsc --noEmit in the target repo and confirm no new errors.",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h08-source-plus-test",
     description: "Add feature with test coverage",
     prompt:
       "In core/run-summary.ts, add a new exported function 'formatVerdictBadge(status: string): string' that returns a formatted badge. Then add a corresponding test in core/run-summary.test.ts that verifies it works for 'pass' and 'fail' inputs.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h09-refactor-comment-cleanup",
     description: "Improve code quality without behavior change",
     prompt:
       "In core/charter.ts, look for any TODO comments or placeholder comments (text containing 'TODO' or 'FIXME' or 'HACK') and replace each with a brief real description of what needs to be done.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h10-do-not-touch",
     description: "Respect exclusion constraints",
     prompt:
       "In core/charter.ts, add a trailing comment '// extra: Coordinated by Aedis' at the end of the file. Do NOT modify core/change-set.ts or core/run-summary.ts.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h11-ambiguous-should-ask",
     description: "Vague request triggers clarify mode",
     prompt: "Clean up the config file.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h12-no-op-recovery",
     description: "Builder produces no-op, system recovers",
     prompt:
       "Add a trailing newline to the end of core/run-summary.ts if it does not already have one.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h13-large-file-target",
     description: "Handle a large target file",
     prompt:
       "In core/coordinator.ts, add a comment '// Aedis burn-in test' on a new line before the 'export interface Deliverable' declaration.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h14-external-repo",
     description: "Operate on a different repo",
     prompt:
-      "In core/judge.ts in /mnt/ai/crucible, add a comment '// Coordinated by Aedis' above the DETERMINISTIC_JUDGE_METADATA constant.",
-    repoPath: "/mnt/ai/crucible",
+      "In core/judge.ts in the configured external repo, add a comment '// Coordinated by Aedis' above the DETERMINISTIC_JUDGE_METADATA constant.",
+    repoPath: EXTERNAL_REPO,
   },
   {
     id: "h15-no-regression",
     description: "Verify existing code still passes typecheck",
     prompt:
-      "Run TypeScript type check (tsc --noEmit) in /mnt/ai/aedis and confirm there are no new errors introduced by recent changes. Report the count of errors.",
-    repoPath: "/mnt/ai/aedis",
+      "Run TypeScript type check (tsc --noEmit) in the target repo and confirm there are no new errors introduced by recent changes. Report the count of errors.",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h16-create-delete-pair",
     description: "Create a file then delete it in two steps",
     prompt:
       'Step 1: Create a new file src/utils/temp-aedis-file.ts containing export const TEMP = "temporary";\nStep 2: Delete that same file. Report what you did.',
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h17-scope-bleed",
     description: "Verify only targeted files are modified",
     prompt:
       "In core/run-summary.ts, add a comment '// scope-bleed-test' at the end of the file. Do NOT modify any other files.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h18-builder-error-recovery",
     description: "System handles builder errors gracefully",
     prompt:
       "In core/nonexistent-file-xyz.ts, try to add a function. This file does not exist so you must create it.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h19-cross-file-consistency",
     description: "Maintain consistency across multiple files",
     prompt:
       "In core/change-set.ts, find the MAX_PATH_LENGTH constant. In core/coordinator.ts, find if it uses MAX_PATH_LENGTH. If both exist and are consistent, add a comment '// cross-file consistency verified' in core/change-set.ts near that constant. If they are inconsistent, report it.",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
   {
     id: "h20-many-small-changes",
     description: "Handle many small changes across many files",
     prompt:
       "Make all of the following changes in a single run:\n1. Add '// burn-in' comment to src/index.ts\n2. Add '// burn-in' comment to server/index.ts\n3. Add '// burn-in' comment to core/run-summary.ts\n4. Add '// burn-in' comment to core/charter.ts",
-    repoPath: "/mnt/ai/aedis",
+    repoPath: DEFAULT_REPO,
   },
 ] as const;
 

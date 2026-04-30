@@ -228,7 +228,7 @@ REASON: hallucinated completion
 ```bash
 # Aedis running on port 18796
 # Test repo cloned to /tmp/<repo-name>
-# Working directory: /mnt/ai/aedis-scratch
+# Working directory: <aedis-temp-workspace>
 ```
 
 ### Standard Run Command

@@ -861,6 +861,28 @@ body .app::before{
 .diff-line.ctx > .tx{color:rgba(210,220,240,.72)}
 .diff-empty{padding:18px;color:rgba(180,210,240,.55);font-family:var(--mono);font-size:12px;text-align:center;border:1px dashed rgba(120,200,255,.18);border-radius:10px}
 
+/* ─── Loqui Orientation panel ───────────────────────────────────── */
+.orientation-panel{display:none;gap:12px;padding:18px;border:1px solid rgba(94,234,212,.28);background:linear-gradient(180deg,rgba(8,18,32,.85),rgba(4,10,24,.85))}
+.orientation-panel.show{display:grid}
+.orientation-panel.collapsed .orientation-body{display:none}
+.orientation-head{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.orientation-head .label{flex:1}
+.orientation-variant{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--teal-dim);padding:3px 8px;border:1px solid rgba(94,234,212,.28);border-radius:8px}
+.orientation-actions-row{display:flex;gap:6px}
+.orientation-toggle,.orientation-dismiss{font-family:var(--mono);font-size:11px;letter-spacing:.14em;padding:4px 10px;border-radius:8px;border:1px solid rgba(120,200,255,.22);background:rgba(4,10,24,.6);color:rgba(180,210,240,.85);cursor:pointer;text-transform:uppercase}
+.orientation-toggle:hover,.orientation-dismiss:hover{border-color:rgba(120,200,255,.45);color:#cde5ff}
+.orientation-body{display:grid;gap:12px}
+.orientation-section{display:grid;gap:6px}
+.orientation-section-title{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--teal)}
+.orientation-section ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.orientation-section li{font-family:var(--font-ui);font-size:13px;line-height:1.5;color:rgba(220,232,248,.86)}
+.orientation-section.warn .orientation-section-title{color:var(--orange)}
+.orientation-quick-actions{display:flex;gap:8px;flex-wrap:wrap;padding-top:6px;border-top:1px solid rgba(120,200,255,.12)}
+.orientation-quick-actions button{font-family:var(--mono);font-size:11px;letter-spacing:.14em;padding:6px 12px;border-radius:8px;border:1px solid rgba(94,234,212,.30);background:rgba(77,245,200,.06);color:var(--teal);cursor:pointer;text-transform:uppercase}
+.orientation-quick-actions button:hover{background:rgba(77,245,200,.14);border-color:rgba(94,234,212,.55)}
+.orientation-quick-actions button .hint{display:block;text-transform:none;letter-spacing:0;font-size:10px;color:rgba(180,210,240,.55);margin-top:3px;font-family:var(--font-ui)}
+.orientation-reason{font-family:var(--mono);font-size:10px;color:rgba(180,210,240,.45);letter-spacing:.06em}
+
 /* ─── Loqui panel ───────────────────────────────────────────────── */
 .loqui-panel{display:grid;gap:12px;padding:18px}
 .loqui-log{
@@ -937,6 +959,32 @@ body .app::before{
 /* ─── Settings ──────────────────────────────────────────────────── */
 .settings-panel{display:grid;gap:12px;padding:18px}
 .settings-grid{display:grid;gap:10px}
+.settings-header{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:6px 0 8px;border-bottom:1px dashed rgba(120,200,255,.10);margin-bottom:4px;
+}
+.settings-profile-chip{
+  display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid rgba(94,234,212,.32);background:rgba(94,234,212,.06);color:var(--teal);
+}
+.settings-profile-chip.locked{border-color:rgba(251,191,36,.40);background:rgba(251,191,36,.08);color:#fbbf24}
+.settings-meta{display:grid;gap:4px;justify-items:end}
+.settings-source-row{display:flex;align-items:center;gap:6px}
+.settings-source-pill{
+  font-family:var(--mono);font-size:9px;letter-spacing:.10em;text-transform:uppercase;
+  padding:1px 6px;border-radius:6px;
+  border:1px solid rgba(120,200,255,.18);background:rgba(120,200,255,.04);color:var(--muted);
+}
+.settings-source-pill.src-saved{border-color:rgba(94,234,212,.36);background:rgba(94,234,212,.08);color:var(--teal)}
+.settings-source-pill.src-profile{border-color:rgba(251,191,36,.40);background:rgba(251,191,36,.08);color:#fbbf24}
+.settings-source-pill.src-default{border-color:rgba(120,200,255,.20);background:rgba(120,200,255,.04);color:var(--muted)}
+.settings-synthetic-hint{
+  font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--orange);
+  cursor:help;
+}
+.settings-item.locked{opacity:.85}
+.settings-item.locked .config-select{cursor:not-allowed}
 .settings-item{
   border-radius:18px;
   border:1px solid rgba(120,200,255,.14);
@@ -965,6 +1013,210 @@ body .app::before{
   padding:16px;font-family:var(--mono);font-size:12px;letter-spacing:.04em;
 }
 
+/* ─── Task Plan panel — multi-step "continue-until-done" loop ──── */
+.taskplan-panel{display:grid;gap:12px;padding:18px}
+.taskplan-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.taskplan-objective{font-size:13px;color:var(--ink);line-height:1.4;letter-spacing:.01em}
+.taskplan-status-chip{
+  display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid rgba(120,200,255,.18);background:rgba(120,200,255,.06);color:var(--muted);
+}
+.taskplan-status-chip.running{border-color:rgba(94,234,212,.42);background:rgba(94,234,212,.08);color:var(--teal)}
+.taskplan-status-chip.paused{border-color:rgba(251,191,36,.42);background:rgba(251,191,36,.08);color:#fbbf24}
+.taskplan-status-chip.completed{border-color:rgba(94,234,212,.5);background:rgba(94,234,212,.12);color:var(--teal)}
+.taskplan-status-chip.failed,
+.taskplan-status-chip.blocked{border-color:rgba(255,93,108,.42);background:rgba(255,93,108,.08);color:var(--red)}
+.taskplan-status-chip.cancelled,
+.taskplan-status-chip.interrupted{border-color:rgba(167,139,250,.42);background:rgba(167,139,250,.08);color:#a78bfa}
+.taskplan-progress{display:flex;align-items:center;gap:10px}
+.taskplan-progress-meter{
+  flex:1;height:6px;border-radius:6px;
+  background:rgba(120,200,255,.08);overflow:hidden;
+  border:1px solid rgba(120,200,255,.14);
+}
+.taskplan-progress-meter > i{
+  display:block;height:100%;background:linear-gradient(90deg,var(--teal),#7ef5d1);
+  box-shadow:0 0 12px rgba(94,234,212,.45);transition:width .3s ease;
+}
+.taskplan-progress-text{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:90px;text-align:right}
+.taskplan-current{
+  display:grid;gap:4px;padding:10px 12px;
+  border-radius:14px;border:1px solid rgba(120,200,255,.14);
+  background:linear-gradient(180deg,rgba(4,10,24,.7),rgba(2,6,16,.85));
+}
+.taskplan-current-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.taskplan-current-title{font-size:12px;color:var(--ink);line-height:1.4}
+.taskplan-current-meta{
+  display:flex;flex-wrap:wrap;gap:6px 10px;font-family:var(--mono);font-size:10px;
+  color:var(--muted);padding-top:4px;border-top:1px dashed rgba(120,200,255,.10);margin-top:4px;
+}
+.taskplan-actions{display:flex;gap:8px;flex-wrap:wrap}
+.taskplan-actions button{
+  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:6px 12px;border-radius:10px;cursor:pointer;
+  background:rgba(94,234,212,.08);border:1px solid rgba(94,234,212,.32);color:var(--teal);
+}
+.taskplan-actions button.warn{background:rgba(255,93,108,.06);border-color:rgba(255,93,108,.36);color:var(--red)}
+.taskplan-actions button:disabled{opacity:.4;cursor:not-allowed}
+.taskplan-summary{font-size:11px;color:var(--muted);line-height:1.5;border-top:1px dashed rgba(120,200,255,.10);padding-top:8px}
+.taskplan-summary strong{color:var(--ink)}
+.taskplan-list{display:grid;gap:4px;font-family:var(--mono);font-size:11px}
+.taskplan-list .row{display:flex;align-items:center;gap:8px;padding:3px 0}
+.taskplan-list .ord{color:var(--muted);min-width:32px}
+.taskplan-list .st{
+  display:inline-block;min-width:84px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+  text-align:center;padding:1px 6px;border-radius:8px;
+  background:rgba(120,200,255,.06);border:1px solid rgba(120,200,255,.14);color:var(--muted);
+}
+.taskplan-list .st.completed,.taskplan-list .st.repaired{background:rgba(94,234,212,.10);border-color:rgba(94,234,212,.32);color:var(--teal)}
+.taskplan-list .st.running,.taskplan-list .st.verifying{background:rgba(251,146,60,.08);border-color:rgba(251,146,60,.32);color:var(--orange)}
+.taskplan-list .st.failed,.taskplan-list .st.blocked{background:rgba(255,93,108,.08);border-color:rgba(255,93,108,.36);color:var(--red)}
+.taskplan-list .st.skipped{background:rgba(167,139,250,.06);border-color:rgba(167,139,250,.30);color:#a78bfa}
+.taskplan-list .ti{color:var(--ink);flex:1}
+
+/* Task Plan creation form */
+.taskplan-form{display:grid;gap:10px}
+.taskplan-field{display:grid;gap:4px}
+.taskplan-field-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.taskplan-row{display:flex;align-items:center}
+.taskplan-subtasks-editor{display:grid;gap:6px}
+.taskplan-subtask-row{
+  display:grid;grid-template-columns:32px minmax(120px,1fr) minmax(0,2fr) auto;gap:6px;align-items:center;
+}
+.taskplan-subtask-row .ord{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;padding-right:4px}
+.taskplan-subtask-row input{font-size:12px}
+.taskplan-subtask-row .remove{
+  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:6px 10px;border-radius:8px;cursor:pointer;
+  background:rgba(255,93,108,.06);border:1px solid rgba(255,93,108,.32);color:var(--red);
+}
+.taskplan-budget-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:6px}
+.taskplan-budget-grid label{display:grid;gap:3px}
+.taskplan-budget-grid input{font-size:12px;padding:6px 10px}
+.ghost-btn{
+  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:6px 12px;border-radius:8px;cursor:pointer;
+  background:rgba(94,234,212,.06);border:1px solid rgba(94,234,212,.32);color:var(--teal);
+}
+.taskplan-draft-body{display:grid;gap:6px;padding-top:6px}
+
+/* Task Plan budget usage rows */
+.taskplan-budget-rows{display:grid;gap:6px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.taskplan-budget-row{display:grid;grid-template-columns:140px 1fr auto;align-items:center;gap:8px}
+.taskplan-budget-bar{height:5px;border-radius:5px;background:rgba(120,200,255,.08);overflow:hidden;border:1px solid rgba(120,200,255,.12)}
+.taskplan-budget-bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),#7ef5d1);transition:width .3s ease}
+.taskplan-budget-bar.warn > i{background:linear-gradient(90deg,var(--amber),#fcd34d)}
+.taskplan-budget-bar.over > i{background:linear-gradient(90deg,var(--red),#ff7a8a)}
+.taskplan-evidence{display:flex;flex-wrap:wrap;gap:4px;padding-top:6px}
+.taskplan-evidence code{
+  font-family:var(--mono);font-size:10px;color:var(--muted);
+  padding:1px 6px;border-radius:6px;background:rgba(120,200,255,.05);
+  border:1px solid rgba(120,200,255,.10);cursor:pointer;
+}
+.taskplan-evidence code:hover{color:var(--teal);border-color:rgba(94,234,212,.32)}
+
+/* ─── Loqui Decision panel — confidence + signals audit ───────── */
+.loqui-decision{
+  display:grid;gap:10px;padding:14px 18px;
+  border-top:1px dashed rgba(120,200,255,.12);
+}
+.loqui-decision-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.loqui-confidence-meter{
+  flex:1;min-width:140px;height:8px;border-radius:6px;
+  background:rgba(120,200,255,.08);overflow:hidden;
+  border:1px solid rgba(120,200,255,.14);
+}
+.loqui-confidence-meter > i{
+  display:block;height:100%;border-radius:6px;
+  transition:width .3s ease;
+}
+.loqui-confidence-meter.high > i{background:linear-gradient(90deg,var(--teal),#7ef5d1);box-shadow:0 0 12px rgba(94,234,212,.45)}
+.loqui-confidence-meter.med  > i{background:linear-gradient(90deg,var(--amber),#fcd34d);box-shadow:0 0 12px rgba(251,191,36,.45)}
+.loqui-confidence-meter.low  > i{background:linear-gradient(90deg,var(--orange),#fb923c);box-shadow:0 0 12px rgba(251,146,60,.45)}
+.loqui-confidence-meter.warn > i{background:linear-gradient(90deg,var(--red),#ff7a8a);box-shadow:0 0 12px rgba(255,93,108,.45)}
+.loqui-confidence-pct{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--ink);min-width:42px;text-align:right}
+.loqui-decision-reason{font-size:12px;color:var(--muted);line-height:1.4}
+.loqui-signal-chip{
+  display:inline-flex;align-items:center;gap:6px;padding:2px 8px;
+  border-radius:999px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid rgba(94,234,212,.32);background:rgba(94,234,212,.06);color:var(--teal);
+}
+.loqui-signal-chip.suppressed{border-color:rgba(167,139,250,.32);background:rgba(167,139,250,.06);color:#a78bfa}
+.loqui-signal-chip.warn{border-color:rgba(251,191,36,.36);background:rgba(251,191,36,.08);color:#fbbf24}
+.loqui-signals-details summary{
+  cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--muted);
+  list-style:none;padding:4px 0;
+}
+.loqui-signals-details summary::-webkit-details-marker{display:none}
+.loqui-signals-details summary::before{content:"▸ ";color:var(--teal)}
+.loqui-signals-details[open] summary::before{content:"▾ "}
+.loqui-signals-list{
+  display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:6px;
+}
+.loqui-signals-list code{
+  font-family:var(--mono);font-size:10px;color:var(--muted);
+  padding:1px 6px;border-radius:6px;background:rgba(120,200,255,.05);
+  border:1px solid rgba(120,200,255,.10);
+}
+
+/* ─── Candidate Workspaces panel — primary vs shadow duel ──────── */
+.lanes-panel{display:grid;gap:14px;padding:18px}
+.lanes-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.lane-mode-chip{
+  display:inline-flex;gap:6px;align-items:center;padding:2px 10px;border-radius:999px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid rgba(94,234,212,.36);background:rgba(94,234,212,.06);color:var(--teal);
+}
+.lane-mode-chip.inactive{border-color:rgba(120,200,255,.18);background:rgba(120,200,255,.04);color:var(--muted)}
+.lane-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.lane-card{
+  position:relative;display:grid;gap:8px;padding:14px;
+  border-radius:18px;border:1px solid rgba(120,200,255,.16);
+  background:linear-gradient(180deg,rgba(4,10,24,.82),rgba(2,6,16,.92));
+  min-height:140px;
+}
+.lane-card.role-primary{border-color:rgba(251,146,60,.32);box-shadow:0 0 22px rgba(251,146,60,.10)}
+.lane-card.role-shadow{border-color:rgba(167,139,250,.32);box-shadow:0 0 22px rgba(167,139,250,.10)}
+.lane-card.empty{
+  border-style:dashed;color:var(--muted);
+  display:grid;place-items:center;text-align:center;padding:20px;font-size:12px;
+}
+.lane-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lane-role{
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+}
+.lane-role.role-primary{color:var(--orange)}
+.lane-role.role-shadow{color:#a78bfa}
+.lane-badges{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.lane-badge{
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  padding:2px 8px;border-radius:999px;
+  border:1px solid rgba(120,200,255,.18);background:rgba(120,200,255,.04);color:var(--muted);
+}
+.lane-badge.win{border-color:rgba(94,234,212,.5);background:rgba(94,234,212,.10);color:var(--teal);box-shadow:0 0 14px rgba(94,234,212,.18)}
+.lane-badge.dq{border-color:rgba(255,93,108,.5);background:rgba(255,93,108,.10);color:var(--red)}
+.lane-badge.lost{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.08);color:#fbbf24}
+.lane-badge.pending{border-color:rgba(120,200,255,.28);background:rgba(120,200,255,.06);color:var(--ink)}
+.lane-meta{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-family:var(--mono);font-size:11px}
+.lane-meta-cell{color:var(--muted)}
+.lane-meta-cell strong{display:block;color:var(--ink);font-weight:500;letter-spacing:.04em;font-size:12px;margin-top:2px}
+.lane-reason{font-size:11px;color:var(--muted);line-height:1.45;border-top:1px dashed rgba(120,200,255,.12);padding-top:6px}
+.lane-footer{
+  font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--muted);
+  border-top:1px dashed rgba(120,200,255,.10);padding-top:8px;
+}
+.lane-footer strong{color:var(--teal)}
+.lane-profile-row{
+  display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;
+  padding:8px 0;font-family:var(--mono);font-size:11px;color:var(--muted);
+  border-top:1px dashed rgba(120,200,255,.08);
+}
+.lane-profile-row code{
+  background:rgba(120,200,255,.06);border:1px solid rgba(120,200,255,.12);
+  border-radius:6px;padding:1px 6px;color:var(--ink);
+}
+
 /* ─── Responsive ────────────────────────────────────────────────── */
 @media (max-width:1240px){
   .abyss-banner{grid-template-columns:1fr;min-height:auto;gap:20px;text-align:center}
@@ -982,7 +1234,7 @@ body .app::before{
 @media (max-width:760px){
   .app{padding:12px}
   .ab-title{font-size:28px}
-  .receipt-metrics,.settings-item,.worker-grid,.loqui-unified-form,.vitals{grid-template-columns:1fr}
+  .receipt-metrics,.settings-item,.worker-grid,.loqui-unified-form,.vitals,.lane-cards{grid-template-columns:1fr}
   .loqui-msg{max-width:92%}
   .lumen-box{font-size:13px}
   .lumen-line.big{font-size:18px}
@@ -992,10 +1244,568 @@ body .app::before{
 @media (prefers-reduced-motion:reduce){
   .ab-squid img,.ab-squid-halo,body::before{animation:none!important}
 }
+
+/* ─── UX Polish: Guided Start ──────────────────────────────────── */
+.guided-start{
+  position:fixed;inset:0;z-index:100;
+  display:grid;place-items:center;
+  background:
+    radial-gradient(ellipse 60% 60% at 50% 50%,rgba(4,12,28,.96),rgba(0,3,10,.99));
+  backdrop-filter:blur(8px);
+  opacity:1;transition:opacity 400ms ease;
+}
+.guided-start.hidden{opacity:0;pointer-events:none}
+.guided-start-inner{
+  max-width:540px;width:90%;display:grid;gap:28px;text-align:center;
+  padding:40px 32px;border-radius:28px;
+  border:1px solid rgba(120,200,255,.22);
+  background:
+    radial-gradient(ellipse 80% 120% at 50% -10%,rgba(111,217,255,.08),transparent 60%),
+    linear-gradient(180deg,rgba(4,10,24,.92),rgba(2,6,16,.96));
+  box-shadow:var(--bubble-glow);
+}
+.guided-start-title{
+  font-family:var(--body);font-weight:700;font-size:32px;
+  letter-spacing:.06em;color:var(--orange);
+  text-shadow:0 0 18px rgba(251,146,60,.42);
+}
+.guided-start-sub{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase}
+.guided-start-actions{display:grid;gap:12px}
+.guided-start-btn{
+  display:grid;gap:4px;padding:16px 20px;border-radius:18px;cursor:pointer;
+  border:1px solid rgba(94,234,212,.32);
+  background:linear-gradient(180deg,rgba(77,245,200,.08),rgba(77,245,200,.03));
+  transition:border-color 200ms,background 200ms,transform 120ms;
+  text-align:left;
+}
+.guided-start-btn:hover{
+  border-color:rgba(94,234,212,.55);
+  background:linear-gradient(180deg,rgba(77,245,200,.16),rgba(77,245,200,.06));
+  transform:translateY(-1px);
+}
+.guided-start-btn.primary{
+  border-color:rgba(251,146,60,.42);
+  background:linear-gradient(180deg,rgba(251,146,60,.12),rgba(251,146,60,.04));
+}
+.guided-start-btn.primary:hover{
+  border-color:rgba(251,146,60,.65);
+  background:linear-gradient(180deg,rgba(251,146,60,.22),rgba(251,146,60,.08));
+}
+.guided-start-btn-label{
+  font-family:var(--mono);font-size:14px;font-weight:500;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--teal);
+}
+.guided-start-btn.primary .guided-start-btn-label{color:var(--orange)}
+.guided-start-btn-hint{font-family:var(--font-ui);font-size:12px;color:var(--muted)}
+
+/* Guided flow steps */
+.guided-flow{display:none;gap:16px}
+.guided-flow.active{display:grid}
+.guided-flow-step{display:none;gap:12px}
+.guided-flow-step.active{display:grid}
+.guided-flow-progress{
+  display:flex;gap:6px;justify-content:center;
+}
+.guided-flow-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:rgba(120,200,255,.18);border:1px solid rgba(120,200,255,.22);
+  transition:background 200ms,border-color 200ms;
+}
+.guided-flow-dot.active{background:var(--teal);border-color:rgba(94,234,212,.55);box-shadow:0 0 8px rgba(94,234,212,.4)}
+.guided-flow-dot.done{background:rgba(94,234,212,.4);border-color:rgba(94,234,212,.35)}
+.guided-flow-nav{display:flex;gap:10px;justify-content:center}
+
+/* ─── UX Polish: Global Status Bar ─────────────────────────────── */
+.global-status-bar{
+  position:sticky;top:0;z-index:50;
+  display:grid;grid-template-columns:auto 1fr auto auto;
+  align-items:center;gap:14px;
+  padding:8px 18px;
+  border-radius:0 0 16px 16px;
+  border:1px solid rgba(120,200,255,.14);border-top:none;
+  background:
+    linear-gradient(180deg,rgba(4,10,24,.96),rgba(2,6,16,.94));
+  box-shadow:0 8px 32px rgba(0,0,0,.55);
+  backdrop-filter:blur(6px);
+  font-family:var(--mono);font-size:11px;
+  transition:border-color 300ms;
+}
+.global-status-bar.status-running{border-color:rgba(251,191,36,.34)}
+.global-status-bar.status-complete{border-color:rgba(94,234,212,.34)}
+.global-status-bar.status-failed{border-color:rgba(255,85,119,.34)}
+.gsb-status{
+  display:flex;align-items:center;gap:8px;
+}
+.gsb-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--muted);
+  box-shadow:0 0 8px currentColor;
+  animation:breathe 2.2s ease-in-out infinite;
+}
+.gsb-dot.running{background:var(--amber);color:var(--amber)}
+.gsb-dot.complete{background:var(--teal);color:var(--teal)}
+.gsb-dot.failed{background:var(--red);color:var(--red)}
+.gsb-dot.blocked{background:#fbbf24;color:#fbbf24}
+.gsb-dot.paused{background:var(--violet);color:var(--violet)}
+.gsb-word{letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+.gsb-info{
+  display:flex;align-items:center;gap:16px;overflow:hidden;
+  color:var(--muted);min-width:0;
+}
+.gsb-info span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gsb-model{color:var(--ink-cold);font-size:10px;letter-spacing:.06em}
+.gsb-last-action{color:var(--ink-dim);font-size:10px;max-width:260px}
+.gsb-cta{
+  font-family:var(--mono);font-size:11px;letter-spacing:.10em;text-transform:uppercase;
+  padding:5px 14px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(94,234,212,.34);
+  background:rgba(77,245,200,.08);color:var(--teal);
+  transition:background 200ms,border-color 200ms;
+  white-space:nowrap;
+}
+.gsb-cta:hover{background:rgba(77,245,200,.16);border-color:rgba(94,234,212,.55)}
+.gsb-cta.warn{border-color:rgba(255,93,108,.36);background:rgba(255,93,108,.06);color:var(--red)}
+.gsb-cta:disabled{opacity:.4;cursor:not-allowed}
+
+/* ─── UX Polish: Approval Card ─────────────────────────────────── */
+.approval-card{
+  display:none;gap:12px;padding:18px;
+  border:1px solid rgba(251,191,36,.34);
+  border-radius:22px;
+  background:
+    radial-gradient(ellipse 80% 120% at 50% -10%,rgba(251,191,36,.08),transparent 60%),
+    linear-gradient(180deg,rgba(4,10,24,.88),rgba(2,6,16,.94));
+  box-shadow:0 0 24px rgba(251,191,36,.10);
+}
+.approval-card.show{display:grid}
+.approval-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.approval-card-title{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#fbbf24}
+.approval-card-why{
+  font-family:var(--font-ui);font-size:13px;line-height:1.5;color:var(--ink-cold);
+  padding:10px 12px;border-radius:12px;
+  border:1px solid rgba(120,200,255,.10);background:rgba(4,10,24,.7);
+}
+.approval-card-badges{display:flex;gap:6px;flex-wrap:wrap}
+.approval-badge{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 10px;border-radius:999px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+}
+.approval-badge.pass{color:var(--teal);border:1px solid rgba(94,234,212,.38);background:rgba(94,234,212,.06)}
+.approval-badge.fail{color:var(--red);border:1px solid rgba(255,85,119,.38);background:rgba(255,85,119,.06)}
+.approval-badge.warn{color:#fbbf24;border:1px solid rgba(251,191,36,.38);background:rgba(251,191,36,.06)}
+.approval-badge.neutral{color:var(--muted);border:1px solid rgba(120,200,255,.18);background:rgba(120,200,255,.04)}
+.approval-diff-preview{
+  max-height:200px;overflow:auto;border-radius:10px;
+  border:1px solid rgba(120,200,255,.14);background:rgba(2,6,18,.92);
+  font-family:var(--mono);font-size:12px;line-height:1.5;
+}
+.approval-actions{display:flex;gap:10px;flex-wrap:wrap;padding-top:6px}
+.approval-btn{
+  font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+  padding:8px 20px;border-radius:12px;cursor:pointer;
+  transition:background 200ms,border-color 200ms;
+}
+.approval-btn.approve{
+  background:linear-gradient(180deg,rgba(77,245,200,.18),rgba(77,245,200,.08));
+  border:1px solid rgba(94,234,212,.42);color:var(--teal);
+}
+.approval-btn.approve:hover{background:rgba(77,245,200,.28);border-color:rgba(94,234,212,.65)}
+.approval-btn.reject{
+  background:rgba(255,85,119,.06);border:1px solid rgba(255,85,119,.34);color:var(--red);
+}
+.approval-btn.reject:hover{background:rgba(255,85,119,.14);border-color:rgba(255,85,119,.55)}
+.approval-btn.edit{
+  background:rgba(120,200,255,.04);border:1px solid rgba(120,200,255,.22);color:var(--ink-cold);
+}
+.approval-btn.edit:hover{background:rgba(120,200,255,.10);border-color:rgba(120,200,255,.42)}
+.approval-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ─── UX Polish: Receipt Summary ───────────────────────────────── */
+.receipt-summary{
+  display:none;gap:12px;padding:16px;
+  border-radius:18px;border:1px solid rgba(120,200,255,.14);
+  background:
+    radial-gradient(ellipse 80% 120% at 50% -10%,rgba(111,217,255,.06),transparent 60%),
+    linear-gradient(180deg,rgba(4,10,24,.82),rgba(2,6,16,.92));
+}
+.receipt-summary.show{display:grid}
+.receipt-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.receipt-summary-cell{
+  padding:8px 10px;border-radius:10px;
+  border:1px solid rgba(120,200,255,.08);background:rgba(111,217,255,.03);
+  display:grid;gap:3px;
+}
+.receipt-summary-cell .label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.receipt-summary-cell .value{font-family:var(--mono);font-size:16px;color:var(--teal)}
+.receipt-summary-toggle{
+  font-family:var(--mono);font-size:11px;letter-spacing:.10em;text-transform:uppercase;
+  padding:4px 10px;border-radius:8px;cursor:pointer;
+  border:1px solid rgba(120,200,255,.22);background:rgba(4,10,24,.6);color:var(--muted);
+}
+.receipt-summary-toggle:hover{border-color:rgba(120,200,255,.45);color:#cde5ff}
+
+/* ─── UX Polish: Loqui Suggestion Chips ────────────────────────── */
+.loqui-suggestions{
+  display:flex;gap:6px;flex-wrap:wrap;padding:4px 0;
+}
+.loqui-chip{
+  font-family:var(--mono);font-size:10px;letter-spacing:.06em;
+  padding:5px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(120,200,255,.18);
+  background:rgba(120,200,255,.04);color:var(--muted);
+  transition:border-color 200ms,background 200ms,color 200ms;
+  white-space:nowrap;
+}
+.loqui-chip:hover{
+  border-color:rgba(94,234,212,.42);background:rgba(77,245,200,.08);color:var(--teal);
+}
+
+/* ─── UX Polish: Error Banner ──────────────────────────────────── */
+.error-banner{
+  display:none;gap:10px;padding:14px 18px;
+  border-radius:16px;
+  border:1px solid rgba(255,85,119,.34);
+  background:linear-gradient(180deg,rgba(255,85,119,.08),rgba(255,85,119,.03));
+  align-items:start;
+}
+.error-banner.show{display:grid}
+.error-banner-text{font-family:var(--font-ui);font-size:13px;color:#fca5a5;line-height:1.5}
+.error-banner-text strong{color:var(--red);font-weight:600}
+.error-banner-actions{display:flex;gap:8px;flex-wrap:wrap}
+.error-banner-btn{
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  padding:4px 10px;border-radius:8px;cursor:pointer;
+  border:1px solid rgba(255,85,119,.28);background:rgba(255,85,119,.06);color:#fca5a5;
+}
+.error-banner-btn:hover{border-color:rgba(255,85,119,.5);background:rgba(255,85,119,.14)}
+
+/* ─── UX: Scout Evidence Panel ─────────────────────────────────── */
+.scouts-panel{display:none;gap:12px;padding:18px}
+.scouts-panel.show{display:grid}
+.scouts-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.scouts-disclaimer{
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  padding:4px 10px;border-radius:8px;
+  border:1px dashed rgba(120,200,255,.18);background:rgba(120,200,255,.03);
+  color:var(--muted);
+}
+.scouts-status{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 10px;border-radius:999px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.10em;text-transform:uppercase;
+  border:1px solid rgba(120,200,255,.18);background:rgba(120,200,255,.04);color:var(--muted);
+}
+.scouts-status.spawned{border-color:rgba(94,234,212,.38);background:rgba(94,234,212,.06);color:var(--teal)}
+.scouts-status.skipped{border-color:rgba(251,146,60,.34);background:rgba(251,146,60,.06);color:var(--orange)}
+.scouts-reason{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.4}
+.scouts-reports{display:grid;gap:8px}
+.scout-report-card{
+  border-radius:14px;border:1px solid rgba(120,200,255,.14);
+  background:linear-gradient(180deg,rgba(4,10,24,.82),rgba(2,6,16,.92));
+  padding:12px;display:grid;gap:8px;
+}
+.scout-report-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.scout-report-type{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  padding:2px 8px;border-radius:999px;
+  border:1px solid rgba(94,234,212,.32);background:rgba(94,234,212,.06);color:var(--teal);
+}
+.scout-report-model{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.scout-report-summary{font-family:var(--font-ui);font-size:12px;color:var(--ink-cold);line-height:1.4}
+.scout-finding{
+  padding:6px 8px;border-radius:8px;
+  border:1px solid rgba(120,200,255,.08);background:rgba(120,200,255,.02);
+  font-family:var(--mono);font-size:11px;color:var(--muted);display:grid;gap:2px;
+}
+.scout-finding-title{color:var(--ink);font-weight:500}
+.scout-finding-files{font-size:10px;color:var(--teal-dim)}
+.scout-targets{display:flex;flex-wrap:wrap;gap:4px}
+.scout-target-chip{
+  font-family:var(--mono);font-size:10px;
+  padding:2px 8px;border-radius:6px;
+  border:1px solid rgba(94,234,212,.24);background:rgba(94,234,212,.04);color:var(--teal-dim);
+}
+.scout-risks{display:grid;gap:3px;font-family:var(--mono);font-size:11px;color:var(--red)}
+
+/* ─── Timeline / Action Feed ───────────────────────────────────── */
+.timeline-panel{display:grid;gap:12px;padding:18px}
+.timeline-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.timeline-filters{display:flex;gap:4px}
+.timeline-filter{
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  padding:3px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(120,200,255,.18);background:transparent;color:var(--muted);
+  transition:border-color 200ms,background 200ms,color 200ms;
+}
+.timeline-filter:hover{border-color:rgba(120,200,255,.32);color:var(--ink-cold)}
+.timeline-filter.active{border-color:rgba(94,234,212,.42);background:rgba(94,234,212,.06);color:var(--teal)}
+.timeline-list{
+  display:grid;gap:2px;max-height:480px;overflow-y:auto;
+  border-radius:14px;border:1px solid rgba(120,200,255,.10);
+  background:rgba(4,10,24,.82);padding:8px;
+}
+.timeline-entry{
+  display:grid;grid-template-columns:72px 8px 1fr;gap:8px;align-items:start;
+  padding:5px 8px;border-radius:8px;
+  transition:background 160ms;font-family:var(--font-ui);font-size:12px;
+}
+.timeline-entry:hover{background:rgba(120,200,255,.04)}
+.timeline-entry .tl-time{
+  font-family:var(--mono);font-size:10px;color:var(--muted);
+  text-align:right;padding-top:2px;white-space:nowrap;
+}
+.timeline-entry .tl-dot{
+  width:8px;height:8px;border-radius:50%;margin-top:4px;
+}
+.timeline-entry .tl-dot.info{background:var(--blue)}
+.timeline-entry .tl-dot.success{background:var(--teal)}
+.timeline-entry .tl-dot.warning{background:#fbbf24}
+.timeline-entry .tl-dot.error{background:var(--red)}
+.timeline-entry .tl-dot.active{background:var(--orange);animation:dotPulse 1.4s ease-in-out infinite}
+.timeline-entry .tl-body{display:grid;gap:2px;min-width:0}
+.timeline-entry .tl-msg{color:var(--ink-cold);line-height:1.35;word-break:break-word}
+.timeline-entry .tl-details{
+  font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.3;
+  max-height:60px;overflow:hidden;word-break:break-word;
+}
+.timeline-entry .tl-phase{
+  font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-ghost);
+}
+.timeline-entry.importance-high .tl-msg{color:var(--ink);font-weight:500}
+.timeline-empty{
+  color:var(--muted);font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+  text-align:center;padding:22px 12px;
+  border:1px dashed rgba(120,200,255,.12);border-radius:10px;
+}
+
+/* ─── Mission Proposal card ────────────────────────────────────── */
+.mission-proposal{
+  justify-self:start;max-width:94%;
+  border-radius:20px;
+  border:1px solid rgba(251,146,60,.32);
+  background:
+    radial-gradient(ellipse 80% 120% at 50% -10%,rgba(251,146,60,.06),transparent 60%),
+    linear-gradient(180deg,rgba(4,10,24,.90),rgba(2,6,16,.95));
+  padding:16px;display:grid;gap:12px;
+  box-shadow:0 0 20px rgba(251,146,60,.08);
+}
+.mission-head{
+  display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:12px;letter-spacing:.10em;text-transform:uppercase;color:var(--orange);
+}
+.mission-objective{font-family:var(--font-ui);font-size:13px;color:var(--ink);line-height:1.45}
+.mission-meta{display:grid;gap:6px;font-family:var(--mono);font-size:10px;color:var(--muted)}
+.mission-meta-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.mission-risk-badge{
+  padding:2px 8px;border-radius:999px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+}
+.mission-risk-badge.low{color:var(--teal);border:1px solid rgba(94,234,212,.28);background:rgba(94,234,212,.05)}
+.mission-risk-badge.medium{color:#fbbf24;border:1px solid rgba(251,191,36,.28);background:rgba(251,191,36,.05)}
+.mission-risk-badge.high{color:var(--red);border:1px solid rgba(255,85,119,.28);background:rgba(255,85,119,.05)}
+.mission-approval-note{
+  font-family:var(--mono);font-size:10px;color:var(--teal-dim);
+  padding:6px 10px;border-radius:8px;
+  border:1px dashed rgba(94,234,212,.22);background:rgba(94,234,212,.03);
+  line-height:1.4;
+}
+.mission-actions{display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px dashed rgba(120,200,255,.10)}
+.mission-btn{
+  font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+  padding:8px 18px;border-radius:12px;cursor:pointer;
+}
+.mission-btn.start{
+  background:linear-gradient(180deg,rgba(251,146,60,.22),rgba(251,146,60,.10));
+  border:1px solid rgba(251,146,60,.45);color:var(--orange);
+}
+.mission-btn.start:hover{background:rgba(251,146,60,.32);border-color:rgba(251,146,60,.65)}
+.mission-btn.edit{
+  background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.32);color:#a78bfa;
+}
+.mission-btn.edit:hover{background:rgba(167,139,250,.14);border-color:rgba(167,139,250,.55)}
+.mission-btn.ask{
+  background:transparent;border:1px solid rgba(120,200,255,.22);color:var(--ink-cold);
+}
+.mission-btn.ask:hover{border-color:rgba(120,200,255,.42);background:rgba(120,200,255,.06)}
+
+/* ─── System Health Indicator ──────────────────────────────────── */
+.sys-health{
+  display:inline-flex;align-items:center;gap:5px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.06em;
+  padding:2px 8px;border-radius:999px;white-space:nowrap;
+  cursor:help;transition:border-color 200ms,background 200ms,color 200ms;
+}
+.sys-health.ok{color:var(--teal-dim);border:1px solid rgba(94,234,212,.22);background:rgba(94,234,212,.03)}
+.sys-health.warning{color:#fbbf24;border:1px solid rgba(251,191,36,.32);background:rgba(251,191,36,.05)}
+.sys-health.critical{color:var(--red);border:1px solid rgba(255,85,119,.34);background:rgba(255,85,119,.06);animation:breathe 1.4s ease-in-out infinite}
+.sys-health-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+
+/* ─── Plan Assist suggestion card ──────────────────────────────── */
+.plan-suggest{
+  justify-self:start;max-width:92%;
+  border-radius:18px;border:1px solid rgba(167,139,250,.32);
+  background:
+    radial-gradient(ellipse 80% 120% at 50% -10%,rgba(167,139,250,.08),transparent 60%),
+    linear-gradient(180deg,rgba(4,10,24,.88),rgba(2,6,16,.94));
+  padding:14px;display:grid;gap:10px;
+  box-shadow:0 0 18px rgba(167,139,250,.10);
+}
+.plan-suggest-head{
+  display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#a78bfa;
+}
+.plan-suggest-reason{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.4}
+.plan-suggest-list{display:grid;gap:6px}
+.plan-suggest-item{
+  display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:start;
+  padding:8px 10px;border-radius:12px;
+  border:1px solid rgba(120,200,255,.10);background:rgba(120,200,255,.02);
+}
+.plan-suggest-item .ord{
+  font-family:var(--mono);font-size:12px;color:var(--muted);
+  text-align:right;padding-top:2px;
+}
+.plan-suggest-item .body{display:grid;gap:3px}
+.plan-suggest-item .st-title{font-family:var(--font-ui);font-size:12px;color:var(--ink);font-weight:500}
+.plan-suggest-item .st-prompt{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.4}
+.plan-suggest-item .st-meta{
+  display:flex;gap:6px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--muted);
+}
+.plan-suggest-item .st-risk{
+  padding:1px 6px;border-radius:999px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+}
+.plan-suggest-item .st-risk.low{color:var(--teal);border:1px solid rgba(94,234,212,.28);background:rgba(94,234,212,.05)}
+.plan-suggest-item .st-risk.medium{color:#fbbf24;border:1px solid rgba(251,191,36,.28);background:rgba(251,191,36,.05)}
+.plan-suggest-item .st-risk.high{color:var(--red);border:1px solid rgba(255,85,119,.28);background:rgba(255,85,119,.05)}
+.plan-suggest-item .st-scope{color:var(--ink-dim)}
+.plan-suggest-item .st-reason{color:var(--ink-ghost);font-style:italic}
+.plan-suggest-item .st-actions{
+  display:flex;flex-direction:column;gap:4px;padding-top:2px;
+}
+.plan-suggest-item .st-btn{
+  font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 6px;border-radius:6px;cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(120,200,255,.18);background:rgba(120,200,255,.03);color:var(--muted);
+}
+.plan-suggest-item .st-btn:hover{border-color:rgba(120,200,255,.38);color:var(--ink-cold)}
+.plan-suggest-item .st-btn.del{border-color:rgba(255,85,119,.24);color:var(--red)}
+.plan-suggest-item .st-btn.del:hover{border-color:rgba(255,85,119,.45);background:rgba(255,85,119,.06)}
+.plan-suggest-actions{display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;border-top:1px dashed rgba(120,200,255,.10)}
+.plan-suggest-btn{
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  padding:7px 14px;border-radius:10px;cursor:pointer;
+}
+.plan-suggest-btn.create{
+  background:linear-gradient(180deg,rgba(167,139,250,.18),rgba(167,139,250,.08));
+  border:1px solid rgba(167,139,250,.42);color:#a78bfa;
+}
+.plan-suggest-btn.create:hover{background:rgba(167,139,250,.28);border-color:rgba(167,139,250,.65)}
+.plan-suggest-btn.clarify{
+  background:rgba(120,200,255,.04);border:1px solid rgba(120,200,255,.22);color:var(--ink-cold);
+}
+.plan-suggest-btn.clarify:hover{background:rgba(120,200,255,.10);border-color:rgba(120,200,255,.42)}
+.plan-suggest-btn.skip{
+  background:transparent;border:1px solid rgba(120,200,255,.14);color:var(--muted);
+}
+.plan-suggest-btn.skip:hover{border-color:rgba(120,200,255,.28);color:var(--ink-cold)}
 </style>
 </head>
 <body>
+  <!-- UX: Guided Start Overlay -->
+  <div id="guided-start" class="guided-start hidden">
+    <div class="guided-start-inner">
+      <div class="ab-mark" style="text-align:center">Governed AI Build Orchestrator</div>
+      <div class="guided-start-title">AEDIS</div>
+      <div class="guided-start-sub">What would you like to do?</div>
+      <div id="guided-start-menu" class="guided-start-actions">
+        <button class="guided-start-btn primary" onclick="guidedStartTask()">
+          <span class="guided-start-btn-label">Start a Task</span>
+          <span class="guided-start-btn-hint">Walk through repo, mode, and task setup step by step</span>
+        </button>
+        <button class="guided-start-btn" onclick="guidedMission()">
+          <span class="guided-start-btn-label">Start a Mission</span>
+          <span class="guided-start-btn-hint">Give a high-level objective — Aedis scouts, plans, and executes step by step</span>
+        </button>
+        <button class="guided-start-btn" onclick="guidedSmoke()">
+          <span class="guided-start-btn-label">Run Local Smoke Test</span>
+          <span class="guided-start-btn-hint">Test Aedis with local Ollama models — no cloud keys needed</span>
+        </button>
+        <button class="guided-start-btn" onclick="dismissGuidedStart()" style="border-color:rgba(120,200,255,.14)">
+          <span class="guided-start-btn-label" style="color:var(--muted);font-size:11px">Skip — I know what I'm doing</span>
+        </button>
+      </div>
+      <div id="guided-flow" class="guided-flow">
+        <div class="guided-flow-progress">
+          <div class="guided-flow-dot" id="gf-dot-0"></div>
+          <div class="guided-flow-dot" id="gf-dot-1"></div>
+          <div class="guided-flow-dot" id="gf-dot-2"></div>
+          <div class="guided-flow-dot" id="gf-dot-3"></div>
+        </div>
+        <div class="guided-flow-step" id="gf-step-0">
+          <div class="guided-start-sub">Step 1: Choose a repository</div>
+          <input id="gf-repo" class="field" type="text" placeholder="/path/to/your-repo" autocomplete="off" />
+          <div class="guided-flow-nav">
+            <button class="guided-start-btn" onclick="guidedFlowBack()" style="padding:8px 16px"><span class="guided-start-btn-label" style="font-size:11px;color:var(--muted)">Back</span></button>
+            <button class="guided-start-btn primary" onclick="guidedFlowNext()" style="padding:8px 16px"><span class="guided-start-btn-label" style="font-size:11px">Next</span></button>
+          </div>
+        </div>
+        <div class="guided-flow-step" id="gf-step-1">
+          <div class="guided-start-sub">Step 2: Choose a mode</div>
+          <button class="guided-start-btn primary" onclick="guidedSetMode('build')">
+            <span class="guided-start-btn-label">Build</span>
+            <span class="guided-start-btn-hint">Make a code change with full verification</span>
+          </button>
+          <button class="guided-start-btn" onclick="guidedSetMode('plan')">
+            <span class="guided-start-btn-label">Dry Run</span>
+            <span class="guided-start-btn-hint">See the plan without executing</span>
+          </button>
+          <button class="guided-start-btn" onclick="guidedSetMode('question')">
+            <span class="guided-start-btn-label">Ask a Question</span>
+            <span class="guided-start-btn-hint">Ask about the codebase without making changes</span>
+          </button>
+          <div class="guided-flow-nav">
+            <button class="guided-start-btn" onclick="guidedFlowBack()" style="padding:8px 16px"><span class="guided-start-btn-label" style="font-size:11px;color:var(--muted)">Back</span></button>
+          </div>
+        </div>
+        <div class="guided-flow-step" id="gf-step-2">
+          <div class="guided-start-sub">Step 3: Describe your task</div>
+          <input id="gf-task" class="field" type="text" placeholder="e.g. Add input validation to the login form" autocomplete="off" />
+          <div class="guided-flow-nav">
+            <button class="guided-start-btn" onclick="guidedFlowBack()" style="padding:8px 16px"><span class="guided-start-btn-label" style="font-size:11px;color:var(--muted)">Back</span></button>
+            <button class="guided-start-btn primary" onclick="guidedFlowNext()" style="padding:8px 16px"><span class="guided-start-btn-label" style="font-size:11px">Next</span></button>
+          </div>
+        </div>
+        <div class="guided-flow-step" id="gf-step-3">
+          <div class="guided-start-sub">Step 4: Confirm and start</div>
+          <div id="gf-summary" style="text-align:left;padding:12px;border-radius:12px;border:1px solid rgba(120,200,255,.14);background:rgba(4,10,24,.7);font-family:var(--mono);font-size:12px;color:var(--ink-cold);line-height:1.6"></div>
+          <div class="guided-flow-nav">
+            <button class="guided-start-btn" onclick="guidedFlowBack()" style="padding:8px 16px"><span class="guided-start-btn-label" style="font-size:11px;color:var(--muted)">Back</span></button>
+            <button class="guided-start-btn primary" onclick="guidedFlowSubmit()" style="padding:8px 16px"><span class="guided-start-btn-label" style="font-size:11px">Start</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="app">
+    <!-- UX: Global Status Bar (sticky) -->
+    <div id="global-status-bar" class="global-status-bar" style="display:none">
+      <div class="gsb-status">
+        <div id="gsb-dot" class="gsb-dot"></div>
+        <span id="gsb-word" class="gsb-word">IDLE</span>
+      </div>
+      <div class="gsb-info">
+        <span id="gsb-step"></span>
+        <span id="gsb-scout-status" style="display:none;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:999px;white-space:nowrap"></span>
+        <span id="gsb-model" class="gsb-model"></span>
+        <span id="gsb-last-action" class="gsb-last-action"></span>
+      </div>
+      <span id="gsb-cost" class="gsb-model" style="color:var(--teal)"></span>
+      <span id="sys-health" class="sys-health ok" title="System memory: healthy"><span class="sys-health-dot"></span><span id="sys-health-pct">—</span></span>
+      <button id="gsb-cta" class="gsb-cta" type="button" style="display:none"></button>
+    </div>
+
     <div class="shell">
 
       <!-- HERO BANNER — Crucibulum abyss-banner style -->
@@ -1093,6 +1903,44 @@ body .app::before{
       <div id="run-progress" class="run-progress" aria-hidden="true"></div>
 
 
+      <!-- Loqui Orientation panel — adaptive system explanation +
+           workflow guide. Shown on first UI load when no task is
+           active, when /loqui/orientation reports show=true, or when
+           the operator explicitly types "what does Aedis do?" / "help"
+           into the Loqui input. Dismissible per-session. Quick-action
+           buttons map to existing UI handlers; orientation never
+           auto-runs anything. -->
+      <section class="panel orientation-panel" id="orientation-panel">
+        <div class="orientation-head">
+          <div class="label">Aedis Orientation</div>
+          <span class="orientation-variant" id="orientation-variant">—</span>
+          <div class="orientation-actions-row">
+            <button id="orientation-toggle" class="orientation-toggle" type="button">HIDE</button>
+            <button id="orientation-dismiss" class="orientation-dismiss" type="button" title="Dismiss for this session">×</button>
+          </div>
+        </div>
+        <div class="orientation-body" id="orientation-body">
+          <div class="orientation-section">
+            <div class="orientation-section-title">What Aedis is</div>
+            <ul id="orientation-what"></ul>
+          </div>
+          <div class="orientation-section">
+            <div class="orientation-section-title">What Aedis will do</div>
+            <ul id="orientation-will"></ul>
+          </div>
+          <div class="orientation-section warn">
+            <div class="orientation-section-title">What Aedis will NOT do</div>
+            <ul id="orientation-wont"></ul>
+          </div>
+          <div class="orientation-section">
+            <div class="orientation-section-title">What you can do next</div>
+            <ul id="orientation-next"></ul>
+          </div>
+          <div class="orientation-quick-actions" id="orientation-actions"></div>
+          <div class="orientation-reason" id="orientation-reason"></div>
+        </div>
+      </section>
+
       <!-- Loqui chat panel -->
       <section class="panel loqui-panel">
         <div class="loqui-row">
@@ -1105,6 +1953,164 @@ body .app::before{
             placeholder="Ask, plan, or build — Loqui routes it." autocomplete="off" />
           <button id="loqui-send" class="button" type="submit">Send</button>
         </form>
+        <div id="loqui-suggestions" class="loqui-suggestions"></div>
+
+        <!-- Loqui Decision audit — confidence + intent + signals.
+             Populated each time the unified router responds; hidden
+             until Loqui has classified at least one message in this
+             session. The block is observability, not a control:
+             everything here also flows into the run-detail view via
+             /runs/:id so a later visitor sees the same audit. -->
+        <div id="loqui-decision" class="loqui-decision" style="display:none;">
+          <div class="loqui-decision-row">
+            <span id="loqui-decision-badge"></span>
+            <div class="loqui-confidence-meter" id="loqui-confidence-meter"><i style="width:0%"></i></div>
+            <span id="loqui-confidence-pct" class="loqui-confidence-pct">—</span>
+          </div>
+          <div id="loqui-decision-chips" class="loqui-decision-row" style="gap:6px"></div>
+          <div id="loqui-decision-reason" class="loqui-decision-reason"></div>
+          <details class="loqui-signals-details" id="loqui-signals-details">
+            <summary>Why Loqui chose this</summary>
+            <div id="loqui-signals-list" class="loqui-signals-list"></div>
+          </details>
+        </div>
+      </section>
+
+      <!-- Candidate Workspaces — primary vs shadow side-by-side.
+           Populated from /runs/:id `candidates` block when a run is
+           selected. Each card shows model/provider/status/cost so the
+           operator can see the lane comparison at a glance.
+
+           Architectural reminder is footer-pinned: only primary
+           workspaces can promote — shadow candidates exist purely
+           for comparison. -->
+      <section class="panel lanes-panel" id="lanes-panel" style="display:none;">
+        <div class="lanes-head">
+          <div class="label">Candidate Workspaces</div>
+          <span id="lanes-mode-chip" class="lane-mode-chip">primary_only</span>
+          <span id="lanes-mode-note" class="tiny" style="color:var(--muted)"></span>
+        </div>
+        <div id="lane-cards" class="lane-cards"></div>
+        <div id="lane-selection" class="lane-footer"></div>
+        <div id="lane-profile" class="lane-profile-row" style="display:none;"></div>
+      </section>
+
+      <!-- Task Plan — multi-step "continue-until-done" loop.
+           Hidden by default; appears when a plan is selected via
+           the API (POST /task-plans). The panel polls the plan
+           detail every few seconds while the loop is running so
+           the operator can watch progress, the current subtask,
+           the current model, and stop / continue the loop. -->
+      <!-- Task Plan creation form. Operator types subtasks one per
+           line OR uses the row editor. Submitting POSTs to /task-plans
+           and loads the new plan into the panel below. The plan does
+           NOT auto-start — Start is a separate explicit action.
+
+           Safety copy: emphasize that this is supervised execution
+           and that approval is still required before promotion. -->
+      <section class="panel taskplan-panel" id="taskplan-create-panel">
+        <div class="taskplan-head">
+          <div class="label">New Task Plan</div>
+          <span class="tiny" style="color:var(--muted)">supervised multi-step execution</span>
+        </div>
+        <div class="tiny" style="color:var(--muted);line-height:1.5">
+          Aedis runs one subtask at a time through the normal safety pipeline
+          (Velum → workspace → verification). Approval is still required before
+          source changes are promoted.
+        </div>
+
+        <form id="taskplan-form" class="taskplan-form">
+          <label class="taskplan-field">
+            <span class="taskplan-field-label">Objective</span>
+            <input id="taskplan-objective-input" class="field" type="text"
+              placeholder="e.g. Add Instructor Mode to Magister with tests" />
+          </label>
+          <label class="taskplan-field">
+            <span class="taskplan-field-label">Repo path</span>
+            <input id="taskplan-repo-input" class="field" type="text" placeholder="/path/to/your-repo" />
+          </label>
+
+          <div class="taskplan-field">
+            <span class="taskplan-field-label">Subtasks</span>
+            <div id="taskplan-subtasks" class="taskplan-subtasks-editor"></div>
+            <div class="taskplan-row" style="gap:6px;margin-top:6px">
+              <button type="button" id="taskplan-add-subtask" class="ghost-btn">+ Add subtask</button>
+              <span class="tiny" style="color:var(--muted)">at least one required</span>
+            </div>
+          </div>
+
+          <details class="taskplan-draft">
+            <summary class="tiny" style="cursor:pointer;color:var(--muted)">Draft subtasks from a checklist</summary>
+            <div class="taskplan-draft-body">
+              <textarea id="taskplan-draft-text" class="field" rows="4"
+                placeholder="Paste a numbered checklist or rough plan, one item per line. No LLM is invoked — lines are split client-side."></textarea>
+              <div class="taskplan-row" style="gap:6px;margin-top:6px">
+                <button type="button" id="taskplan-draft-convert" class="ghost-btn">Convert lines to subtasks</button>
+                <span class="tiny" style="color:var(--muted)">replaces current subtask list</span>
+              </div>
+            </div>
+          </details>
+
+          <details class="taskplan-budget">
+            <summary class="tiny" style="cursor:pointer;color:var(--muted)">Advanced budget</summary>
+            <div class="taskplan-budget-grid">
+              <label><span class="tiny">max subtasks</span><input id="bud-maxSubtasks" class="field" type="number" min="1" /></label>
+              <label><span class="tiny">max attempts / subtask</span><input id="bud-maxAttemptsPerSubtask" class="field" type="number" min="1" /></label>
+              <label><span class="tiny">max repair attempts</span><input id="bud-maxRepairAttempts" class="field" type="number" min="1" /></label>
+              <label><span class="tiny">max runtime (min)</span><input id="bud-maxRuntimeMinutes" class="field" type="number" min="1" /></label>
+              <label><span class="tiny">max cost (USD)</span><input id="bud-maxCostUsd" class="field" type="number" min="0.01" step="0.01" /></label>
+              <label><span class="tiny">max consecutive failures</span><input id="bud-maxConsecutiveFailures" class="field" type="number" min="1" /></label>
+            </div>
+          </details>
+
+          <div class="taskplan-row" style="gap:8px;justify-content:flex-end">
+            <span id="taskplan-form-error" class="tiny" style="color:var(--red);flex:1;text-align:left"></span>
+            <button type="submit" id="taskplan-create-btn" class="button">Create plan</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel taskplan-panel" id="taskplan-panel" style="display:none;">
+        <div class="taskplan-head">
+          <div class="label">Task Plan</div>
+          <span id="taskplan-status-chip" class="taskplan-status-chip">pending</span>
+          <span id="taskplan-id-tag" class="tiny" style="color:var(--muted);font-family:var(--mono)"></span>
+        </div>
+        <div id="taskplan-objective" class="taskplan-objective"></div>
+        <div class="taskplan-progress">
+          <div class="taskplan-progress-meter"><i id="taskplan-progress-fill" style="width:0%"></i></div>
+          <span id="taskplan-progress-text" class="taskplan-progress-text">0/0</span>
+        </div>
+        <div id="taskplan-current" class="taskplan-current" style="display:none;">
+          <span class="taskplan-current-label">Current subtask</span>
+          <span id="taskplan-current-title" class="taskplan-current-title"></span>
+          <div id="taskplan-current-meta" class="taskplan-current-meta"></div>
+        </div>
+
+        <div id="taskplan-budget-rows" class="taskplan-budget-rows"></div>
+
+        <div class="taskplan-actions">
+          <button id="taskplan-start" type="button">Start</button>
+          <button id="taskplan-continue" type="button">Continue</button>
+          <button id="taskplan-skip" type="button">Skip current</button>
+          <button id="taskplan-cancel" type="button" class="warn">Cancel</button>
+        </div>
+        <div id="taskplan-summary" class="taskplan-summary"></div>
+        <details>
+          <summary class="tiny" style="cursor:pointer;color:var(--muted)">All subtasks</summary>
+          <div id="taskplan-list" class="taskplan-list"></div>
+        </details>
+      </section>
+
+      <!-- Scout Evidence -->
+      <section class="panel scouts-panel" id="scouts-panel">
+        <div class="scouts-head">
+          <div class="label">Scouts</div>
+          <span id="scouts-status" class="scouts-status">not spawned</span>
+          <span class="scouts-disclaimer">Read-only investigators. Cannot modify your repo.</span>
+        </div>
+        <div id="scouts-reason" class="scouts-reason"></div>
+        <div id="scouts-reports" class="scouts-reports"></div>
       </section>
 
       <!-- Workers grid -->
@@ -1121,6 +2127,21 @@ body .app::before{
         <div id="lumen-log" class="lumen-box"></div>
       </section>
 
+      <!-- Action Timeline — chronological feed of what Aedis is doing.
+           Sits between Lumen and Diff so the operator sees the structured
+           timeline alongside the raw log. Filterable: all / important / errors. -->
+      <section class="panel timeline-panel" id="timeline-panel">
+        <div class="timeline-head">
+          <div class="label">Action Timeline</div>
+          <div class="timeline-filters">
+            <button class="timeline-filter active" data-tl-filter="all" type="button">All</button>
+            <button class="timeline-filter" data-tl-filter="important" type="button">Important</button>
+            <button class="timeline-filter" data-tl-filter="errors" type="button">Errors</button>
+          </div>
+        </div>
+        <div id="timeline-list" class="timeline-list"></div>
+      </section>
+
       <!-- Diff Viewer — transparency rule: sits directly below the Lumen
            live log so the operator can watch +/- lines land in real time
            as each Builder completes. Always visible; empty state when
@@ -1134,6 +2155,21 @@ body .app::before{
           <button id="diff-panel-toggle" class="diff-panel-toggle" type="button">HIDE</button>
         </div>
         <div id="diff-panel-body" class="diff-panel-body"></div>
+      </section>
+
+      <!-- UX: Approval Card -->
+      <section id="approval-card" class="approval-card panel">
+        <div class="approval-card-head">
+          <span class="approval-card-title">Approval Required</span>
+          <div id="approval-badges" class="approval-card-badges"></div>
+        </div>
+        <div id="approval-why" class="approval-card-why"></div>
+        <div id="approval-diff-preview" class="approval-diff-preview"></div>
+        <div class="approval-actions">
+          <button id="approval-approve" class="approval-btn approve" type="button">Approve</button>
+          <button id="approval-reject" class="approval-btn reject" type="button">Reject</button>
+          <button id="approval-view-full" class="approval-btn edit" type="button">View Full Diff</button>
+        </div>
       </section>
 
       <!-- Trust Summary -->
@@ -1153,7 +2189,11 @@ body .app::before{
 
       <!-- Receipt Feed -->
       <section class="panel receipts-panel">
-        <div class="label">Receipt Feed</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div class="label">Receipt Feed</div>
+          <button id="receipt-raw-toggle" class="receipt-summary-toggle" type="button" style="display:none">Show Raw</button>
+        </div>
+        <div id="receipt-summary" class="receipt-summary"></div>
         <div id="receipt-list" class="receipts-list"></div>
       </section>
 
@@ -1331,6 +2371,12 @@ body .app::before{
       historyError: '',
       providerRegistry: null,
       modelConfig: { ...DEFAULT_MODEL_CONFIG },
+      // Provenance for the worker-models panel — populated from
+      // GET /config/models. Drives the profile chip, the per-role
+      // source pill, and the read-only state under local-smoke.
+      modelProfile: 'default',
+      modelConfigSource: null,
+      modelConfigFilePresent: false,
       repoPath: '.',
       submitting: false,
       loqui: {
@@ -1350,7 +2396,26 @@ body .app::before{
         // which is fine because the underlying run is still visible
         // in the worker grid and Lumen log.
         pendingBuilds: new Map(),
-      }
+        // Latest decision rendered next to the chat. Replaced on
+        // every submit; used by renderLoquiDecision. Null when
+        // Loqui hasn't classified anything yet in this session.
+        decision: null,
+        // When the most recent assistant turn was a clarification
+        // asking for a file/module path, this holds the user's
+        // original prompt so the next message (a path-only reply)
+        // can be merged with it via the follow-up scope binder.
+        // Cleared whenever any non-clarification response arrives.
+        awaitingScopeFor: null,
+      },
+      // Lane profile snapshot from /config/lanes. Read-only — we
+      // surface what the file says and never offer an editor.
+      laneProfile: null,
+      // Active multi-step task plan (continue-until-done loop). Null
+      // when no plan is selected. The UI polls /task-plans/<id> every
+      // few seconds while status==="running" so the operator sees
+      // progress without us building a WS bridge for plan events.
+      taskPlan: null,
+      taskPlanPollHandle: null,
     };
 
     function createEmptyRun() {
@@ -1560,6 +2625,35 @@ body .app::before{
             failureExplanation: backendFailure || mined,
           };
         }
+        // Stash preflight scout report IDs if present in the receipt
+        if (data.receipt && Array.isArray(data.receipt.preflightScoutReportIds)) {
+          run.preflightScoutReportIds = data.receipt.preflightScoutReportIds;
+        }
+        // Stash the new transparency blocks on the run object so the
+        // panels render them on the next render() pass. Tolerant of
+        // missing fields — older runs without recorded decisions just
+        // collapse the panel.
+        if (data.loqui) {
+          run.loquiDecision = data.loqui;
+          if (state.currentRunId === runId) {
+            state.loqui.decision = {
+              action: data.loqui.action,
+              intent: data.loqui.intent,
+              label: data.loqui.label,
+              confidence: data.loqui.confidence,
+              reason: data.loqui.reason,
+              signals: Array.isArray(data.loqui.signals) ? data.loqui.signals.slice() : [],
+              scopedBuildSignal: Boolean(data.loqui.scopedBuildSignal),
+              safeFallbackSuppressed: Boolean(data.loqui.safeFallbackSuppressed),
+              clarification: data.loqui.clarification || '',
+            };
+          }
+        }
+        if (data.candidates) {
+          run.candidatesBlock = data.candidates;
+        }
+        renderLoquiDecision();
+        renderLanesPanel(run.candidatesBlock);
         render();
       } catch (err) {
         const run = ensureRun(runId);
@@ -1659,6 +2753,16 @@ body .app::before{
       inputEl.value = '';
       renderLoqui();
 
+      // Orientation hook: if the operator typed a help/orientation
+      // question, re-fetch /loqui/orientation with the question in
+      // tow so the panel re-surfaces even if it was dismissed.
+      // The unified-router call below still runs — orientation is a
+      // side panel, not a replacement for Loqui's normal answer path.
+      if (typeof loadOrientation === 'function' &&
+          /\b(what (does|is) aedis|how (do i use|does) aedis|help( me)?( get| with| using)|orient|onboard|getting started)\b/i.test(text)) {
+        void loadOrientation({ question: text });
+      }
+
       // Snapshot whatever conversational context we have so the
       // classifier can emit resume_run / status safely. Rule B in
       // the classifier downgrades these intents when there is no
@@ -1678,6 +2782,11 @@ body .app::before{
         lastRunId: state.currentRunId || null,
         lastRunVerdict: state.active && state.active.verdict ? String(state.active.verdict) : null,
         previousMessageWasBuild,
+        // Forward the prior clarification's original prompt (if any)
+        // so the server can run path-follow-up binding when the user
+        // replies with just a path. The server defaults projectRoot
+        // to repoPath, so we don't need to pass it explicitly.
+        awaitingScopeFor: state.loqui.awaitingScopeFor || null,
       };
 
       try {
@@ -1736,8 +2845,42 @@ body .app::before{
         }
       }
       state.loqui.lastIntent = label;
+      // Stash the full decision for the audit panel. Carries the
+      // intent + confidence + signals + scoped-build / safe-fallback
+      // flags so the operator can see exactly which path Loqui took.
+      state.loqui.decision = {
+        action: route,
+        intent: String(data.intent || ''),
+        label,
+        confidence: Number(data.confidence || 0),
+        reason: String(data.reason || ''),
+        signals: Array.isArray(data.signals) ? data.signals.slice() : [],
+        scopedBuildSignal: Boolean(data.scoped_build_signal),
+        safeFallbackSuppressed: Boolean(data.safe_fallback_suppressed),
+        clarification: String(data.clarification || ''),
+      };
+      renderLoquiDecision();
 
       if (route === 'build' || route === 'resume') {
+        // Successful dispatch — clear any awaitingScopeFor so the
+        // next user message is treated as a fresh turn rather than
+        // another follow-up.
+        state.loqui.awaitingScopeFor = null;
+
+        // If the server bound a path-only follow-up to a prior
+        // clarification, surface the "Got it — using <path>"
+        // acknowledgement before the build queue confirmation so
+        // the operator sees the scope decision explicitly.
+        if (data.follow_up_scope && data.follow_up_scope.message) {
+          state.loqui.messages.push({
+            role: 'assistant',
+            text: String(data.follow_up_scope.message),
+            label: 'Building',
+            at: new Date().toISOString(),
+            followUpScope: data.follow_up_scope,
+          });
+        }
+
         const taskId = data.task_id || data.taskId || '';
         const runId = data.run_id || data.runId || taskId;
         if (!runId) {
@@ -1822,11 +2965,77 @@ body .app::before{
         return;
       }
 
-      // GAP 1 — Needs clarification (ambiguous prompt)
-      if (data.status === 'needs_clarification') {
+      // Plan Assist / Mission Mode — Loqui suggests a task plan.
+      // Multi-step prompts become mission proposals with Start Mission,
+      // Edit Plan, and Ask Clarifying Question buttons.
+      if (route === 'suggest_plan' || data.status === 'suggest_plan') {
+        const suggestion = data.plan_suggestion || {};
+        const subtasks = Array.isArray(suggestion.subtasks) ? suggestion.subtasks : [];
+        const scoutEv = data.scout_evidence || null;
+
+        // Build as mission proposal (richer than bare plan suggestion)
+        const scoutSummary = scoutEv && scoutEv.spawned ? {
+          spawned: true,
+          reportCount: scoutEv.reports_count || 0,
+          recommendedTargets: scoutEv.recommended_targets || [],
+          recommendedTests: scoutEv.recommended_tests || [],
+          risks: scoutEv.risks || [],
+          routing: scoutEv.routing || [],
+          totalCostUsd: scoutEv.total_cost_usd || 0,
+        } : null;
+
+        const riskLevel = subtasks.reduce((max, s) => {
+          if (s.risk === 'high') return 'high';
+          if (s.risk === 'medium' && max !== 'high') return 'medium';
+          return max;
+        }, 'low');
+
+        state.loqui.pendingMission = {
+          objective: suggestion.objective || originalText,
+          subtasks: subtasks.map((s, i) => ({
+            title: s.title || `Step ${i + 1}`,
+            prompt: s.prompt || '',
+            risk: s.risk || 'low',
+            scope: s.scope || 'unknown',
+            reason: s.reason || '',
+          })),
+          scoutSummary: scoutSummary,
+          riskLevel: riskLevel,
+          estimatedCostRange: subtasks.length <= 2 ? '$0.00 – $0.02 estimated' : '$0.01 – $' + (subtasks.length * 0.04).toFixed(2) + ' estimated',
+          modelProfile: 'default',
+          cloudDisclosure: scoutSummary ? 'No cloud models used.' : 'No cloud models used.',
+          approvalReminder: 'Starting this mission creates a task plan but does NOT approve or promote changes. Approval is required before source changes.',
+          confidence: suggestion.confidence || 0.5,
+          signals: suggestion.signals || [],
+          reason: suggestion.reason || '',
+          repoPath: repoPath,
+        };
+        state.loqui.pendingPlanSuggestion = null; // clear any prior plan suggestion
         state.loqui.messages.push({
           role: 'assistant',
-          text: data.question || data.clarification || 'Which file or function should I modify? Be specific.',
+          text: '',
+          label: 'Planning',
+          at: new Date().toISOString(),
+          missionProposal: true,
+        });
+        renderLoqui();
+        return;
+      }
+
+      // GAP 1 — Needs clarification (ambiguous prompt)
+      if (data.status === 'needs_clarification') {
+        const clarifyText = data.question || data.clarification || 'Which file or function should I modify? Be specific.';
+        // If the question is asking for a file/module/path, remember
+        // the user's original prompt so the next message (a path-only
+        // reply) can be merged with it via the follow-up scope binder.
+        if (/\b(file|module|path|directory|folder|target)\b/i.test(clarifyText)) {
+          state.loqui.awaitingScopeFor = originalText;
+        } else {
+          state.loqui.awaitingScopeFor = null;
+        }
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: clarifyText,
           label: 'Clarify',
           at: new Date().toISOString(),
           needsClarification: true,
@@ -1860,6 +3069,11 @@ body .app::before{
 
       if (route === 'clarify') {
         const clarification = String(data.clarification || 'Could you clarify what you want me to do?');
+        if (/\b(file|module|path|directory|folder|target|scope)\b/i.test(clarification)) {
+          state.loqui.awaitingScopeFor = originalText;
+        } else {
+          state.loqui.awaitingScopeFor = null;
+        }
         state.loqui.messages.push({
           role: 'assistant',
           text: clarification,
@@ -2220,6 +3434,64 @@ body .app::before{
           return;
         }
 
+        // Preflight scout lifecycle events — fired between charter
+        // generation and scope classification. Read-only scouts gather
+        // advisory evidence before the build path commits.
+        case 'preflight_scouts_started': {
+          run.preflightScoutStatus = 'running';
+          pushLumen(run, {
+            color: 'blue',
+            icon: '⊕',
+            text: String(payload.message || 'Running read-only scout checks...'),
+          });
+          return;
+        }
+
+        case 'preflight_scouts_complete': {
+          run.preflightScoutStatus = 'complete';
+          run.preflightScoutReportIds = Array.isArray(payload.reportIds) ? payload.reportIds : [];
+          const tCount = Number(payload.recommendedTargetCount || 0);
+          const rCount = Number(payload.riskCount || 0);
+          pushLumen(run, {
+            color: tCount > 0 || rCount > 0 ? 'teal' : 'gray',
+            icon: '⊕',
+            text: String(payload.message || `Scouts: ${tCount} target(s), ${rCount} risk(s)`),
+          });
+          return;
+        }
+
+        case 'preflight_scouts_skipped': {
+          run.preflightScoutStatus = 'skipped';
+          pushLumen(run, {
+            color: 'gray',
+            icon: '⊖',
+            text: String(payload.message || 'Scouts not needed'),
+          });
+          return;
+        }
+
+        // System resource pressure events — update the health indicator
+        // and push timeline entries on transitions only.
+        case 'system_pressure_warning':
+        case 'system_pressure_critical':
+        case 'system_pressure_recovered':
+        case 'system_status': {
+          const level = String(payload.level || 'ok');
+          const pct = Number(payload.percentUsed || 0);
+          const msg = String(payload.message || '');
+          // Update health indicator
+          updateSystemHealth(level, pct, msg);
+          // Push to lumen only on actual pressure events (not regular status)
+          if (type !== 'system_status') {
+            pushLumen(run, {
+              color: level === 'critical' ? 'red' : level === 'warning' ? 'orange' : 'teal',
+              icon: level === 'critical' ? '⚠' : level === 'warning' ? '⚡' : '✓',
+              text: msg,
+            });
+          }
+          return;
+        }
+
         // Human-Readable Execution + Trust Layer v1 — fired right
         // after scope classification, before any worker runs. Gives
         // the UI a projected blast radius chip so the user sees the
@@ -2429,6 +3701,21 @@ body .app::before{
         ? { ...rawPayload.payload, ...rawPayload }
         : rawPayload;
       const type = normalizeType(payload);
+
+      // Task plan transitions: refresh the loaded plan when the
+      // event refers to it. Plan creation events from other sessions
+      // are ignored — the operator only cares about the plan they're
+      // looking at. Wire format: rawPayload is { type, payload, ... }
+      // and payload.taskPlanId is the inner field hoisted above.
+      if (type === 'task_plan_event') {
+        const planId = payload.taskPlanId || (rawPayload && rawPayload.payload && rawPayload.payload.taskPlanId);
+        if (planId && state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.taskPlanId === planId) {
+          // Fire-and-forget — loadTaskPlan re-renders + reschedules
+          // the polling fallback if needed.
+          void loadTaskPlan(planId);
+        }
+        return;
+      }
       const runId = guessRunId(payload);
       const run = ensureRun(runId);
 
@@ -2815,13 +4102,40 @@ body .app::before{
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
         state.modelConfig = mergeModelConfig(data.models || data);
+        // Capture provenance so renderSettings can show profile +
+        // per-role source. Without this the dropdown was guessing
+        // client-side and silently misrepresenting reality.
+        state.modelProfile = (data && typeof data.profile === 'string') ? data.profile : 'default';
+        state.modelConfigSource = (data && data.source && typeof data.source === 'object') ? data.source : null;
+        state.modelConfigFilePresent = Boolean(data && data.config_file_present);
         window.localStorage.setItem(STORAGE_KEYS.modelConfig, JSON.stringify(state.modelConfig));
-        setConfigStatus('Model config loaded.', false);
+        setConfigStatus(
+          state.modelProfile === 'local-smoke'
+            ? 'Model config locked by AEDIS_MODEL_PROFILE=local-smoke. Selectors are read-only.'
+            : (state.modelConfigFilePresent
+                ? 'Model config loaded from saved .aedis/model-config.json.'
+                : 'Model config: server defaults (no saved file yet).'),
+          false,
+        );
       } catch (err) {
         setConfigStatus(`Using local defaults. ${err.message}`, true);
+        state.modelProfile = 'default';
+        state.modelConfigSource = null;
       }
       renderSettings();
       renderWorkers();
+      // Disable Save under local-smoke — the server ignores the saved
+      // file under that profile so a save would silently no-op and
+      // then look like it took effect after reload. Better to make
+      // the disabled state explicit.
+      const saveBtn = document.getElementById('config-save');
+      if (saveBtn) {
+        const locked = state.modelProfile === 'local-smoke';
+        saveBtn.disabled = locked;
+        saveBtn.title = locked
+          ? 'Locked by AEDIS_MODEL_PROFILE=local-smoke. Unset the env var to save custom models.'
+          : 'Persist current selections to .aedis/model-config.json.';
+      }
     }
 
     async function saveModelConfig() {
@@ -2876,12 +4190,18 @@ body .app::before{
     function readSetting(role) {
       if (role === 'scout' || role === 'verifier') return MODEL_OPTIONS[role][0];
       const select = document.getElementById(`model-${role}`);
-      const opts = MODEL_OPTIONS[role] || [];
-      // The <option> values are now indices into MODEL_OPTIONS[role] so
-      // duplicate model names (qwen3.6-plus across providers) can
-      // be distinguished. Falls back to the current state if the select
-      // element isn't mounted yet.
+      // Read the selected option's data-model + data-provider so a
+      // synthetic "off-list" option (the one renderSettings injects
+      // when state.modelConfig[role] isn't in MODEL_OPTIONS) round-
+      // trips correctly. Indexing into MODEL_OPTIONS would skip the
+      // synthetic option and silently overwrite the actual value.
       if (select) {
+        const opt = select.options[select.selectedIndex];
+        if (opt && opt.dataset && opt.dataset.model) {
+          return { model: opt.dataset.model, provider: opt.dataset.provider || 'unknown' };
+        }
+        // Fallback: numeric index (back-compat with the old shape).
+        const opts = MODEL_OPTIONS[role] || [];
         const idx = Number(select.value);
         if (Number.isInteger(idx) && idx >= 0 && idx < opts.length) {
           return { model: opts[idx].model, provider: opts[idx].provider };
@@ -2919,6 +4239,8 @@ body .app::before{
       renderLumen();
       renderHistory();
       renderLoqui();
+      renderLoquiDecision();
+      renderLanesPanel(state.active && state.active.candidatesBlock ? state.active.candidatesBlock : null);
 
       const active = isRunActive();
 
@@ -3244,6 +4566,12 @@ body .app::before{
           Checks: ${esc(checksLabel)}
         </div>
         ${failureBlock}
+        ${run.preflightScoutReportIds && run.preflightScoutReportIds.length > 0
+          ? `<div class="trust-summary-narrative" style="font-size:12px;color:var(--teal-dim)">
+              Scout evidence used: ${run.preflightScoutReportIds.length} report${run.preflightScoutReportIds.length === 1 ? '' : 's'}
+              <span style="font-family:var(--mono);font-size:10px;margin-left:6px">${run.preflightScoutReportIds.map(id => esc(id.slice(0, 16))).join(', ')}</span>
+            </div>`
+          : ''}
       `;
     }
 
@@ -3320,6 +4648,14 @@ body .app::before{
         parts.push('<div class="loqui-empty">Ask, plan, or build — Loqui routes it. Try "what files handle auth?", "show me the plan first", or "build a capability registry".</div>');
       } else {
         for (const msg of messages) {
+          if (msg.missionProposal && state.loqui.pendingMission) {
+            parts.push(renderMissionProposalCard(state.loqui.pendingMission));
+            continue;
+          }
+          if (msg.planSuggestion && state.loqui.pendingPlanSuggestion) {
+            parts.push(renderPlanSuggestionCard(state.loqui.pendingPlanSuggestion));
+            continue;
+          }
           const isUser = msg.role === 'user';
           const cls = isUser ? 'user' : 'assistant';
           const buildCls = (msg.label === 'Building' || msg.label === 'Resuming') && isUser ? ' build' : '';
@@ -3366,6 +4702,642 @@ body .app::before{
         .toLowerCase()
         .replace(/\s+/g, '-');
       return `<span class="loqui-intent-badge ${esc(cls)}">${esc(label)}</span>`;
+    }
+
+    /**
+     * Render the Loqui Decision audit block — confidence meter,
+     * intent badge, scoped-build chip, signals expand. Driven by
+     * state.loqui.decision; hidden when no decision is on file.
+     */
+    function renderLoquiDecision() {
+      const host = document.getElementById('loqui-decision');
+      if (!host) return;
+      const decision = state.loqui.decision;
+      if (!decision) { host.style.display = 'none'; return; }
+      host.style.display = 'grid';
+
+      const badge = document.getElementById('loqui-decision-badge');
+      if (badge) badge.outerHTML = renderIntentBadge(decision.label || 'Routing').replace('class="loqui-intent-badge', 'id="loqui-decision-badge" class="loqui-intent-badge');
+
+      const pct = Math.round(Math.max(0, Math.min(1, Number(decision.confidence) || 0)) * 100);
+      const meter = document.getElementById('loqui-confidence-meter');
+      if (meter) {
+        // Color tier: high (>=70%), medium (40–69%), low (1–39%),
+        // warn (clarify/blocked). Mirrors the request: green/teal,
+        // amber, orange/red.
+        const action = String(decision.action || '');
+        const isWarn = action === 'clarify' || action === 'blocked';
+        let tier = 'low';
+        if (isWarn) tier = 'warn';
+        else if (pct >= 70) tier = 'high';
+        else if (pct >= 40) tier = 'med';
+        meter.className = `loqui-confidence-meter ${tier}`;
+        const fill = meter.querySelector('i');
+        if (fill) fill.style.width = `${pct}%`;
+      }
+      const pctEl = document.getElementById('loqui-confidence-pct');
+      if (pctEl) pctEl.textContent = `${pct}%`;
+
+      const chips = document.getElementById('loqui-decision-chips');
+      if (chips) {
+        const parts = [];
+        if (decision.scopedBuildSignal) {
+          parts.push('<span class="loqui-signal-chip">SCOPED BUILD ✓</span>');
+        }
+        if (decision.safeFallbackSuppressed) {
+          parts.push('<span class="loqui-signal-chip suppressed">Safe-fallback suppressed</span>');
+        }
+        if (String(decision.action || '') === 'clarify') {
+          parts.push('<span class="loqui-signal-chip warn">Clarification required</span>');
+        }
+        chips.innerHTML = parts.join('');
+      }
+
+      const reason = document.getElementById('loqui-decision-reason');
+      if (reason) {
+        const baseReason = decision.reason || '';
+        const clarify = decision.clarification ? ` &middot; ${esc(decision.clarification)}` : '';
+        reason.innerHTML = baseReason ? `${esc(baseReason)}${clarify}` : (clarify ? esc(decision.clarification) : '');
+      }
+
+      const list = document.getElementById('loqui-signals-list');
+      if (list) {
+        const signals = Array.isArray(decision.signals) ? decision.signals : [];
+        list.innerHTML = signals.length === 0
+          ? '<span class="tiny">no signals reported</span>'
+          : signals.map((s) => `<code>${esc(s)}</code>`).join('');
+      }
+    }
+
+    /**
+     * Render the Candidate Workspaces panel from a `candidates` block.
+     * The block always carries a stable shape (shadowMode active or
+     * inactive); we render either side-by-side cards or a single
+     * "shadow inactive" explainer.
+     *
+     * SAFETY: every render path includes the "Only primary may
+     * promote" reminder via the selection.note field. The shadow
+     * card never shows a promote control.
+     */
+    function renderLanesPanel(block) {
+      const panel = document.getElementById('lanes-panel');
+      const cardsHost = document.getElementById('lane-cards');
+      const modeChip = document.getElementById('lanes-mode-chip');
+      const modeNote = document.getElementById('lanes-mode-note');
+      const selFooter = document.getElementById('lane-selection');
+      const profileRow = document.getElementById('lane-profile');
+      if (!panel || !cardsHost || !modeChip || !selFooter) return;
+      if (!block) { panel.style.display = 'none'; return; }
+
+      panel.style.display = 'grid';
+      const isActive = String(block.shadowMode) === 'active';
+      modeChip.textContent = String(block.laneMode || (isActive ? 'multi-lane' : 'primary_only')).replace(/_/g, ' ');
+      modeChip.className = `lane-mode-chip ${isActive ? '' : 'inactive'}`;
+      if (modeNote) {
+        modeNote.textContent = isActive
+          ? 'Primary vs shadow comparison — selection picks the winner.'
+          : (block.inactiveReason || 'Shadow workspace inactive for this run.');
+      }
+
+      const candidates = Array.isArray(block.candidates) ? block.candidates : [];
+      const selection = block.selection || {};
+      const winnerId = selection.winnerWorkspaceId || null;
+
+      const renderCard = (c) => {
+        const isWinner = winnerId && c.workspaceId === winnerId;
+        const isDq = c.outcome === 'disqualified' || Boolean(c.disqualification);
+        const role = c.role === 'shadow' ? 'shadow' : 'primary';
+        const badges = [];
+        if (isWinner) badges.push('<span class="lane-badge win">WINNER</span>');
+        if (isDq) badges.push('<span class="lane-badge dq">DISQUALIFIED</span>');
+        if (!isWinner && !isDq && c.outcome === 'lost') badges.push('<span class="lane-badge lost">LOST</span>');
+        if (c.outcome === 'pending') badges.push('<span class="lane-badge pending">PENDING</span>');
+        if (c.lane) badges.push(`<span class="lane-badge">${esc(c.lane)}</span>`);
+
+        const meta = [];
+        meta.push(`<div class="lane-meta-cell">model<strong>${esc(c.model || '—')}</strong></div>`);
+        meta.push(`<div class="lane-meta-cell">provider<strong>${esc(c.provider || '—')}</strong></div>`);
+        meta.push(`<div class="lane-meta-cell">status<strong>${esc(c.status || '—')}</strong></div>`);
+        const cost = (typeof c.costUsd === 'number') ? `$${c.costUsd.toFixed(4)}` : '—';
+        meta.push(`<div class="lane-meta-cell">cost<strong>${esc(cost)}</strong></div>`);
+        const verifier = c.verifierVerdict || '—';
+        meta.push(`<div class="lane-meta-cell">verifier<strong>${esc(verifier)}</strong></div>`);
+        const conf = (typeof c.confidence === 'number') ? `${Math.round(c.confidence * 100)}%` : '—';
+        meta.push(`<div class="lane-meta-cell">confidence<strong>${esc(conf)}</strong></div>`);
+        const filesText = (typeof c.changedFilesCount === 'number') ? String(c.changedFilesCount) : '—';
+        meta.push(`<div class="lane-meta-cell">files<strong>${esc(filesText)}</strong></div>`);
+        const adv = (typeof c.advisoryFindings === 'number') ? String(c.advisoryFindings) : '—';
+        meta.push(`<div class="lane-meta-cell">advisories<strong>${esc(adv)}</strong></div>`);
+
+        const reason = c.reason || (isDq ? `disqualified: ${c.disqualification}` : '');
+        const reasonRow = reason
+          ? `<div class="lane-reason">${esc(reason)}</div>`
+          : '';
+        return `
+          <article class="lane-card role-${esc(role)}">
+            <div class="lane-head">
+              <span class="lane-role role-${esc(role)}">${esc(role)}</span>
+              <div class="lane-badges">${badges.join('')}</div>
+            </div>
+            <div class="lane-meta">${meta.join('')}</div>
+            ${reasonRow}
+          </article>
+        `;
+      };
+
+      if (!isActive && candidates.length === 0) {
+        // Empty state — stable layout with a side-by-side primary
+        // placeholder and a "shadow inactive" panel so the user
+        // sees what _would_ render when shadow mode is enabled.
+        cardsHost.innerHTML = `
+          <article class="lane-card role-primary">
+            <div class="lane-head"><span class="lane-role role-primary">primary</span></div>
+            <div class="lane-reason">No candidate manifest recorded for this run yet. Primary workspace lifecycle is owned by the standard submit / approve / promote flow.</div>
+          </article>
+          <article class="lane-card empty role-shadow">
+            <strong style="color:#a78bfa;font-family:var(--mono);font-size:11px;letter-spacing:.14em">SHADOW INACTIVE</strong>
+            <div>${esc(block.inactiveReason || 'Shadow workspace inactive for this run.')}</div>
+            <div class="tiny">Configure <code>.aedis/lane-config.json</code> and set <code>mode</code> to <code>local_then_cloud</code>, <code>local_vs_cloud</code>, or <code>cloud_with_local_check</code>.</div>
+          </article>
+        `;
+      } else {
+        // Stable order: primary first, then shadows. Pad to two cards
+        // so the duel layout doesn't collapse when only one candidate
+        // exists (common during in-flight renders).
+        const ordered = candidates.slice().sort((a, b) => {
+          if (a.role === b.role) return 0;
+          return a.role === 'primary' ? -1 : 1;
+        });
+        const cards = ordered.map(renderCard);
+        if (cards.length === 1) {
+          cards.push(`
+            <article class="lane-card empty role-shadow">
+              <strong style="color:#a78bfa;font-family:var(--mono);font-size:11px;letter-spacing:.14em">SHADOW PENDING</strong>
+              <div>Shadow lane has not produced a candidate yet.</div>
+            </article>
+          `);
+        }
+        cardsHost.innerHTML = cards.join('');
+      }
+
+      // Selection footer — winner + safety reminder. Always present.
+      const winnerWord = selection.winnerRole
+        ? `${esc(selection.winnerRole)} (${esc(selection.winnerWorkspaceId || '')})`
+        : '—';
+      const tiebreakBits = [];
+      if (selection.advisoryAffected) tiebreakBits.push('advisories');
+      if (selection.costAffected) tiebreakBits.push('cost');
+      if (selection.rolePreferenceUsed) tiebreakBits.push('role-tiebreak');
+      const tiebreaks = tiebreakBits.length ? ` &middot; tiebreak: ${tiebreakBits.join(', ')}` : '';
+      selFooter.innerHTML = `
+        <strong>Selected:</strong> ${winnerWord}${tiebreaks}.
+        <span style="color:var(--muted);margin-left:6px">${esc(selection.note || 'Only primary workspaces can promote.')}</span>
+      `;
+
+      // Lane profile (read-only) — populated by loadLaneProfile.
+      if (profileRow && state.laneProfile) {
+        const lp = state.laneProfile;
+        const primary = lp.primary ? `<code>${esc(lp.primary.provider)}/${esc(lp.primary.model)}</code>` : '<code>—</code>';
+        const shadow = lp.shadow ? `<code>${esc(lp.shadow.provider)}/${esc(lp.shadow.model)}</code>` : '<code>—</code>';
+        const profile = `<code>${esc(lp.profile || 'default')}</code>`;
+        const shadowState = lp.shadowActive ? '<span style="color:var(--teal)">active</span>' : '<span style="color:var(--muted)">inactive</span>';
+        profileRow.style.display = 'flex';
+        profileRow.innerHTML = `
+          <span>profile ${profile}</span>
+          <span>primary ${primary}</span>
+          <span>shadow ${shadow}</span>
+          <span>shadow lane ${shadowState}</span>
+          ${lp.localSmokeActive ? '<span style="color:#fbbf24">local-smoke ON</span>' : ''}
+          <span class="tiny">Model selection is configured through <code>.aedis/lane-config.json</code> and the <code>AEDIS_MODEL_PROFILE</code> env var.</span>
+        `;
+      } else if (profileRow) {
+        profileRow.style.display = 'none';
+      }
+    }
+
+    /**
+     * Task-plan helpers — create / load / render / poll / control.
+     * Wired to /task-plans on the server. The UI keeps the panel
+     * informed via WebSocket task_plan_event broadcasts (live) with
+     * a 30s polling fallback. The operator creates plans via the
+     * form above the panel and explicitly clicks Start; nothing
+     * auto-starts.
+     *
+     * Safety: every action goes through the server-side route, which
+     * runs through coordinator.submit() with its full pipeline. The
+     * UI never bypasses approval and never invokes promotion.
+     */
+
+    // Default budgets surfaced in the form. Mirror DEFAULT_TASK_PLAN_BUDGET
+    // in core/task-plan.ts so a fresh form lands on the same caps the
+    // server would apply if every field were left blank.
+    const TASKPLAN_BUDGET_DEFAULTS = {
+      maxSubtasks: 25,
+      maxAttemptsPerSubtask: 3,
+      maxRepairAttempts: 2,
+      maxRuntimeMinutes: 30,
+      maxCostUsd: 5.0,
+      maxConsecutiveFailures: 2,
+    };
+
+    // Local model for the subtask editor — array of { title, prompt }.
+    // Two empty rows by default so the form looks "real" rather than
+    // requiring an Add click before anything appears.
+    state.taskPlanFormSubtasks = [
+      { title: '', prompt: '' },
+      { title: '', prompt: '' },
+    ];
+
+    function renderTaskPlanForm() {
+      const editor = document.getElementById('taskplan-subtasks');
+      if (!editor) return;
+      editor.innerHTML = state.taskPlanFormSubtasks.map((s, i) => `
+        <div class="taskplan-subtask-row" data-i="${i}">
+          <span class="ord">${i + 1}.</span>
+          <input class="field tps-title" type="text" placeholder="title (optional)" value="${esc(s.title || '')}" />
+          <input class="field tps-prompt" type="text" placeholder="prompt — what this subtask should do" value="${esc(s.prompt || '')}" />
+          <button type="button" class="remove tps-remove" title="Remove this subtask">×</button>
+        </div>
+      `).join('');
+      // Bind input changes so adding/removing other rows doesn't lose
+      // unsaved text.
+      editor.querySelectorAll('.taskplan-subtask-row').forEach((row) => {
+        const i = Number(row.dataset.i);
+        const title = row.querySelector('.tps-title');
+        const prompt = row.querySelector('.tps-prompt');
+        const remove = row.querySelector('.tps-remove');
+        if (title) title.addEventListener('input', (ev) => { state.taskPlanFormSubtasks[i].title = ev.target.value; });
+        if (prompt) prompt.addEventListener('input', (ev) => { state.taskPlanFormSubtasks[i].prompt = ev.target.value; });
+        if (remove) remove.addEventListener('click', () => {
+          state.taskPlanFormSubtasks.splice(i, 1);
+          if (state.taskPlanFormSubtasks.length === 0) state.taskPlanFormSubtasks.push({ title: '', prompt: '' });
+          renderTaskPlanForm();
+        });
+      });
+    }
+
+    function setTaskPlanFormError(text) {
+      const el = document.getElementById('taskplan-form-error');
+      if (el) el.textContent = text || '';
+    }
+
+    function readTaskPlanBudget() {
+      // Read each Advanced field; only include fields the user actually
+      // touched (i.e. value !== ''). The server applies defaults for
+      // anything omitted so we don't have to recreate them here.
+      const out = {};
+      const map = {
+        maxSubtasks: 'bud-maxSubtasks',
+        maxAttemptsPerSubtask: 'bud-maxAttemptsPerSubtask',
+        maxRepairAttempts: 'bud-maxRepairAttempts',
+        maxCostUsd: 'bud-maxCostUsd',
+        maxConsecutiveFailures: 'bud-maxConsecutiveFailures',
+      };
+      for (const [key, id] of Object.entries(map)) {
+        const el = document.getElementById(id);
+        if (el && el.value !== '') {
+          const v = Number(el.value);
+          if (Number.isFinite(v) && v > 0) out[key] = v;
+        }
+      }
+      // Runtime is captured in minutes, server expects ms.
+      const runEl = document.getElementById('bud-maxRuntimeMinutes');
+      if (runEl && runEl.value !== '') {
+        const minutes = Number(runEl.value);
+        if (Number.isFinite(minutes) && minutes > 0) {
+          out.maxRuntimeMs = Math.round(minutes * 60 * 1000);
+        }
+      }
+      return out;
+    }
+
+    async function submitTaskPlanForm(event) {
+      if (event) event.preventDefault();
+      setTaskPlanFormError('');
+      const objective = String(document.getElementById('taskplan-objective-input').value || '').trim();
+      const repoPath = String(document.getElementById('taskplan-repo-input').value || '').trim() || state.repoPath || '';
+      const subtasks = state.taskPlanFormSubtasks
+        .map((s) => ({ title: String(s.title || '').trim(), prompt: String(s.prompt || '').trim() }))
+        .filter((s) => s.prompt.length > 0);
+      if (!objective) { setTaskPlanFormError('Objective is required.'); return; }
+      if (!repoPath) { setTaskPlanFormError('Repo path is required.'); return; }
+      if (subtasks.length === 0) {
+        setTaskPlanFormError('Add at least one scoped subtask. Vague broad objectives must not become repo edits.');
+        return;
+      }
+      const budget = readTaskPlanBudget();
+      const body = { objective, repoPath, subtasks, ...(Object.keys(budget).length ? { budget } : {}) };
+      const btn = document.getElementById('taskplan-create-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+      try {
+        const res = await fetch(`${API_BASE}/task-plans`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const msg = errData && (errData.message || (errData.errors && errData.errors.join('; '))) || `HTTP ${res.status}`;
+          throw new Error(msg);
+        }
+        const data = await res.json();
+        const id = data && (data.task_plan_id || (data.plan && data.plan.taskPlanId));
+        if (!id) throw new Error('Server did not return task_plan_id');
+        // Reset the form so the operator can build the next plan
+        // without reloading.
+        state.taskPlanFormSubtasks = [{ title: '', prompt: '' }];
+        renderTaskPlanForm();
+        document.getElementById('taskplan-objective-input').value = '';
+        // Load + show the new plan.
+        await loadTaskPlan(id);
+      } catch (err) {
+        setTaskPlanFormError(err && err.message ? err.message : String(err));
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Create plan'; }
+      }
+    }
+
+    function convertDraftToSubtasks() {
+      const ta = document.getElementById('taskplan-draft-text');
+      if (!ta) return;
+      const lines = String(ta.value || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0)
+        // Strip leading list markers ("1.", "1)", "-", "*", "• ") so the
+        // remainder reads as the actual subtask prompt.
+        .map((l) => l.replace(/^(\d+[.)]\s*|[-*•]\s+)/, '').trim())
+        .filter((l) => l.length > 0);
+      if (lines.length === 0) { setTaskPlanFormError('Draft text is empty — paste a checklist first.'); return; }
+      state.taskPlanFormSubtasks = lines.map((prompt) => ({ title: '', prompt }));
+      renderTaskPlanForm();
+      ta.value = '';
+      setTaskPlanFormError('');
+    }
+
+    async function startTaskPlan() {
+      const data = state.taskPlan;
+      if (!data || !data.plan) return;
+      const id = data.plan.taskPlanId;
+      try {
+        const res = await fetch(`${API_BASE}/task-plans/${encodeURIComponent(id)}/start`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadTaskPlan(id);
+      } catch (err) {
+        console.warn('task-plan start failed', err);
+      }
+    }
+    window.startTaskPlan = startTaskPlan;
+
+    async function skipCurrentSubtask() {
+      const data = state.taskPlan;
+      if (!data || !data.plan) return;
+      const id = data.plan.taskPlanId;
+      // Prefer the current blocked / failed / pending subtask.
+      const sub = data.plan.subtasks.find((s) => s.status === 'blocked' || s.status === 'failed' || s.status === 'pending');
+      if (!sub) return;
+      try {
+        const res = await fetch(`${API_BASE}/task-plans/${encodeURIComponent(id)}/skip`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subtaskId: sub.id }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadTaskPlan(id);
+      } catch (err) {
+        console.warn('task-plan skip failed', err);
+      }
+    }
+    window.skipCurrentSubtask = skipCurrentSubtask;
+
+    async function loadTaskPlan(planId) {
+      if (!planId) { state.taskPlan = null; renderTaskPlan(); return; }
+      try {
+        const res = await fetch(`${API_BASE}/task-plans/${encodeURIComponent(planId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        state.taskPlan = data;
+        renderTaskPlan();
+        // WS task_plan_event drives most refreshes. Poll as a fallback
+        // every 30s while the plan is running so a missed broadcast
+        // (network blip, late-joining tab) eventually reconciles.
+        const status = String(data?.plan?.status || '');
+        if (status === 'running') {
+          if (state.taskPlanPollHandle) window.clearTimeout(state.taskPlanPollHandle);
+          state.taskPlanPollHandle = window.setTimeout(() => loadTaskPlan(planId), 30000);
+        } else if (state.taskPlanPollHandle) {
+          window.clearTimeout(state.taskPlanPollHandle);
+          state.taskPlanPollHandle = null;
+        }
+      } catch (err) {
+        console.warn('task-plan load failed', err);
+      }
+    }
+    window.loadTaskPlan = loadTaskPlan;
+
+    function renderTaskPlan() {
+      const panel = document.getElementById('taskplan-panel');
+      if (!panel) return;
+      const data = state.taskPlan;
+      if (!data || !data.plan) { panel.style.display = 'none'; return; }
+      panel.style.display = 'grid';
+      const plan = data.plan;
+      const summary = data.summary || {};
+
+      const objEl = document.getElementById('taskplan-objective');
+      if (objEl) objEl.textContent = plan.objective || '(no objective)';
+
+      const idTag = document.getElementById('taskplan-id-tag');
+      if (idTag) idTag.textContent = plan.taskPlanId || '';
+
+      const chip = document.getElementById('taskplan-status-chip');
+      if (chip) {
+        chip.className = `taskplan-status-chip ${plan.status}`;
+        chip.textContent = String(plan.status || '').replace(/_/g, ' ');
+      }
+
+      const counts = summary.counts || { total: plan.subtasks.length, completed: 0 };
+      const done = (counts.completed || 0) + (counts.skipped || 0);
+      const pct = counts.total > 0 ? Math.round((done / counts.total) * 100) : 0;
+      const fill = document.getElementById('taskplan-progress-fill');
+      if (fill) fill.style.width = `${pct}%`;
+      const ptext = document.getElementById('taskplan-progress-text');
+      if (ptext) ptext.textContent = `${done}/${counts.total || plan.subtasks.length}`;
+
+      // Current subtask: the first non-terminal one. Surface attempts,
+      // repairs, last verdict, blocker, and recommended next action so
+      // the operator never has to expand the All-subtasks list to
+      // figure out what's happening.
+      const current = plan.subtasks.find((s) => s.status !== 'completed' && s.status !== 'skipped' && s.status !== 'failed' && s.status !== 'repaired');
+      const currentBox = document.getElementById('taskplan-current');
+      if (current) {
+        currentBox.style.display = 'grid';
+        document.getElementById('taskplan-current-title').textContent = current.title || current.id;
+        const meta = [];
+        meta.push(`<span>status <strong style="color:var(--ink)">${esc(current.status)}</strong></span>`);
+        meta.push(`<span>attempts ${current.attempts}/${plan.budget.maxAttemptsPerSubtask}</span>`);
+        meta.push(`<span>repairs ${current.repairAttempts}/${plan.budget.maxRepairAttempts}</span>`);
+        if (current.lastVerdict) meta.push(`<span>verdict <strong>${esc(current.lastVerdict)}</strong></span>`);
+        if (current.lastRunId) meta.push(`<span>run <code>${esc(String(current.lastRunId).slice(0, 8))}</code></span>`);
+        if (current.blockerReason) {
+          // Parse diagnosis category from blockerReason (format: "category: rootCause")
+          const colonIdx = current.blockerReason.indexOf(':');
+          const diagCategory = colonIdx > 0 ? current.blockerReason.slice(0, colonIdx).trim() : '';
+          const diagBody = colonIdx > 0 ? current.blockerReason.slice(colonIdx + 1).trim() : current.blockerReason;
+          const categoryColors = {
+            'verification-failure': 'var(--red)', 'empty-output': 'var(--orange)', 'scope-drift': 'var(--violet)',
+            'syntax-error': 'var(--red)', 'missing-export': 'var(--red)', 'merge-blocked': 'var(--amber)',
+            'execution-gate-failed': 'var(--orange)', 'timeout': 'var(--gray)', 'unknown': 'var(--muted)',
+          };
+          const catColor = categoryColors[diagCategory] || 'var(--red)';
+          if (diagCategory && diagCategory !== 'unknown') {
+            meta.push(`<span style="color:${catColor};font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;border-radius:999px;border:1px solid currentColor">${esc(diagCategory)}</span>`);
+          }
+          meta.push(`<span style="color:var(--red)">⚠ ${esc(diagBody)}</span>`);
+        }
+        if (current.nextRecommendedAction) meta.push(`<span style="color:var(--muted)">→ ${esc(current.nextRecommendedAction)}</span>`);
+        document.getElementById('taskplan-current-meta').innerHTML = meta.join('');
+      } else {
+        currentBox.style.display = 'none';
+      }
+
+      // Budget usage rows. Cost / runtime / consecutive failures with a
+      // bar each. Bar turns amber over 75% and red at/over 100% so
+      // budget pressure surfaces immediately.
+      const budRows = document.getElementById('taskplan-budget-rows');
+      if (budRows) {
+        const cost = Number(plan.spent.totalCostUsd || 0);
+        const runtimeMs = Number(plan.spent.totalRuntimeMs || 0);
+        const failStreak = Number(plan.spent.consecutiveFailures || 0);
+        const maxCost = Number(plan.budget.maxCostUsd || 1);
+        const maxRuntimeMs = Number(plan.budget.maxRuntimeMs || 1);
+        const maxFails = Number(plan.budget.maxConsecutiveFailures || 1);
+        budRows.innerHTML = [
+          renderBudgetRow('cost', `$${cost.toFixed(4)} / $${maxCost.toFixed(2)}`, cost / maxCost),
+          renderBudgetRow('runtime', `${formatDuration(runtimeMs)} / ${formatDuration(maxRuntimeMs)}`, runtimeMs / maxRuntimeMs),
+          renderBudgetRow('failure streak', `${failStreak} / ${maxFails}`, failStreak / maxFails),
+        ].join('');
+      }
+
+      // Buttons — only enable the right one for the current status.
+      // Tooltips explain why a disabled button is disabled.
+      const startBtn = document.getElementById('taskplan-start');
+      const contBtn = document.getElementById('taskplan-continue');
+      const skipBtn = document.getElementById('taskplan-skip');
+      const cancelBtn = document.getElementById('taskplan-cancel');
+      const terminal = plan.status === 'completed' || plan.status === 'cancelled' || plan.status === 'failed';
+      const running = plan.status === 'running';
+      const resumable = plan.status === 'paused' || plan.status === 'blocked' || plan.status === 'interrupted';
+      if (startBtn) {
+        startBtn.disabled = plan.status !== 'pending';
+        startBtn.title = plan.status === 'pending'
+          ? 'Begin loop execution. The first subtask runs through the normal Aedis safety pipeline.'
+          : `Start is only available for pending plans (status: ${plan.status}).`;
+      }
+      if (contBtn) {
+        contBtn.disabled = !resumable;
+        contBtn.title = resumable
+          ? 'Resume the loop. Use this after approving / rejecting a paused run.'
+          : `Continue is available when the plan is paused, blocked, or interrupted (status: ${plan.status}).`;
+      }
+      if (skipBtn) {
+        const candidate = plan.subtasks.find((s) => s.status === 'blocked' || s.status === 'failed' || s.status === 'pending');
+        skipBtn.disabled = terminal || !candidate;
+        skipBtn.title = candidate
+          ? `Mark subtask ${candidate.id} skipped and let the loop advance.`
+          : 'No blocked / failed / pending subtask to skip.';
+      }
+      if (cancelBtn) {
+        cancelBtn.disabled = terminal;
+        cancelBtn.title = terminal
+          ? `Plan is already terminal (status: ${plan.status}).`
+          : (running ? 'Cancel in-flight loop. The current submit is aborted.' : 'Cancel the plan and mark it terminal.');
+      }
+
+      // Summary line.
+      const summaryEl = document.getElementById('taskplan-summary');
+      if (summaryEl) {
+        const stop = summary.stopReason ? ` · <strong>${esc(summary.stopReason)}</strong>` : '';
+        const cost = `$${Number(summary.totalCostUsd || 0).toFixed(4)}`;
+        const runtime = formatDuration(summary.totalRuntimeMs || 0);
+        const evidence = Array.isArray(summary.receiptRunIds) ? summary.receiptRunIds : [];
+        const evidenceRow = evidence.length === 0
+          ? ''
+          : `<div class="taskplan-evidence">${evidence.map((id) => `<code title="${esc(id)}" onclick="navigator.clipboard?.writeText('${esc(id)}')">${esc(String(id).slice(0, 8))}</code>`).join('')}</div>`;
+        summaryEl.innerHTML = `${esc(summary.headline || '')}${stop} · cost ${cost} · runtime ${runtime}<br/><span class="tiny">${esc(summary.recommendedNextAction || '')}</span>${evidenceRow}`;
+      }
+
+      // Subtask list.
+      const listEl = document.getElementById('taskplan-list');
+      if (listEl) {
+        listEl.innerHTML = plan.subtasks.map((s) => `
+          <div class="row">
+            <span class="ord">${s.ordinal}.</span>
+            <span class="st ${esc(s.status)}">${esc(s.status)}</span>
+            <span class="ti">${esc(s.title || s.id)}</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    function renderBudgetRow(label, text, ratio) {
+      const r = Math.max(0, Math.min(1, Number(ratio) || 0));
+      const pct = Math.round(r * 100);
+      const cls = r >= 1 ? 'over' : r >= 0.75 ? 'warn' : '';
+      return `
+        <div class="taskplan-budget-row">
+          <span>${esc(label)}</span>
+          <div class="taskplan-budget-bar ${cls}"><i style="width:${Math.min(100, pct)}%"></i></div>
+          <span>${esc(text)}</span>
+        </div>
+      `;
+    }
+
+    async function continueTaskPlan() {
+      const data = state.taskPlan;
+      if (!data || !data.plan) return;
+      const id = data.plan.taskPlanId;
+      try {
+        const res = await fetch(`${API_BASE}/task-plans/${encodeURIComponent(id)}/continue`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadTaskPlan(id);
+      } catch (err) {
+        console.warn('task-plan continue failed', err);
+      }
+    }
+    window.continueTaskPlan = continueTaskPlan;
+
+    async function cancelTaskPlan() {
+      const data = state.taskPlan;
+      if (!data || !data.plan) return;
+      const id = data.plan.taskPlanId;
+      try {
+        const res = await fetch(`${API_BASE}/task-plans/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadTaskPlan(id);
+      } catch (err) {
+        console.warn('task-plan cancel failed', err);
+      }
+    }
+    window.cancelTaskPlan = cancelTaskPlan;
+
+    /**
+     * Fetch the current lane / model profile from /config/lanes and
+     * cache it on state. Read-only — no editing UI.
+     */
+    async function loadLaneProfile() {
+      try {
+        const res = await fetch(`${API_BASE}/config/lanes`);
+        if (!res.ok) return;
+        const data = await res.json();
+        state.laneProfile = data;
+        // Re-render lanes panel if a run with a candidates block is
+        // already showing.
+        const run = state.runs.find((r) => r.id === state.currentRunId);
+        if (run && run.candidatesBlock) renderLanesPanel(run.candidatesBlock);
+      } catch (err) {
+        console.warn('lane profile load failed', err);
+      }
     }
 
     function trimLabel(label, length) {
@@ -3431,25 +5403,87 @@ body .app::before{
 
     function renderSettings() {
       const grid = document.getElementById('settings-grid');
-      grid.innerHTML = CONFIG_ROLE_ORDER.map((role) => {
+      if (!grid) return;
+      const profile = state.modelProfile || 'default';
+      const sourceMap = state.modelConfigSource || null;
+      const lockedByProfile = profile === 'local-smoke';
+
+      // Header strip: profile chip + source-of-truth hint + lock copy.
+      // Sits at the top of the panel so the operator sees provenance
+      // BEFORE they read individual rows. Without this the selector
+      // was free to silently disagree with the worker dispatch.
+      const header = `
+        <div class="settings-header">
+          <span class="settings-profile-chip ${lockedByProfile ? 'locked' : ''}">${esc(profile)}</span>
+          ${lockedByProfile
+            ? '<span class="tiny" style="color:#fbbf24">🔒 Configured by AEDIS_MODEL_PROFILE=local-smoke. Selectors are read-only.</span>'
+            : '<span class="tiny" style="color:var(--muted)">Actual worker models are resolved from the active model profile and environment.</span>'}
+        </div>
+      `;
+
+      const rows = CONFIG_ROLE_ORDER.map((role) => {
         const current = state.modelConfig[role] || DEFAULT_MODEL_CONFIG[role];
         const color = ROLE_COLORS[role] || 'var(--ink)';
-        const options = MODEL_OPTIONS[role] || [];
+        const baseOptions = MODEL_OPTIONS[role] || [];
+        // CRITICAL: always include the current (model, provider) tuple
+        // so the dropdown's selected option equals the server's truth.
+        // Without this, when the server's actual config (e.g. xiaomi/
+        // mimo-v2.5/openrouter for builder) wasn't on the curated
+        // MODEL_OPTIONS list, the browser silently picked option index
+        // 0 — typically an ollama/qwen entry — and the operator saw a
+        // qwen label even though Aedis was running on OpenRouter.
+        const currentInBase = baseOptions.some((o) => o.model === current.model && o.provider === current.provider);
+        const options = currentInBase
+          ? baseOptions
+          : [
+              {
+                model: current.model,
+                provider: current.provider,
+                label: `${current.model} [${current.provider}]`,
+                synthetic: true,
+              },
+              ...baseOptions,
+            ];
         const fixed = role === 'scout' || role === 'verifier';
-        // <option value> is the index into MODEL_OPTIONS[role] so duplicate
-        // model names (qwen3.6-plus may appear across providers)
-        // are distinguishable. The "selected" check matches BOTH model and
-        // provider so the right entry is highlighted on render.
+
+        // Per-role source pill. Mirrors the server's classification
+        // so the operator can see what's saved vs what's a default
+        // fallback vs what's a profile lock.
+        const src = sourceMap && sourceMap[role] ? String(sourceMap[role]) : 'default';
+        const srcLabel = src === 'profile' ? 'profile' : src === 'saved' ? 'saved' : 'default';
+        const srcTitle = src === 'profile'
+          ? 'Locked by AEDIS_MODEL_PROFILE; saved file (if any) is ignored'
+          : src === 'saved'
+            ? 'Loaded from .aedis/model-config.json'
+            : 'No saved value for this role; using server default';
+
+        // Disable the selector entirely under local-smoke; under
+        // default profile the saved file is honored so the user can
+        // still change values.
+        const disabledAttr = lockedByProfile ? 'disabled' : '';
+        const lockTooltip = lockedByProfile ? `title="Locked by AEDIS_MODEL_PROFILE=local-smoke"` : '';
+        const syntheticHint = !fixed && !currentInBase
+          ? '<span class="settings-synthetic-hint" title="Active value is not in the curated MODEL_OPTIONS list — surfaced verbatim from the server so the dropdown matches actual worker dispatch">⚠ off-list</span>'
+          : '';
+
         return `
-          <div class="settings-item">
+          <div class="settings-item ${lockedByProfile ? 'locked' : ''}" ${lockTooltip}>
             <div class="role-name" style="color:${color}">${esc(role)}</div>
             ${fixed
               ? `<div class="fixed-model">${esc(current.model)}</div>`
-              : `<select id="model-${role}" class="config-select">${options.map((entry, i) => `<option value="${i}" ${entry.model === current.model && entry.provider === current.provider ? 'selected' : ''}>${esc(entry.label)}</option>`).join('')}</select>`}
-            <div class="tiny">${esc(current.provider)}</div>
+              : `<select id="model-${role}" class="config-select" ${disabledAttr}>${options.map((entry, i) => `<option value="${i}" data-model="${esc(entry.model)}" data-provider="${esc(entry.provider)}" ${entry.model === current.model && entry.provider === current.provider ? 'selected' : ''}>${esc(entry.label)}</option>`).join('')}</select>`}
+            <div class="settings-meta">
+              <div class="tiny">${esc(current.provider)}</div>
+              <div class="settings-source-row">
+                <span class="settings-source-pill src-${esc(src)}" title="${esc(srcTitle)}">${esc(srcLabel)}</span>
+                ${syntheticHint}
+              </div>
+            </div>
           </div>
         `;
       }).join('');
+
+      grid.innerHTML = header + rows;
     }
 
     function formatDuration(ms) {
@@ -3494,8 +5528,1451 @@ body .app::before{
       const toggle = document.getElementById('diff-panel-toggle');
       if (toggle) toggle.textContent = body.classList.contains('collapsed') ? 'SHOW' : 'HIDE';
     });
+    {
+      const start = document.getElementById('taskplan-start');
+      const cont = document.getElementById('taskplan-continue');
+      const skip = document.getElementById('taskplan-skip');
+      const can = document.getElementById('taskplan-cancel');
+      if (start) start.addEventListener('click', () => { void startTaskPlan(); });
+      if (cont) cont.addEventListener('click', () => { void continueTaskPlan(); });
+      if (skip) skip.addEventListener('click', () => { void skipCurrentSubtask(); });
+      if (can) can.addEventListener('click', () => { void cancelTaskPlan(); });
+
+      // Plan-creation form bindings.
+      const form = document.getElementById('taskplan-form');
+      if (form) form.addEventListener('submit', submitTaskPlanForm);
+      const addBtn = document.getElementById('taskplan-add-subtask');
+      if (addBtn) addBtn.addEventListener('click', () => {
+        state.taskPlanFormSubtasks.push({ title: '', prompt: '' });
+        renderTaskPlanForm();
+      });
+      const draft = document.getElementById('taskplan-draft-convert');
+      if (draft) draft.addEventListener('click', convertDraftToSubtasks);
+
+      // Default the repo input to whatever the operator already
+      // configured for the rest of the UI; can be edited per plan.
+      const repo = document.getElementById('taskplan-repo-input');
+      if (repo && !repo.value) repo.value = state.repoPath || '';
+
+      // Pre-fill the budget defaults so the operator sees the caps
+      // explicitly rather than guessing.
+      for (const [key, value] of Object.entries(TASKPLAN_BUDGET_DEFAULTS)) {
+        const el = document.getElementById(`bud-${key}`);
+        if (el && el.value === '') el.value = String(value);
+      }
+
+      renderTaskPlanForm();
+    }
     document.getElementById('repo-input').addEventListener('change', persistRepoPath);
     document.getElementById('repo-input').addEventListener('blur', persistRepoPath);
+
+    // ─── Loqui Orientation panel wiring ──────────────────────────
+    //
+    // Calls GET /loqui/orientation on first load and renders the
+    // four-section guide when `show=true`. Dismiss/collapse state is
+    // sticky for this UI session via sessionStorage so a refresh
+    // re-shows orientation but a navigation within the session does
+    // not. Quick-action buttons map to existing UI handlers — the
+    // orientation API never auto-runs anything.
+    const ORIENTATION_KEYS = {
+      shown: 'aedis.orientation.shown',
+      dismissed: 'aedis.orientation.dismissed',
+      collapsed: 'aedis.orientation.collapsed',
+    };
+    function readOrientationFlag(key) {
+      try { return sessionStorage.getItem(key) === '1'; } catch { return false; }
+    }
+    function writeOrientationFlag(key, value) {
+      try { sessionStorage.setItem(key, value ? '1' : '0'); } catch { /* ignore */ }
+    }
+    function renderOrientation(payload) {
+      const panel = document.getElementById('orientation-panel');
+      if (!panel) return;
+      if (!payload || !payload.show) {
+        panel.classList.remove('show');
+        return;
+      }
+      const o = payload.orientation;
+      if (!o || !o.sections) {
+        panel.classList.remove('show');
+        return;
+      }
+      const fill = (id, lines) => {
+        const ul = document.getElementById(id);
+        if (!ul) return;
+        ul.innerHTML = (Array.isArray(lines) ? lines : [])
+          .map((l) => `<li>${esc(l)}</li>`)
+          .join('');
+      };
+      fill('orientation-what', o.sections.whatAedisIs);
+      fill('orientation-will', o.sections.whatAedisWillDo);
+      fill('orientation-wont', o.sections.whatAedisWillNotDo);
+      fill('orientation-next', o.sections.whatYouCanDoNext);
+      const variantEl = document.getElementById('orientation-variant');
+      if (variantEl) variantEl.textContent = String(o.variant || '—').replace(/-/g, ' ');
+      const reasonEl = document.getElementById('orientation-reason');
+      if (reasonEl) reasonEl.textContent = String(o.reason || '');
+
+      const actionsEl = document.getElementById('orientation-actions');
+      if (actionsEl) {
+        actionsEl.innerHTML = (Array.isArray(o.actions) ? o.actions : [])
+          .map((a) => {
+            const id = String(a.id || '');
+            const label = esc(String(a.label || id));
+            const hint = esc(String(a.hint || ''));
+            return `<button data-orientation-action="${esc(id)}" type="button">${label}<span class="hint">${hint}</span></button>`;
+          })
+          .join('');
+        for (const btn of actionsEl.querySelectorAll('button[data-orientation-action]')) {
+          btn.addEventListener('click', () => {
+            handleOrientationAction(btn.getAttribute('data-orientation-action'));
+          });
+        }
+      }
+      panel.classList.add('show');
+      if (readOrientationFlag(ORIENTATION_KEYS.collapsed)) {
+        panel.classList.add('collapsed');
+        const toggle = document.getElementById('orientation-toggle');
+        if (toggle) toggle.textContent = 'SHOW';
+      }
+      writeOrientationFlag(ORIENTATION_KEYS.shown, true);
+    }
+    function handleOrientationAction(id) {
+      switch (id) {
+        case 'create-task-plan': {
+          const form = document.getElementById('taskplan-create-panel');
+          if (form && form.scrollIntoView) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          const objective = document.getElementById('taskplan-objective-input');
+          if (objective && objective.focus) objective.focus();
+          break;
+        }
+        case 'view-active-plan': {
+          const panel = document.getElementById('taskplan-panel');
+          if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          break;
+        }
+        case 'run-local-smoke': {
+          // Local-smoke is an env-level toggle; the UI cannot flip it
+          // without a server restart. Surface a Loqui hint with the
+          // exact env var so the operator knows what to set.
+          const log = document.getElementById('loqui-log');
+          if (log) {
+            const div = document.createElement('div');
+            div.className = 'loqui-msg assistant';
+            div.textContent =
+              "To run in local-smoke mode, set AEDIS_MODEL_PROFILE=local-smoke before starting Aedis. " +
+              "Local-smoke routes every worker to Ollama (qwen3.5:9b) — no cloud keys required.";
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+          }
+          break;
+        }
+        case 'open-provider-setup': {
+          // Provider keys live in env vars; the on-page settings panel
+          // surfaces models per provider but not key entry. Scroll the
+          // operator there and emit a hint about apiKeyEnv.
+          const target = document.getElementById('manage-models');
+          if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          const log = document.getElementById('loqui-log');
+          if (log) {
+            const div = document.createElement('div');
+            div.className = 'loqui-msg assistant';
+            div.textContent =
+              "Provider API keys are read from environment variables (e.g. OPENROUTER_API_KEY, ZAI_API_KEY). " +
+              "Set them in your shell or a .env file before launching Aedis.";
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+          }
+          break;
+        }
+      }
+    }
+    async function loadOrientation(opts) {
+      try {
+        const params = new URLSearchParams();
+        if (readOrientationFlag(ORIENTATION_KEYS.shown)) params.set('alreadyShown', '1');
+        if (readOrientationFlag(ORIENTATION_KEYS.dismissed)) params.set('dismissed', '1');
+        if (opts && opts.question) params.set('question', opts.question);
+        const res = await fetch(`${API_BASE}/loqui/orientation?${params.toString()}`);
+        if (!res.ok) return;
+        const payload = await res.json().catch(() => null);
+        if (!payload) return;
+        renderOrientation(payload);
+      } catch (err) {
+        // Orientation is purely informational. Network failure must
+        // never block the UI from booting.
+        console.warn('orientation fetch failed', err);
+      }
+    }
+    {
+      const toggle = document.getElementById('orientation-toggle');
+      const dismiss = document.getElementById('orientation-dismiss');
+      const panel = document.getElementById('orientation-panel');
+      if (toggle && panel) {
+        toggle.addEventListener('click', () => {
+          panel.classList.toggle('collapsed');
+          const collapsed = panel.classList.contains('collapsed');
+          toggle.textContent = collapsed ? 'SHOW' : 'HIDE';
+          writeOrientationFlag(ORIENTATION_KEYS.collapsed, collapsed);
+        });
+      }
+      if (dismiss && panel) {
+        dismiss.addEventListener('click', () => {
+          panel.classList.remove('show');
+          writeOrientationFlag(ORIENTATION_KEYS.dismissed, true);
+        });
+      }
+    }
+    void loadOrientation();
+
+    // ─── UX Polish: Guided Start ──────────────────────────────────
+    const guidedState = { step: 0, mode: 'build', repo: '', task: '' };
+
+    function showGuidedStart() {
+      const overlay = document.getElementById('guided-start');
+      if (!overlay) return;
+      // Show only if no runs exist and not dismissed this session
+      try {
+        if (sessionStorage.getItem('aedis.guided.dismissed') === '1') return;
+      } catch {}
+      if (state.runs.length > 0) return;
+      overlay.classList.remove('hidden');
+    }
+
+    function dismissGuidedStart() {
+      const overlay = document.getElementById('guided-start');
+      if (overlay) overlay.classList.add('hidden');
+      try { sessionStorage.setItem('aedis.guided.dismissed', '1'); } catch {}
+    }
+    window.dismissGuidedStart = dismissGuidedStart;
+
+    function guidedStartTask() {
+      const menu = document.getElementById('guided-start-menu');
+      const flow = document.getElementById('guided-flow');
+      if (menu) menu.style.display = 'none';
+      if (flow) flow.classList.add('active');
+      guidedState.step = 0;
+      guidedState.repo = state.repoPath || '.';
+      const repoInput = document.getElementById('gf-repo');
+      if (repoInput) repoInput.value = guidedState.repo;
+      renderGuidedFlow();
+    }
+    window.guidedStartTask = guidedStartTask;
+
+    function guidedMission() {
+      dismissGuidedStart();
+      const input = document.getElementById('loqui-input');
+      if (input) {
+        input.placeholder = 'Describe your mission objective...';
+        input.focus();
+      }
+      state.loqui.messages.push({
+        role: 'assistant',
+        text: 'Mission Mode: describe your objective and Aedis will scout the repo, propose a plan with editable subtasks, and execute step by step after your approval. Try something like:\n\n"Add authentication to the API with JWT tokens, middleware, and tests"\n"Fix the P1 login bug and update error messages across all affected views"',
+        label: 'Planning',
+        at: new Date().toISOString(),
+      });
+      render();
+    }
+    window.guidedMission = guidedMission;
+
+    function guidedSmoke() {
+      dismissGuidedStart();
+      state.loqui.messages.push({
+        role: 'assistant',
+        text: 'To run in local-smoke mode, set AEDIS_MODEL_PROFILE=local-smoke before starting Aedis. ' +
+          'Local-smoke routes every worker to Ollama (qwen3.5:9b) — no cloud keys required. ' +
+          'Then type a simple task like "add a hello world endpoint" to test.',
+        label: 'Answering',
+        at: new Date().toISOString(),
+      });
+      render();
+    }
+    window.guidedSmoke = guidedSmoke;
+
+    function guidedSetMode(mode) {
+      guidedState.mode = mode;
+      guidedState.step = 2;
+      renderGuidedFlow();
+    }
+    window.guidedSetMode = guidedSetMode;
+
+    function guidedFlowNext() {
+      if (guidedState.step === 0) {
+        const repoInput = document.getElementById('gf-repo');
+        guidedState.repo = (repoInput && repoInput.value.trim()) || '.';
+      }
+      if (guidedState.step === 2) {
+        const taskInput = document.getElementById('gf-task');
+        guidedState.task = (taskInput && taskInput.value.trim()) || '';
+        if (!guidedState.task) return;
+        // Build summary
+        const summary = document.getElementById('gf-summary');
+        if (summary) {
+          const modeLabel = guidedState.mode === 'build' ? 'Build (execute)' : guidedState.mode === 'plan' ? 'Dry Run (preview)' : 'Question (no changes)';
+          summary.innerHTML =
+            `<div>Repo: <strong style="color:var(--teal)">${esc(guidedState.repo)}</strong></div>` +
+            `<div>Mode: <strong style="color:var(--teal)">${esc(modeLabel)}</strong></div>` +
+            `<div>Task: <strong style="color:var(--orange)">${esc(guidedState.task)}</strong></div>`;
+        }
+      }
+      guidedState.step = Math.min(guidedState.step + 1, 3);
+      renderGuidedFlow();
+    }
+    window.guidedFlowNext = guidedFlowNext;
+
+    function guidedFlowBack() {
+      if (guidedState.step === 0) {
+        const menu = document.getElementById('guided-start-menu');
+        const flow = document.getElementById('guided-flow');
+        if (menu) menu.style.display = 'grid';
+        if (flow) flow.classList.remove('active');
+        return;
+      }
+      guidedState.step = Math.max(guidedState.step - 1, 0);
+      renderGuidedFlow();
+    }
+    window.guidedFlowBack = guidedFlowBack;
+
+    function guidedFlowSubmit() {
+      dismissGuidedStart();
+      // Apply repo
+      state.repoPath = guidedState.repo;
+      const repoInput = document.getElementById('repo-input');
+      if (repoInput) repoInput.value = guidedState.repo;
+      try { window.localStorage.setItem(STORAGE_KEYS.repoPath, guidedState.repo); } catch {}
+      // Apply task to Loqui
+      let prefix = '';
+      if (guidedState.mode === 'plan') prefix = 'show me the plan first: ';
+      else if (guidedState.mode === 'question') prefix = '';
+      const inputEl = document.getElementById('loqui-input');
+      if (inputEl) {
+        inputEl.value = prefix + guidedState.task;
+        inputEl.focus();
+        // Auto-submit
+        const form = document.getElementById('loqui-form');
+        if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
+      }
+    }
+    window.guidedFlowSubmit = guidedFlowSubmit;
+
+    function renderGuidedFlow() {
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById(`gf-dot-${i}`);
+        const step = document.getElementById(`gf-step-${i}`);
+        if (dot) {
+          dot.className = 'guided-flow-dot' +
+            (i === guidedState.step ? ' active' : '') +
+            (i < guidedState.step ? ' done' : '');
+        }
+        if (step) {
+          step.className = 'guided-flow-step' + (i === guidedState.step ? ' active' : '');
+        }
+      }
+    }
+
+    // ─── UX Polish: Global Status Bar ─────────────────────────────
+    let lastLumenText = '';
+    function renderGlobalStatusBar() {
+      const bar = document.getElementById('global-status-bar');
+      if (!bar) return;
+      const run = state.active;
+      const status = normalizeRunStatus(run.status);
+      const hasPlan = state.taskPlan && state.taskPlan.plan;
+      const planStatus = hasPlan ? state.taskPlan.plan.status : null;
+
+      // Show when there's an active run or plan
+      const shouldShow = status !== 'idle' || hasPlan;
+      bar.style.display = shouldShow ? 'grid' : 'none';
+      if (!shouldShow) return;
+
+      // Determine effective status
+      let effectiveStatus = status;
+      if (hasPlan && (planStatus === 'paused' || planStatus === 'blocked')) effectiveStatus = 'blocked';
+      if (hasPlan && planStatus === 'running') effectiveStatus = 'running';
+      bar.className = `global-status-bar status-${effectiveStatus}`;
+
+      const dot = document.getElementById('gsb-dot');
+      if (dot) dot.className = `gsb-dot ${effectiveStatus}`;
+
+      const word = document.getElementById('gsb-word');
+      if (word) word.textContent = effectiveStatus.toUpperCase();
+
+      // Step info
+      const stepEl = document.getElementById('gsb-step');
+      if (stepEl && hasPlan) {
+        const plan = state.taskPlan.plan;
+        const counts = (state.taskPlan.summary || {}).counts || {};
+        const done = (counts.completed || 0) + (counts.skipped || 0);
+        const current = plan.subtasks.find(s => s.status === 'running' || s.status === 'verifying');
+        stepEl.textContent = current
+          ? `Step ${done + 1}/${plan.subtasks.length}: ${truncate(current.title || current.id, 30)}`
+          : `${done}/${plan.subtasks.length} complete`;
+      } else if (stepEl) {
+        stepEl.textContent = run.prompt ? truncate(run.prompt, 40) : '';
+      }
+
+      // Scout status chip
+      const scoutChip = document.getElementById('gsb-scout-status');
+      if (scoutChip) {
+        const ss = run.preflightScoutStatus;
+        if (ss === 'running') {
+          scoutChip.style.display = 'inline';
+          scoutChip.textContent = 'scouts running';
+          scoutChip.style.color = 'var(--blue)';
+          scoutChip.style.border = '1px solid rgba(96,165,250,.32)';
+          scoutChip.style.background = 'rgba(96,165,250,.06)';
+          scoutChip.title = 'Read-only scouts gathering evidence. They cannot edit your repo.';
+        } else if (ss === 'complete') {
+          const ids = run.preflightScoutReportIds || [];
+          scoutChip.style.display = 'inline';
+          scoutChip.textContent = `scouts: ${ids.length} report${ids.length === 1 ? '' : 's'}`;
+          scoutChip.style.color = 'var(--teal-dim)';
+          scoutChip.style.border = '1px solid rgba(94,234,212,.24)';
+          scoutChip.style.background = 'rgba(94,234,212,.04)';
+          scoutChip.title = 'Read-only scout evidence gathered. Scouts cannot edit your repo.';
+        } else if (ss === 'skipped') {
+          scoutChip.style.display = 'inline';
+          scoutChip.textContent = 'scouts: not needed';
+          scoutChip.style.color = 'var(--muted)';
+          scoutChip.style.border = '1px solid rgba(120,200,255,.14)';
+          scoutChip.style.background = 'transparent';
+          scoutChip.title = 'Scouts were not needed for this task.';
+        } else {
+          scoutChip.style.display = 'none';
+        }
+      }
+
+      // Model
+      const modelEl = document.getElementById('gsb-model');
+      if (modelEl) {
+        const cfg = state.modelConfig.builder || {};
+        modelEl.textContent = cfg.model ? `${cfg.model} [${cfg.provider}]` : '';
+      }
+
+      // Last action from lumen
+      const actionEl = document.getElementById('gsb-last-action');
+      if (actionEl && run.lumen.length > 0) {
+        const last = run.lumen[run.lumen.length - 1];
+        if (last.text !== lastLumenText) {
+          lastLumenText = last.text;
+          actionEl.textContent = truncate(last.text, 50);
+        }
+      }
+
+      // Cost
+      const costEl = document.getElementById('gsb-cost');
+      if (costEl) costEl.textContent = `$${Number(run.totalCostUsd || 0).toFixed(4)}`;
+
+      // CTA button
+      const cta = document.getElementById('gsb-cta');
+      if (cta) {
+        if (effectiveStatus === 'blocked' || effectiveStatus === 'paused') {
+          cta.style.display = 'inline-flex';
+          cta.textContent = 'Review';
+          cta.className = 'gsb-cta warn';
+          cta.onclick = () => {
+            const card = document.getElementById('approval-card');
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          };
+        } else if (effectiveStatus === 'complete' || effectiveStatus === 'failed') {
+          cta.style.display = 'inline-flex';
+          cta.textContent = 'New Task';
+          cta.className = 'gsb-cta';
+          cta.onclick = () => {
+            const input = document.getElementById('loqui-input');
+            if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+          };
+        } else {
+          cta.style.display = 'none';
+        }
+      }
+    }
+
+    // ─── UX Polish: Approval Card ─────────────────────────────────
+    function renderApprovalCard() {
+      const card = document.getElementById('approval-card');
+      if (!card) return;
+      const run = state.active;
+      const status = normalizeRunStatus(run.status);
+      const isAwaiting = String(run.status || '').toLowerCase().includes('await') ||
+                         String(run.status || '').toLowerCase().includes('approval');
+      const planPaused = state.taskPlan && state.taskPlan.plan &&
+                         (state.taskPlan.plan.status === 'paused' || state.taskPlan.plan.status === 'blocked');
+
+      if (!isAwaiting && !planPaused) {
+        card.classList.remove('show');
+        return;
+      }
+      card.classList.add('show');
+
+      // Why this change
+      const whyEl = document.getElementById('approval-why');
+      if (whyEl) {
+        const summary = run.runSummary;
+        if (summary && summary.headline) {
+          whyEl.textContent = summary.headline;
+        } else if (run.prompt) {
+          whyEl.textContent = `Requested: ${truncate(run.prompt, 120)}`;
+        } else {
+          whyEl.textContent = 'A change is awaiting your approval before promotion.';
+        }
+      }
+
+      // Verification badges
+      const badges = document.getElementById('approval-badges');
+      if (badges) {
+        const parts = [];
+        const summary = run.runSummary;
+        if (run.executionVerified === true) {
+          parts.push('<span class="approval-badge pass">Execution Verified</span>');
+        } else if (run.executionVerified === false) {
+          parts.push('<span class="approval-badge fail">Execution Failed</span>');
+        }
+        if (summary) {
+          if (summary.verification === 'passed') parts.push('<span class="approval-badge pass">Tests Pass</span>');
+          else if (summary.verification === 'failed') parts.push('<span class="approval-badge fail">Tests Fail</span>');
+          const bl = summary.blastRadius || run.blastRadius;
+          if (bl) {
+            const cls = bl.level === 'high' ? 'fail' : bl.level === 'medium' ? 'warn' : 'pass';
+            parts.push(`<span class="approval-badge ${cls}">Blast: ${esc(bl.level)}</span>`);
+          }
+          if (summary.confidence && summary.confidence.overall) {
+            const pct = Math.round(summary.confidence.overall * 100);
+            const cls = pct >= 70 ? 'pass' : pct >= 40 ? 'warn' : 'fail';
+            parts.push(`<span class="approval-badge ${cls}">${pct}% confidence</span>`);
+          }
+        }
+        if (run.preflightScoutReportIds && run.preflightScoutReportIds.length > 0) {
+          parts.push(`<span class="approval-badge pass">Scout Evidence</span>`);
+        }
+        if (parts.length === 0) parts.push('<span class="approval-badge neutral">Pending verification</span>');
+        badges.innerHTML = parts.join('');
+      }
+
+      // Diff preview
+      const diffPreview = document.getElementById('approval-diff-preview');
+      if (diffPreview) {
+        const diff = run.patchDiff || '';
+        if (diff.trim()) {
+          diffPreview.innerHTML = renderUnifiedDiff(diff);
+          diffPreview.style.display = 'block';
+        } else {
+          diffPreview.innerHTML = '<div class="diff-empty">No diff available yet</div>';
+        }
+      }
+    }
+
+    // Approval card button handlers
+    {
+      const approveBtn = document.getElementById('approval-approve');
+      const rejectBtn = document.getElementById('approval-reject');
+      const viewFullBtn = document.getElementById('approval-view-full');
+
+      if (approveBtn) approveBtn.addEventListener('click', async () => {
+        const run = state.active;
+        if (!run || !run.id) return;
+        approveBtn.disabled = true;
+        approveBtn.textContent = 'Approving...';
+        try {
+          // Try plan approve first, then run approve
+          const planId = state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.taskPlanId;
+          if (planId) {
+            await fetch(`${API_BASE}/task-plans/${encodeURIComponent(planId)}/continue`, { method: 'POST' });
+            await loadTaskPlan(planId);
+          } else {
+            const taskId = run.taskId || run.id;
+            await fetch(`${API_BASE}/tasks/${encodeURIComponent(taskId)}/approve`, { method: 'POST' });
+          }
+          render();
+        } catch (err) {
+          console.warn('approve failed', err);
+        } finally {
+          approveBtn.disabled = false;
+          approveBtn.textContent = 'Approve';
+        }
+      });
+
+      if (rejectBtn) rejectBtn.addEventListener('click', async () => {
+        const run = state.active;
+        if (!run || !run.id) return;
+        rejectBtn.disabled = true;
+        rejectBtn.textContent = 'Rejecting...';
+        try {
+          const planId = state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.taskPlanId;
+          if (planId) {
+            await fetch(`${API_BASE}/task-plans/${encodeURIComponent(planId)}/cancel`, { method: 'POST' });
+            await loadTaskPlan(planId);
+          } else {
+            const taskId = run.taskId || run.id;
+            await fetch(`${API_BASE}/plans/${encodeURIComponent(taskId)}/reject`, { method: 'POST' });
+          }
+          render();
+        } catch (err) {
+          console.warn('reject failed', err);
+        } finally {
+          rejectBtn.disabled = false;
+          rejectBtn.textContent = 'Reject';
+        }
+      });
+
+      if (viewFullBtn) viewFullBtn.addEventListener('click', () => {
+        const diffPanel = document.getElementById('diff-panel');
+        if (diffPanel) diffPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const body = document.getElementById('diff-panel-body');
+        if (body) body.classList.remove('collapsed');
+      });
+    }
+
+    // ─── UX Polish: Receipt Summary ───────────────────────────────
+    function renderReceiptSummary() {
+      const container = document.getElementById('receipt-summary');
+      const toggle = document.getElementById('receipt-raw-toggle');
+      if (!container) return;
+      const run = state.active;
+      const receipts = run.receipts || [];
+      const summary = run.runSummary;
+
+      if (receipts.length === 0 && !summary) {
+        container.classList.remove('show');
+        if (toggle) toggle.style.display = 'none';
+        return;
+      }
+
+      container.classList.add('show');
+      if (toggle) toggle.style.display = receipts.length > 0 ? 'inline-flex' : 'none';
+
+      const totalCost = Number(run.totalCostUsd || 0);
+      const totalTokens = receipts.reduce((s, r) => s + (Number(r.totalTokens) || 0), 0);
+      const filesChanged = summary ? (summary.filesTouchedCount || 0) : 0;
+      const verdict = summary ? (summary.classification || run.verdict || '—') : (run.verdict || '—');
+      const model = state.modelConfig.builder ? state.modelConfig.builder.model : '—';
+      const duration = run.startedAt
+        ? formatDuration((run.completedAt ? new Date(run.completedAt).getTime() : Date.now()) - new Date(run.startedAt).getTime())
+        : '—';
+
+      container.innerHTML = `
+        <div class="receipt-summary-grid">
+          <div class="receipt-summary-cell">
+            <span class="label">Result</span>
+            <span class="value" style="color:${verdict.includes('SUCCESS') || verdict === 'success' ? 'var(--teal)' : verdict.includes('FAIL') ? 'var(--red)' : 'var(--orange)'}">${esc(verdict)}</span>
+          </div>
+          <div class="receipt-summary-cell">
+            <span class="label">Cost</span>
+            <span class="value">$${totalCost.toFixed(4)}</span>
+          </div>
+          <div class="receipt-summary-cell">
+            <span class="label">Files</span>
+            <span class="value">${filesChanged}</span>
+          </div>
+          <div class="receipt-summary-cell">
+            <span class="label">Tokens</span>
+            <span class="value">${formatInt(totalTokens)}</span>
+          </div>
+          <div class="receipt-summary-cell">
+            <span class="label">Duration</span>
+            <span class="value">${esc(duration)}</span>
+          </div>
+          <div class="receipt-summary-cell">
+            <span class="label">Model</span>
+            <span class="value" style="font-size:11px">${esc(model)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Receipt raw toggle
+    {
+      const toggle = document.getElementById('receipt-raw-toggle');
+      if (toggle) {
+        let showRaw = true;
+        toggle.addEventListener('click', () => {
+          showRaw = !showRaw;
+          toggle.textContent = showRaw ? 'Show Raw' : 'Hide Raw';
+          const list = document.getElementById('receipt-list');
+          if (list) list.style.display = showRaw ? 'grid' : 'none';
+        });
+      }
+    }
+
+    // ─── UX Polish: Loqui Suggestion Chips ────────────────────────
+    function renderLoquiSuggestions() {
+      const container = document.getElementById('loqui-suggestions');
+      if (!container) return;
+      const run = state.active;
+      const status = normalizeRunStatus(run.status);
+      const hasPlan = state.taskPlan && state.taskPlan.plan;
+      const msgs = state.loqui.messages;
+
+      const chips = [];
+
+      if (msgs.length === 0) {
+        chips.push({ label: 'What can Aedis do?', text: 'what does Aedis do?' });
+        chips.push({ label: 'Start a Mission', text: '' });
+        chips.push({ label: 'Ask about code', text: 'what files handle authentication?' });
+      } else if (status === 'complete') {
+        chips.push({ label: 'What changed?', text: 'what changed in the last run?' });
+        chips.push({ label: 'Run tests', text: 'run the test suite' });
+        chips.push({ label: 'Next task', text: '' });
+      } else if (status === 'failed') {
+        chips.push({ label: 'Why did it fail?', text: 'why did the last run fail?' });
+        chips.push({ label: 'Try again', text: 'try again' });
+        chips.push({ label: 'Show the plan', text: 'show me the plan first' });
+      } else if (status === 'idle' && msgs.length > 0) {
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg.role === 'assistant' && lastMsg.label === 'Answering') {
+          chips.push({ label: 'Build it', text: 'build that' });
+          chips.push({ label: 'More detail', text: 'tell me more' });
+        }
+      }
+
+      // System pressure suggestion
+      if (currentSystemLevel === 'critical') {
+        chips.unshift({ label: 'Memory high — try smaller tasks', text: '' });
+      }
+
+      if (chips.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+
+      container.innerHTML = chips.map(c =>
+        `<button class="loqui-chip" type="button" data-text="${esc(c.text)}">${esc(c.label)}</button>`
+      ).join('');
+
+      container.querySelectorAll('.loqui-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const text = btn.dataset.text;
+          const input = document.getElementById('loqui-input');
+          if (input) {
+            if (text) {
+              input.value = text;
+              const form = document.getElementById('loqui-form');
+              if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
+            } else {
+              input.focus();
+            }
+          }
+        });
+      });
+    }
+
+    // ─── UX Polish: Error Messaging ───────────────────────────────
+    // Wrap Loqui error messages with actionable guidance
+    const originalHandleRouteResponse = handleRouteResponse;
+    // Enhance the error push in submitLoqui's catch block — we patch
+    // the loqui.messages push to add guidance. This is done by
+    // wrapping the render to decorate error messages.
+    const _origRenderLoqui = renderLoqui;
+    renderLoqui = function() {
+      // Decorate error messages with actionable text if they're raw
+      for (const msg of state.loqui.messages) {
+        if (msg.error && !msg._enhanced) {
+          msg._enhanced = true;
+          const text = msg.text || '';
+          if (text.includes('ECONNREFUSED') || text.includes('fetch')) {
+            msg.text = 'Connection failed — the Aedis server may not be running.\n\nTry: Check that the server is started (npm start), then refresh this page.';
+          } else if (text.includes('400') || text.includes('validation')) {
+            msg.text = text + '\n\nTry: Be more specific about which file or function to change.';
+          } else if (text.includes('timeout') || text.includes('ETIMEDOUT')) {
+            msg.text = text + '\n\nTry: The model may be overloaded. Wait a moment and try again, or switch to a different model in Worker Models below.';
+          } else if (text.includes('401') || text.includes('403') || text.includes('key')) {
+            msg.text = text + '\n\nTry: Check that your API key is set in the environment (e.g. OPENROUTER_API_KEY). See the Manage Models section below.';
+          }
+        }
+      }
+      _origRenderLoqui();
+    };
+
+    // ─── System Health Indicator ────────────────────────────────────
+
+    let currentSystemLevel = 'ok';
+
+    function updateSystemHealth(level, pct, message) {
+      currentSystemLevel = level;
+      const el = document.getElementById('sys-health');
+      const pctEl = document.getElementById('sys-health-pct');
+      if (!el || !pctEl) return;
+      el.className = 'sys-health ' + level;
+      pctEl.textContent = pct > 0 ? Math.round(pct) + '%' : '—';
+      el.title = message || 'System memory: ' + level;
+    }
+
+    // ─── Action Timeline ──────────────────────────────────────────
+    //
+    // Structured, filterable feed of what Aedis is doing. Each run
+    // accumulates timeline entries from WS events. On reload, the
+    // timeline is reconstructed from persisted receipt/run data.
+
+    let timelineFilter = 'all';
+
+    // Inline timeline conversion — mirrors core/timeline.ts logic
+    // but runs in the browser without module imports.
+    function wsEventToTimeline(eventType, payload, timestamp) {
+      const ts = timestamp || new Date().toISOString();
+      const id = 'tl-' + eventType + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,5);
+
+      const statusColors = { info: 'blue', success: 'teal', warning: '#fbbf24', error: 'red', active: 'orange' };
+
+      function mkEntry(status, phase, importance, message, details) {
+        return { id, timestamp: ts, status, phase, importance, message, details: details || '', eventType };
+      }
+
+      function fmtConf(raw) {
+        if (raw == null) return 'pending';
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return 'pending';
+        return Math.round(Math.max(0, Math.min(1, n)) * 100) + '%';
+      }
+
+      function workerPhase(wt) {
+        const l = (wt || '').toLowerCase();
+        if (l === 'scout') return 'discovery';
+        if (l === 'builder') return 'building';
+        if (l === 'critic') return 'reviewing';
+        if (l === 'verifier') return 'verifying';
+        if (l === 'integrator') return 'integrating';
+        return 'building';
+      }
+
+      switch (eventType) {
+        case 'run_started':
+          return mkEntry('active', 'intent', 'high', 'Run started' + (payload.runId ? ' (' + truncate(String(payload.runId), 12) + ')' : ''), '');
+        case 'charter_generated': {
+          const obj = payload.objective || (payload.charter && payload.charter.objective) || payload.summary || '';
+          return mkEntry('info', 'planning', 'normal', 'Charter: ' + truncate(obj, 60), '');
+        }
+        case 'intent_locked':
+          return mkEntry('info', 'planning', 'low', 'Intent locked', '');
+        case 'merge_blocked':
+          return mkEntry('error', 'safety', 'high', 'Merge blocked: ' + truncate(String(Array.isArray(payload.blockers) ? payload.blockers[0] : ''), 80), '');
+        case 'merge_approved':
+          return mkEntry('success', 'safety', 'high', 'Merge approved', '');
+        case 'preflight_scouts_started':
+          return mkEntry('active', 'scout', 'normal', String(payload.message || 'Running read-only scout checks...'), 'Scouts cannot edit your repo.');
+        case 'preflight_scouts_complete':
+          return mkEntry(Number(payload.recommendedTargetCount || 0) > 0 ? 'success' : 'info', 'scout', 'normal', String(payload.message || 'Scouts complete'), String(payload.reason || ''));
+        case 'preflight_scouts_skipped':
+          return mkEntry('info', 'scout', 'low', String(payload.message || 'Scouts not needed'), '');
+        case 'blast_radius_estimated': {
+          const lvl = String(payload.level || 'unknown');
+          return mkEntry(lvl === 'high' || lvl === 'critical' ? 'warning' : 'info', 'discovery', 'normal', 'Blast radius: ' + lvl + ' — ' + truncate(String(payload.rationale || ''), 60), '');
+        }
+        case 'worker_assigned': {
+          const wt = String(payload.workerType || payload.worker_type || 'unknown');
+          return mkEntry('active', workerPhase(wt), 'normal', capitalize(wt) + ' assigned', '');
+        }
+        case 'scout_complete':
+          return mkEntry('success', 'discovery', 'normal', 'Scout complete — confidence ' + fmtConf(payload.confidence), '');
+        case 'builder_complete':
+          return mkEntry('success', 'building', 'high', 'Builder complete — confidence ' + fmtConf(payload.confidence), '');
+        case 'critic_review':
+          return mkEntry('info', 'reviewing', 'normal', 'Critic review — confidence ' + fmtConf(payload.confidence), '');
+        case 'verifier_check':
+          return mkEntry('info', 'verifying', 'normal', 'Verifier check — confidence ' + fmtConf(payload.confidence), '');
+        case 'execution_verified':
+          return mkEntry('success', 'verifying', 'high', 'Execution verified' + (payload.reason ? ' — ' + truncate(String(payload.reason), 80) : ''), '');
+        case 'execution_failed':
+          return mkEntry('error', 'verifying', 'high', 'Execution failed — ' + truncate(String(payload.reason || 'no real output'), 80), '');
+        case 'commit_created':
+          return mkEntry('success', 'promotion', 'high', 'Committed ' + (String(payload.sha || payload.commitSha || '').slice(0, 8) || '?'), '');
+        case 'task_failed': {
+          const wt2 = String(payload.workerType || payload.worker_type || 'task');
+          return mkEntry('error', workerPhase(wt2), 'high', capitalize(wt2) + ' failed — ' + truncate(String(payload.error || payload.message || 'unknown'), 80), '');
+        }
+        case 'recovery_attempted':
+          return mkEntry('warning', 'repair', 'high', 'Recovery attempted: ' + truncate(String(payload.strategy || payload.reason || ''), 60), '');
+        case 'escalation_triggered':
+          return mkEntry('warning', 'repair', 'high', 'Escalation' + (payload.toModel ? ' → ' + payload.toModel : ''), String(payload.reason || ''));
+        case 'run_cancelled':
+          return mkEntry('warning', 'summary', 'high', 'Run cancelled', '');
+        case 'run_complete':
+          return mkEntry('info', 'summary', 'high', 'Run complete — ' + String(payload.verdict || payload.status || 'unknown'), '');
+        case 'run_summary': {
+          const cls = String(payload.classification || '');
+          const st = cls.includes('SUCCESS') ? 'success' : cls.includes('FAIL') ? 'error' : 'info';
+          return mkEntry(st, 'summary', 'high', String(payload.headline || 'Summary: ' + cls), String(payload.narrative || ''));
+        }
+        case 'task_plan_event': {
+          const kind = String(payload.kind || '');
+          if (kind.includes('paused') || kind.includes('blocked'))
+            return mkEntry('warning', 'approval', 'high', String(payload.message || 'Plan ' + kind.replace(/_/g, ' ')), '');
+          if (kind.includes('failed') || kind.includes('cancelled'))
+            return mkEntry('error', 'summary', 'high', String(payload.message || 'Plan ' + kind.replace(/_/g, ' ')), '');
+          if (kind.includes('completed'))
+            return mkEntry('success', 'summary', 'high', String(payload.message || 'Plan completed'), '');
+          return mkEntry('info', 'building', 'normal', String(payload.message || 'Plan: ' + kind.replace(/_/g, ' ')), '');
+        }
+        case 'system_pressure_warning':
+          return mkEntry('warning', 'safety', 'high', String(payload.message || 'System memory pressure: warning'), '');
+        case 'system_pressure_critical':
+          return mkEntry('error', 'safety', 'high', String(payload.message || 'System memory pressure: critical'), '');
+        case 'system_pressure_recovered':
+          return mkEntry('success', 'safety', 'normal', String(payload.message || 'System memory pressure: recovered'), '');
+        default:
+          return null;
+      }
+    }
+
+    // Push a timeline entry onto the active run's timeline array
+    function pushTimeline(run, entry) {
+      if (!run || !entry) return;
+      if (!run.timeline) run.timeline = [];
+      run.timeline.push(entry);
+      if (run.timeline.length > 300) run.timeline.shift();
+    }
+
+    function renderTimeline() {
+      const list = document.getElementById('timeline-list');
+      if (!list) return;
+      const run = state.active;
+      const entries = run.timeline || [];
+
+      const filtered = entries.filter(function(e) {
+        if (timelineFilter === 'all') return true;
+        if (timelineFilter === 'important') return e.importance === 'high';
+        if (timelineFilter === 'errors') return e.status === 'error' || e.status === 'warning';
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        list.innerHTML = '<div class="timeline-empty">No timeline events yet — submit a task to see activity.</div>';
+        return;
+      }
+
+      list.innerHTML = filtered.map(function(e) {
+        const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '';
+        return '<div class="timeline-entry' + (e.importance === 'high' ? ' importance-high' : '') + '">' +
+          '<span class="tl-time">' + esc(time) + '</span>' +
+          '<span class="tl-dot ' + esc(e.status) + '"></span>' +
+          '<div class="tl-body">' +
+            '<div class="tl-msg">' + esc(e.message) + '</div>' +
+            (e.details ? '<div class="tl-details">' + esc(e.details) + '</div>' : '') +
+            '<span class="tl-phase">' + esc(e.phase) + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      list.scrollTop = list.scrollHeight;
+    }
+
+    // Wire filter buttons
+    {
+      const panel = document.getElementById('timeline-panel');
+      if (panel) {
+        panel.addEventListener('click', function(ev) {
+          const btn = ev.target.closest('.timeline-filter');
+          if (!btn) return;
+          const filter = btn.dataset.tlFilter;
+          if (!filter) return;
+          timelineFilter = filter;
+          panel.querySelectorAll('.timeline-filter').forEach(function(b) {
+            b.classList.toggle('active', b.dataset.tlFilter === filter);
+          });
+          renderTimeline();
+        });
+      }
+    }
+
+    // Hook into the existing event ingestion to build the timeline
+    const _origIngestEvent = ingestEvent;
+    ingestEvent = function(rawPayload) {
+      // Build timeline entry before the existing handler runs
+      const payload = (rawPayload && rawPayload.payload && typeof rawPayload.payload === 'object' && !Array.isArray(rawPayload.payload))
+        ? { ...rawPayload.payload, ...rawPayload }
+        : rawPayload;
+      const type = String(payload.type || payload.event || payload.kind || 'log').toLowerCase();
+      const ts = rawPayload.timestamp || new Date().toISOString();
+      const tlEntry = wsEventToTimeline(type, payload, ts);
+      if (tlEntry) {
+        const runId = payload.runId || payload.run_id || state.currentRunId || null;
+        const run = runId ? (state.runs.find(function(r) { return r.id === runId; }) || state.active) : state.active;
+        pushTimeline(run, tlEntry);
+      }
+      // Call original handler
+      _origIngestEvent(rawPayload);
+    };
+
+    // Reconstruct timeline from persisted run data when loading detail
+    const _origLoadRunDetail = loadRunDetail;
+    loadRunDetail = async function(runId) {
+      await _origLoadRunDetail(runId);
+      // After the original loads run data, reconstruct timeline from
+      // workerEvents + summary if the run has no live timeline yet
+      const run = state.runs.find(function(r) { return r.id === runId; });
+      if (run && (!run.timeline || run.timeline.length === 0)) {
+        run.timeline = [];
+        if (run.startedAt) {
+          pushTimeline(run, { id: 'tl-recon-start', timestamp: run.startedAt, status: 'active', phase: 'intent', importance: 'high', message: 'Run started', details: '', eventType: 'run_started' });
+        }
+        // Use lumen entries as a reconstruction source
+        if (run.lumen) {
+          for (const entry of run.lumen) {
+            const status = entry.verdictClass === 'complete' ? 'success'
+              : entry.verdictClass === 'failed' ? 'error'
+              : entry.color === 'red' ? 'error'
+              : entry.color === 'green' || entry.color === 'bright-teal' ? 'success'
+              : entry.color === 'orange' ? 'warning'
+              : 'info';
+            pushTimeline(run, {
+              id: 'tl-recon-' + Math.random().toString(36).slice(2,6),
+              timestamp: entry.at || '',
+              status: status,
+              phase: 'building',
+              importance: entry.big ? 'high' : 'normal',
+              message: entry.text,
+              details: '',
+              eventType: 'reconstructed',
+            });
+          }
+        }
+        if (run.preflightScoutReportIds && run.preflightScoutReportIds.length > 0) {
+          pushTimeline(run, { id: 'tl-recon-scout', timestamp: '', status: 'success', phase: 'scout', importance: 'normal', message: 'Scout evidence: ' + run.preflightScoutReportIds.length + ' report(s)', details: 'Read-only scouts gathered advisory evidence.', eventType: 'preflight_scouts_complete' });
+        }
+        if (run.runSummary && run.runSummary.headline) {
+          const cls = String(run.runSummary.classification || '');
+          pushTimeline(run, { id: 'tl-recon-summary', timestamp: run.completedAt || '', status: cls.includes('SUCCESS') ? 'success' : cls.includes('FAIL') ? 'error' : 'info', phase: 'summary', importance: 'high', message: run.runSummary.headline, details: run.runSummary.narrative || '', eventType: 'run_summary' });
+        }
+      }
+      renderTimeline();
+    };
+
+    // ─── Plan Assist: suggestion card renderer ──────────────────
+    function renderPlanSuggestionCard(suggestion) {
+      if (!suggestion || !suggestion.subtasks || suggestion.subtasks.length === 0) {
+        return '<div class="loqui-msg assistant">No plan suggestion available.</div>';
+      }
+
+      const items = suggestion.subtasks.map((s, i) => `
+        <div class="plan-suggest-item" data-idx="${i}">
+          <span class="ord">${i + 1}.</span>
+          <div class="body">
+            <div class="st-title">${esc(s.title)}</div>
+            <div class="st-prompt">${esc(s.prompt)}</div>
+            <div class="st-meta">
+              <span class="st-risk ${esc(s.risk)}">${esc(s.risk)} risk</span>
+              <span class="st-scope">${esc(s.scope)}</span>
+            </div>
+            <div class="st-reason">${esc(s.reason)}</div>
+          </div>
+          <div class="st-actions">
+            <button class="st-btn del" onclick="planSuggestRemove(${i})" title="Remove this subtask">x</button>
+          </div>
+        </div>
+      `).join('');
+
+      // Scout evidence section
+      const ev = suggestion.scoutEvidence;
+      let evidenceHtml = '';
+      if (ev && ev.spawned) {
+        const targetChips = (ev.recommended_targets || []).slice(0, 6).map(t =>
+          `<span class="scout-target-chip">${esc(t)}</span>`
+        ).join('');
+        const riskLines = (ev.risks || []).slice(0, 3).map(r =>
+          `<div style="color:var(--red);font-family:var(--mono);font-size:10px">* ${esc(r)}</div>`
+        ).join('');
+        const testChips = (ev.recommended_tests || []).slice(0, 4).map(t =>
+          `<span class="scout-target-chip">${esc(t)}</span>`
+        ).join('');
+        const routeInfo = (ev.routing || []).map(r =>
+          `<span style="font-family:var(--mono);font-size:9px;color:var(--muted)">${esc(r.route)}:${esc(r.model)}</span>`
+        ).join(' ');
+
+        evidenceHtml = `
+          <div style="border-top:1px dashed rgba(120,200,255,.12);padding-top:8px;display:grid;gap:6px">
+            <div style="font-family:var(--mono);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--teal)">
+              Scout Evidence (${ev.reports_count || 0} report${(ev.reports_count || 0) === 1 ? '' : 's'})
+            </div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">${esc(ev.reason || '')}</div>
+            ${targetChips ? '<div style="display:flex;flex-wrap:wrap;gap:4px">' + targetChips + '</div>' : ''}
+            ${testChips ? '<div style="display:flex;flex-wrap:wrap;gap:4px">' + testChips + '</div>' : ''}
+            ${riskLines}
+            ${routeInfo ? '<div>' + routeInfo + '</div>' : ''}
+            ${ev.total_cost_usd > 0 ? '<div style="font-family:var(--mono);font-size:10px;color:var(--muted)">cost: $' + Number(ev.total_cost_usd).toFixed(4) + '</div>' : ''}
+          </div>
+        `;
+      } else if (ev && !ev.spawned) {
+        evidenceHtml = `
+          <div style="border-top:1px dashed rgba(120,200,255,.12);padding-top:6px;font-family:var(--mono);font-size:10px;color:var(--muted)">
+            Scouts: not spawned — ${esc(ev.reason || 'not needed')}
+          </div>
+        `;
+      }
+
+      return `
+        <div class="plan-suggest">
+          <div class="plan-suggest-head">
+            ${renderIntentBadge('Planning')}
+            Loqui suggests a task plan
+          </div>
+          <div class="plan-suggest-reason">${esc(suggestion.reason || '')}</div>
+          <div class="plan-suggest-list">${items}</div>
+          ${evidenceHtml}
+          <div class="plan-suggest-actions">
+            <button class="plan-suggest-btn create" onclick="planSuggestCreate()">Create Task Plan</button>
+            <button class="plan-suggest-btn clarify" onclick="planSuggestClarify()">Ask Clarifying Question</button>
+            <button class="plan-suggest-btn skip" onclick="planSuggestSkipBuild()">Build Without Plan</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function planSuggestRemove(index) {
+      const s = state.loqui.pendingPlanSuggestion;
+      if (!s) return;
+      s.subtasks = s.subtasks.filter((_, i) => i !== index);
+      if (s.subtasks.length === 0) {
+        state.loqui.pendingPlanSuggestion = null;
+        // Remove the plan suggestion message
+        state.loqui.messages = state.loqui.messages.filter(m => !m.planSuggestion);
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: 'All subtasks removed. Type a new request or refine the objective.',
+          label: 'Planning',
+          at: new Date().toISOString(),
+        });
+      }
+      renderLoqui();
+    }
+    window.planSuggestRemove = planSuggestRemove;
+
+    async function planSuggestCreate() {
+      const s = state.loqui.pendingPlanSuggestion;
+      if (!s || !s.subtasks || s.subtasks.length === 0) return;
+
+      // Create a TaskPlan via POST /task-plans
+      const body = {
+        objective: s.objective,
+        repoPath: s.repoPath || state.repoPath || '.',
+        subtasks: s.subtasks.map(sub => ({
+          title: sub.title,
+          prompt: sub.prompt,
+        })),
+      };
+
+      try {
+        const res = await fetch(`${API_BASE}/task-plans`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || err.errors?.join('; ') || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const planId = data.task_plan_id || (data.plan && data.plan.taskPlanId);
+
+        // Clear the suggestion
+        state.loqui.pendingPlanSuggestion = null;
+        state.loqui.messages = state.loqui.messages.filter(m => !m.planSuggestion);
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: `Task plan created (${planId}). ${s.subtasks.length} subtasks ready. Click Start in the Task Plan panel to begin supervised execution.`,
+          label: 'Planning',
+          at: new Date().toISOString(),
+        });
+
+        // Load the plan in the task plan panel
+        if (typeof loadTaskPlan === 'function') {
+          await loadTaskPlan(planId);
+        }
+        render();
+
+        // Scroll to the plan panel
+        const panel = document.getElementById('taskplan-panel');
+        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (err) {
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: `Failed to create task plan: ${err.message || err}`,
+          label: 'Error',
+          at: new Date().toISOString(),
+          error: true,
+        });
+        render();
+      }
+    }
+    window.planSuggestCreate = planSuggestCreate;
+
+    function planSuggestClarify() {
+      state.loqui.pendingPlanSuggestion = null;
+      state.loqui.messages = state.loqui.messages.filter(m => !m.planSuggestion);
+      state.loqui.messages.push({
+        role: 'assistant',
+        text: 'What would you like to change about the plan? You can refine the objective, add details, or specify which files to target.',
+        label: 'Clarifying',
+        at: new Date().toISOString(),
+      });
+      render();
+      const input = document.getElementById('loqui-input');
+      if (input) input.focus();
+    }
+    window.planSuggestClarify = planSuggestClarify;
+
+    function planSuggestSkipBuild() {
+      const s = state.loqui.pendingPlanSuggestion;
+      state.loqui.pendingPlanSuggestion = null;
+      state.loqui.messages = state.loqui.messages.filter(m => !m.planSuggestion);
+      // Re-submit the original prompt as a direct build (bypass plan-assist)
+      // by setting it in the input and submitting
+      if (s && s.objective) {
+        const input = document.getElementById('loqui-input');
+        if (input) {
+          input.value = s.objective;
+          // The user will submit manually — don't auto-submit to avoid surprise execution
+          state.loqui.messages.push({
+            role: 'assistant',
+            text: 'Plan skipped. Your original prompt is in the input — press Send to submit it as a direct build.',
+            label: 'Planning',
+            at: new Date().toISOString(),
+          });
+          render();
+          input.focus();
+        }
+      }
+    }
+    window.planSuggestSkipBuild = planSuggestSkipBuild;
+
+    // ─── Mission Mode ────────────────────────────────────────────
+
+    function renderMissionProposalCard(proposal) {
+      if (!proposal || !proposal.subtasks) return '';
+
+      const subtaskItems = proposal.subtasks.map((s, i) =>
+        `<div class="plan-suggest-item" data-idx="${i}">
+          <span class="ord">${i + 1}.</span>
+          <div class="body">
+            <div class="st-title">${esc(s.title)}</div>
+            <div class="st-prompt">${esc(s.prompt)}</div>
+            <div class="st-meta">
+              <span class="st-risk ${esc(s.risk)}">${esc(s.risk)} risk</span>
+              <span class="st-scope">${esc(s.scope)}</span>
+            </div>
+            <div class="st-reason">${esc(s.reason)}</div>
+          </div>
+          <div class="st-actions">
+            <button class="st-btn del" onclick="missionRemoveSubtask(${i})" title="Remove">x</button>
+          </div>
+        </div>`
+      ).join('');
+
+      // Scout summary
+      let scoutHtml = '';
+      const scout = proposal.scoutSummary;
+      if (scout && scout.spawned) {
+        const targetChips = (scout.recommendedTargets || []).slice(0, 6).map(t =>
+          `<span class="scout-target-chip">${esc(t)}</span>`
+        ).join('');
+        scoutHtml = `
+          <div style="border-top:1px dashed rgba(120,200,255,.12);padding-top:6px;display:grid;gap:4px">
+            <span style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal)">Scout Evidence (${scout.reportCount} report${scout.reportCount === 1 ? '' : 's'})</span>
+            ${targetChips ? '<div style="display:flex;flex-wrap:wrap;gap:4px">' + targetChips + '</div>' : ''}
+            ${(scout.risks || []).length > 0 ? '<div style="font-family:var(--mono);font-size:10px;color:var(--red)">' + scout.risks.slice(0,3).map(r => '* ' + esc(r)).join('<br>') + '</div>' : ''}
+          </div>
+        `;
+      }
+
+      return `
+        <div class="mission-proposal">
+          <div class="mission-head">
+            ${renderIntentBadge('Planning')}
+            Mission Proposal
+          </div>
+          <div class="mission-objective">${esc(proposal.objective)}</div>
+          <div class="mission-meta">
+            <div class="mission-meta-row">
+              <span class="mission-risk-badge ${esc(proposal.riskLevel || 'low')}">${esc(proposal.riskLevel || 'low')} risk</span>
+              <span>${esc(proposal.estimatedCostRange || '')}</span>
+              <span>${esc(proposal.modelProfile || 'default')}</span>
+            </div>
+            <div style="font-size:10px;color:var(--muted)">${esc(proposal.cloudDisclosure || '')}</div>
+          </div>
+          <div class="plan-suggest-list">${subtaskItems}</div>
+          ${scoutHtml}
+          <div class="mission-approval-note">${esc(proposal.approvalReminder || '')}</div>
+          <div class="mission-actions">
+            <button class="mission-btn start" onclick="missionStart()">Start Mission</button>
+            <button class="mission-btn edit" onclick="missionEdit()">Edit Plan</button>
+            <button class="mission-btn ask" onclick="missionClarify()">Ask Clarifying Question</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function missionRemoveSubtask(index) {
+      const p = state.loqui.pendingMission;
+      if (!p) return;
+      p.subtasks = p.subtasks.filter((_, i) => i !== index);
+      if (p.subtasks.length === 0) {
+        state.loqui.pendingMission = null;
+        state.loqui.messages = state.loqui.messages.filter(m => !m.missionProposal);
+        state.loqui.messages.push({ role: 'assistant', text: 'All subtasks removed. Describe a new objective.', label: 'Planning', at: new Date().toISOString() });
+      }
+      renderLoqui();
+    }
+    window.missionRemoveSubtask = missionRemoveSubtask;
+
+    async function missionStart() {
+      const p = state.loqui.pendingMission;
+      if (!p || !p.subtasks || p.subtasks.length === 0) return;
+      try {
+        const res = await fetch(`${API_BASE}/missions/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            objective: p.objective,
+            repoPath: p.repoPath || state.repoPath || '.',
+            subtasks: p.subtasks.map(s => ({ title: s.title, prompt: s.prompt })),
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || err.errors?.join('; ') || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        const planId = data.task_plan_id;
+        state.loqui.pendingMission = null;
+        state.loqui.messages = state.loqui.messages.filter(m => !m.missionProposal);
+        state.loqui.messages.push({
+          role: 'assistant',
+          text: `Mission created (${planId}) with ${p.subtasks.length} subtask(s). Click Start in the Task Plan panel to begin. Approval is required before any source changes.`,
+          label: 'Planning',
+          at: new Date().toISOString(),
+        });
+        if (typeof loadTaskPlan === 'function') await loadTaskPlan(planId);
+        render();
+        const panel = document.getElementById('taskplan-panel');
+        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (err) {
+        state.loqui.messages.push({ role: 'assistant', text: `Mission start failed: ${err.message || err}`, label: 'Error', at: new Date().toISOString(), error: true });
+        render();
+      }
+    }
+    window.missionStart = missionStart;
+
+    function missionEdit() {
+      const p = state.loqui.pendingMission;
+      if (!p) return;
+      // Convert mission to a plan-assist suggestion so the existing plan edit UI works
+      state.loqui.pendingMission = null;
+      state.loqui.messages = state.loqui.messages.filter(m => !m.missionProposal);
+      state.loqui.pendingPlanSuggestion = {
+        objective: p.objective,
+        subtasks: p.subtasks.map(s => ({ title: s.title, prompt: s.prompt, risk: s.risk || 'low', scope: s.scope || 'unknown', reason: s.reason || '' })),
+        reason: 'Converted from mission proposal for editing',
+        repoPath: p.repoPath || state.repoPath || '.',
+        scoutEvidence: p.scoutSummary ? { spawned: true, reason: 'mission scouts', reports_count: p.scoutSummary.reportCount, recommended_targets: p.scoutSummary.recommendedTargets, recommended_tests: p.scoutSummary.recommendedTests, risks: p.scoutSummary.risks, routing: p.scoutSummary.routing || [], total_cost_usd: p.scoutSummary.totalCostUsd || 0 } : null,
+      };
+      state.loqui.messages.push({ role: 'assistant', text: '', label: 'Planning', at: new Date().toISOString(), planSuggestion: true });
+      renderLoqui();
+    }
+    window.missionEdit = missionEdit;
+
+    function missionClarify() {
+      state.loqui.pendingMission = null;
+      state.loqui.messages = state.loqui.messages.filter(m => !m.missionProposal);
+      state.loqui.messages.push({ role: 'assistant', text: 'What would you like to change about the mission? Refine the objective, add details, or specify target files.', label: 'Clarifying', at: new Date().toISOString() });
+      render();
+      const input = document.getElementById('loqui-input');
+      if (input) input.focus();
+    }
+    window.missionClarify = missionClarify;
+
+    // ─── UX: Scout Evidence Panel ────────────────────────────────
+    let lastScoutRunId = null;
+    async function loadScoutEvidence(runId) {
+      if (!runId || runId === lastScoutRunId) return;
+      lastScoutRunId = runId;
+      const panel = document.getElementById('scouts-panel');
+      if (!panel) return;
+      try {
+        const res = await fetch(`${API_BASE}/scouts/evidence/${encodeURIComponent(runId)}`);
+        if (!res.ok) {
+          panel.classList.remove('show');
+          return;
+        }
+        const data = await res.json();
+        renderScoutsPanel(data);
+      } catch {
+        panel.classList.remove('show');
+      }
+    }
+
+    function renderScoutsPanel(evidence) {
+      const panel = document.getElementById('scouts-panel');
+      if (!panel) return;
+      if (!evidence) { panel.classList.remove('show'); return; }
+
+      panel.classList.add('show');
+      const statusEl = document.getElementById('scouts-status');
+      const reasonEl = document.getElementById('scouts-reason');
+      const reportsEl = document.getElementById('scouts-reports');
+
+      const decision = evidence.spawnDecision || {};
+      if (statusEl) {
+        statusEl.textContent = decision.spawn ? `${(evidence.reports || []).length} spawned` : 'not spawned';
+        statusEl.className = `scouts-status ${decision.spawn ? 'spawned' : 'skipped'}`;
+      }
+      if (reasonEl) {
+        reasonEl.textContent = decision.reason || '';
+      }
+
+      const reports = evidence.reports || [];
+      if (reportsEl) {
+        if (reports.length === 0) {
+          reportsEl.innerHTML = '<div class="scouts-reason">No scout reports for this run.</div>';
+          return;
+        }
+        reportsEl.innerHTML = reports.map(r => {
+          const findings = (r.findings || []).slice(0, 5).map(f =>
+            `<div class="scout-finding">
+              <div class="scout-finding-title">${esc(f.title)}</div>
+              <div>${esc(f.evidence)}</div>
+              ${f.files && f.files.length ? `<div class="scout-finding-files">${f.files.map(p => esc(p)).join(', ')}</div>` : ''}
+            </div>`
+          ).join('');
+
+          const targets = (r.recommendedTargets || []).map(t =>
+            `<span class="scout-target-chip">${esc(t)}</span>`
+          ).join('');
+
+          const risks = (r.risks || []).map(rk =>
+            `<div>⚠ ${esc(rk)}</div>`
+          ).join('');
+
+          return `
+            <article class="scout-report-card">
+              <div class="scout-report-head">
+                <span class="scout-report-type">${esc(r.type)}</span>
+                <span class="scout-report-model">${esc(r.modelProvider)}/${esc(r.modelName)} · ${esc(r.localOrCloud)}</span>
+                <span class="scout-report-model">$${Number(r.costUsd || 0).toFixed(4)}</span>
+                <span class="scout-report-model">${Math.round((r.confidence || 0) * 100)}%</span>
+              </div>
+              <div class="scout-report-summary">${esc(r.summary)}</div>
+              ${findings}
+              ${targets ? `<div class="scouts-targets">${targets}</div>` : ''}
+              ${risks ? `<div class="scout-risks">${risks}</div>` : ''}
+            </article>
+          `;
+        }).join('');
+      }
+    }
+
+    // ─── Patch render() to include new panels ─────────────────────
+    const _origRender = render;
+    render = function() {
+      _origRender();
+      renderGlobalStatusBar();
+      renderApprovalCard();
+      renderReceiptSummary();
+      renderLoquiSuggestions();
+      renderTimeline();
+      // Load scout evidence for active run
+      if (state.active && state.active.id) {
+        void loadScoutEvidence(state.active.id);
+      }
+    };
 
     loadRepoPath();
     restoreRuns();
@@ -3504,6 +6981,9 @@ body .app::before{
     connect();
     void loadPersistedRuns();
     void loadMetrics();
+    void loadLaneProfile();
+    // Show guided start after initial data loads
+    window.setTimeout(showGuidedStart, 300);
     // Fetch provider registry first so dropdowns reflect server truth,
     // then pull the saved worker-model assignments.
     (async () => {

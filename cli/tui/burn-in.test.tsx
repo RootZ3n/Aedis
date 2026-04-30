@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createElement } from "react";
 import { render } from "ink-testing-library";
 
@@ -335,7 +337,7 @@ test("burn-in: pressing [r] reloads summaries via injected loader", async () => 
 // Sanity: HARD_RESULTS_PATH and SOFT_RESULTS_PATH are stable strings the
 // screen depends on. If someone moves the JSONL location the screen will
 // silently report empty — keep the path coupling explicit.
-test("burn-in: result path constants point at /mnt/ai/tmp", () => {
-  assert.equal(SOFT_RESULTS_PATH, "/mnt/ai/tmp/aedis-burn-in-results.jsonl");
-  assert.equal(HARD_RESULTS_PATH, "/mnt/ai/tmp/aedis-burn-in-hard.jsonl");
+test("burn-in: result path constants point at os tmpdir by default", () => {
+  assert.equal(SOFT_RESULTS_PATH, join(tmpdir(), "aedis-burn-in-results.jsonl"));
+  assert.equal(HARD_RESULTS_PATH, join(tmpdir(), "aedis-burn-in-hard.jsonl"));
 });

@@ -225,3 +225,114 @@ test("intent: concrete build target with a file path → still routes to build",
     assert.equal(r.action, "build", `concrete build must still route to build: ${input}`);
   }
 });
+
+// ─── Scoped-build routing (Instructor Mode regression) ──────────────
+//
+// Class of bug: Loqui treated clear scoped build requests as
+// exploratory because high-weight `explain` / `plan` rules fired on
+// words inside the requirement description ("explains", "suggest"),
+// or because the safe-fallback fired on an incidental "module" /
+// "class" word. Aedis already runs Velum, target discovery, and the
+// approval gate, so a clear "verb + target + deliverables" prompt
+// must reach the build path.
+
+test("scoped-build: 'Add Instructor Mode to Magister...' (full spec) → build", () => {
+  const d = classifyLoquiIntent(
+    "Add Instructor Mode to Magister for interactive teaching. It should detect logs, " +
+    "explain key lines, suggest debugging steps, and ask follow-up questions. Add tests.",
+  );
+  assert.equal(d.intent, "build", `expected build; got ${d.intent}`);
+  assert.equal(d.needsClarification, false);
+  assert.ok(
+    d.signals.some((s) => s.includes("scoped-build-signal")),
+    `expected scoped-build-signal; got ${d.signals.join(",")}`,
+  );
+  // Target evidence: PascalCase identifier matched.
+  assert.match(d.reason, /scoped build/i);
+});
+
+test("scoped-build: explicit absolute path is strong scope evidence → build", () => {
+  const d = classifyLoquiIntent(
+    "In /mnt/ai/squidley-v2/modules/magister, add Instructor Mode for pasted logs.",
+  );
+  assert.equal(d.intent, "build");
+  assert.equal(d.needsClarification, false);
+  assert.ok(d.signals.some((s) => s.includes("scoped-build-signal")));
+});
+
+test("scoped-build: 'modules/magister' relative module path → build", () => {
+  const d = classifyLoquiIntent(
+    "implement an Instructor Mode in modules/magister that reads logs, explains key lines, and asks questions. Include tests.",
+  );
+  assert.equal(d.intent, "build");
+  assert.equal(d.needsClarification, false);
+});
+
+test("scoped-build: vague 'Make Magister better' → needs_clarification", () => {
+  const d = classifyLoquiIntent("Make Magister better");
+  assert.equal(d.needsClarification, true, `expected clarification; got ${JSON.stringify(d)}`);
+  assert.notEqual(d.intent, "build");
+  assert.ok(d.signals.some((s) => s.includes("vague-quality-marker")));
+});
+
+test("scoped-build: vague 'improve the auth code' → needs_clarification, not build", () => {
+  const d = classifyLoquiIntent("improve the auth code");
+  // Either downgraded by safe-fallback or vague-quality gate, but
+  // never `build`.
+  assert.notEqual(d.intent, "build");
+});
+
+test("scoped-build: 'Refactor the whole repo and improve everything' → blocked as too broad", () => {
+  const d = classifyLoquiIntent("Refactor the whole repo and improve everything");
+  assert.equal(d.needsClarification, true);
+  assert.notEqual(d.intent, "build");
+});
+
+test("scoped-build: clear build requests do NOT use the old 'do you want me to build this?' wording", () => {
+  // Regression for the Instructor Mode report — the safe-fallback's
+  // "Do you want me to actually build this?" phrasing must not
+  // surface for clear scoped builds. The classifier either routes
+  // to build (no clarification at all) or, when ambiguous, uses the
+  // updated wording that names the missing scope explicitly.
+  const clearBuilds = [
+    "Add Instructor Mode to Magister for interactive teaching. It should detect logs, explain key lines, suggest debugging steps, and ask follow-up questions. Add tests.",
+    "In /mnt/ai/squidley-v2/modules/magister, add Instructor Mode for pasted logs.",
+    "implement an Instructor Mode in modules/magister that reads logs, explains key lines, and asks questions. Include tests.",
+    "fix the bug in core/coordinator.ts",
+  ];
+  for (const input of clearBuilds) {
+    const r = routeLoquiInput({ input });
+    assert.equal(r.action, "build", `expected build for "${input}"; got ${r.action}`);
+    assert.equal(r.clarification, "", `clear build must not carry clarification text: ${r.clarification}`);
+  }
+  // For ambiguous prompts that still clarify, the wording must NOT
+  // be the old "Do you want me to actually build this?" form.
+  const ambiguous = routeLoquiInput({ input: "we should probably improve this" });
+  assert.equal(ambiguous.action, "clarify");
+  assert.doesNotMatch(
+    ambiguous.clarification,
+    /do you want me to actually build this/i,
+    `old wording must be replaced; got: ${ambiguous.clarification}`,
+  );
+});
+
+test("scoped-build: scoped build wins over incidental 'explain' / 'suggest' inside the spec", () => {
+  // Without the strong-build boost, "explain" (weight 3) beat
+  // "add" (weight 2) and the prompt routed to the Q&A path. With
+  // the boost, the build score climbs past explain.
+  const d = classifyLoquiIntent(
+    "Add a debug helper to core/foo.ts that explains the call stack and suggests a likely root cause. Should also write tests.",
+  );
+  assert.equal(d.intent, "build");
+});
+
+test("scoped-build: scoped build wins over 'module' / 'class' question signals", () => {
+  // The safe-fallback used to fire when build=2 and question=1
+  // (because "module" matches QUESTION:about-the-repo). For a
+  // scoped build request with deliverables, we no longer fall back.
+  const d = classifyLoquiIntent(
+    "Add a capability registry module that exposes register, list, and lookup methods. Include unit tests for each.",
+  );
+  assert.equal(d.intent, "build");
+  assert.equal(d.needsClarification, false);
+});

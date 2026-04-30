@@ -15,11 +15,21 @@ import {
   projectRunDetail,
   type TrackedRunLike,
 } from "../../core/metrics.js";
-import { getAllTrackedRuns, getTrackedRun } from "./tasks.js";
 import {
+  getAllTrackedRuns,
+  getLoquiDecisionForRun,
+  getTrackedRun,
+} from "./tasks.js";
+import {
+  buildInactiveCandidatesBlock,
+  buildLoquiDecisionView,
   buildRunDetailResponse,
   buildRunIntegrationResponse,
   buildRunListEntry,
+  projectCandidatesFromReceipt as projectCandidatesFromReceiptShape,
+  type RunCandidatesBlock,
+  type RunCandidateView,
+  type RunLoquiDecisionView,
 } from "./run-contracts.js";
 
 // ─── Request Schemas ─────────────────────────────────────────────────
@@ -178,6 +188,8 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
           narrative?: unknown;
           verification?: unknown;
         } | null;
+        const candidates = projectCandidatesFromReceipt(persisted.finalReceipt);
+        const loqui = projectLoquiDecision(runId, task?.taskId ?? null);
         reply.send({
           ...buildRunDetailResponse({
             id: persisted.runId,
@@ -222,6 +234,8 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
             totalCostUsd: persisted.totalCost.estimatedCostUsd,
             workerEvents: persisted.workerEvents,
             checkpoints: persisted.checkpoints,
+            candidates,
+            ...(loqui ? { loqui } : {}),
           }),
           source: "persistent-receipts",
         });
@@ -271,6 +285,8 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
       const active = ctx().coordinator.getRunStatus(runId);
       if (active) {
         const task = await ctx().receiptStore.getTaskByRunId(runId);
+        const liveCandidates = projectCandidatesFromActiveRun(ctx(), runId);
+        const loqui = projectLoquiDecision(runId, task?.taskId ?? null);
         reply.send({
           ...buildRunDetailResponse({
             id: runId,
@@ -296,6 +312,8 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
             totalCostUsd: active.run.totalCost.estimatedCostUsd,
             workerEvents: [],
             checkpoints: [],
+            candidates: liveCandidates,
+            ...(loqui ? { loqui } : {}),
           }),
           runState: {
             phase: active.run.phase,
@@ -500,3 +518,95 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
     }
   );
 };
+
+// ─── Projection helpers ─────────────────────────────────────────────
+
+/**
+ * Wrapper kept for back-compat with the route handler — delegates to
+ * the pure projection in run-contracts.ts so tests can pin the
+ * shape without booting fastify.
+ */
+function projectCandidatesFromReceipt(finalReceipt: unknown): RunCandidatesBlock {
+  return projectCandidatesFromReceiptShape(finalReceipt as Parameters<typeof projectCandidatesFromReceiptShape>[0]);
+}
+
+/**
+ * Project an active-run's live candidate list. The Coordinator's
+ * in-memory `Candidate[]` carries the rich fields (advisoryFindings,
+ * confidence, changedFiles) that the persisted manifest strips, so
+ * the UI gets the full picture while a run is still in flight.
+ */
+function projectCandidatesFromActiveRun(
+  context: ServerContext,
+  runId: string,
+): RunCandidatesBlock {
+  const candidates = context.coordinator.getRunCandidates(runId);
+  if (!candidates || candidates.length === 0) {
+    return buildInactiveCandidatesBlock("unknown", "Run is in flight — no candidates recorded yet.");
+  }
+  const winner = context.coordinator.selectBestRunCandidate(runId);
+  const winnerId = winner?.workspaceId ?? null;
+  const hasShadow = candidates.some((c) => c.role === "shadow");
+  const projected: RunCandidateView[] = candidates.map((c) => {
+    const isWinner = winnerId !== null && c.workspaceId === winnerId;
+    const dq = c.status !== "passed" && c.status !== "pending"
+      ? `status=${c.status}`
+      : null;
+    return {
+      workspaceId: c.workspaceId,
+      role: c.role,
+      lane: c.lane ?? null,
+      provider: c.provider ?? null,
+      model: c.model ?? null,
+      status: c.status,
+      disqualification: dq,
+      costUsd: c.costUsd,
+      latencyMs: c.latencyMs,
+      verifierVerdict: c.verifierVerdict,
+      confidence: c.confidence ?? null,
+      advisoryFindings: c.advisoryFindings ?? null,
+      criticalFindings: c.criticalFindings,
+      changedFilesCount: c.changedFiles?.length ?? null,
+      outcome: dq
+        ? "disqualified"
+        : isWinner
+          ? "selected"
+          : winnerId === null
+            ? "pending"
+            : "lost",
+      reason: c.reason,
+    };
+  });
+  return {
+    shadowMode: hasShadow ? "active" : "inactive",
+    laneMode: "in-flight",
+    inactiveReason: hasShadow
+      ? ""
+      : "Only the primary lane has produced a candidate so far.",
+    candidates: projected,
+    selection: {
+      winnerWorkspaceId: winnerId,
+      winnerRole: winner?.role ?? null,
+      rolePreferenceUsed: false,
+      costAffected: false,
+      advisoryAffected: false,
+      shadowPromoteAllowed: false,
+      note: "Only primary workspaces can promote. Selection is recomputed on every receipt write.",
+    },
+  };
+}
+
+/**
+ * Look up the Loqui decision the unified router recorded when this
+ * run was submitted. Returns undefined when no decision is on file
+ * (legacy /tasks submit, or server restarted since submission).
+ */
+function projectLoquiDecision(
+  runId: string,
+  taskId: string | null,
+): RunLoquiDecisionView | undefined {
+  const decision = getLoquiDecisionForRun(runId)
+    ?? (taskId ? getLoquiDecisionForRun(taskId) : undefined);
+  if (!decision) return undefined;
+  return buildLoquiDecisionView(decision);
+}

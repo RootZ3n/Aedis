@@ -144,14 +144,11 @@ function buildHarness(projectRoot: string, builder: AbstractWorker) {
     {
       projectRoot, autoCommit: true, requireWorkspace: true,
       requireApproval: false, autoPromoteOnSuccess: false,
-      // Force the shadow lane to fall back to the registered stub
-      // Builder. Phase D made `maybeRunFallbackShadow` construct a
-      // real BuilderWorker via `createBuilderForLane` — leaving that
-      // path active would let these tests reach OpenRouter for real.
-      // Returning null disables the lane-pinned builder
-      // and drops back to the registry default (the stubs above),
-      // which is exactly what these tests want to exercise.
-      laneBuilderFactory: () => null,
+      // Return the registered stub builder for lane-pinned dispatches
+      // so these tests exercise lane policy without reaching the real
+      // provider network. Production fail-closes if this factory
+      // returns null unless allowFallback:true is explicit.
+      laneBuilderFactory: () => builder as any,
       verificationConfig: {
         requiredChecks: [],
         hooks: [{

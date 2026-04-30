@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer as netCreateServer } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { execSync } from "node:child_process";
 
 import { isPortInUse, createServer } from "./index.js";
 
@@ -130,7 +131,7 @@ async function getDisableAuthFromEnv(tailcaleOnly: string): Promise<boolean> {
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
 
-  // cwd of the test runner is the repo root (/mnt/ai/aedis).
+  // cwd of the test runner is the repository root.
   // dist/ is at the repo root, so resolve from cwd.
   const distPath = join(process.cwd(), "dist/server/index.js");
 
@@ -202,6 +203,38 @@ test("TAILSCALE_ONLY=false sets disableAuth=true in DEFAULT_CONFIG", async () =>
 test("TAILSCALE_ONLY unset defaults to disableAuth=false (auth enabled)", async () => {
   const disabled = await getDisableAuthFromEnv("");
   assert.equal(disabled, false, "unset TAILSCALE_ONLY must default to disableAuth=false");
+});
+
+test("DEFAULT_CONFIG host defaults to loopback and requires opt-in for public bind", async () => {
+  const scriptPath = mkdtempSync(join(tmpdir(), "aedis-host-config-")) + "/probe.mjs";
+  writeFileSync(scriptPath, `
+    import { DEFAULT_CONFIG } from ${JSON.stringify(resolve(process.cwd(), "server/index.ts"))};
+    console.log(JSON.stringify({ host: DEFAULT_CONFIG.host }));
+  `);
+  try {
+    const baseEnv = { ...process.env };
+    delete baseEnv["AEDIS_HOST"];
+    delete baseEnv["AEDIS_ALLOW_PUBLIC_BIND"];
+    const loopback = JSON.parse(String(execSync(`node --import tsx ${scriptPath}`, {
+      env: baseEnv,
+      encoding: "utf8",
+    })).trim()) as { host: string };
+    assert.equal(loopback.host, "127.0.0.1");
+
+    const refusedPublic = JSON.parse(String(execSync(`node --import tsx ${scriptPath}`, {
+      env: { ...process.env, AEDIS_HOST: "0.0.0.0", AEDIS_ALLOW_PUBLIC_BIND: "" },
+      encoding: "utf8",
+    })).trim()) as { host: string };
+    assert.equal(refusedPublic.host, "127.0.0.1");
+
+    const allowedPublic = JSON.parse(String(execSync(`node --import tsx ${scriptPath}`, {
+      env: { ...process.env, AEDIS_HOST: "0.0.0.0", AEDIS_ALLOW_PUBLIC_BIND: "true" },
+      encoding: "utf8",
+    })).trim()) as { host: string };
+    assert.equal(allowedPublic.host, "0.0.0.0");
+  } finally {
+    rmSync(dirname(scriptPath), { recursive: true, force: true });
+  }
 });
 
 test("DEFAULT_CONFIG keeps AEDIS_STATE_ROOT separate from AEDIS_PROJECT_ROOT", async () => {

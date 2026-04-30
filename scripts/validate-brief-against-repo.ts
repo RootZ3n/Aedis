@@ -10,7 +10,7 @@
  *   npx tsx scripts/validate-brief-against-repo.ts <projectRoot> "<prompt>"
  *
  * Example:
- *   npx tsx scripts/validate-brief-against-repo.ts /mnt/ai/squidley-v2 "improve provider error handling in apps/api/src"
+ *   npx tsx scripts/validate-brief-against-repo.ts /path/to/repo "improve provider error handling in apps/api/src"
  */
 
 import { randomUUID } from "crypto";

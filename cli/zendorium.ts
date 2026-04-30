@@ -180,6 +180,18 @@ function extractCostUsd(payload: any): number {
   return 0;
 }
 
+function isFailureStatus(status: unknown): boolean {
+  const s = String(status ?? "").toLowerCase();
+  return s === "failed" ||
+    s === "cancelled" ||
+    s === "rollback_failed" ||
+    s === "rollback_incomplete" ||
+    s === "unsafe_state" ||
+    s === "unsupported_config" ||
+    s === "cleanup_error" ||
+    s === "execution_error";
+}
+
 // ─── Journal Tail (--watch) ──────────────────────────────────────────
 
 // Lines containing any of these substrings are dropped from the tail
@@ -304,6 +316,9 @@ async function main(): Promise<void> {
     try {
       const data = await fetchJson(`/tasks/${encodeURIComponent(runId)}`);
       process.stdout.write(JSON.stringify(data, null, 2) + "\n");
+      if (isFailureStatus(data.status)) {
+        process.exitCode = 1;
+      }
     } catch (err) {
       process.stderr.write(`aedis status: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exitCode = 1;
@@ -416,6 +431,9 @@ Task ${taskId}: ${display}
         if (statusData.error) {
           process.stderr.write(`Error: ${statusData.error}
 `);
+        }
+        if (isFailureStatus(statusData.status)) {
+          process.exitCode = 1;
         }
       }
     } catch {

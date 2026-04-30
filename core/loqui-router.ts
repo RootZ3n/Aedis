@@ -38,6 +38,7 @@
  */
 
 import { classifyLoquiIntent, type LoquiIntent, type LoquiIntentContext, type LoquiIntentDecision } from "./loqui-intent.js";
+import { extractPathOnlyToken, resolvePathFollowUp, type PathFollowUpResolution } from "./loqui-followup.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -83,6 +84,19 @@ export interface LoquiRouteDecision {
    * otherwise.
    */
   readonly clarification: string;
+  /**
+   * Populated when the router merged a path-only message with a prior
+   * clarification. Carries the relative path, the existence/type
+   * flags, and the human-facing acknowledgement (`Got it — using …`)
+   * the UI should surface before the build dispatch.
+   */
+  readonly followUpScope?: {
+    readonly relativePath: string;
+    readonly absolutePath: string;
+    readonly exists: boolean;
+    readonly isDirectory: boolean;
+    readonly message: string;
+  };
 }
 
 export interface LoquiRouteInput {
@@ -98,8 +112,83 @@ export interface LoquiRouteInput {
  */
 export function routeLoquiInput(input: LoquiRouteInput): LoquiRouteDecision {
   const original = (input.input ?? "").trim();
-  const classification = classifyLoquiIntent(original, input.context ?? {});
+  const ctx = input.context ?? {};
+
+  // Path follow-up binding wins over the classifier whenever the
+  // previous turn asked for scope. A bare path coming back is the
+  // missing target — combine it with the original prompt and route
+  // straight to build, so the user does not get re-asked the same
+  // clarification question. The classifier itself never sees the
+  // path-only message; we hand it the merged prompt and let it
+  // confirm `build` instead of falling into the specificity gate.
+  if (ctx.awaitingScopeFor && ctx.awaitingScopeFor.trim().length > 0) {
+    const followUp = resolvePathFollowUp(original, {
+      originalPrompt: ctx.awaitingScopeFor,
+      ...(ctx.projectRoot ? { projectRoot: ctx.projectRoot } : {}),
+    });
+    if (followUp) {
+      return buildFollowUpDecision(original, followUp);
+    }
+  }
+
+  // A path-only first message with no prior build intent is not
+  // actionable on its own — the user named *where* but not *what*.
+  // Don't pass it to the classifier where it would weakly match
+  // "module" → question, since "answer this path" is meaningless.
+  // Force a clarifying question so the next turn can carry both
+  // the original task and the path together.
+  const pathOnly = extractPathOnlyToken(original);
+  if (pathOnly && (!ctx.awaitingScopeFor || ctx.awaitingScopeFor.trim().length === 0)) {
+    return {
+      action: "clarify",
+      intent: "unknown",
+      label: "Clarifying",
+      originalInput: original,
+      effectivePrompt: original,
+      reason: "Path-only message with no prior build intent — needs context.",
+      confidence: 0.3,
+      signals: ["clarify:path-only-no-context"],
+      clarification:
+        `You sent a path (${pathOnly}) but no task. ` +
+        `What do you want me to do there — add a feature, fix something, run scouts, explain it? ` +
+        `Tell me the change and I'll bind it to that scope.`,
+    };
+  }
+
+  const classification = classifyLoquiIntent(original, ctx);
   return decisionFromClassification(original, classification);
+}
+
+function buildFollowUpDecision(
+  original: string,
+  followUp: PathFollowUpResolution,
+): LoquiRouteDecision {
+  const signals = [
+    "followup:path-bound",
+    followUp.exists
+      ? followUp.isDirectory
+        ? "followup:directory-target"
+        : "followup:file-target"
+      : "followup:unverified-target",
+  ];
+  return {
+    action: "build",
+    intent: "build",
+    label: "Building",
+    originalInput: original,
+    effectivePrompt: followUp.combinedPrompt,
+    reason: `Path follow-up: bound ${followUp.relativePath} to the prior build request.`,
+    confidence: followUp.exists ? 0.85 : 0.7,
+    signals,
+    clarification: "",
+    followUpScope: {
+      relativePath: followUp.relativePath,
+      absolutePath: followUp.absolutePath,
+      exists: followUp.exists,
+      isDirectory: followUp.isDirectory,
+      message: followUp.reason,
+    },
+  };
 }
 
 /**

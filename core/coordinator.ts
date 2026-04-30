@@ -97,6 +97,12 @@ import {
   filterRuntimeArtifacts,
 } from "./promotion-filter.js";
 import {
+  assertRelativePath,
+  resolveSafeDeletePath,
+  resolveSafeExistingPath,
+  resolveSafeWritePath,
+} from "./safe-path.js";
+import {
   createTaskGraph,
   addNode,
   addEdge,
@@ -201,6 +207,14 @@ import { runRepairAuditPass, type RepairAuditResult } from "./repair-audit-pass.
 import { isTrivialTask, type TrivialCheckResult } from "./trivial-task-detector.js";
 import { prepareTargetsForPrompt } from "./target-discovery.js";
 import {
+  discoverNamedTargets,
+  formatAmbiguousNamedTargetMessage,
+  formatMissingNamedTargetMessage,
+  type NamedTargetDiscoveryResult,
+} from "./named-target-discovery.js";
+import { runPreflightScouts, type PreflightScoutResult } from "./coordinator-preflight-scouts.js";
+import { ScoutEvidenceStore } from "./scout-report.js";
+import {
   decideMerge,
   groupFindingsBySource,
   type MergeDecision,
@@ -235,12 +249,17 @@ import {
   type WorkspaceRole,
 } from "./candidate.js";
 import {
-  DEFAULT_LANE_CONFIG,
   laneConfigRunsShadow,
-  loadLaneConfigFromDisk,
+  loadLaneConfigWithDiagnostics,
   type LaneConfig,
+  type LoadLaneConfigResult,
 } from "./lane-config.js";
-import { createBuilderForLane } from "./lane-builder-factory.js";
+import {
+  createBuilderForLane,
+  describeSupportedProviderModels,
+  isSupportedProvider,
+  isSupportedProviderModel,
+} from "./lane-builder-factory.js";
 import { findImplForTest, findMissingTestFiles } from "./import-graph.js";
 import { TrustRouter, type TrustProfile, type RoutingDecision } from "../router/trust-router.js";
 import {
@@ -289,6 +308,19 @@ export interface CoordinatorConfig {
    * the explicit promote endpoint.
    */
   autoPromoteOnSuccess: boolean;
+  /**
+   * Public RC source-promotion guard. Default false: even an approved,
+   * verified workspace commit remains staged for review and cannot be
+   * applied to the original source repo. Operators must explicitly opt
+   * into local source promotion for trusted repos.
+   */
+  allowSourcePromotion: boolean;
+  /**
+   * Explicit trust knob for local repo writes. Public RC defaults to
+   * review-only unless this is true. It is checked alongside
+   * allowSourcePromotion so one stray flag cannot enable source writes.
+   */
+  trustedLocalRepoWrites: boolean;
   /** Git branch to work on (created if needed) */
   workBranch: string;
   /** Maximum seconds for external commands (git, npm test, etc). Default: 120 */
@@ -327,9 +359,10 @@ export interface CoordinatorConfig {
    * (and any future caller that needs to swap in a stub builder
    * without mutating WorkerRegistry) can override it.
    *
-   * When the factory returns null the shadow lane silently falls
-   * back to the registered default Builder so a misconfigured
-   * `lane-config.json` never crashes the run.
+   * When the factory returns null, public RC mode fails closed unless
+   * `.aedis/lane-config.json` explicitly sets `allowFallback:true`.
+   * That keeps provider/model/lane truth from silently drifting to
+   * the registry default builder.
    */
   laneBuilderFactory?: typeof createBuilderForLane;
 }
@@ -341,6 +374,8 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   autoCommit: true,
   requireApproval: false,
   autoPromoteOnSuccess: false,
+  allowSourcePromotion: false,
+  trustedLocalRepoWrites: false,
   workBranch: "aedis/run",
   externalCommandTimeoutSec: 120,
   maxGraphIterations: 50,
@@ -597,6 +632,31 @@ export interface RunReceipt {
    */
   readonly workspaceCleanup: WorkspaceCleanupResult | null;
   /**
+   * Rollback outcome for runs where Aedis attempted to undo
+   * uncommitted workspace/source changes. When status is not "clean",
+   * this dominates the final verdict: the run is a failure even if
+   * build or verification evidence exists.
+   */
+  readonly rollback: RollbackOutcome | null;
+  /**
+   * Provider/model/lane truth for the run-level lane config. When
+   * unsupported config fails closed, intended values are preserved and
+   * actual values are recorded as not_run.
+   */
+  readonly providerLaneTruth?: ProviderLaneTruth | null;
+  /**
+   * Public-RC promotion gate evidence. This is persisted before
+   * source promotion so the promote endpoint can fail closed after
+   * process restarts instead of trusting caller intent.
+   */
+  readonly promotionSafety?: PromotionSafety | null;
+  /**
+   * Human approval receipt for the final diff. Pending while the run is
+   * awaiting approval, approved after approveRun(), rejected/expired via
+   * the rejection paths. Source promotion requires approved.
+   */
+  readonly diffApproval?: DiffApprovalReceipt | null;
+  /**
    * Source repo path (never mutated). Null for legacy runs that
    * predated the isolated workspace model.
    */
@@ -635,6 +695,61 @@ export interface RunReceipt {
   readonly candidates?: readonly CandidateManifestEntry[];
   readonly selectedCandidateWorkspaceId?: string | null;
   readonly laneMode?: import("./lane-config.js").LaneMode;
+  /**
+   * Scout report IDs from preflight scout evidence gathering.
+   * Populated when scouts ran before target discovery/build.
+   * Empty or omitted when no scouts were spawned.
+   */
+  readonly preflightScoutReportIds?: readonly string[];
+}
+
+export type RollbackStatus = "clean" | "failed" | "incomplete" | "unsafe_state";
+
+export interface RollbackOutcome {
+  readonly status: RollbackStatus;
+  readonly summary: string;
+  readonly restored: number;
+  readonly deleted: number;
+  readonly failedPaths: readonly string[];
+  readonly dirtyFiles: readonly string[];
+  readonly error?: string;
+  readonly manualInspectionRequired: boolean;
+}
+
+export interface ProviderLaneTruth {
+  readonly status: "planned" | "not_run" | "fallback_used";
+  readonly reason: string;
+  readonly intendedProvider?: string;
+  readonly intendedModel?: string;
+  readonly intendedLane?: string;
+  readonly actualProvider: string | null;
+  readonly actualModel: string | null;
+  readonly actualLane: string | null;
+  readonly fallbackAllowed: boolean;
+}
+
+export interface DiffApprovalReceipt {
+  readonly status: "pending" | "approved" | "rejected" | "timeout";
+  readonly requestedAt: string;
+  readonly decidedAt?: string;
+  readonly decidedBy?: "human" | "system";
+  readonly reason: string;
+  readonly files: readonly string[];
+  readonly diffSummary: string;
+}
+
+export interface PromotionSafety {
+  readonly publicRcReviewOnly: boolean;
+  readonly sourcePromotionEnabled: boolean;
+  readonly trustedLocalRepoWrites: boolean;
+  readonly scoutPlanConcrete: boolean;
+  readonly builderMatchesPlan: boolean;
+  readonly criticReviewedActualDiff: boolean;
+  readonly verifierPassed: boolean;
+  readonly humanDiffApproved: boolean;
+  readonly approvalReceiptRecorded: boolean;
+  readonly readyForPromotion: boolean;
+  readonly blockers: readonly string[];
 }
 
 /**
@@ -851,6 +966,80 @@ export class Coordinator {
     console.log(`[coordinator] STARTUP RECOVERY: complete`);
   }
 
+  private validateProviderLaneConfig(
+    active: ActiveRun,
+    diagnostics: LoadLaneConfigResult,
+  ): string | null {
+    const fail = (
+      reason: string,
+      assignment?: { lane?: string; provider?: string; model?: string },
+    ): string => {
+      active.providerLaneTruth = {
+        status: "not_run",
+        reason,
+        ...(assignment?.provider ? { intendedProvider: assignment.provider } : {}),
+        ...(assignment?.model ? { intendedModel: assignment.model } : {}),
+        ...(assignment?.lane ? { intendedLane: assignment.lane } : {}),
+        actualProvider: null,
+        actualModel: null,
+        actualLane: null,
+        fallbackAllowed: active.laneConfig.allowFallback === true,
+      };
+      return reason;
+    };
+
+    if (diagnostics.source === "invalid-config") {
+      return fail(
+        `Unsupported lane config: ${diagnostics.errors.join("; ")}. ` +
+        `No provider/model/lane was run; actual provider/model/lane=not_run.`,
+      );
+    }
+
+    const mode = active.laneConfig.mode;
+    if (mode !== "primary_only" && mode !== "local_then_cloud") {
+      return fail(
+        `Unsupported lane mode "${mode}" in ${diagnostics.configPath}. ` +
+        `Public RC supports primary_only and local_then_cloud only; actual provider/model/lane=not_run.`,
+        active.laneConfig.primary,
+      );
+    }
+
+    const assignments = [
+      { role: "primary", value: active.laneConfig.primary },
+      ...(active.laneConfig.shadow ? [{ role: "shadow", value: active.laneConfig.shadow }] : []),
+    ] as const;
+    for (const { role, value } of assignments) {
+      if (!isSupportedProvider(value.provider)) {
+        return fail(
+          `Unsupported ${role} provider "${value.provider}" in ${diagnostics.configPath}. ` +
+          `No fallback will run without allowFallback:true; actual provider/model/lane=not_run.`,
+          value,
+        );
+      }
+      if (!isSupportedProviderModel(value.provider, value.model)) {
+        return fail(
+          `Unsupported ${role} model "${value.model}" for provider "${value.provider}" in ${diagnostics.configPath}. ` +
+          `Supported models for ${value.provider}: ${describeSupportedProviderModels(value.provider)}. ` +
+          `No fallback will run without allowFallback:true; actual provider/model/lane=not_run.`,
+          value,
+        );
+      }
+    }
+
+    active.providerLaneTruth = {
+      status: "planned",
+      reason: `Lane config accepted from ${diagnostics.source}`,
+      intendedProvider: active.laneConfig.primary.provider,
+      intendedModel: active.laneConfig.primary.model,
+      intendedLane: active.laneConfig.primary.lane,
+      actualProvider: null,
+      actualModel: null,
+      actualLane: null,
+      fallbackAllowed: active.laneConfig.allowFallback === true,
+    };
+    return null;
+  }
+
   // ─── Public API ────────────────────────────────────────────────────
 
   /**
@@ -908,11 +1097,46 @@ export class Coordinator {
     let normalizedInput = await normalizePrompt(input, gated, effectiveProjectRoot);
 
     const baseAnalysis = this.charterGen.analyzeRequest(normalizedInput);
-    const preparedTargets = prepareTargetsForPrompt({
+    let preparedTargets = prepareTargetsForPrompt({
       projectRoot: effectiveProjectRoot,
       prompt: normalizedInput,
       analysis: baseAnalysis,
     });
+
+    // Named-target fallback: when the explicit target extractor came
+    // back empty, try resolving any module-style names in the prompt
+    // against well-known repo roots (modules/, core/, src/, …).
+    // Lets prompts like "Add Instructor Mode to Magister" bind to
+    // `modules/magister` automatically instead of bouncing off the
+    // generic "name a file" clarification below. The discovery is
+    // read-only — no source mutation, no model calls.
+    let namedDiscovery: NamedTargetDiscoveryResult | null = null;
+    if (preparedTargets.targets.length === 0) {
+      namedDiscovery = discoverNamedTargets({
+        prompt: normalizedInput,
+        projectRoot: effectiveProjectRoot,
+      });
+      if (namedDiscovery.resolvedPath) {
+        console.log(
+          `[coordinator] named-target discovery: ${namedDiscovery.resolvedPath} ` +
+          `(from name(s): ${namedDiscovery.extractedNames.join(", ")})`,
+        );
+        preparedTargets = {
+          ...preparedTargets,
+          targets: [namedDiscovery.resolvedPath],
+        };
+      } else if (namedDiscovery.ambiguous) {
+        console.log(
+          `[coordinator] named-target discovery: ambiguous — ` +
+          `${namedDiscovery.candidates.length} candidates ` +
+          `(names: ${namedDiscovery.extractedNames.join(", ")})`,
+        );
+        return {
+          kind: "needs_clarification",
+          question: formatAmbiguousNamedTargetMessage(namedDiscovery),
+        };
+      }
+    }
     const analysis: RequestAnalysis = {
       ...baseAnalysis,
       targets: preparedTargets.targets.length > 0
@@ -937,11 +1161,14 @@ export class Coordinator {
     if (charterTargets.length === 0) {
       if (charterTargets.length === 0) {
         console.log(`[coordinator] no actionable targets found — asking for clarification: "${input}"`);
+        const helpfulQuestion =
+          namedDiscovery && namedDiscovery.extractedNames.length > 0
+            ? formatMissingNamedTargetMessage(namedDiscovery)
+            : preparedTargets.clarification ??
+              "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.";
         return {
           kind: "needs_clarification",
-          question:
-            preparedTargets.clarification ??
-            "I couldn't identify a file to work on. Please name a specific file (e.g. `core/foo.ts`) or describe the module to change.",
+          question: helpfulQuestion,
         };
       }
     }
@@ -1125,6 +1352,175 @@ export class Coordinator {
     console.log(`[coordinator] PHASE 1 done — category=${analysis.category} scope=${analysis.scopeEstimate} deliverables=${charter.deliverables.length} targets=[${analysis.targets.slice(0, 5).join(", ")}${analysis.targets.length > 5 ? "…" : ""}]`);
 
     this.emit({ type: "charter_generated", payload: { charter, analysis } });
+
+    // ── Preflight Scout Evidence (advisory) ────────────────────────
+    // After Velum passes, charter is generated, and initial target
+    // discovery has run — but BEFORE scope classification and task
+    // graph creation. Scouts gather read-only evidence to improve
+    // target discovery when confidence is low.
+    //
+    // Safety invariants:
+    //   - Scouts are read-only: they never edit files or promote changes
+    //   - Advisory only: coordinator still validates all paths
+    //   - Scope violation detection still runs after this
+    //   - Approval still required
+    //   - Never silently escalate to cloud
+    //   - Not every task spawns scouts (simple/explicit = no scouts)
+    //
+    // Scout targets are MERGED into preparedTargets so scope
+    // classification and task graph creation see the fuller picture.
+    // But the coordinator's own path-validation still runs on every
+    // target — scouts cannot inject invalid paths.
+    let preflightScoutResult: PreflightScoutResult | null = null;
+    {
+      // Compute a rough confidence from the target discovery results:
+      // high scores on selected targets = high confidence, zero
+      // targets = zero confidence.
+      const avgScore = preparedTargets.selected.length > 0
+        ? preparedTargets.selected.reduce((s, c) => s + c.score, 0) / preparedTargets.selected.length
+        : 0;
+      const targetConfidence = Math.min(1, avgScore / 10);
+
+      // Emit started event before scouts run
+      this.emit({
+        type: "preflight_scouts_started",
+        payload: {
+          runId: submission.runId ?? null,
+          reason: "checking whether read-only scouts can improve target discovery",
+          targetConfidence,
+          timestamp: new Date().toISOString(),
+          message: "Running read-only scout checks...",
+        },
+      });
+
+      try {
+        preflightScoutResult = await runPreflightScouts({
+          prompt: normalizedInput,
+          repoPath: effectiveProjectRoot,
+          discoveredTargets: preparedTargets.targets as string[],
+          targetDiscoveryConfidence: targetConfidence,
+          modelProfile: undefined,
+          cloudKeysAvailable: undefined,
+          remainingBudgetUsd: undefined,
+        });
+      } catch (err) {
+        // Scout failure is non-fatal. Log and proceed without evidence.
+        console.warn(
+          `[coordinator] preflight scouts failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      if (preflightScoutResult?.scouted) {
+        console.log(
+          `[coordinator] preflight scouts: ${preflightScoutResult.scoutReportIds.length} report(s), ` +
+          `${preflightScoutResult.advisoryTargets.length} advisory target(s), ` +
+          `${preflightScoutResult.risks.length} risk(s), ` +
+          `cost=$${preflightScoutResult.costUsd.toFixed(4)}`,
+        );
+
+        // Emit completion event with evidence summary
+        this.emit({
+          type: "preflight_scouts_complete",
+          payload: {
+            runId: submission.runId ?? null,
+            reason: preflightScoutResult.reason,
+            scoutTypes: preflightScoutResult.routing.map((r) => r.model),
+            reportIds: [...preflightScoutResult.scoutReportIds],
+            recommendedTargetCount: preflightScoutResult.advisoryTargets.length,
+            recommendedTestCount: preflightScoutResult.advisoryTests.length,
+            riskCount: preflightScoutResult.risks.length,
+            costUsd: preflightScoutResult.costUsd,
+            timestamp: new Date().toISOString(),
+            message: `Scouts found ${preflightScoutResult.advisoryTargets.length} target(s) and ${preflightScoutResult.risks.length} risk(s)`,
+          },
+        });
+
+        // Merge advisory targets into prepared targets. Only add
+        // targets that aren't already in the list and that actually
+        // exist on disk (scouts already validate paths, but
+        // belt-and-suspenders).
+        const existingTargets = new Set(preparedTargets.targets);
+        const newTargets: string[] = [];
+        for (const advisoryTarget of preflightScoutResult.advisoryTargets) {
+          if (!existingTargets.has(advisoryTarget)) {
+            try {
+              const { existsSync: fileExists } = await import("node:fs");
+              const { resolve: resolvePath, join: joinPath } = await import("node:path");
+              const fullPath = resolvePath(joinPath(effectiveProjectRoot, advisoryTarget));
+              if (fileExists(fullPath)) {
+                newTargets.push(advisoryTarget);
+              }
+            } catch {
+              // Skip targets that can't be validated
+            }
+          }
+        }
+
+        if (newTargets.length > 0) {
+          // Rebuild the prepared target set with merged targets.
+          // Use Object.assign to preserve the readonly interface shape
+          // while adding new targets. This is the one mutation point —
+          // everything after this reads the merged set.
+          const mergedTargets = [...preparedTargets.targets, ...newTargets];
+          (preparedTargets as { targets: readonly string[] }).targets = mergedTargets;
+          console.log(
+            `[coordinator] preflight scouts added ${newTargets.length} advisory target(s): ${newTargets.join(", ")}`,
+          );
+        }
+
+        // Persist scout evidence under AEDIS_STATE_ROOT
+        try {
+          const stateRoot = this.config.stateRoot;
+          if (stateRoot) {
+            const store = new ScoutEvidenceStore(stateRoot);
+            await store.save({
+              runId: submission.runId ?? `preflight-${Date.now()}`,
+              prompt: normalizedInput,
+              repoPath: effectiveProjectRoot,
+              reports: preflightScoutResult.scoutReportIds.map((id) => ({
+                scoutId: id,
+                type: "target_discovery" as const,
+                modelProvider: "local",
+                modelName: "local",
+                localOrCloud: "deterministic" as const,
+                confidence: 0,
+                summary: "preflight scout report (ID only)",
+                findings: [],
+                recommendedTargets: preflightScoutResult!.advisoryTargets as string[],
+                recommendedTests: preflightScoutResult!.advisoryTests as string[],
+                risks: preflightScoutResult!.risks as string[],
+                costUsd: preflightScoutResult!.costUsd,
+                startedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+              })),
+              spawnDecision: {
+                spawn: true,
+                reason: preflightScoutResult.reason,
+                scoutCount: preflightScoutResult.scoutReportIds.length,
+                scoutTypes: ["target_discovery"],
+                localOrCloudRecommendation: "deterministic",
+                expectedEvidence: ["advisory targets"],
+              },
+              createdAt: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          // Persistence failure is non-fatal
+          console.warn(`[coordinator] scout evidence persistence failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else if (preflightScoutResult) {
+        console.log(`[coordinator] preflight scouts: not spawned — ${preflightScoutResult.reason}`);
+        this.emit({
+          type: "preflight_scouts_skipped",
+          payload: {
+            runId: submission.runId ?? null,
+            reason: preflightScoutResult.reason,
+            timestamp: new Date().toISOString(),
+            message: `Scouts not needed: ${preflightScoutResult.reason}`,
+          },
+        });
+      }
+    }
 
     // Classify scope from the charter's target files (deduped union of
     // every deliverable's targetFiles). Surfaces oversized requests early
@@ -1424,6 +1820,7 @@ export class Coordinator {
       });
     }
 
+    const laneDiagnostics = loadLaneConfigWithDiagnostics(effectiveProjectRoot);
     const active: ActiveRun = {
       intent,
       run,
@@ -1450,7 +1847,7 @@ export class Coordinator {
       // alongside the source's other .aedis/ config). Fallback to
       // DEFAULT_LANE_CONFIG when the file is absent so existing
       // single-lane projects keep their current behavior verbatim.
-      laneConfig: loadLaneConfigFromDisk(effectiveProjectRoot),
+      laneConfig: laneDiagnostics.config,
       gatedContext,
       projectMemory,
       analysis,
@@ -1479,8 +1876,20 @@ export class Coordinator {
       userNamedStrippedTargets: [],
       fastPath: false,
       runAbortController: new AbortController(),
+      preflightScoutReportIds: [],
+      preflightScoutResult: null,
+      rollbackOutcome: null,
+      promotionSafety: null,
+      diffApproval: null,
+      providerLaneTruth: null,
     };
     this.activeRuns.set(run.id, active);
+
+    // Thread preflight scout evidence into the active run for receipt transparency
+    if (preflightScoutResult?.scouted) {
+      active.preflightScoutReportIds = [...preflightScoutResult.scoutReportIds];
+      active.preflightScoutResult = preflightScoutResult;
+    }
 
     if (trivialCheck.isTrivial) {
       active.fastPath = true;
@@ -1672,6 +2081,13 @@ export class Coordinator {
     }
 
     try {
+      const providerLaneError = this.validateProviderLaneConfig(active, laneDiagnostics);
+      if (providerLaneError) {
+        console.error(`[coordinator] ${providerLaneError}`);
+        failRun(run, providerLaneError);
+        throw new CoordinatorError(providerLaneError);
+      }
+
       // Phase 4: Build TaskGraph
       console.log(`[coordinator] PHASE 4: BuildTaskGraph — entering`);
       advancePhase(run, "planning");
@@ -2084,16 +2500,18 @@ export class Coordinator {
         // repo is left in the state the user started with. This is the
         // difference between an advisory gate (commit anyway) and a
         // blocking gate (fail safely).
-        await this.rollbackChanges(active, mergeDecision);
+        const rollback = await this.rollbackChanges(active, mergeDecision);
         await this.persistReceiptCheckpoint(active, {
           at: new Date().toISOString(),
           type: "failure_occurred",
-          status: "VERIFIED_FAIL",
+          status: rollback.status === "clean" ? "VERIFIED_FAIL" : this.persistentStatusForRollback(rollback),
           phase: run.phase,
-          summary: mergeDecision.primaryBlockReason,
-          details: { summary: mergeDecision.summary },
+          summary: rollback.status === "clean" ? mergeDecision.primaryBlockReason : rollback.summary,
+          details: { summary: mergeDecision.summary, rollback },
         }, {
-          appendErrors: [mergeDecision.primaryBlockReason],
+          appendErrors: rollback.status === "clean"
+            ? [mergeDecision.primaryBlockReason]
+            : [mergeDecision.primaryBlockReason, rollback.summary],
         });
       } else {
         this.emit({
@@ -2172,6 +2590,11 @@ export class Coordinator {
         // can age it. Set HERE instead of at construction so a long
         // build doesn't count toward the approval-pending clock.
         active.awaitingApprovalSinceMs = Date.now();
+        active.diffApproval = this.buildDiffApprovalReceipt(
+          active,
+          "pending",
+          "Final diff approval required before workspace commit or source promotion",
+        );
         this.pendingApproval.set(run.id, active);
         // Build the awaiting-approval receipt FIRST so we can persist it
         // into finalReceipt below. Run ffe132ed/4b3ec065 surfaced the bug:
@@ -2194,8 +2617,16 @@ export class Coordinator {
         // at the auto-promote terminal a few lines later.
         await this.receiptStore.patchRun(run.id, {
           status: "AWAITING_APPROVAL",
-          taskSummary: `Awaiting approval — ${changeCount} change(s) ready to commit`,
+          taskSummary: `Staged for review — ${changeCount} change(s) awaiting final diff approval`,
           finalReceipt: awaitReceipt,
+          appendCheckpoints: [{
+            at: new Date().toISOString(),
+            type: "worker_step",
+            status: "AWAITING_APPROVAL",
+            phase: run.phase,
+            summary: `diff approval requested: ${active.diffApproval.diffSummary}`,
+            details: { diffApproval: active.diffApproval },
+          }],
         });
         return awaitReceipt;
       }
@@ -2210,8 +2641,10 @@ export class Coordinator {
           // Merge gate approved but commit failed — explicit commit_failed
           // terminal state. Roll back on-disk changes to leave the repo clean.
           console.error(`[coordinator] PHASE 10 FAILED — gitCommit returned null. Rolling back builder changes.`);
-          await this.rollbackChanges(active, mergeDecision);
-          run.failureReason = "Merge gate approved but git commit failed — changes rolled back";
+          const rollback = await this.rollbackChanges(active, mergeDecision);
+          run.failureReason = rollback.status === "clean"
+            ? "Merge gate approved but git commit failed — changes rolled back"
+            : rollback.summary;
           advancePhase(run, "commit_failed");
         }
       } else if (this.config.autoCommit && !active.cancelled) {
@@ -2429,6 +2862,8 @@ export class Coordinator {
       const regressionBlocksPromote = regressionAlert !== null && classification !== "PARTIAL_SUCCESS";
       const shouldAutoPromote =
         this.config.autoPromoteOnSuccess &&
+        this.config.allowSourcePromotion &&
+        this.config.trustedLocalRepoWrites &&
         !regressionBlocksPromote &&
         sourceRepo &&
         (classification === "VERIFIED_SUCCESS" ||
@@ -2727,7 +3162,7 @@ export class Coordinator {
   private async cancelPendingApprovalRun(active: ActiveRun): Promise<void> {
     const runId = active.run.id;
     try {
-      await this.rollbackChanges(active, {
+      const rollback = await this.rollbackChanges(active, {
         action: "block",
         findings: [],
         critical: [{
@@ -2743,27 +3178,41 @@ export class Coordinator {
 
       const persisted = await this.receiptStore.getRun(runId);
       const runSummary = getRunSummary(active.run);
+      const unsafe = rollback.status !== "clean";
       const finalReceipt = persisted?.finalReceipt
-        ? { ...persisted.finalReceipt, verdict: "aborted" as const, summary: runSummary }
+        ? {
+            ...persisted.finalReceipt,
+            verdict: "aborted" as const,
+            summary: runSummary,
+            rollback,
+            humanSummary: persisted.finalReceipt.humanSummary
+              ? this.composeHumanSummary(active, { ...persisted.finalReceipt, verdict: "aborted" as const, summary: runSummary, rollback })
+              : persisted.finalReceipt.humanSummary,
+          }
         : undefined;
 
       await this.receiptStore.patchRun(runId, {
         intentId: active.intent.id,
         prompt: active.rawUserPrompt,
-        taskSummary: "Cancelled by user during approval — changes rolled back",
-        status: "INTERRUPTED",
+        taskSummary: unsafe
+          ? rollback.summary
+          : "Cancelled by user during approval — changes rolled back",
+        status: unsafe ? this.persistentStatusForRollback(rollback) : "INTERRUPTED",
         phase: active.run.phase,
         completedAt: active.run.completedAt,
         runSummary,
         ...(finalReceipt ? { finalReceipt } : {}),
-        appendErrors: ["Cancelled by user during approval gate"],
+        appendErrors: unsafe
+          ? ["Cancelled by user during approval gate", rollback.summary]
+          : ["Cancelled by user during approval gate"],
         appendCheckpoints: [
           {
             at: new Date().toISOString(),
             type: "failure_occurred",
-            status: "INTERRUPTED",
+            status: unsafe ? this.persistentStatusForRollback(rollback) : "INTERRUPTED",
             phase: active.run.phase,
-            summary: "Run interrupted by user cancellation during approval",
+            summary: unsafe ? rollback.summary : "Run interrupted by user cancellation during approval",
+            details: { rollback },
           },
         ],
       });
@@ -3305,7 +3754,7 @@ export class Coordinator {
 
     // ── PHASE 0 — Canonicalize absolute source-repo paths to worktree-relative ──
     // The charter's regex extractor captures absolute paths verbatim from the
-    // user prompt (e.g. /mnt/ai/squidley-v2/apps/api/src/routes/index.ts).
+    // user prompt (e.g. /path/to/repo/apps/api/src/routes/index.ts).
     // Every downstream worker resolves target files relative to the
     // per-task projectRoot (the isolated workspace), so absolute paths
     // from the source repo cause set-membership mismatches (Critic reports
@@ -3479,7 +3928,7 @@ export class Coordinator {
         // Resolve against active.projectRoot (the per-task effective root)
         // so dedup honors the per-task projectRoot rather than the
         // Coordinator's boot-time default. Also normalize absolute source-repo
-        // paths (e.g. /mnt/ai/squidley-v2/...) to worktree-relative so they
+        // paths (e.g. /path/to/repo/...) to worktree-relative so they
         // deduplicate correctly against relative forms of the same file.
         // We push the canonical (relative) form downstream so workers all
         // operate on the same path shape — otherwise the Critic's
@@ -4807,15 +5256,45 @@ export class Coordinator {
       });
       if (pinnedPrimary) {
         worker = pinnedPrimary;
+        active.providerLaneTruth = {
+          status: "planned",
+          reason: "Primary builder pinned to configured lane provider/model",
+          intendedProvider: active.laneConfig.primary.provider,
+          intendedModel: active.laneConfig.primary.model,
+          intendedLane: active.laneConfig.primary.lane,
+          actualProvider: active.laneConfig.primary.provider,
+          actualModel: active.laneConfig.primary.model,
+          actualLane: active.laneConfig.primary.lane,
+          fallbackAllowed: active.laneConfig.allowFallback === true,
+        };
         console.log(
           `[coordinator] dispatchNode: primary builder pinned to ` +
           `${active.laneConfig.primary.provider}/${active.laneConfig.primary.model} ` +
           `(lane=${active.laneConfig.primary.lane}, mode=${active.laneConfig.mode})`,
         );
-      } else {
+      } else if (active.laneConfig.allowFallback === true) {
+        active.providerLaneTruth = {
+          status: "fallback_used",
+          reason: "Primary lane builder factory returned null and lane config explicitly allowed fallback",
+          intendedProvider: active.laneConfig.primary.provider,
+          intendedModel: active.laneConfig.primary.model,
+          intendedLane: active.laneConfig.primary.lane,
+          actualProvider: null,
+          actualModel: null,
+          actualLane: null,
+          fallbackAllowed: true,
+        };
         console.warn(
-          `[coordinator] dispatchNode: lane-config.primary.provider="${active.laneConfig.primary.provider}" ` +
-          `unsupported — primary builder falls back to registry default`,
+          `[coordinator] dispatchNode: lane-config.primary ${active.laneConfig.primary.provider}/` +
+          `${active.laneConfig.primary.model} could not construct a lane builder; ` +
+          `allowFallback:true permits registry default builder fallback`,
+        );
+      } else {
+        throw new CoordinatorError(
+          `Unsupported primary provider/model/lane dispatch: ` +
+          `${active.laneConfig.primary.provider}/${active.laneConfig.primary.model} ` +
+          `(lane=${active.laneConfig.primary.lane}) could not construct a lane builder; ` +
+          `actual provider/model/lane=not_run. Set allowFallback:true only if registry fallback is intentional.`,
         );
       }
     }
@@ -6034,6 +6513,12 @@ export class Coordinator {
 
     console.log(`[coordinator] APPROVAL RECEIVED for run ${runId} — committing...`);
     this.pendingApproval.delete(runId);
+    active.diffApproval = this.buildDiffApprovalReceipt(
+      active,
+      "approved",
+      "Human approved final diff for workspace commit and source-promotion eligibility",
+      { decidedAt: new Date().toISOString(), decidedBy: "human" },
+    );
 
     try {
       const commitSha = await this.gitCommit(active);
@@ -6075,8 +6560,19 @@ export class Coordinator {
         // would lie about which gates ran.
         const persisted = await this.receiptStore.getRun(runId);
         const existingFinal = persisted?.finalReceipt ?? null;
+        active.promotionSafety = this.buildPromotionSafety(
+          active,
+          existingFinal?.verificationReceipt ?? null,
+          existingFinal?.mergeDecision ?? null,
+        );
         const mergedFinal: RunReceipt | null = existingFinal
-          ? { ...existingFinal, patchArtifact, commitSha }
+          ? {
+              ...existingFinal,
+              patchArtifact,
+              commitSha,
+              diffApproval: active.diffApproval,
+              promotionSafety: active.promotionSafety,
+            }
           : null;
         if (!mergedFinal) {
           console.warn(
@@ -6089,6 +6585,17 @@ export class Coordinator {
           taskSummary: `Approved and committed: ${commitSha.slice(0, 8)}`,
           completedAt: new Date().toISOString(),
           ...(mergedFinal ? { finalReceipt: mergedFinal } : {}),
+          appendCheckpoints: [{
+            at: new Date().toISOString(),
+            type: "worker_step",
+            status: "READY_FOR_PROMOTION",
+            phase: active.run.phase,
+            summary: `diff approval recorded: ${active.diffApproval.diffSummary}`,
+            details: {
+              diffApproval: active.diffApproval,
+              promotionSafety: active.promotionSafety,
+            },
+          }],
         });
         return { ok: true, commitSha };
       } else {
@@ -6149,9 +6656,15 @@ export class Coordinator {
         : `[coordinator] REJECTION received for run ${runId} — rolling back...`,
     );
     this.pendingApproval.delete(runId);
+    active.diffApproval = this.buildDiffApprovalReceipt(
+      active,
+      isAuto ? "timeout" : "rejected",
+      reason,
+      { decidedAt: new Date().toISOString(), decidedBy: isAuto ? "system" : "human" },
+    );
 
     // Roll back all builder changes symmetrically (create/modify/delete)
-    await this.rollbackChanges(active, {
+    const rollback = await this.rollbackChanges(active, {
       action: "block",
       findings: [],
       critical: [{
@@ -6167,7 +6680,7 @@ export class Coordinator {
 
     // Set the explicit rejected terminal state
     advancePhase(active.run, "rejected");
-    active.run.failureReason = reason;
+    active.run.failureReason = rollback.status === "clean" ? reason : rollback.summary;
 
     recordDecision(active.run, {
       description: isAuto
@@ -6176,9 +6689,11 @@ export class Coordinator {
       madeBy: isAuto ? "system" : "human",
       taskId: null,
       alternatives: isAuto ? ["Approve before timeout"] : ["Approve and commit"],
-      rationale: isAuto
-        ? `Auto-rejected by approval-timeout sweeper. ${reason}. All changes rolled back.`
-        : "Human rejected the run at the approval gate. All changes rolled back.",
+      rationale: rollback.status === "clean"
+        ? (isAuto
+            ? `Auto-rejected by approval-timeout sweeper. ${reason}. All changes rolled back.`
+            : "Human rejected the run at the approval gate. All changes rolled back.")
+        : `${rollback.summary}. Manual inspection required before trusting the workspace state.`,
     });
 
     // Persist a terminal-shaped receipt: phase, runSummary, and a merged
@@ -6189,20 +6704,40 @@ export class Coordinator {
     // terminal receipts.
     const persisted = await this.receiptStore.getRun(runId);
     const runSummary = getRunSummary(active.run);
+    const unsafe = rollback.status !== "clean";
     const mergedFinalReceipt = persisted?.finalReceipt
-      ? { ...persisted.finalReceipt, verdict: "failed" as const, summary: runSummary }
+      ? {
+          ...persisted.finalReceipt,
+          verdict: "failed" as const,
+          summary: runSummary,
+          rollback,
+          humanSummary: persisted.finalReceipt.humanSummary
+            ? this.composeHumanSummary(active, { ...persisted.finalReceipt, verdict: "failed" as const, summary: runSummary, rollback })
+            : persisted.finalReceipt.humanSummary,
+          diffApproval: active.diffApproval,
+        }
       : undefined;
 
     await this.receiptStore.patchRun(runId, {
-      status: "REJECTED",
-      taskSummary: isAuto
-        ? `Auto-rejected — ${reason}`
-        : "Rejected by human — all changes rolled back",
+      status: unsafe ? this.persistentStatusForRollback(rollback) : "REJECTED",
+      taskSummary: unsafe
+        ? rollback.summary
+        : isAuto
+          ? `Auto-rejected — ${reason}`
+          : "Rejected by human — all changes rolled back",
       phase: active.run.phase,
       completedAt: new Date().toISOString(),
       runSummary,
       ...(mergedFinalReceipt ? { finalReceipt: mergedFinalReceipt } : {}),
-      appendErrors: [reason],
+      appendErrors: unsafe ? [reason, rollback.summary] : [reason],
+      appendCheckpoints: [{
+        at: new Date().toISOString(),
+        type: "failure_occurred",
+        status: unsafe ? this.persistentStatusForRollback(rollback) : "REJECTED",
+        phase: active.run.phase,
+        summary: `diff approval ${active.diffApproval.status}: ${reason}`,
+        details: { diffApproval: active.diffApproval, rollback },
+      }],
     });
 
     console.log(`[coordinator] Run ${runId} rejected and rolled back — terminal state: rejected`);
@@ -6212,7 +6747,7 @@ export class Coordinator {
         runId,
         verdict: "failed",
         executionVerified: false,
-        executionReason: reason,
+        executionReason: unsafe ? rollback.summary : reason,
         classification: null,
       },
     });
@@ -6327,10 +6862,20 @@ export class Coordinator {
     }
   }
 
-  private async rollbackChanges(active: ActiveRun, decision: MergeDecision): Promise<void> {
+  private async rollbackChanges(active: ActiveRun, decision: MergeDecision): Promise<RollbackOutcome> {
     if (active.changes.length === 0) {
       console.log(`[coordinator] rollbackChanges: no changes to roll back`);
-      return;
+      const outcome: RollbackOutcome = {
+        status: "clean",
+        summary: "Rollback clean — no changes to roll back",
+        restored: 0,
+        deleted: 0,
+        failedPaths: [],
+        dirtyFiles: [],
+        manualInspectionRequired: false,
+      };
+      active.rollbackOutcome = outcome;
+      return outcome;
     }
 
     const { writeFile, unlink } = await import("fs/promises");
@@ -6339,9 +6884,9 @@ export class Coordinator {
     const unrestorable: string[] = [];
 
     for (const change of active.changes) {
-      const absPath = resolve(active.projectRoot, change.path);
       try {
         if (change.operation === "create") {
+          const absPath = await resolveSafeDeletePath(active.projectRoot, change.path);
           if (existsSync(absPath)) {
             await unlink(absPath);
             deleted++;
@@ -6350,6 +6895,7 @@ export class Coordinator {
         }
 
         if (change.originalContent !== undefined) {
+          const absPath = await resolveSafeWritePath(active.projectRoot, change.path);
           await writeFile(absPath, change.originalContent, "utf-8");
           restored++;
         } else if (change.operation === "delete") {
@@ -6357,6 +6903,7 @@ export class Coordinator {
           // recover from git so the user doesn't lose the file.
           try {
             const { stdout } = await exec("git", ["show", `HEAD:${change.path}`], { cwd: active.projectRoot });
+            const absPath = await resolveSafeWritePath(active.projectRoot, change.path);
             await writeFile(absPath, stdout, "utf-8");
             restored++;
             console.warn(`[coordinator] rollbackChanges: restored deleted file ${change.path} from git HEAD`);
@@ -6407,17 +6954,64 @@ export class Coordinator {
           alternatives: ["Manual git restore required"],
           rationale: `git status --porcelain showed: ${dirtyFiles.slice(0, 5).join(", ")}`,
         });
+        const outcome: RollbackOutcome = {
+          status: unrestorable.length > 0 ? "failed" : "incomplete",
+          summary: `ROLLBACK ${unrestorable.length > 0 ? "FAILED" : "INCOMPLETE"} — ${dirtyFiles.length} file(s) still dirty after rollback; manual inspection required before trusting this workspace`,
+          restored,
+          deleted,
+          failedPaths: [...unrestorable],
+          dirtyFiles,
+          manualInspectionRequired: true,
+        };
+        active.rollbackOutcome = outcome;
         void this.receiptStore.patchRun(active.run.id, {
-          status: "EXECUTION_ERROR",
-          appendErrors: [`Rollback incomplete — ${dirtyFiles.length} file(s) still dirty`],
+          status: this.persistentStatusForRollback(outcome),
+          appendErrors: [outcome.summary],
         });
+        return outcome;
       } else {
         console.log(`[coordinator] rollbackChanges: verified clean — no uncommitted changes`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[coordinator] rollbackChanges: git status check failed (non-fatal): ${msg}`);
+      console.error(`[coordinator] rollbackChanges: git status check failed — unsafe rollback state: ${msg}`);
+      const outcome: RollbackOutcome = {
+        status: "unsafe_state",
+        summary: `ROLLBACK UNSAFE STATE — rollback status check failed; manual inspection required before trusting this workspace`,
+        restored,
+        deleted,
+        failedPaths: [...unrestorable],
+        dirtyFiles: [],
+        error: msg,
+        manualInspectionRequired: true,
+      };
+      active.rollbackOutcome = outcome;
+      void this.receiptStore.patchRun(active.run.id, {
+        status: this.persistentStatusForRollback(outcome),
+        appendErrors: [outcome.summary],
+      });
+      return outcome;
     }
+
+    const outcome: RollbackOutcome = {
+      status: unrestorable.length > 0 ? "failed" : "clean",
+      summary: unrestorable.length > 0
+        ? `ROLLBACK FAILED — ${unrestorable.length} file(s) could not be restored; manual inspection required before trusting this workspace`
+        : "Rollback clean — all recorded changes reverted and git status is clean",
+      restored,
+      deleted,
+      failedPaths: [...unrestorable],
+      dirtyFiles: [],
+      manualInspectionRequired: unrestorable.length > 0,
+    };
+    active.rollbackOutcome = outcome;
+    if (outcome.status !== "clean") {
+      await this.receiptStore.patchRun(active.run.id, {
+        status: this.persistentStatusForRollback(outcome),
+        appendErrors: [outcome.summary],
+      });
+    }
+    return outcome;
   }
 
   // ─── Git Operations ────────────────────────────────────────────────
@@ -6439,7 +7033,7 @@ export class Coordinator {
           if (corruptedFiles.includes(change.path) && change.originalContent) {
             // Resolve restore path against active.projectRoot so the
             // restore writes to the correct repo.
-            const absPath = resolve(active.projectRoot, change.path);
+            const absPath = await resolveSafeWritePath(active.projectRoot, change.path);
             const { writeFile } = await import("fs/promises");
             await writeFile(absPath, change.originalContent, "utf-8");
             console.error(`[Coordinator]   Restored: ${change.path}`);
@@ -6447,9 +7041,10 @@ export class Coordinator {
         }
         // Unstage the restored files so a later git operation does not
         // accidentally commit the (now-reverted) content.
-        const restoredPaths = corruptedFiles
-          .filter((p) => active.changes.some((c) => c.path === p && c.originalContent))
-          .map((p) => resolve(active.projectRoot, p));
+        const restoredPaths: string[] = [];
+        for (const p of corruptedFiles.filter((path) => active.changes.some((c) => c.path === path && c.originalContent))) {
+          restoredPaths.push(await resolveSafeExistingPath(active.projectRoot, p));
+        }
         if (restoredPaths.length > 0) {
           try {
             await exec("git", ["reset", "HEAD", "--", ...restoredPaths], { cwd: active.projectRoot });
@@ -6508,10 +7103,13 @@ export class Coordinator {
       // All git commands run with cwd=active.projectRoot so they target
       // the per-task effective root rather than the API server's cwd.
       // This is the difference between committing to the right repo vs.
-      // committing to /mnt/ai/aedis accidentally.
+      // committing to the service repo accidentally.
       // Stage only the files Aedis changed — NOT `git add -A` which would
       // sweep in unrelated uncommitted files from the working tree.
-      const changedPaths = active.changes.map((c) => resolve(active.projectRoot, c.path));
+      const changedPaths: string[] = [];
+      for (const change of active.changes) {
+        changedPaths.push(await resolveSafeWritePath(active.projectRoot, change.path));
+      }
       if (changedPaths.length === 0) {
         console.warn(`[coordinator] gitCommit: no changed paths to stage — skipping commit`);
         return null;
@@ -6618,7 +7216,7 @@ export class Coordinator {
     } catch (err) {
       const reverseMsg = err instanceof Error ? err.message : String(err);
       try {
-        const files = filterRuntimeArtifacts(changedFiles).map((f) => resolve(sourceRepo, f));
+        const files = await this.assertPromotionPathsContained(sourceRepo, changedFiles);
         if (files.length > 0) {
           await exec("git", ["checkout", "HEAD", "--", ...files], { cwd: sourceRepo }).catch(() => undefined);
           await exec("git", ["clean", "-f", "--", ...files], { cwd: sourceRepo }).catch(() => undefined);
@@ -6642,15 +7240,82 @@ export class Coordinator {
     error: string,
     rollbackSucceeded: boolean,
   ): Promise<void> {
+    const rollback: RollbackOutcome | null = rollbackSucceeded
+      ? null
+      : {
+          status: "failed",
+          summary: "ROLLBACK FAILED — source promotion rollback failed; manual inspection required before trusting the source repo",
+          restored: 0,
+          deleted: 0,
+          failedPaths: [],
+          dirtyFiles: [],
+          error,
+          manualInspectionRequired: true,
+        };
+    const persisted = await this.receiptStore.getRun(runId).catch(() => null);
+    const finalReceipt = persisted?.finalReceipt
+      ? {
+          ...persisted.finalReceipt,
+          verdict: "failed" as const,
+          rollback,
+        }
+      : undefined;
     await this.receiptStore.patchRun(runId, {
-      status: rollbackSucceeded ? "EXECUTION_ERROR" : "CLEANUP_ERROR",
+      status: rollbackSucceeded ? "EXECUTION_ERROR" : "ROLLBACK_FAILED",
       taskSummary: rollbackSucceeded
         ? "Promotion failed — source rollback completed"
-        : "Promotion failed — source rollback failed",
-      appendErrors: [error],
+        : rollback!.summary,
+      ...(finalReceipt ? { finalReceipt } : {}),
+      appendErrors: rollback ? [error, rollback.summary] : [error],
     }).catch((err) => {
       console.warn(`[coordinator] recordPromotionFailure failed: ${err instanceof Error ? err.message : String(err)}`);
     });
+  }
+
+  private persistentStatusForRollback(outcome: RollbackOutcome): import("./receipt-store.js").PersistentRunStatus {
+    switch (outcome.status) {
+      case "failed":
+        return "ROLLBACK_FAILED";
+      case "incomplete":
+        return "ROLLBACK_INCOMPLETE";
+      case "unsafe_state":
+        return "UNSAFE_STATE";
+      case "clean":
+        return "EXECUTION_ERROR";
+    }
+  }
+
+  private async canonicalSourceRepoForPromotion(receipt: any, finalReceipt: any): Promise<string> {
+    const candidates = [
+      receipt?.sourceRepo,
+      finalReceipt?.sourceRepo,
+      finalReceipt?.workspace?.sourceRepo,
+      receipt?.workspace?.sourceRepo,
+    ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    const sourceRepo = candidates[0] ?? this.config.projectRoot;
+    return resolveSafeExistingPath(sourceRepo, ".");
+  }
+
+  private promotionDiffPaths(diff: string): string[] {
+    const files = new Set<string>();
+    for (const line of diff.split(/\r?\n/)) {
+      const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+      if (!match) continue;
+      const before = match[1]!;
+      const after = match[2]!;
+      if (before !== "/dev/null") files.add(before);
+      if (after !== "/dev/null") files.add(after);
+    }
+    return [...files];
+  }
+
+  private async assertPromotionPathsContained(sourceRepo: string, paths: readonly string[]): Promise<string[]> {
+    const safe: string[] = [];
+    for (const path of filterRuntimeArtifacts(paths)) {
+      assertRelativePath(path);
+      safe.push(await resolveSafeWritePath(sourceRepo, path));
+    }
+    return safe;
   }
 
   // ─── Shadow Workspace API ──────────────────────────────────────────
@@ -6818,6 +7483,14 @@ export class Coordinator {
     const actualModel = result?.cost?.model || undefined;
     const providerUsed =
       actualModel && actualModel === intentModel ? opts.provider : undefined;
+    if (active.providerLaneTruth?.status === "fallback_used") {
+      active.providerLaneTruth = {
+        ...active.providerLaneTruth,
+        actualProvider: providerUsed ?? null,
+        actualModel: actualModel ?? null,
+        actualLane: opts.lane ?? null,
+      };
+    }
 
     const candidate: Candidate = {
       workspaceId: shadow.workspaceId,
@@ -6971,6 +7644,14 @@ export class Coordinator {
     // undefined rather than guessing.
     const providerUsed =
       actualModel && actualModel === intentModel ? inputs.provider : undefined;
+    if (active.providerLaneTruth?.status === "fallback_used") {
+      active.providerLaneTruth = {
+        ...active.providerLaneTruth,
+        actualProvider: providerUsed ?? null,
+        actualModel: actualModel ?? null,
+        actualLane: inputs.lane ?? null,
+      };
+    }
 
     const candidate: Candidate = {
       workspaceId: "primary",
@@ -7055,10 +7736,9 @@ export class Coordinator {
     // ── Phase D: pin the shadow Builder to lane-config.shadow's
     // (provider, model). Constructed transient — no registry mutation,
     // no model-config.json on-disk side effects, no cross-run leakage.
-    // If the configured provider isn't in the supported Provider
-    // union, fall back to the registry's default Builder so a typo in
-    // lane-config.json doesn't crash the run; the candidate manifest
-    // still records the intended lane labels for diagnosis.
+    // If the configured provider/model cannot construct a lane builder,
+    // public RC mode fails closed unless the lane config explicitly
+    // opts into registry fallback.
     //
     // The factory is injectable via `config.laneBuilderFactory` so
     // tests can substitute a stub builder without touching the
@@ -7071,10 +7751,30 @@ export class Coordinator {
       runState: active.run,
     });
     if (!laneBuilder) {
-      console.warn(
-        `[coordinator] local_then_cloud: lane-config.shadow.provider="${shadowAssignment.provider}" is not a supported Provider — ` +
-        `shadow lane will dispatch the registered default Builder. Fix lane-config.json or expand SUPPORTED_PROVIDERS.`,
-      );
+      if (active.laneConfig.allowFallback === true) {
+        active.providerLaneTruth = {
+          status: "fallback_used",
+          reason: "Shadow lane builder factory returned null and lane config explicitly allowed fallback",
+          intendedProvider: shadowAssignment.provider,
+          intendedModel: shadowAssignment.model,
+          intendedLane: shadowAssignment.lane,
+          actualProvider: null,
+          actualModel: null,
+          actualLane: null,
+          fallbackAllowed: true,
+        };
+        console.warn(
+          `[coordinator] local_then_cloud: lane-config.shadow ${shadowAssignment.provider}/` +
+          `${shadowAssignment.model} could not construct a lane builder; ` +
+          `allowFallback:true permits registry default builder fallback.`,
+        );
+      } else {
+        throw new CoordinatorError(
+          `Unsupported shadow provider/model/lane dispatch: ${shadowAssignment.provider}/` +
+          `${shadowAssignment.model} (lane=${shadowAssignment.lane}) could not construct a lane builder; ` +
+          `actual provider/model/lane=not_run. Set allowFallback:true only if registry fallback is intentional.`,
+        );
+      }
     }
     // Cost-surfacing log (Phase D minimal cost guard). A second model
     // invocation costs real money; the operator should see exactly
@@ -7119,6 +7819,107 @@ export class Coordinator {
       verifierVerdict: c.verifierVerdict,
       reason: c.reason,
     }));
+  }
+
+  private buildDiffApprovalReceipt(
+    active: ActiveRun,
+    status: DiffApprovalReceipt["status"],
+    reason: string,
+    opts: { decidedBy?: DiffApprovalReceipt["decidedBy"]; decidedAt?: string } = {},
+  ): DiffApprovalReceipt {
+    const files = Array.from(new Set(active.changes.map((change) => change.path))).sort();
+    const operations = new Map<string, number>();
+    for (const change of active.changes) {
+      operations.set(change.operation, (operations.get(change.operation) ?? 0) + 1);
+    }
+    const opSummary = [...operations.entries()]
+      .map(([op, count]) => `${count} ${op}`)
+      .join(", ");
+    return {
+      status,
+      requestedAt: active.awaitingApprovalSinceMs
+        ? new Date(active.awaitingApprovalSinceMs).toISOString()
+        : new Date().toISOString(),
+      ...(opts.decidedAt ? { decidedAt: opts.decidedAt } : {}),
+      ...(opts.decidedBy ? { decidedBy: opts.decidedBy } : {}),
+      reason,
+      files,
+      diffSummary: `${files.length} file(s): ${opSummary || "no file operations"}`,
+    };
+  }
+
+  private buildPromotionSafety(
+    active: ActiveRun,
+    verificationReceipt: VerificationReceipt | null,
+    mergeDecision: MergeDecision | null,
+  ): PromotionSafety {
+    const plannedFiles = active.changeSet.filesInScope
+      .filter((file) => file.mutationExpected)
+      .map((file) => file.path);
+    const changedFiles = Array.from(new Set(
+      active.gitDiffResult?.actualChangedFiles ?? active.changes.map((change) => change.path),
+    ));
+    const planned = new Set(plannedFiles);
+    const scoutPlanConcrete = plannedFiles.length > 0;
+    const builderMatchesPlan =
+      changedFiles.length > 0 &&
+      changedFiles.every((file) => planned.has(file)) &&
+      plannedFiles.every((file) => changedFiles.includes(file));
+    const criticReviewedActualDiff =
+      changedFiles.length > 0 &&
+      active.workerResults.some((result) => result.workerType === "critic" && result.success);
+    const verifierPassed = verificationReceipt !== null && verificationReceipt.verdict !== "fail";
+    const humanDiffApproved = active.diffApproval?.status === "approved";
+    const sourcePromotionEnabled = this.config.allowSourcePromotion === true;
+    const trustedLocalRepoWrites = this.config.trustedLocalRepoWrites === true;
+    const blockers: string[] = [];
+
+    if (!sourcePromotionEnabled) blockers.push("source promotion is disabled in public RC mode");
+    if (!trustedLocalRepoWrites) blockers.push("trusted local repo writes are not enabled");
+    if (!scoutPlanConcrete) blockers.push("no concrete Scout/planning file plan");
+    if (!builderMatchesPlan) blockers.push("builder diff does not match the planned file set");
+    if (!criticReviewedActualDiff) blockers.push("critic did not review the actual promoted diff");
+    if (!verifierPassed) blockers.push("verifier did not pass");
+    if (!humanDiffApproved) blockers.push("final diff has not been approved");
+    if (!active.diffApproval) blockers.push("approval receipt is missing");
+    if (mergeDecision?.action !== "apply") blockers.push("merge gate did not approve integration");
+
+    return {
+      publicRcReviewOnly: !sourcePromotionEnabled || !trustedLocalRepoWrites,
+      sourcePromotionEnabled,
+      trustedLocalRepoWrites,
+      scoutPlanConcrete,
+      builderMatchesPlan,
+      criticReviewedActualDiff,
+      verifierPassed,
+      humanDiffApproved,
+      approvalReceiptRecorded: active.diffApproval !== null,
+      readyForPromotion: blockers.length === 0,
+      blockers,
+    };
+  }
+
+  private validatePersistedPromotionSafety(finalReceipt: any): string | null {
+    const safety = finalReceipt?.promotionSafety as PromotionSafety | undefined;
+    const approval = finalReceipt?.diffApproval as DiffApprovalReceipt | undefined;
+    if (!this.config.allowSourcePromotion) {
+      return "Source promotion disabled: public RC mode is review-only unless allowSourcePromotion is explicitly enabled.";
+    }
+    if (!this.config.trustedLocalRepoWrites) {
+      return "Source promotion disabled: trustedLocalRepoWrites must be explicitly enabled for this local repo.";
+    }
+    if (!safety) return "Promote refused: missing promotion safety receipt.";
+    if (!approval) return "Promote refused: missing final diff approval receipt.";
+    if (approval.status !== "approved") return `Promote refused: final diff approval is ${approval.status}, not approved.`;
+    if (!safety.scoutPlanConcrete) return "Promote refused: no concrete Scout/planning file plan was recorded.";
+    if (!safety.builderMatchesPlan) return "Promote refused: builder output does not match the planned files.";
+    if (!safety.criticReviewedActualDiff) return "Promote refused: critic did not review the actual diff.";
+    if (!safety.verifierPassed) return "Promote refused: verifier did not pass.";
+    if (!safety.approvalReceiptRecorded) return "Promote refused: approval receipt was not recorded.";
+    if (!safety.readyForPromotion) {
+      return `Promote refused: promotion safety blockers remain: ${(safety.blockers ?? []).join("; ") || "unknown blocker"}`;
+    }
+    return null;
   }
 
   /**
@@ -7188,6 +7989,11 @@ export class Coordinator {
     if (!receipt) return { ok: false, error: "No receipt found for run " + runId };
 
     const finalReceipt = (receipt as any).finalReceipt;
+    if (sourceRepoPath) {
+      console.warn(
+        `[coordinator] promoteToSource ignored caller-supplied source_repo for ${runId}; using the canonical source repo recorded at run creation`,
+      );
+    }
 
     // Multi-workspace safety guard. Only "primary" workspaces may
     // promote — shadow workspaces exist for alternate Builder attempts
@@ -7204,6 +8010,26 @@ export class Coordinator {
       return { ok: false, error: msg };
     }
 
+    const promotionSafetyError = this.validatePersistedPromotionSafety(finalReceipt);
+    if (promotionSafetyError) {
+      console.error(`[coordinator] PROMOTE BLOCKED for ${runId}: ${promotionSafetyError}`);
+      await this.receiptStore.patchRun(runId, {
+        appendErrors: [promotionSafetyError],
+        appendCheckpoints: [{
+          at: new Date().toISOString(),
+          type: "failure_occurred",
+          status: "AWAITING_APPROVAL",
+          phase: receipt.phase,
+          summary: promotionSafetyError,
+          details: {
+            promotionSafety: finalReceipt?.promotionSafety ?? null,
+            diffApproval: finalReceipt?.diffApproval ?? null,
+          },
+        }],
+      }).catch(() => undefined);
+      return { ok: false, error: promotionSafetyError };
+    }
+
     const patchArtifact = finalReceipt?.patchArtifact as { diff?: string; changedFiles?: string[]; commitSha?: string | null } | undefined;
     // Source-repo resolution. The persistent receipt's TOP-LEVEL
     // sourceRepo is null for any run currently in this codebase — only
@@ -7211,21 +8037,12 @@ export class Coordinator {
     // (set in buildReceipt at ~line 5898 and at workspace creation).
     // Run 6bf45418 surfaced the gap: POST /tasks/:id/promote with no
     // body fell straight through to this.config.projectRoot
-    // (/mnt/ai/aedis) and tried to git-apply an absent-pianist patch
+    // (the service repo) and tried to git-apply an absent-pianist patch
     // there, failing with "app.py: does not exist in index." Walk the
     // chain in trust order so the explicit body wins, then anything the
     // receipt itself recorded, and only last fall back to the
     // coordinator's project root.
-    const persistentWorkspaceSourceRepo = (receipt as any)?.workspace?.sourceRepo;
-    const finalReceiptSourceRepo = finalReceipt?.sourceRepo;
-    const finalReceiptWorkspaceSourceRepo = finalReceipt?.workspace?.sourceRepo;
-    const sourceRepo =
-      sourceRepoPath ??
-      (receipt as any).sourceRepo ??
-      finalReceiptSourceRepo ??
-      finalReceiptWorkspaceSourceRepo ??
-      persistentWorkspaceSourceRepo ??
-      this.config.projectRoot;
+    const sourceRepo = await this.canonicalSourceRepoForPromotion(receipt, finalReceipt);
 
     // Try patch artifact first (survives workspace cleanup)
     if (patchArtifact?.diff && patchArtifact.diff.trim()) {
@@ -7235,9 +8052,15 @@ export class Coordinator {
         if (alreadyPromoted) return alreadyPromoted;
         const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
         const { writeFile: writeTmp, unlink: rmTmp } = await import("node:fs/promises");
-        const patchTmp = resolve(sourceRepo, `.aedis-promote-${runId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${randomUUID()}.patch.tmp`);
+        const patchTmpName = `.aedis-promote-${runId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${randomUUID()}.patch.tmp`;
+        const patchTmp = await resolveSafeWritePath(sourceRepo, patchTmpName);
         let applied = false;
         try {
+        const diffPaths = this.promotionDiffPaths(patchDiff);
+        await this.assertPromotionPathsContained(sourceRepo, [
+          ...(patchArtifact.changedFiles ?? []),
+          ...diffPaths,
+        ]);
         await writeTmp(patchTmp, patchDiff, "utf-8");
         try {
           await exec("git", ["apply", patchTmp], { cwd: sourceRepo });
@@ -7255,8 +8078,16 @@ export class Coordinator {
         // tsc against the source repo AFTER the patch has been
         // applied, so the would-be-promoted state is what gets
         // checked.
-        const candidatePaths = filterRuntimeArtifacts(patchArtifact.changedFiles ?? [])
-          .map((f) => resolve(sourceRepo, f));
+        const { stdout: appliedNames } = await exec(
+          "git",
+          ["diff", "--name-only", "HEAD", "--", ".", ...PROMOTION_EXCLUDE_PATHSPECS],
+          { cwd: sourceRepo },
+        );
+        const appliedFiles = filterRuntimeArtifacts(appliedNames.trim().split("\n").filter(Boolean));
+        const candidatePaths = await this.assertPromotionPathsContained(sourceRepo, [
+          ...(patchArtifact.changedFiles ?? []),
+          ...appliedFiles,
+        ]);
         const gateResult = await this.typecheckPromoteGate(
           sourceRepo,
           promoteTscBaseline,
@@ -7277,7 +8108,7 @@ export class Coordinator {
         // by an older Aedis version carries unfiltered changedFiles.
         const files = filterRuntimeArtifacts(patchArtifact.changedFiles ?? []);
         if (files.length > 0) {
-          await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
+          await exec("git", ["add", "--", ...await this.assertPromotionPathsContained(sourceRepo, files)], { cwd: sourceRepo });
         } else if ((patchArtifact.changedFiles ?? []).length === 0) {
           // Only fall back to "git add -A" when the receipt explicitly
           // had no file list — never sweep all changes blindly when the
@@ -7343,13 +8174,15 @@ export class Coordinator {
       if (alreadyPromoted) return alreadyPromoted;
       const promoteTscBaseline = await this.tscErrorSignatures(sourceRepo);
       const { writeFile: writeTmp, unlink: rmTmp } = await import("node:fs/promises");
-      const patchTmp = resolve(sourceRepo, `.aedis-promote-${runId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${randomUUID()}.patch.tmp`);
+      const patchTmpName = `.aedis-promote-${runId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${randomUUID()}.patch.tmp`;
+      const patchTmp = await resolveSafeWritePath(sourceRepo, patchTmpName);
       let applied = false;
       let files: string[] = [];
       try {
         const { stdout: patch } = await exec("git", ["format-patch", "--stdout", commitSha + "^.." + commitSha], { cwd: workspacePath });
         if (!patch.trim()) return { ok: false, error: "Empty patch — nothing to promote" };
 
+        await this.assertPromotionPathsContained(sourceRepo, this.promotionDiffPaths(patch));
         await writeTmp(patchTmp, patch, "utf-8");
         try {
           await exec("git", ["apply", patchTmp], { cwd: sourceRepo });
@@ -7364,6 +8197,7 @@ export class Coordinator {
           { cwd: workspacePath },
         );
         files = filterRuntimeArtifacts(diffOut.trim().split("\n").filter(Boolean));
+        await this.assertPromotionPathsContained(sourceRepo, files);
 
       // Promote-time typecheck gate (workspace-fallback path). Same
       // contract as the patch-artifact path above: refuse to commit if
@@ -7385,7 +8219,7 @@ export class Coordinator {
       }
 
       if (files.length > 0) {
-        await exec("git", ["add", "--", ...files.map((f) => resolve(sourceRepo, f))], { cwd: sourceRepo });
+        await exec("git", ["add", "--", ...await this.assertPromotionPathsContained(sourceRepo, files)], { cwd: sourceRepo });
       }
 
       const msg = "aedis: " + (receipt.taskSummary ?? "Aedis run " + runId) + "\n\nPromoted from workspace: " + workspacePath + "\nOriginal run: " + runId;
@@ -7393,7 +8227,7 @@ export class Coordinator {
 
       const { stdout: sourceSha } = await exec("git", ["rev-parse", "HEAD"], { cwd: sourceRepo });
       await this.receiptStore.patchRun(runId, {
-        status: "READY_FOR_PROMOTION",
+        status: "PROMOTED",
         taskSummary: "Promoted to source: " + sourceSha.trim().slice(0, 8),
       });
 
@@ -7716,7 +8550,9 @@ export class Coordinator {
     // (which has already applied execution-gate truth enforcement),
     // fall back to determineVerdict for legacy/test callers.
     const rawVerdict = this.determineVerdict(active, verificationReceipt, judgmentReport, mergeDecision);
+    const rollbackDominates = active.rollbackOutcome?.status !== undefined && active.rollbackOutcome.status !== "clean";
     const verdict: RunReceipt["verdict"] =
+      rollbackDominates ? "failed" :
       verdictOverride ??
       (executionDecision && !executionDecision.executionVerified && (rawVerdict === "success" || rawVerdict === "partial")
         ? "failed"
@@ -7780,6 +8616,11 @@ export class Coordinator {
       actualChanged: actualChangedForTargets.has(file.path),
       reason: file.mutationReason,
     }));
+    active.promotionSafety = this.buildPromotionSafety(
+      active,
+      verificationReceipt,
+      mergeDecision,
+    );
 
     // Build the receipt without humanSummary first, then compose
     // the summary from the receipt itself (the summary generator
@@ -7822,6 +8663,10 @@ export class Coordinator {
       evaluation: null,
       patchArtifact: active.patchArtifact ?? null,
       workspaceCleanup: active.workspaceCleanup ?? null,
+      rollback: active.rollbackOutcome ?? null,
+      providerLaneTruth: active.providerLaneTruth ?? null,
+      promotionSafety: active.promotionSafety,
+      diffApproval: active.diffApproval,
       sourceRepo: active.sourceRepo ?? null,
       sourceCommitSha: active.workspace?.sourceCommitSha ?? null,
       targetRoles,
@@ -7837,6 +8682,9 @@ export class Coordinator {
               selectBestCandidate(active.candidates)?.workspaceId ?? null,
             laneMode: active.laneConfig.mode,
           }
+        : {}),
+      ...(active.preflightScoutReportIds.length > 0
+        ? { preflightScoutReportIds: [...active.preflightScoutReportIds] }
         : {}),
     };
 
@@ -8265,6 +9113,7 @@ export class Coordinator {
       evaluation: null,
       patchArtifact: null,
       workspaceCleanup: null,
+      rollback: null,
       sourceRepo: input.sourceRepo,
       sourceCommitSha: null,
       targetRoles: [],
@@ -8420,6 +9269,8 @@ interface ActiveRun {
    * type-checks but the dispatch path is still primary-only.
    */
   laneConfig: import("./lane-config.js").LaneConfig;
+  /** Provider/model/lane truth captured before execution. */
+  providerLaneTruth: ProviderLaneTruth | null;
   /** Gated project memory relevant to the current prompt, for Scout context. */
   gatedContext: GatedContext;
   /**
@@ -8567,4 +9418,19 @@ interface ActiveRun {
   confidenceDampening: number;
   /** Historical reliability tier for the matched task archetype. */
   historicalReliabilityTier: "reliable" | "risky" | "caution" | "unknown" | null;
+  /** Rollback outcome, when rollback was attempted. Non-clean dominates final status. */
+  rollbackOutcome: RollbackOutcome | null;
+  /** Promotion gate evidence persisted on receipts. */
+  promotionSafety: PromotionSafety | null;
+  /** Final diff approval receipt for the approval/promote flow. */
+  diffApproval: DiffApprovalReceipt | null;
+  /**
+   * Scout report IDs from preflight scout evidence gathering. Populated
+   * between charter generation and scope classification when scouts
+   * run (advisory targets, risks). Empty when scouts were not spawned.
+   * Threaded into the RunReceipt for audit transparency.
+   */
+  preflightScoutReportIds: string[];
+  /** Preflight scout result for transparency in receipts/UI. */
+  preflightScoutResult: PreflightScoutResult | null;
 }

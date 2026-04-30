@@ -38,12 +38,20 @@ export interface RuntimePolicy {
    * creation fails. Safe default = true (workspace required).
    */
   readonly requireWorkspace: boolean;
+  /** Whether explicit source promotion is enabled for trusted local repos. */
+  readonly allowSourcePromotion: boolean;
+  /** Whether the operator explicitly trusted this local repo for writes. */
+  readonly trustedLocalRepoWrites: boolean;
+  /** Public RC default mode: no source writes until both promotion flags are true. */
+  readonly publicRcReviewOnly: boolean;
 }
 
 export interface DeriveRuntimePolicyInput {
   readonly autoPromoteOnSuccess: boolean;
   readonly requireApproval: boolean;
   readonly requireWorkspace: boolean;
+  readonly allowSourcePromotion?: boolean;
+  readonly trustedLocalRepoWrites?: boolean;
   readonly laneMode?: LaneMode;
 }
 
@@ -70,6 +78,9 @@ export function deriveRuntimePolicy(
     laneMode: input.laneMode ?? "unset",
     shadowPromoteAllowed: false,
     requireWorkspace: input.requireWorkspace,
+    allowSourcePromotion: input.allowSourcePromotion === true,
+    trustedLocalRepoWrites: input.trustedLocalRepoWrites === true,
+    publicRcReviewOnly: input.allowSourcePromotion !== true || input.trustedLocalRepoWrites !== true,
   };
 }
 
@@ -93,6 +104,8 @@ export interface SafeDefaultsResult {
   readonly autoPromoteOnSuccess: boolean;
   readonly requireApproval: boolean;
   readonly requireWorkspace: boolean;
+  readonly allowSourcePromotion: boolean;
+  readonly trustedLocalRepoWrites: boolean;
   readonly source: {
     readonly autoPromoteOnSuccess: "default-safe" | "env-override";
     readonly requireApproval: "default-safe" | "env-override";
@@ -117,6 +130,8 @@ export function safeDefaults(input: SafeDefaultsInput = {}): SafeDefaultsResult 
     // explicit programmatic config so it never accidentally trips on
     // a misset env var.
     requireWorkspace: true,
+    allowSourcePromotion: env["AEDIS_ALLOW_SOURCE_PROMOTION"] === "true",
+    trustedLocalRepoWrites: env["AEDIS_TRUSTED_LOCAL_REPO_WRITES"] === "true",
     source: {
       autoPromoteOnSuccess: autoPromoteRaw === "true" ? "env-override" : "default-safe",
       requireApproval: approvalRaw === "false" ? "env-override" : "default-safe",
@@ -126,13 +141,16 @@ export function safeDefaults(input: SafeDefaultsInput = {}): SafeDefaultsResult 
 
 /** Helper to build a RuntimePolicy directly from a CoordinatorConfig. */
 export function policyFromCoordinatorConfig(
-  config: Pick<CoordinatorConfig, "autoPromoteOnSuccess" | "requireApproval" | "requireWorkspace">,
+  config: Pick<CoordinatorConfig, "autoPromoteOnSuccess" | "requireApproval" | "requireWorkspace"> &
+    Partial<Pick<CoordinatorConfig, "allowSourcePromotion" | "trustedLocalRepoWrites">>,
   laneMode?: LaneMode,
 ): RuntimePolicy {
   return deriveRuntimePolicy({
     autoPromoteOnSuccess: config.autoPromoteOnSuccess,
     requireApproval: config.requireApproval,
     requireWorkspace: config.requireWorkspace,
+    allowSourcePromotion: config.allowSourcePromotion,
+    trustedLocalRepoWrites: config.trustedLocalRepoWrites,
     ...(laneMode !== undefined ? { laneMode } : {}),
   });
 }

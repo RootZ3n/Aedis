@@ -60,7 +60,31 @@ export type AedisEventType =
   | "trust_updated"
   | "trust_regression"
   | "wave_partial_failure"
-  | "adversarial_escalation";
+  | "adversarial_escalation"
+  // Task-plan loop transitions. Emitted by TaskLoopRunner on every
+  // status change so the UI can refresh in real time without polling.
+  // Payload shape (see core/task-loop.ts):
+  //   {
+  //     kind: "plan_started" | "plan_paused" | "plan_completed"
+  //         | "plan_cancelled" | "plan_interrupted" | "plan_blocked"
+  //         | "subtask_started" | "subtask_completed" | "subtask_failed"
+  //         | "subtask_blocked" | "subtask_skipped",
+  //     taskPlanId, status, currentSubtaskId, progress: { completed, total },
+  //     stopReason, message, updatedAt
+  //   }
+  | "task_plan_event"
+  // Preflight scout lifecycle. Emitted by the coordinator between
+  // charter generation and scope classification. Read-only scouts
+  // gather advisory evidence before the build path commits.
+  | "preflight_scouts_started"
+  | "preflight_scouts_complete"
+  | "preflight_scouts_skipped"
+  // System resource monitoring. Emitted on pressure level transitions
+  // (not every poll tick — only when the level changes).
+  | "system_status"
+  | "system_pressure_warning"
+  | "system_pressure_critical"
+  | "system_pressure_recovered";
 
 /**
  * @deprecated Use AedisEventType. Alias kept for downstream code that

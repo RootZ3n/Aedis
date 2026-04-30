@@ -13,9 +13,11 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-export const SOFT_RESULTS_PATH = "/mnt/ai/tmp/aedis-burn-in-results.jsonl";
-export const HARD_RESULTS_PATH = "/mnt/ai/tmp/aedis-burn-in-hard.jsonl";
+export const SOFT_RESULTS_PATH = process.env["AEDIS_BURN_RESULTS"] ?? join(tmpdir(), "aedis-burn-in-results.jsonl");
+export const HARD_RESULTS_PATH = process.env["AEDIS_BURN_HARD_RESULTS"] ?? join(tmpdir(), "aedis-burn-in-hard.jsonl");
 
 export type BurnVerdict =
   | "PASS"

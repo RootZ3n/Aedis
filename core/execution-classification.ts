@@ -98,6 +98,8 @@ export function classifyExecution(
   factors.push(`executionVerified:${executionVerified}`);
   if (verification) factors.push(`verification:${verification.verdict}`);
   if (mergeAction) factors.push(`merge:${mergeAction}`);
+  if (receipt.rollback) factors.push(`rollback:${receipt.rollback.status}`);
+  if (receipt.providerLaneTruth) factors.push(`providerLane:${receipt.providerLaneTruth.status}`);
 
   // ── Rule 1: aborted → always FAILED ──────────────────────────────
   // A cancelled run is never a success, partial or otherwise.
@@ -106,6 +108,32 @@ export function classifyExecution(
       classification: "FAILED",
       reasonCode: "aborted",
       reason: "Run was cancelled before completion",
+      factors,
+    };
+  }
+
+  // ── Rule 1a: rollback failure/incomplete → always FAILED ─────────
+  // Rollback integrity dominates all earlier stage evidence. A run can
+  // preserve "verification passed" as evidence, but if cleanup left the
+  // workspace/repo unsafe the final classification must be failure.
+  if (receipt.rollback && receipt.rollback.status !== "clean") {
+    return {
+      classification: "FAILED",
+      reasonCode: receipt.rollback.status === "incomplete"
+        ? "rollback-incomplete"
+        : receipt.rollback.status === "unsafe_state"
+          ? "rollback-unsafe-state"
+          : "rollback-failed",
+      reason: receipt.rollback.summary,
+      factors,
+    };
+  }
+
+  if (receipt.providerLaneTruth?.status === "not_run") {
+    return {
+      classification: "FAILED",
+      reasonCode: "unsupported-provider-lane-config",
+      reason: receipt.providerLaneTruth.reason,
       factors,
     };
   }

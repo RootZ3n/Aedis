@@ -74,6 +74,14 @@ export interface LaneConfig {
   readonly mode: LaneMode;
   readonly primary: LaneAssignment;
   readonly shadow?: LaneAssignment;
+  /**
+   * Explicit escape hatch for test harnesses / private installs that
+   * want registry fallback when a lane-pinned builder cannot be
+   * constructed. Public RC behavior defaults to false so configured
+   * provider/model/lane mistakes fail closed instead of silently
+   * charging/running a different builder.
+   */
+  readonly allowFallback?: boolean;
 }
 
 const VALID_LANES: ReadonlySet<LaneId> = new Set(["local", "cloud"]);
@@ -138,11 +146,16 @@ export function parseLaneConfig(raw: unknown): ParseLaneConfigResult {
   if (errors.length > 0) {
     return { config: null, errors };
   }
+  const allowFallback = obj["allowFallback"];
+  if (allowFallback !== undefined && typeof allowFallback !== "boolean") {
+    return { config: null, errors: ["allowFallback must be a boolean when present"] };
+  }
   return {
     config: Object.freeze({
       mode: mode as LaneMode,
       primary: primary!,
       ...(shadow ? { shadow } : {}),
+      ...(allowFallback === true ? { allowFallback: true } : {}),
     }),
     errors: [],
   };
@@ -221,34 +234,58 @@ export interface LoadLaneConfigOptions {
   readonly onError?: (msg: string) => void;
 }
 
-export function loadLaneConfigFromDisk(
+export interface LoadLaneConfigResult {
+  readonly config: LaneConfig;
+  readonly source: "default" | "user-config" | "invalid-config";
+  readonly configPath: string;
+  readonly errors: readonly string[];
+}
+
+export function loadLaneConfigWithDiagnostics(
   projectRoot: string,
   opts: LoadLaneConfigOptions = {},
-): LaneConfig {
+): LoadLaneConfigResult {
   const onError = opts.onError ?? ((msg) => console.warn(msg));
   const filePath = opts.path ?? resolve(projectRoot, ".aedis", "lane-config.json");
 
-  if (!existsSync(filePath)) return DEFAULT_LANE_CONFIG;
+  if (!existsSync(filePath)) {
+    return { config: DEFAULT_LANE_CONFIG, source: "default", configPath: filePath, errors: [] };
+  }
 
   let raw: unknown;
   try {
     const text = readFileSync(filePath, "utf-8");
     raw = JSON.parse(text);
   } catch (err) {
-    onError(
-      `[lane-config] failed to read/parse ${filePath}: ${err instanceof Error ? err.message : String(err)} — falling back to DEFAULT_LANE_CONFIG`,
-    );
-    return DEFAULT_LANE_CONFIG;
+    const message = `[lane-config] failed to read/parse ${filePath}: ${err instanceof Error ? err.message : String(err)}`;
+    onError(`${message} — falling back to DEFAULT_LANE_CONFIG`);
+    return {
+      config: DEFAULT_LANE_CONFIG,
+      source: "invalid-config",
+      configPath: filePath,
+      errors: [message],
+    };
   }
 
   const result = parseLaneConfig(raw);
   if (!result.config) {
-    onError(
-      `[lane-config] ${filePath} failed validation: ${result.errors.join("; ")} — falling back to DEFAULT_LANE_CONFIG`,
-    );
-    return DEFAULT_LANE_CONFIG;
+    const message = `[lane-config] ${filePath} failed validation: ${result.errors.join("; ")}`;
+    onError(`${message} — falling back to DEFAULT_LANE_CONFIG`);
+    return {
+      config: DEFAULT_LANE_CONFIG,
+      source: "invalid-config",
+      configPath: filePath,
+      errors: [message],
+    };
   }
-  return result.config;
+  return { config: result.config, source: "user-config", configPath: filePath, errors: [] };
+}
+
+export function loadLaneConfigFromDisk(
+  projectRoot: string,
+  opts: LoadLaneConfigOptions = {},
+): LaneConfig {
+  return loadLaneConfigWithDiagnostics(projectRoot, opts).config;
 }
 
 /**

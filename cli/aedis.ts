@@ -125,6 +125,18 @@ function fmtTask(data: any): string {
   return lines.join("\n");
 }
 
+export function isFailureStatus(status: unknown): boolean {
+  const s = String(status ?? "").toLowerCase();
+  return s === "failed" ||
+    s === "cancelled" ||
+    s === "rollback_failed" ||
+    s === "rollback_incomplete" ||
+    s === "unsafe_state" ||
+    s === "unsupported_config" ||
+    s === "cleanup_error" ||
+    s === "execution_error";
+}
+
 // ─── Doctor (build + duplicate + freshness) ─────────────────────────
 
 export interface DoctorHealthShape {
@@ -448,6 +460,7 @@ const COMMANDS = {
     if (!taskId) { console.error("status <task-id>"); process.exitCode = 1; return; }
     const data = await fetchJson(`/tasks/${encodeURIComponent(taskId)}`);
     console.log(fmtTask(data));
+    if (isFailureStatus(data.status)) process.exitCode = 1;
   },
 
   async reliability(args: string[]) {

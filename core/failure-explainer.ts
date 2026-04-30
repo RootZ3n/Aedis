@@ -34,6 +34,8 @@ export type FailureStage =
   | "verifying"
   | "merging"
   | "committing"
+  | "rollback"
+  | "provider-config"
   | "execution-gate"
   | "unknown";
 
@@ -71,6 +73,8 @@ export function explainFailure(receipt: RunReceipt): FailureExplanation {
   if (gateReason) evidence.push(`gate:${truncate(gateReason, 80)}`);
   if (mergeReason) evidence.push(`merge:${truncate(mergeReason, 80)}`);
   if (verification) evidence.push(`verification:${verification.verdict}`);
+  if (receipt.rollback) evidence.push(`rollback:${receipt.rollback.status}`);
+  if (receipt.providerLaneTruth) evidence.push(`providerLane:${receipt.providerLaneTruth.status}`);
   if (failedNodes > 0) evidence.push(`failedNodes:${failedNodes}`);
 
   // ── Rule 1: user cancelled ─────────────────────────────────────
@@ -80,6 +84,33 @@ export function explainFailure(receipt: RunReceipt): FailureExplanation {
       stage: "unknown",
       rootCause: "The run was cancelled before it could complete.",
       suggestedFix: "Re-submit the task when you're ready to let it finish.",
+      evidence,
+    };
+  }
+
+  // ── Rule 1a: rollback failure/incomplete dominates ─────────────
+  if (receipt.rollback && receipt.rollback.status !== "clean") {
+    return {
+      code: receipt.rollback.status === "incomplete"
+        ? "rollback-incomplete"
+        : receipt.rollback.status === "unsafe_state"
+          ? "rollback-unsafe-state"
+          : "rollback-failed",
+      stage: "rollback",
+      rootCause: receipt.rollback.summary,
+      suggestedFix:
+        "Manually inspect the repo or workspace before trusting the result. Check git status, review dirty files, and restore or discard changes explicitly.",
+      evidence,
+    };
+  }
+
+  if (receipt.providerLaneTruth?.status === "not_run") {
+    return {
+      code: "unsupported-provider-lane-config",
+      stage: "provider-config",
+      rootCause: receipt.providerLaneTruth.reason,
+      suggestedFix:
+        "Edit .aedis/lane-config.json to use a supported provider/model/lane, or set allowFallback:true only when running the registry default builder is intentional.",
       evidence,
     };
   }

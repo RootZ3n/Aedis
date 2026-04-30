@@ -111,6 +111,6 @@ Those warnings currently influence:
 Aedis loads the shared substrate dynamically from Squidley core via:
 
 - `AEDIS_LAB_MEMORY_MODULE`
-- default: `/mnt/ai/squidley-v2/core/dist/memory/index.js`
+- default: disabled unless `AEDIS_LAB_MEMORY_MODULE=/path/to/memory/index.js` is set
 
 If the module is unavailable, Aedis keeps running and falls back to its local `.aedis/memory.json` behavior.

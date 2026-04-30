@@ -1,7 +1,7 @@
 {
   "name": "aedis",
   "version": "1.0.0",
-  "description": "Build quality without token burn.",
+  "description": "Supervised AI build orchestration with receipts, verification, and human approval.",
   "main": "dist/server/index.js",
   "type": "module",
   "files": [
@@ -9,7 +9,10 @@
     "ui/",
     "docs/",
     "README.md",
-    ".env.example"
+    ".env.example",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "LICENSE"
   ],
   "bin": {
     "aedis": "./dist/cli/aedis.js"
@@ -19,15 +22,23 @@
     "start:dist": "node dist/server/index.js",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc -p tsconfig.build.json && node scripts/write-build-info.mjs",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "dev": "npx tsx watch server/index.ts",
     "cli": "tsx cli/aedis.ts",
     "prepack": "npm run build",
-    "test": "bash -O globstar -c 'tsx --test core/**/*.test.{ts,tsx} server/**/*.test.ts workers/**/*.test.ts cli/**/*.test.{ts,tsx} scripts/**/*.test.ts'",
+    "test": "bash -O globstar -c 'tsx --test --test-concurrency=4 core/**/*.test.{ts,tsx} server/**/*.test.ts workers/**/*.test.ts cli/**/*.test.{ts,tsx} scripts/**/*.test.ts'",
+    "test:gauntlet": "tsx --test core/regression-gauntlet.test.ts",
+    "smoke": "node scripts/smoke.mjs",
     "tui": "tsx cli/tui/index.tsx",
     "security:secrets": "bash scripts/check-secrets.sh",
+    "audit:release": "npm audit --audit-level=moderate",
+    "verify:release": "npm run typecheck && npm run build && npm test && npm run security:secrets && npm run smoke",
     "check": "npm run security:secrets && npm test && npm run build && npx tsc -p tsconfig.build.json --noEmit",
     "burn:soft": "npx tsx scripts/burn-in/test-burn-in.ts",
     "burn:hard": "npx tsx scripts/burn-in/test-burn-in-hard.ts"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "keywords": [
     "ai",

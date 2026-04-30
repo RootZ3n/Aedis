@@ -16,9 +16,9 @@
  *     runShadowBuilder, which preserves the "shadow-never-promotes"
  *     invariant via the workspace-role guard in promoteToSource.
  *   - Unknown providers (not in the Provider union from
- *     core/model-invoker.ts) return null. The caller falls back to
- *     the registry default and logs the gap so a typo in
- *     `.aedis/lane-config.json` doesn't crash the lane silently.
+ *     core/model-invoker.ts) return null. Public RC callers validate
+ *     before dispatch and fail closed unless the lane config explicitly
+ *     opts into fallback.
  */
 
 import { BuilderWorker } from "../workers/builder.js";
@@ -47,6 +47,36 @@ const SUPPORTED_PROVIDERS: ReadonlySet<Provider> = new Set([
 
 export function isSupportedProvider(p: string): p is Provider {
   return SUPPORTED_PROVIDERS.has(p as Provider);
+}
+
+const SUPPORTED_MODELS_BY_PROVIDER: Readonly<Record<Provider, readonly string[]>> = Object.freeze({
+  local: ["local", "integration-judge", "verification"],
+  ollama: ["qwen3.5:9b"],
+  openrouter: [
+    "xiaomi/mimo-v2.5",
+    "xiaomi/mimo-v2-pro",
+    "deepseek/deepseek-v4-flash",
+    "deepseek-v4-flash",
+    "moonshotai/kimi-k2",
+    "z-ai/glm-5.1",
+  ],
+  anthropic: ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+  openai: ["gpt-4o-mini"],
+  minimax: ["minimax-coding"],
+  modelstudio: ["qwen3.6-plus"],
+  zai: ["glm-5.1"],
+  "glm-5.1-openrouter": ["z-ai/glm-5.1", "glm-5.1"],
+  "glm-5.1-direct": ["glm-5.1", "z-ai/glm-5.1"],
+});
+
+export function isSupportedProviderModel(provider: string, model: string): provider is Provider {
+  if (!isSupportedProvider(provider)) return false;
+  return SUPPORTED_MODELS_BY_PROVIDER[provider].includes(model.trim());
+}
+
+export function describeSupportedProviderModels(provider: string): string {
+  if (!isSupportedProvider(provider)) return "none";
+  return SUPPORTED_MODELS_BY_PROVIDER[provider].join(", ");
 }
 
 export interface CreateBuilderForLaneInput {

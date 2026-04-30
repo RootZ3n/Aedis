@@ -1,148 +1,114 @@
-# AEDIS
+# Aedis
 
-**Governed AI Build Orchestrator**
+**Supervised AI build orchestration for repositories.**
 
-*The anti-CC. Cheap, governed, auditable, self-aware.*
+Aedis is a supervised AI build orchestrator that plans, edits, verifies, and stages repository changes through explicit gates, receipts, and human approval.
 
----
+Public RC mode is review-only by default. Aedis can prepare and verify changes in an isolated workspace, but source-repo promotion requires explicit trusted-write opt-in, a passing verifier, critic review of the actual diff, and human approval of the final diff.
 
-Aedis takes a natural language prompt, decomposes it into a governed execution plan, dispatches it through a 5-worker pipeline, verifies the output against hard contracts, and — with operator approval — commits real code changes to a git repo. If any gate fails, everything rolls back.
+## What Aedis Is
 
-Not a chatbot wrapper. Not a prompt-and-pray loop. Not autonomous. A supervised build system with receipts, rollback, approval gates, and a merge gate that means it.
+- Supervised AI build orchestration.
+- A planning, editing, and verification pipeline.
+- Receipt-driven change staging.
+- A human-approved integration tool.
+- Review-only by default in public RC mode.
 
-## Benchmark
+## What Aedis Is Not
 
-7 tasks completed on its own codebase. Every one passed the merge gate and committed clean.
+- Not a fully autonomous code replacement.
+- Not a guaranteed rollback system. Aedis attempts rollback and records receipts; if rollback is incomplete, the final result is unsafe/failure and manual inspection is required.
+- Not a guaranteed cheaper Claude Code replacement. Provider/model cost depends on your configuration and workload.
+- Not safe for untrusted repositories without review.
+- Not a reason to skip human diff review.
+- Not a silent auto-merge tool.
 
-| Metric | Value |
-|---|---|
-| Tasks completed | 7 |
-| Total cost | **$0.17** |
-| Avg cost per task | **$0.024** |
-| Most expensive task | $0.038 |
-| Equivalent CC sessions | $5 -- 10 |
+## Ecosystem
 
-All five workers reporting:
+- **Colosseum**: agent trial harness.
+- **Crucible**: scoreboard and evidence viewer.
+- **Verum**: adversarial trust and probing layer.
+- **Aedis**: governed build orchestration.
+- **Squidley Public**: broader AI control surface.
 
-| Worker | Role | Confidence |
-|---|---|---|
-| Scout | File discovery, risk assessment, dependency mapping | 0.92 |
-| Builder | Model-driven code generation with contract scope | -- |
-| Critic | Adversarial review, request-changes loop | 0.84 |
-| Verifier | Type check, lint, contract validation | 0.95 |
-| Integrator | Cross-file merge, final coherence pass | 1.00 |
+## Pipeline
 
-## Cost Comparison
-
-| Task type | Aedis | Claude Code |
-|---|---|---|
-| Add JSDoc comment | $0.02 | ~$0.50 |
-| Multi-file feature | $0.04 | ~$2.00 |
-| Full session (10 tasks) | $0.25 | $5 -- 10 |
-
-Builder model selection lives per-repo in `.aedis/model-config.json` with declarative `chain[]` fallbacks. The default in-repo configuration uses `xiaomi/mimo-v2.5` on OpenRouter for the hot-path roles. Anthropic is *not* in the hot path by default — see `DOCTRINE.md` "No Anthropic Hot Path." Scout and Verifier are local (zero-cost). Coordinator, MergeGate, VerificationPipeline, and ContextAssembler run locally with no model calls.
-
-## Architecture
-
-```
-prompt
-  |
-  v
-Coordinator ─── CharterGenerator ─── ScopeClassifier
-  |                                        |
-  v                                        v
-TaskGraph ─── Scout ─── Builder ─── Critic ─── Verifier ─── Integrator
-  |               |         |          |           |             |
-  v               v         v          v           v             v
-ContextGate   FileRead   ModelCall   Review    TypeCheck     MergeGate
-  |                         |                                    |
-  v                         v                                    v
-ProjectMemory          DiffApplier                        git commit / rollback
+```text
+Prompt
+  -> Coordinator
+  -> Scout
+  -> Builder
+  -> Critic
+  -> Verifier
+  -> Integrator
+  -> receipt + staged diff + human approval gate
 ```
 
-**Coordinator** (`core/coordinator.ts`) — Master orchestrator. Owns the full lifecycle: charter, intent, task graph, dispatch, rehearsal loop, verification, merge gate, commit, receipt. Never does work itself — orchestrates workers and enforces governance.
+Core guarantees are conservative:
 
-**MergeGate** (`core/merge-gate.ts`) — Hard stop before commit. Collects findings from IntegrationJudge, VerificationPipeline, and change-set gate. One critical finding blocks. No "looks mostly good" path. On block: rolls back every file the Builder touched, including restoring deleted files from git HEAD.
+- Writes are contained to the intended workspace/source root with realpath/lstat checks.
+- Unsupported provider, model, or lane configuration fails closed by default.
+- Rollback failure or incomplete cleanup dominates the final status.
+- Source promotion is disabled by default for public RC.
+- Promotion requires an approved final diff receipt.
 
-**VerificationPipeline** (`core/verification-pipeline.ts`) — Multi-stage verification: diff check, contract check, cross-file coherence, lint, typecheck, custom hooks. Produces a receipt with confidence score. Supports per-wave verification for multi-file plans.
-
-**Workers** (`workers/`) — Five specialized workers, each with a single responsibility:
-- **Scout** — Reads files, maps dependencies, estimates complexity, assesses risk. No model calls.
-- **Builder** — Single-file contract-scoped code generation. Reads the file, builds a contract from the charter, calls the model, applies the diff, enforces forbidden-change rules. Section-edit mode for large files (extracts relevant window, applies unified diff back to full file).
-- **Critic** — Reviews Builder output against the contract. Can request changes (triggers rehearsal loop) or approve.
-- **Verifier** — Runs typecheck, lint, and custom hooks against changed files.
-- **Integrator** — Final cross-file merge and coherence check.
-
-**ProjectMemory** (`core/project-memory.ts`) — Persistent per-repo knowledge. Tracks recent files, task summaries, and file clusters that change together. Feeds into ContextGate so the next run knows what worked, what failed, and which files are related.
-
-**ContextGate** (`core/context-gate.ts`) — Controls what context each worker sees. Wave-aware: in multi-file plans, builders only see their wave's invariants and sibling files. Minimal-context discipline — nothing from later waves, nothing from elsewhere in the repo.
-
-**PromptNormalizer** (`core/prompt-normalizer.ts`) — Rewrites vague prompts into explicit engineering instructions. Uses a local model (Qwen 3.5 4B via Ollama) with quality gate — rejects normalization that mangles the original intent.
-
-**Loqui** (`core/loqui.ts`, `core/loqui-router.ts`) — Conversational interface for repo reasoning. Single input, intent-classified routing: build, answer, resume, dry-run, or clarify. The UI sends every message through Loqui — there's no mode to pick.
-
-**Vision** (`core/vision.ts`) — Optional post-build self-check. Captures a screenshot of the running UI and analyzes it for visible errors. Strict opt-in: enabled via `AEDIS_VISION=true` AND a configured model via `AEDIS_VISION_MODEL=<ollama-vision-model>` (e.g. `qwen3-vl:4b`). If `AEDIS_VISION_MODEL` is unset OR the model isn't installed in Ollama, the check skips cleanly with a logged reason — no auto-pull, no implicit default.
-
-**Fallback chains** — Per-role fallback chains are declared in `.aedis/model-config.json`. The runtime walks the chain in order on timeout or error. Per-run timeout blacklisting and a cross-run circuit breaker (`.aedis/circuit-breaker-state.json`) sit in front of every chain step. There is **no** universal safety-net provider — lane attribution stays honest, and a model is only ever invoked if the caller named it explicitly.
-
-**TrustRouter** (`router/trust-router.ts`) — Routes Builder tasks to tiers (fast/standard/premium) from complexity + blast radius + quality bar. Capability-floor and weak-output retry escalate the tier when the brief demands more or the model produced empty/raw/prose/critic-rejected output. *Non-Builder workers (Critic, Integrator, Scout, Verifier) read static `model-config[<role>]` assignments and are not yet tier-routed* — see `DOCTRINE.md` "Trust Boundaries."
-
-**Provider transparency** — Every chain step (success, error, blacklist skip, circuit-breaker skip, empty-response, cancellation) is recorded with timing and cost on `PersistentRunReceipt.providerAttempts[]`. The routing decision and any escalations are recorded on `routing[]`. Operators can see exactly which providers were tried and why without re-deriving from logs.
-
-**End-to-end cancellation** — `Coordinator.cancel(runId)` triggers a per-run `AbortController`; in-flight provider HTTP requests are dropped immediately rather than waiting to settle. Cancelled errors are never retried, never blacklisted, never penalize the circuit breaker.
-
-**Audit-only structural pass** — `repair-audit-pass` surfaces structural smells (broken imports, missing exports, stale markers) as advisory merge-gate findings. It never modifies any file. Receipts say so explicitly.
-
-## Key Features
-
-**Hard merge gate with rollback.** The MergeGate is not advisory. One critical finding blocks the commit. On block, the Coordinator restores every modified file from `originalContent`, removes created files, and recovers deleted files from git HEAD. The repo is left exactly as the user started.
-
-**Wave-aware multi-file execution.** Large tasks are decomposed into waves by the planner. Each wave is verified independently. A failing wave blocks downstream waves and surfaces as a critical merge-gate finding. Builders in each wave see only their wave's invariants.
-
-**Execution truth enforcement.** The ExecutionGate runs after every other gate and is the single authority on whether the run produced real, verifiable work. A "success" from the verdict logic that produces zero evidence is forced to "failed." The receipt tells the truth.
-
-**Project memory.** Every task is recorded: prompt, verdict, commit SHA, cost, files touched. File clusters that change together are learned automatically. The next run's ContextGate uses this to surface relevant files and landmines.
-
-**Scope classifier.** Classifies prompts as single-file, multi-file, or architectural before execution. Oversized requests are flagged early. Blast radius is estimated and attached to the receipt.
-
-**Loqui conversational reasoning.** Ask questions about the repo, plan changes before committing, resume failed runs, or get dry-run previews — all through the same input. Intent classification happens server-side.
-
-**Vision self-check.** Post-build screenshot analysis catches visual regressions that type checks miss. Strict opt-in: requires both `AEDIS_VISION=true` and `AEDIS_VISION_MODEL=<installed-ollama-vision-model>`. Skips cleanly when not configured or when the model is missing — never auto-pulls, never falls back to a default.
-
-**Declared fallback chains.** Never stuck on one provider. The chain in `.aedis/model-config.json` is walked on timeout or error, with per-run blacklisting so a flaky provider doesn't slow down every task. No hidden fallback — the chain is the contract.
-
-**Human-readable receipts.** Every run produces a structured receipt with: classification, headline, confidence breakdown (planning/execution/verification), blast radius, cost, file list, failure explanation, and next steps. The UI renders this — users never read logs.
-
-## Quick Start
+## Quickstart
 
 ```bash
 git clone https://github.com/RootZ3n/aedis
 cd aedis
 cp .env.example .env
+npm ci
+npm run build
+npm run smoke
+npm run verify:release
 ```
 
-Edit `.env` and choose one provider path:
+Expected smoke output:
 
-### A. Local smoke test (Ollama only)
+```text
+[smoke] OK - dist artifacts present for version ...
+```
 
-Use this to prove Aedis can complete one tiny supervised task without cloud keys.
-It is slower/lower quality than full mode and is only intended for first-run
-verification.
+Expected release verification summary:
+
+```text
+# pass ...
+# fail 0
+[check-secrets] OK - no forbidden patterns in tracked files
+[smoke] OK - dist artifacts present for version ...
+```
+
+Start the server after building:
+
+```bash
+npm run start:dist
+```
+
+Open [http://127.0.0.1:18796](http://127.0.0.1:18796).
+
+The default bind is `127.0.0.1`. Binding to `0.0.0.0` requires both:
+
+```bash
+AEDIS_HOST=0.0.0.0
+AEDIS_ALLOW_PUBLIC_BIND=true
+```
+
+Auth is enabled by default. `TAILSCALE_ONLY=true` keeps Tailscale identity enforcement enabled. For local-only development, `TAILSCALE_ONLY=false` disables auth; do not use that on a shared network.
+
+## Configuration
+
+Copy `.env.example` to `.env` and choose a model profile.
+
+Local smoke mode:
 
 ```bash
 AEDIS_MODEL_PROFILE=local-smoke
+ollama pull qwen3.5:9b
+ollama pull qwen3.5:4b
 ```
 
-Install and start Ollama, then pull the required local models:
-
-```bash
-ollama pull qwen3.5:9b    # critic and local smoke worker
-ollama pull qwen3.5:4b    # prompt normalizer
-```
-
-### B. Full recommended mode
-
-Use this for real work:
+Full mode:
 
 ```bash
 AEDIS_MODEL_PROFILE=default
@@ -150,74 +116,57 @@ OPENROUTER_API_KEY=<your-openrouter-key>
 ZAI_API_KEY=<your-zai-key>
 ```
 
-The default/full config uses OpenRouter for the builder/coordinator hot path,
-Z.ai for integrator/escalation assignments, and Ollama for critic/prompt normalization. See
-[docs/PROVIDER-SETUP.md](docs/PROVIDER-SETUP.md) for details.
-
-Auth is enabled by default (Tailscale identity required). For local development,
-set `TAILSCALE_ONLY=true` in `.env` to disable auth.
-
-Then build and run:
+Public RC source promotion stays disabled unless explicitly enabled:
 
 ```bash
-npm ci
-npm run build
-npm run start:dist
+AEDIS_ALLOW_SOURCE_PROMOTION=true
+AEDIS_TRUSTED_LOCAL_REPO_WRITES=true
 ```
 
-Open [http://127.0.0.1:18796](http://127.0.0.1:18796).
+Even with those flags, promotion still requires verifier pass, critic actual-diff review, and human diff approval.
 
-Type a prompt. Watch the worker grid light up. Read the receipt.
+## Useful Commands
 
-Run `aedis doctor` to verify your setup — it checks server health and build staleness. Aedis stores runtime receipts under `AEDIS_STATE_ROOT` (default: the Aedis install directory), not in the target repo.
-If cloud keys are missing and Ollama is ready, doctor prints the exact
-`AEDIS_MODEL_PROFILE=local-smoke` command for the local smoke path.
+```bash
+npm run typecheck
+npm run build
+npm test
+npm run security:secrets
+npm run smoke
+npm run audit:release
+npm run verify:release
+```
 
-**Using Aedis as your primary repo tool with approval in the loop?**
-See [docs/SUPERVISED-QUICKSTART.md](docs/SUPERVISED-QUICKSTART.md) — a
-one-page walkthrough covering doctor, the safe default policy, TUI
-review, approve/reject, burn-in, lane config, stale-server warnings,
-and cleanup/recovery.
+`npm audit --audit-level=moderate` is the dependency advisory gate used for release review.
 
 ## API
 
 ```bash
-# Submit a build task
 curl -X POST http://127.0.0.1:18796/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"prompt": "add error handling to server/index.ts", "repoPath": "/path/to/repo"}'
-
-# Ask Loqui a question
-curl -X POST http://127.0.0.1:18796/tasks/loqui/unified \
-  -H 'Content-Type: application/json' \
-  -d '{"input": "what does the merge gate do?", "repoPath": "/path/to/repo"}'
-
-# Dry run (no execution)
-curl -X POST http://127.0.0.1:18796/tasks/dry-run \
-  -H 'Content-Type: application/json' \
-  -d '{"input": "refactor the context gate", "repoPath": "/path/to/repo"}'
+  -d '{"prompt":"add error handling to server/index.ts","repoPath":"/path/to/repo"}'
 ```
 
-WebSocket at `ws://127.0.0.1:18796/ws` for live events. Send `{"type":"subscribe","runId":"..."}` after connect.
+Dry run:
 
-## Stack
+```bash
+curl -X POST http://127.0.0.1:18796/tasks/dry-run \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"refactor the context gate","repoPath":"/path/to/repo"}'
+```
 
-TypeScript. Fastify. WebSocket. No framework. No ORM. No build step beyond `tsc`.
-
-Models: per-repo selection via `.aedis/model-config.json` with declarative `chain[]` fallbacks. The default in-repo configuration is `xiaomi/mimo-v2.5` on OpenRouter for hot-path roles. Qwen 3.5 4B (local via Ollama) for prompt normalization. There is no hidden last-resort provider; the chain in model-config is the contract. See `DOCTRINE.md` "Model Assignments" for the full picture, including the no-Anthropic-in-hot-path rule.
+WebSocket events are available at `ws://127.0.0.1:18796/ws`.
 
 ## Status
 
-Active development. Running in supervised production on TypeScript monorepos. Building itself for $0.024 per task.
+Public RC hardening. Linux, macOS, and WSL2 are the expected install targets. Windows PowerShell is not yet verified.
 
 ## Docs
 
-- [Provider Setup](docs/PROVIDER-SETUP.md) — configure OpenRouter, Ollama, Z.ai, and optional providers
-- [Supervised Quickstart](docs/SUPERVISED-QUICKSTART.md) — approval flow, doctor, TUI, burn-in, lane config
-- [FAQ](FAQ.md) — common questions about safety, providers, and setup
-- [Contributing](CONTRIBUTING.md) — how to build, test, and submit PRs
-- [License](LICENSE) — MIT
-
----
-
-*Built by [Zen](https://github.com/RootZ3n). Governed by design.*
+- [Provider Setup](docs/PROVIDER-SETUP.md)
+- [Supervised Quickstart](docs/SUPERVISED-QUICKSTART.md)
+- [Security](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [Screenshots placeholder](docs/screenshots/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [License](LICENSE)

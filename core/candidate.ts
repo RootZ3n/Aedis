@@ -278,6 +278,183 @@ export function selectBestCandidate(
 }
 
 /**
+ * Operator-facing explanation of why selection picked the winner.
+ *
+ * Pure projection of `compareCandidates`'s tier outcomes — no decision
+ * logic of its own. Used by the run-detail route + UI so the operator
+ * can see, per losing candidate, exactly which tier it lost on
+ * ("smaller diff", "lower cost", "primary-role tiebreak"). Disqualified
+ * candidates appear in `losers` with their disqualification reason
+ * instead of a tier comparison string.
+ *
+ * SAFETY: never declares a shadow candidate as promotable. The
+ * `shadowPromoteAllowed: false` field is structural and mirrors the
+ * RuntimePolicy invariant — selection picks a winner, but only the
+ * primary workspace ever reaches promoteToSource.
+ */
+export interface CandidateSelectionExplanation {
+  /** Winning workspaceId, or null when no candidate qualified. */
+  readonly winnerWorkspaceId: string | null;
+  /** Winner's role — "primary" or "shadow". Null when no winner. */
+  readonly winnerRole: WorkspaceRole | null;
+  /** Per-candidate row covering both winner and losers. */
+  readonly summaries: readonly CandidateSelectionRow[];
+  /** True when role tiebreak (tier 5) actually decided the winner. */
+  readonly rolePreferenceUsed: boolean;
+  /** True when cost differed between qualified candidates and tier 3 fired. */
+  readonly costAffected: boolean;
+  /** True when advisoryFindings differed and tier 1 fired. */
+  readonly advisoryAffected: boolean;
+  /** Architectural reminder. Always false — shadow candidates can't promote. */
+  readonly shadowPromoteAllowed: false;
+}
+
+export interface CandidateSelectionRow {
+  readonly workspaceId: string;
+  readonly role: WorkspaceRole;
+  readonly outcome: "selected" | "lost" | "disqualified";
+  /** Disqualification reason from candidateDisqualification, if any. */
+  readonly disqualification: string | null;
+  /**
+   * Human-readable explanation of why this row got its outcome:
+   *   - "selected: smaller cleaner diff"
+   *   - "lost: more advisories than primary"
+   *   - "lost: primary preferred on tie"
+   *   - "disqualified: criticalFindings=2"
+   */
+  readonly reason: string;
+}
+
+export function buildSelectionExplanation(
+  candidates: readonly Candidate[],
+): CandidateSelectionExplanation {
+  if (candidates.length === 0) {
+    return {
+      winnerWorkspaceId: null,
+      winnerRole: null,
+      summaries: [],
+      rolePreferenceUsed: false,
+      costAffected: false,
+      advisoryAffected: false,
+      shadowPromoteAllowed: false,
+    };
+  }
+
+  const winner = selectBestCandidate(candidates);
+  const qualified = candidates.filter((c) => candidateDisqualification(c) === null);
+
+  // Did any tier actually fire as a tiebreak between qualified
+  // candidates? Used for the boolean "X affected selection" flags
+  // the UI surfaces.
+  let advisoryAffected = false;
+  let costAffected = false;
+  let rolePreferenceUsed = false;
+  if (qualified.length >= 2 && winner) {
+    for (const other of qualified) {
+      if (other === winner) continue;
+      const advW = winner.advisoryFindings ?? 0;
+      const advO = other.advisoryFindings ?? 0;
+      if (advW !== advO) advisoryAffected = true;
+      if (winner.costUsd !== other.costUsd) costAffected = true;
+      // Role-preference fires only when every earlier tier was equal
+      // and the winner is primary while the other is shadow.
+      const sizeW = diffSize(winner);
+      const sizeO = diffSize(other);
+      const earlierTiersEqual =
+        advW === advO && sizeW === sizeO && winner.costUsd === other.costUsd;
+      if (
+        earlierTiersEqual &&
+        winner.role === "primary" &&
+        other.role === "shadow" &&
+        winner.lane === other.lane
+      ) {
+        rolePreferenceUsed = true;
+      }
+    }
+  }
+
+  const summaries: CandidateSelectionRow[] = candidates.map((c) => {
+    const dq = candidateDisqualification(c);
+    if (dq) {
+      return {
+        workspaceId: c.workspaceId,
+        role: c.role,
+        outcome: "disqualified",
+        disqualification: dq,
+        reason: `disqualified: ${dq}`,
+      };
+    }
+    if (winner && c.workspaceId === winner.workspaceId) {
+      const reason = describeWinReason({
+        rolePreferenceUsed,
+        costAffected,
+        advisoryAffected,
+        winner,
+      });
+      return {
+        workspaceId: c.workspaceId,
+        role: c.role,
+        outcome: "selected",
+        disqualification: null,
+        reason: `selected: ${reason}`,
+      };
+    }
+    if (!winner) {
+      return {
+        workspaceId: c.workspaceId,
+        role: c.role,
+        outcome: "lost",
+        disqualification: null,
+        reason: "lost: no candidate qualified",
+      };
+    }
+    return {
+      workspaceId: c.workspaceId,
+      role: c.role,
+      outcome: "lost",
+      disqualification: null,
+      reason: `lost: ${describeLossVsWinner(c, winner)}`,
+    };
+  });
+
+  return {
+    winnerWorkspaceId: winner?.workspaceId ?? null,
+    winnerRole: winner?.role ?? null,
+    summaries,
+    rolePreferenceUsed,
+    costAffected,
+    advisoryAffected,
+    shadowPromoteAllowed: false,
+  };
+}
+
+function describeWinReason(input: {
+  rolePreferenceUsed: boolean;
+  costAffected: boolean;
+  advisoryAffected: boolean;
+  winner: Candidate;
+}): string {
+  if (input.advisoryAffected) return "fewer advisory findings";
+  if (input.costAffected) return "lower cost on quality tie";
+  if (input.rolePreferenceUsed) return "primary-role tiebreak";
+  if (input.winner.role === "primary") return "primary candidate qualified";
+  return "smaller cleaner diff";
+}
+
+function describeLossVsWinner(loser: Candidate, winner: Candidate): string {
+  const advL = loser.advisoryFindings ?? 0;
+  const advW = winner.advisoryFindings ?? 0;
+  if (advL !== advW) return advL > advW ? "more advisory findings" : "tied on advisories but lost later tier";
+  const sizeL = diffSize(loser);
+  const sizeW = diffSize(winner);
+  if (sizeL !== sizeW) return sizeL > sizeW ? "larger diff than winner" : "smaller diff but lost later tier";
+  if (loser.costUsd !== winner.costUsd) return loser.costUsd > winner.costUsd ? "higher cost than winner" : "tied on cost but lost later tier";
+  if (loser.lane === "cloud" && winner.lane === "local") return "cloud lane lost to local on tie";
+  if (loser.role === "shadow" && winner.role === "primary") return "primary preferred on tie";
+  return "lost on tier comparison";
+}
+
+/**
  * Tiered comparator on the user's policy. Negative → a wins;
  * positive → b wins; zero → fully equal (caller may rely on
  * input order as the implicit final tiebreaker).

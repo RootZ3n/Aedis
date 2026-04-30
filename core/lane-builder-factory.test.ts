@@ -22,7 +22,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { createBuilderForLane, isSupportedProvider } from "./lane-builder-factory.js";
+import {
+  createBuilderForLane,
+  describeSupportedProviderModels,
+  isSupportedProvider,
+  isSupportedProviderModel,
+} from "./lane-builder-factory.js";
 import { BuilderWorker } from "../workers/builder.js";
 import { Coordinator } from "./coordinator.js";
 import { ReceiptStore } from "./receipt-store.js";
@@ -86,6 +91,14 @@ test("isSupportedProvider type-guards string against the Provider union", () => 
   }
   assert.equal(isSupportedProvider("nonexistent"), false);
   assert.equal(isSupportedProvider(""), false);
+});
+
+test("isSupportedProviderModel validates public-RC provider/model pairs", () => {
+  assert.equal(isSupportedProviderModel("ollama", "qwen3.5:9b"), true);
+  assert.equal(isSupportedProviderModel("openrouter", "xiaomi/mimo-v2.5"), true);
+  assert.equal(isSupportedProviderModel("ollama", "definitely-not-supported"), false);
+  assert.equal(isSupportedProviderModel("swarm-chaos-engine", "qwen3.5:9b"), false);
+  assert.match(describeSupportedProviderModels("ollama"), /qwen3\.5:9b/);
 });
 
 // ─── Pinned model flows into the model dispatch path ────────────────
@@ -407,6 +420,7 @@ function buildHarness(projectRoot: string, opts: {
 test("integration: maybeRunFallbackShadow calls the lane factory with config.shadow inputs", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -451,19 +465,22 @@ test("integration: maybeRunFallbackShadow calls the lane factory with config.sha
 test("integration: factory is NOT invoked when primary qualifies (shadow lane skipped)", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
   try {
     let invoked = 0;
+    let returnedBuilder: AbstractWorker | null = null;
     const stubFactory: typeof createBuilderForLane = () => {
       invoked += 1;
-      return null;
+      return returnedBuilder as unknown as BuilderWorker;
     };
     const { coordinator, registered } = buildHarness(dir, {
       typecheckPasses: true,
       laneBuilderFactory: stubFactory,
     });
+    returnedBuilder = registered;
     await coordinator.submit({ input: "modify widget in core" });
     // Phase D: factory IS called for the primary lane (dispatchNode pin),
     // but NOT for the shadow lane (primary qualified → shadow skipped).
@@ -499,6 +516,7 @@ test("integration: factory not invoked under primary_only (laneConfig fast-path)
 test("integration: factory returning null falls back to registered Builder + manifest still records intended labels", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -520,6 +538,8 @@ test("integration: factory returning null falls back to registered Builder + man
     assert.equal(persisted.length, 1);
     const detail = await harness.receiptStore.getRun(persisted[0].runId);
     const final = (detail as any).finalReceipt;
+    assert.equal(final.providerLaneTruth.status, "fallback_used");
+    assert.match(final.humanSummary.headline, /explicitly allowed provider\/model\/lane fallback/);
     assert.ok(final.candidates);
     const shadow = final.candidates.find((c: any) => c.role === "shadow");
     assert.ok(shadow, "shadow candidate still recorded");
@@ -531,31 +551,107 @@ test("integration: factory returning null falls back to registered Builder + man
   }
 });
 
+async function submitUnsupportedLaneConfig(payload: unknown) {
+  const dir = makeRepoWithLaneConfig(payload);
+  const harness = buildHarness(dir, {
+    typecheckPasses: false,
+    laneBuilderFactory: () => {
+      throw new Error("lane factory must not run for unsupported config");
+    },
+  });
+  const receipt = await harness.coordinator.submit({ input: "modify widget in core" });
+  const persisted = await harness.receiptStore.listRuns(1);
+  const detail = await harness.receiptStore.getRun(persisted[0].runId);
+  return { dir, harness, receipt, detail };
+}
+
+test("fail-closed: unsupported provider does not run the default builder", async () => {
+  const { dir, harness, receipt, detail } = await submitUnsupportedLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "swarm-chaos-engine", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    assert.equal(receipt.verdict, "failed");
+    assert.equal(harness.registered.executions, 0, "registry default builder must not run");
+    assert.equal(detail?.status, "UNSUPPORTED_CONFIG");
+    assert.equal(receipt.providerLaneTruth?.status, "not_run");
+    assert.equal(receipt.providerLaneTruth?.intendedProvider, "swarm-chaos-engine");
+    assert.equal(receipt.providerLaneTruth?.actualProvider, null);
+    assert.equal(receipt.providerLaneTruth?.actualModel, null);
+    assert.match(receipt.humanSummary?.headline ?? "", /did not run a builder/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fail-closed: unsupported model preserves intent and records actual as not_run", async () => {
+  const { dir, harness, receipt, detail } = await submitUnsupportedLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "local", provider: "ollama", model: "not-a-public-rc-model" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    assert.equal(receipt.verdict, "failed");
+    assert.equal(harness.registered.executions, 0);
+    assert.equal(detail?.status, "UNSUPPORTED_CONFIG");
+    assert.equal(receipt.providerLaneTruth?.intendedProvider, "ollama");
+    assert.equal(receipt.providerLaneTruth?.intendedModel, "not-a-public-rc-model");
+    assert.equal(receipt.providerLaneTruth?.intendedLane, "local");
+    assert.equal(receipt.providerLaneTruth?.actualProvider, null);
+    assert.equal(receipt.providerLaneTruth?.actualModel, null);
+    assert.match(receipt.providerLaneTruth?.reason ?? "", /Unsupported primary model/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fail-closed: unsupported lane config fails before execution", async () => {
+  const { dir, harness, receipt, detail } = await submitUnsupportedLaneConfig({
+    mode: "local_then_cloud",
+    primary: { lane: "edge", provider: "ollama", model: "qwen3.5:9b" },
+    shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
+  });
+  try {
+    assert.equal(receipt.verdict, "failed");
+    assert.equal(harness.registered.executions, 0);
+    assert.equal(detail?.status, "UNSUPPORTED_CONFIG");
+    assert.equal(receipt.providerLaneTruth?.status, "not_run");
+    assert.equal(receipt.providerLaneTruth?.actualLane, null);
+    assert.match(receipt.providerLaneTruth?.reason ?? "", /failed validation|Unsupported lane config/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ─── Phase D: per-lane model dispatch — primary + shadow use distinct builders ──
 
 test("integration: primary lane uses factory-pinned builder when laneConfig.primary is set (local_then_cloud)", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
   try {
     const calls: Array<{ provider: string; model: string; role: string }> = [];
     let callCount = 0;
+    let returnedBuilder: AbstractWorker | null = null;
     const stubFactory: typeof createBuilderForLane = (input) => {
       callCount += 1;
       // First call = primary (dispatchNode), second = shadow (maybeRunFallbackShadow)
       const role = callCount === 1 ? "primary" : "shadow";
       calls.push({ provider: input.provider, model: input.model, role });
-      // Return null so the registered builder handles both — this test
+      // Return the registered stub so no real provider is called; this test
       // verifies the factory is CALLED with correct args, not that it
       // produces a working builder (that's covered by other tests).
-      return null;
+      return returnedBuilder as unknown as BuilderWorker;
     };
     const harness = buildHarness(dir, {
       typecheckPasses: false,
       laneBuilderFactory: stubFactory,
     });
+    returnedBuilder = harness.registered;
     await harness.coordinator.submit({ input: "modify widget in core" });
 
     // Factory must be called for BOTH primary and shadow lanes.
@@ -604,22 +700,25 @@ test("integration: primary_only mode does NOT call factory for primary builder",
 test("integration: two distinct pinned builders for primary and shadow with different models", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
   try {
     // Track which builder instances are created and which model they carry.
     const instances: Array<{ provider: string; model: string; instance: object }> = [];
+    let returnedBuilder: AbstractWorker | null = null;
     const stubFactory: typeof createBuilderForLane = (input) => {
-      // Return the registered builder (null) but record the call to
+      // Return the registered stub but record the call to
       // prove distinct instantiation was attempted with different models.
       instances.push({ provider: input.provider, model: input.model, instance: {} });
-      return null;
+      return returnedBuilder as unknown as BuilderWorker;
     };
     const harness = buildHarness(dir, {
       typecheckPasses: false,
       laneBuilderFactory: stubFactory,
     });
+    returnedBuilder = harness.registered;
     await harness.coordinator.submit({ input: "modify widget in core" });
 
     // Must have at least 2 factory calls with DIFFERENT models.
@@ -639,6 +738,7 @@ test("integration: two distinct pinned builders for primary and shadow with diff
 test("integration: registry is not mutated when factory creates lane builders", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -690,6 +790,7 @@ test("integration: registry is not mutated when factory creates lane builders", 
 test("integration: candidate receipt contains provider/model/lane for both primary and shadow", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -728,6 +829,7 @@ test("integration: candidate receipt contains provider/model/lane for both prima
 test("integration: primary fails, shadow succeeds — selection picks shadow with correct model attribution", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -767,6 +869,7 @@ test("integration: primary fails, shadow succeeds — selection picks shadow wit
 test("integration: cost-surfacing log fires on shadow dispatch", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -843,6 +946,7 @@ class CostfulBuilder extends AbstractWorker {
 test("receipt records actualModel from WorkerResult.cost.model when shadow runs", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -876,6 +980,7 @@ test("receipt records actualModel from WorkerResult.cost.model when shadow runs"
 test("receipt actualModel === intentModel when no fallback fired (convergent case)", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -919,6 +1024,7 @@ test("receipt actualModel === intentModel when no fallback fired (convergent cas
 test("lane-rescue: primary verification fails → shadow is HARD-selected", async () => {
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -984,6 +1090,7 @@ test("lane-rescue: receipt records intent vs actual model on the rescued shadow"
   // distinction even when selection swapped lanes.
   const dir = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });

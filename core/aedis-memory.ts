@@ -137,7 +137,7 @@ interface RepoIndexSnapshotLike {
   files: RepoIndexFile[];
 }
 
-const DEFAULT_MEMORY_MODULE = process.env["AEDIS_LAB_MEMORY_MODULE"] ?? "/mnt/ai/squidley-v2/core/dist/memory/index.js";
+const DEFAULT_MEMORY_MODULE = process.env["AEDIS_LAB_MEMORY_MODULE"] ?? "";
 const PROJECT_SPACE_PREFIX = "aedis/project";
 const RUNS_SPACE = "aedis/runs";
 const FAILURES_SPACE = "aedis/failures";

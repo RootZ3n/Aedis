@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { formatDoctorReport, formatProviderCheckReport, type DoctorInput } from "./aedis.js";
+import { formatDoctorReport, formatProviderCheckReport, isFailureStatus, type DoctorInput } from "./aedis.js";
 
 const KNOWN_LOCAL: DoctorInput["localBuild"] = {
   version: "1.0.0",
@@ -57,6 +57,15 @@ test("doctor: server reachable + matching commit prints expected fields with no 
   // No drift warnings expected on a matched checkout.
   assert.doesNotMatch(report, /differs from local/);
   assert.doesNotMatch(report, /no build metadata/);
+});
+
+test("cli status classification treats rollback/unsafe/provider states as failures", () => {
+  for (const status of ["failed", "ROLLBACK_FAILED", "ROLLBACK_INCOMPLETE", "UNSAFE_STATE", "UNSUPPORTED_CONFIG", "CLEANUP_ERROR", "EXECUTION_ERROR"]) {
+    assert.equal(isFailureStatus(status), true, `${status} must produce a nonzero status command`);
+  }
+  for (const status of ["complete", "running", "READY_FOR_PROMOTION", "AWAITING_APPROVAL"]) {
+    assert.equal(isFailureStatus(status), false, `${status} must not be treated as terminal failure`);
+  }
 });
 
 test("doctor provider report points missing cloud-key users at local smoke when Ollama is ready", () => {

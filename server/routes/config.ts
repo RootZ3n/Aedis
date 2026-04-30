@@ -14,6 +14,10 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import type { ServerContext } from "../index.js";
+import {
+  DEFAULT_LANE_CONFIG,
+  loadLaneConfigFromDisk,
+} from "../../core/lane-config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -473,6 +477,116 @@ function legacyConfigPath(projectRoot: string): string {
 // don't want to spam the log.
 const doctrineWarnedRoots = new Set<string>();
 
+/**
+ * Per-role provenance for the assignment surfaced on GET /config/models.
+ *
+ *   "profile"  — the value comes from AEDIS_MODEL_PROFILE (currently
+ *                local-smoke). The saved .aedis/model-config.json (if
+ *                any) is *ignored* under this profile, so the UI must
+ *                show the value as read-only.
+ *   "saved"    — value came from .aedis/model-config.json (or the
+ *                legacy .zendorium path). The operator's last save
+ *                is in effect.
+ *   "default"  — neither a profile override nor a saved file applies;
+ *                the role uses DEFAULT_MODEL_CONFIG. Surfaced so the
+ *                operator can tell "this is what Aedis ships with"
+ *                apart from "this is what I configured."
+ */
+export type ModelAssignmentSource = "profile" | "saved" | "default";
+
+export interface ModelConfigSourceMap {
+  scout: ModelAssignmentSource;
+  builder: ModelAssignmentSource;
+  critic: ModelAssignmentSource;
+  verifier: ModelAssignmentSource;
+  integrator: ModelAssignmentSource;
+  escalation: ModelAssignmentSource;
+  coordinator: ModelAssignmentSource;
+}
+
+export interface ResolvedModelConfig {
+  readonly config: ModelConfig;
+  readonly profile: ModelProfile;
+  readonly source: ModelConfigSourceMap;
+  readonly configFilePresent: boolean;
+}
+
+/**
+ * Resolve the active model config and tag each role with where its
+ * value came from. Pure-ish — touches the filesystem to detect the
+ * saved file, but never mutates anything. Returned shape is the
+ * single source of truth the UI displays so the model selector and
+ * worker cards stop disagreeing.
+ *
+ * SAFETY: missing cloud API keys do NOT silently rewrite a saved
+ * `xiaomi/mimo-v2.5/openrouter` entry into a local fallback. The
+ * server reports the truthful saved value; the UI shows it; the
+ * worker would simply fail to dispatch if the key is genuinely
+ * missing. This was the doctrine asked for in the bug report.
+ */
+export function resolveModelConfigForResponse(projectRoot: string): ResolvedModelConfig {
+  const profile = getActiveModelProfile();
+  if (profile === "local-smoke") {
+    const config = getModelProfileConfig("local-smoke");
+    return {
+      config,
+      profile,
+      // Every role under local-smoke is forced by the env var, not by
+      // the saved file. Mark uniformly as "profile" so the UI knows
+      // to surface the lock icon + read-only state.
+      source: {
+        scout: "profile",
+        builder: "profile",
+        critic: "profile",
+        verifier: "profile",
+        integrator: "profile",
+        escalation: "profile",
+        coordinator: "profile",
+      },
+      configFilePresent: existsSync(configPath(projectRoot)) || existsSync(legacyConfigPath(projectRoot)),
+    };
+  }
+
+  // Default profile: prefer saved file, fall back to defaults per-role.
+  const canonical = configPath(projectRoot);
+  const legacy = legacyConfigPath(projectRoot);
+  let saved: Partial<ModelConfig> | null = null;
+  let configFilePresent = false;
+  for (const path of [canonical, legacy]) {
+    try {
+      if (existsSync(path)) {
+        const raw = readFileSync(path, "utf-8");
+        saved = JSON.parse(raw) as Partial<ModelConfig>;
+        configFilePresent = true;
+        break;
+      }
+    } catch {
+      // Corrupt or unreadable — treat as no saved file.
+    }
+  }
+
+  const config = loadModelConfig(projectRoot); // already merges + normalizes
+  // Per-role source: "saved" when the saved file actually carried a
+  // non-empty assignment for that role. Anything else falls back to
+  // "default" — never silently to "profile" (only the env profile
+  // does that).
+  const source = (Object.keys(config) as Array<keyof ModelConfig>).reduce(
+    (acc, role) => {
+      if (role === "builderTiers") return acc;
+      const savedRow = saved && (saved as Record<string, unknown>)[role];
+      const hasSaved =
+        !!savedRow &&
+        typeof savedRow === "object" &&
+        typeof (savedRow as Record<string, unknown>).model === "string" &&
+        ((savedRow as Record<string, unknown>).model as string).trim().length > 0;
+      acc[role as keyof ModelConfigSourceMap] = hasSaved ? "saved" : "default";
+      return acc;
+    },
+    { scout: "default", builder: "default", critic: "default", verifier: "default", integrator: "default", escalation: "default", coordinator: "default" } as ModelConfigSourceMap,
+  );
+  return { config, profile, source, configFilePresent };
+}
+
 export function loadModelConfig(projectRoot: string): ModelConfig {
   const profile = getActiveModelProfile();
   if (profile === "local-smoke") {
@@ -608,14 +722,76 @@ export const configRoutes: FastifyPluginAsync = async (fastify) => {
   const ctx = (): ServerContext => fastify.ctx;
 
   /**
-   * GET /config/models — Return current model assignments.
+   * GET /config/lanes — Read-only lane / model profile snapshot.
+   *
+   * Joins the live `.aedis/lane-config.json`, the active model profile
+   * (default vs local-smoke), and the lane-config file path into one
+   * payload the UI can render in a "Lane Profile" panel without
+   * making three round-trips.
+   *
+   * Read-only by design: lane assignments are configured via the
+   * lane-config file and the env-var profile, not the HTTP API. The
+   * response surfaces the config path so the operator knows where to
+   * edit. The UI never offers a writable form for these fields.
+   */
+  fastify.get(
+    "/lanes",
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      const projectRoot = ctx().config.projectRoot;
+      const laneCfg = loadLaneConfigFromDisk(projectRoot);
+      const profile = getActiveModelProfile();
+      const localSmoke = profile === "local-smoke";
+      // Determine "shadow active" — true when the lane mode declares a
+      // shadow lane and the file actually carried a shadow assignment.
+      const shadowActive = laneCfg.mode !== "primary_only" && Boolean(laneCfg.shadow);
+      reply.send({
+        profile,
+        localSmokeActive: localSmoke,
+        localSmokeModel: getLocalSmokeModel(),
+        laneMode: laneCfg.mode,
+        primary: { ...laneCfg.primary },
+        shadow: laneCfg.shadow ? { ...laneCfg.shadow } : null,
+        shadowActive,
+        // Architectural invariant — kept here for the UI to display
+        // alongside the lane assignments rather than buried elsewhere.
+        shadowPromoteAllowed: false as const,
+        configPath: join(projectRoot, ".aedis", "lane-config.json"),
+        configEditable: false,
+        configNote:
+          "Model selection is configured through .aedis/lane-config.json " +
+          "and the AEDIS_MODEL_PROFILE env var. This endpoint is read-only.",
+        defaults: { ...DEFAULT_LANE_CONFIG },
+      });
+    },
+  );
+
+  /**
+   * GET /config/models — Return current model assignments + provenance.
+   *
+   * Response shape:
+   *   {
+   *     models: ModelConfig,
+   *     profile: "default" | "local-smoke",
+   *     source: { <role>: "profile" | "saved" | "default" },
+   *     config_file_present: boolean,
+   *     config_path, roles, builder_tiers
+   *   }
+   *
+   * The UI's model selector keys off `profile` and `source` so the
+   * operator never sees a dropdown that disagrees with the actual
+   * worker dispatch. See bug "model selection menu shows wrong
+   * defaults" — the UI was guessing client-side and lost track of
+   * the server's real values.
    */
   fastify.get(
     "/models",
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const config = loadModelConfig(ctx().config.projectRoot);
+      const resolved = resolveModelConfigForResponse(ctx().config.projectRoot);
       reply.send({
-        models: config,
+        models: resolved.config,
+        profile: resolved.profile,
+        source: resolved.source,
+        config_file_present: resolved.configFilePresent,
         config_path: configPath(ctx().config.projectRoot),
         roles: VALID_ROLES,
         builder_tiers: VALID_TIERS,

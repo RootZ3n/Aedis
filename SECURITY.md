@@ -16,6 +16,7 @@ Two npm scripts wrap the policy:
 
 ```bash
 npm run security:secrets   # scan tracked files for provider key patterns
+npm run verify:release     # typecheck + build + tests + secret scan + smoke
 npm run check              # security:secrets + tests + build + tsc --noEmit
 ```
 

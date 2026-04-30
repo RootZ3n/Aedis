@@ -88,13 +88,13 @@ function normalizeFiles(
   sourceRepo?: string,
 ): string[] {
   // Deduplicate absolute+relative duplicates. If a file appears as both
-  // /mnt/ai/squidley-v2/... (absolute) and apps/... (worktree-relative),
+  // /path/to/repo/... (absolute) and apps/... (worktree-relative),
   // resolve both to worktree-relative canonical form before deduplicating.
   const canonical = files.map((f) => {
     const trimmed = f.trim();
     if (!trimmed) return "";
     // Resolve absolute source-repo paths to worktree-relative.
-    // This handles paths like /mnt/ai/squidley-v2/apps/api/src/routes/index.ts
+    // This handles paths like /path/to/repo/apps/api/src/routes/index.ts
     // that need to be expressed as apps/api/src/routes/index.ts for downstream
     // components (Builder, IntegrationJudge) that resolve relative to projectRoot.
     if (sourceRepo && trimmed.startsWith(sourceRepo)) {

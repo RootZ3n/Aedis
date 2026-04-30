@@ -36,6 +36,60 @@ const WORKSPACE_ROOT = process.env.AEDIS_TMPDIR ?? tmpdir();
 
 const exec = promisify(execFile);
 
+/**
+ * Tagged error thrown when the disposable workspace cannot be set up
+ * before any builder/verifier work. Lets the Coordinator distinguish
+ * "infrastructure failed before we even started" from "builder
+ * timed out" — both used to surface as opaque ENOENTs when the
+ * scratch root (e.g. AEDIS_TMPDIR=/path/to/aedis-scratch) was missing.
+ */
+export class WorkspaceSetupError extends Error {
+  readonly code = "workspace_setup_failed" as const;
+  readonly workspaceRoot: string;
+  readonly cause: unknown;
+  constructor(message: string, workspaceRoot: string, cause: unknown) {
+    super(message);
+    this.name = "WorkspaceSetupError";
+    this.workspaceRoot = workspaceRoot;
+    this.cause = cause;
+  }
+}
+
+/**
+ * Ensure the workspace root directory exists before any worktree /
+ * clone / copy strategy attempts to create a child path inside it.
+ * `git worktree add` and `git clone` both require the immediate
+ * parent of the target path to exist, so when AEDIS_TMPDIR points at
+ * a scratch directory that hasn't been provisioned (host swap,
+ * fresh checkout, manual cleanup) the run aborts with a misleading
+ * ENOENT on the workspace path. Creating the parent up-front turns
+ * that into a clear infrastructure error or a normal proceed.
+ *
+ * Idempotent — `recursive: true` makes mkdir a no-op when the
+ * directory already exists. Wraps the mkdir failure in a tagged
+ * WorkspaceSetupError so callers can classify it cleanly.
+ */
+async function ensureWorkspaceRoot(): Promise<void> {
+  try {
+    await mkdir(WORKSPACE_ROOT, { recursive: true });
+  } catch (err) {
+    throw new WorkspaceSetupError(
+      `Failed to create workspace root ${WORKSPACE_ROOT}: ${err instanceof Error ? err.message : String(err)}`,
+      WORKSPACE_ROOT,
+      err,
+    );
+  }
+}
+
+/**
+ * Read-only accessor used by tests so they can verify the workspace
+ * root the manager will use without re-implementing the env-var
+ * resolution here.
+ */
+export function getWorkspaceRoot(): string {
+  return WORKSPACE_ROOT;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────
 
 export interface WorkspaceHandle {
@@ -90,6 +144,14 @@ export async function createWorkspace(
   sourceRepo: string,
   runId: string,
 ): Promise<WorkspaceHandle> {
+  // Provision the scratch root before any strategy runs. Without
+  // this, git worktree/clone fail with a generic ENOENT pointing at
+  // the workspace path itself, which the Coordinator then bubbles up
+  // as a builder failure. With this, a missing AEDIS_TMPDIR root
+  // fails fast as a tagged WorkspaceSetupError that the abort path
+  // can label "workspace_setup_failed" instead.
+  await ensureWorkspaceRoot();
+
   const absSource = resolve(sourceRepo);
   const createdAt = new Date().toISOString();
   let sourceCopyableAtStart = false;

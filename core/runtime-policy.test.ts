@@ -28,6 +28,8 @@ test("safeDefaults with empty env: every guard at the safe value", () => {
   assert.equal(r.autoPromoteOnSuccess, false, "auto-promote OFF by default");
   assert.equal(r.requireApproval, true, "approval REQUIRED by default");
   assert.equal(r.requireWorkspace, true, "workspace REQUIRED by default");
+  assert.equal(r.allowSourcePromotion, false, "source promotion OFF by default");
+  assert.equal(r.trustedLocalRepoWrites, false, "trusted local repo writes OFF by default");
   assert.equal(r.source.autoPromoteOnSuccess, "default-safe");
   assert.equal(r.source.requireApproval, "default-safe");
 });
@@ -44,6 +46,21 @@ test("safeDefaults: AEDIS_REQUIRE_APPROVAL=false disables approval", () => {
   const r = safeDefaults({ env: { AEDIS_REQUIRE_APPROVAL: "false" } });
   assert.equal(r.requireApproval, false);
   assert.equal(r.source.requireApproval, "env-override");
+});
+
+test("safeDefaults: source promotion requires explicit trusted-write opt-ins", () => {
+  const partial = safeDefaults({ env: { AEDIS_ALLOW_SOURCE_PROMOTION: "true" } });
+  assert.equal(partial.allowSourcePromotion, true);
+  assert.equal(partial.trustedLocalRepoWrites, false, "promotion alone must not imply trusted writes");
+
+  const full = safeDefaults({
+    env: {
+      AEDIS_ALLOW_SOURCE_PROMOTION: "true",
+      AEDIS_TRUSTED_LOCAL_REPO_WRITES: "true",
+    },
+  });
+  assert.equal(full.allowSourcePromotion, true);
+  assert.equal(full.trustedLocalRepoWrites, true);
 });
 
 test("safeDefaults: AEDIS_AUTO_PROMOTE with non-'true' value resolves to safe", () => {
@@ -90,6 +107,29 @@ test("deriveRuntimePolicy: safe defaults block destructive ops", () => {
   assert.equal(p.destructiveOps, "blocked");
   assert.equal(p.shadowPromoteAllowed, false, "structural invariant");
   assert.equal(p.laneMode, "unset");
+  assert.equal(p.publicRcReviewOnly, true);
+  assert.equal(p.allowSourcePromotion, false);
+  assert.equal(p.trustedLocalRepoWrites, false);
+});
+
+test("deriveRuntimePolicy: public RC exits review-only only with both source-write opt-ins", () => {
+  const partial = deriveRuntimePolicy({
+    autoPromoteOnSuccess: false,
+    requireApproval: true,
+    requireWorkspace: true,
+    allowSourcePromotion: true,
+    trustedLocalRepoWrites: false,
+  });
+  assert.equal(partial.publicRcReviewOnly, true);
+
+  const full = deriveRuntimePolicy({
+    autoPromoteOnSuccess: false,
+    requireApproval: true,
+    requireWorkspace: true,
+    allowSourcePromotion: true,
+    trustedLocalRepoWrites: true,
+  });
+  assert.equal(full.publicRcReviewOnly, false);
 });
 
 test("deriveRuntimePolicy: only auto-promote on + approval off → destructive allowed", () => {

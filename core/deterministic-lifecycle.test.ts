@@ -345,7 +345,7 @@ test("deterministic lifecycle: applied transform flows through verifier, gate, r
   }
 });
 
-test("deterministic lifecycle: verified deterministic success can auto-promote to source repo", async () => {
+test("deterministic lifecycle: verified deterministic success does not auto-promote without diff approval", async () => {
   const repo = makeRepo();
   try {
     const before = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf-8" }).trim();
@@ -358,14 +358,14 @@ test("deterministic lifecycle: verified deterministic success can auto-promote t
     const types = readFileSync(join(repo, "src/types.ts"), "utf-8");
 
     assert.equal(receipt.executionVerified, true, receipt.executionGateReason);
-    assert.notEqual(after, before, "auto-promote should commit deterministic changes to the source repo");
-    assert.match(types, /email:\s*string;/);
+    assert.equal(after, before, "public RC mode must not auto-promote without final diff approval");
+    assert.doesNotMatch(types, /email:\s*string;/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
 });
 
-test("deterministic lifecycle: referenced DTO can remain unchanged in multi-file scaffold", async () => {
+test("deterministic lifecycle: referenced DTO stays unchanged when scaffold is review-only", async () => {
   const repo = makeNestRepo();
   try {
     const before = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf-8" }).trim();
@@ -384,10 +384,9 @@ test("deterministic lifecycle: referenced DTO can remain unchanged in multi-file
 
     assert.equal((builder as SentinelBuilder).called, false, "Builder fallback must not run");
     assert.equal(receipt.executionVerified, true, receipt.executionGateReason);
-    assert.notEqual(after, before, "multi-file deterministic scaffold should auto-promote");
-    assert.match(controller, /@Post\("\/users"\)/);
-    assert.match(controller, /createUser\(.*CreateUserDto/s);
-    assert.match(service, /async createUser\(dto: CreateUserDto\)/);
+    assert.equal(after, before, "multi-file deterministic scaffold must not auto-promote without final diff approval");
+    assert.doesNotMatch(controller, /@Post\("\/users"\)/);
+    assert.doesNotMatch(service, /async createUser\(dto: CreateUserDto\)/);
     assert.equal(dtoAfter, dtoBefore, "DTO reference file must not be mutated");
 
     const dtoRole = receipt.targetRoles?.find((role) => role.file === "src/create-user.dto.ts");

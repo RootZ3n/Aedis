@@ -16,6 +16,8 @@ import { routeLoquiInput, type LoquiRouteDecision } from "../../core/loqui-route
 import { redactText, redactError } from "../../core/redaction.js";
 import type { LoquiIntentContext } from "../../core/loqui-intent.js";
 import { generateDryRun } from "../../core/dry-run.js";
+import { detectPlanAssist } from "../../core/plan-assist.js";
+import { detectPlanAssistWithScouts } from "../../core/plan-assist-with-scouts.js";
 import type { RunReceipt } from "../../core/coordinator.js";
 import type { ServerContext } from "../index.js";
 
@@ -67,6 +69,29 @@ interface TrackedRun {
 }
 
 const trackedRuns = new Map<string, TrackedRun>();
+
+/**
+ * In-memory map of Loqui route decisions, keyed by the Coordinator
+ * runId. Populated by /tasks/loqui/unified at submit time so /runs/:id
+ * can surface the original intent badge / confidence / signals long
+ * after the chat panel has scrolled away. Pure observability — never
+ * gates anything; safe to forget across restarts (the UI degrades to
+ * "decision unavailable").
+ */
+const loquiDecisionsByRunId = new Map<string, LoquiRouteDecision>();
+const loquiDecisionsByTaskId = new Map<string, LoquiRouteDecision>();
+
+export function recordLoquiDecisionForRun(
+  decision: LoquiRouteDecision,
+  ids: { runId?: string | null; taskId?: string | null },
+): void {
+  if (ids.runId) loquiDecisionsByRunId.set(ids.runId, decision);
+  if (ids.taskId) loquiDecisionsByTaskId.set(ids.taskId, decision);
+}
+
+export function getLoquiDecisionForRun(id: string): LoquiRouteDecision | undefined {
+  return loquiDecisionsByRunId.get(id) ?? loquiDecisionsByTaskId.get(id);
+}
 
 export function getTrackedRun(taskId: string): TrackedRun | undefined {
   return trackedRuns.get(taskId);
@@ -265,11 +290,18 @@ async function submitBuildTask(
       receipt.verdict === "aborted" ? "cancelled" : "failed";
     tracked.completedAt = new Date().toISOString();
     tracked.receipt = receipt;
+    tracked.error = receipt.verdict === "success"
+      ? null
+      : (receipt.providerLaneTruth?.status === "not_run"
+          ? receipt.providerLaneTruth.reason
+          : receipt.rollback?.status && receipt.rollback.status !== "clean"
+            ? receipt.rollback.summary
+            : null);
     void ctx.receiptStore.updateTask(taskId, {
       runId: receipt.runId,
       status: tracked.status,
       completedAt: tracked.completedAt,
-      error: null,
+      error: tracked.error,
     }).catch((err: unknown) =>
       console.error("[tasks] receiptStore update failed:", err),
     );
@@ -612,6 +644,10 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       case "CRASHED":
       case "EXECUTION_ERROR":
       case "CLEANUP_ERROR":
+      case "UNSUPPORTED_CONFIG":
+      case "ROLLBACK_FAILED":
+      case "ROLLBACK_INCOMPLETE":
+      case "UNSAFE_STATE":
       case "FAILED":
       case "VERIFIED_FAIL":
       case "CRUCIBULUM_FAIL":
@@ -690,6 +726,8 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
                 lastRunId: { type: ["string", "null"] },
                 lastRunVerdict: { type: ["string", "null"] },
                 previousMessageWasBuild: { type: "boolean" },
+                awaitingScopeFor: { type: ["string", "null"] },
+                projectRoot: { type: ["string", "null"] },
               },
             },
           },
@@ -698,7 +736,17 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request: FastifyRequest<{ Body: LoquiUnifiedBody }>, reply: FastifyReply) => {
       const { input, repoPath } = request.body;
-      const routerContext: LoquiIntentContext = request.body.context ?? {};
+      // Default the projectRoot used for follow-up path normalization
+      // to repoPath. The UI can override (e.g. when the run targets a
+      // sub-tree), but it never has to — the typical case is "the
+      // repo I'm on now is the root for this clarification."
+      const incomingContext = request.body.context ?? {};
+      const routerContext: LoquiIntentContext = {
+        ...incomingContext,
+        ...(incomingContext.projectRoot
+          ? {}
+          : { projectRoot: repoPath }),
+      };
 
       if (!existsSync(repoPath)) {
         reply.code(400).send({
@@ -718,6 +766,8 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
       // Base envelope every response shares. Gives the UI a stable
       // shape to hang its intent badge / signal audit off of, no
       // matter which backend path actually ran.
+      const scopedBuildSignal = decision.signals.includes("build:scoped-build-signal");
+      const safeFallbackFired = decision.signals.some((s) => s.startsWith("safe-fallback:"));
       const envelope = {
         route: decision.action,
         intent: decision.intent,
@@ -726,7 +776,99 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         confidence: decision.confidence,
         signals: [...decision.signals],
         original_input: decision.originalInput,
+        scoped_build_signal: scopedBuildSignal,
+        safe_fallback_suppressed: scopedBuildSignal && !safeFallbackFired,
+        ...(decision.followUpScope
+          ? {
+              follow_up_scope: {
+                relative_path: decision.followUpScope.relativePath,
+                absolute_path: decision.followUpScope.absolutePath,
+                exists: decision.followUpScope.exists,
+                is_directory: decision.followUpScope.isDirectory,
+                message: decision.followUpScope.message,
+              },
+            }
+          : {}),
       };
+
+      // ── Plan Assist + Scout interception ──────────────────────
+      // Before dispatching to the build path, check if the prompt is
+      // plan-worthy. If so, optionally run scouts to gather evidence,
+      // then return a plan suggestion instead of executing immediately.
+      //
+      // Safety: plan creation does NOT start execution. Vague prompts
+      // still clarify. Unsafe prompts still block. The suggestion is
+      // purely advisory — the user must explicitly click "Create Plan".
+      // Scouts are read-only and advisory. Cloud scouts only when
+      // routing policy permits. Never silently escalate.
+      if (decision.action === "build") {
+        const { planResult: planAssist, scoutEvidence } =
+          await detectPlanAssistWithScouts({
+            prompt: decision.originalInput,
+            repoPath,
+            intentConfidence: decision.confidence,
+            intent: decision.intent,
+            modelProfile: undefined, // let routing decide
+            cloudKeysAvailable: undefined,
+          });
+        if (planAssist.kind === "plan_suggestion") {
+          console.log(
+            `[tasks] /loqui/unified: plan-assist intercepted build — ` +
+            `${planAssist.subtasks.length} subtasks suggested, ` +
+            `signals=${planAssist.signals.join(",")}` +
+            (scoutEvidence?.spawned ? `, scouts=${scoutEvidence.reports.length}` : ""),
+          );
+          reply.send({
+            ...envelope,
+            route: "suggest_plan",
+            status: "suggest_plan",
+            plan_suggestion: {
+              objective: planAssist.objective,
+              subtasks: planAssist.subtasks,
+              reason: planAssist.reason,
+              signals: [...planAssist.signals],
+              confidence: planAssist.confidence,
+            },
+            scout_evidence: scoutEvidence ? {
+              spawned: scoutEvidence.spawned,
+              reason: scoutEvidence.spawnDecision.reason,
+              reports_count: scoutEvidence.reports.length,
+              recommended_targets: scoutEvidence.recommendedTargets.slice(0, 10),
+              recommended_tests: scoutEvidence.recommendedTests.slice(0, 5),
+              risks: scoutEvidence.risks.slice(0, 5),
+              routing: scoutEvidence.routing.map((r) => ({
+                route: r.route,
+                model: r.model,
+                provider: r.provider,
+                reason: r.reason,
+                cost: r.estimatedCostUsd,
+              })),
+              total_cost_usd: scoutEvidence.totalCostUsd,
+              scout_report_ids: scoutEvidence.reports.map((r) => r.scoutId),
+            } : null,
+          });
+          return;
+        }
+        if (planAssist.kind === "block") {
+          reply.code(400).send({
+            ...envelope,
+            route: "blocked",
+            status: "blocked",
+            reason: planAssist.reason,
+          });
+          return;
+        }
+        if (planAssist.kind === "clarify") {
+          reply.send({
+            ...envelope,
+            route: "clarify",
+            status: "needs_clarification",
+            clarification: planAssist.question,
+          });
+          return;
+        }
+        // kind === "skip" → fall through to normal build path
+      }
 
       switch (decision.action) {
         case "build": {
@@ -757,6 +899,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
             });
             return;
           }
+          recordLoquiDecisionForRun(decision, { runId: result.runId, taskId: result.taskId });
           reply.code(202).send({
             ...envelope,
             task_id: result.taskId,
@@ -811,6 +954,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
             });
             return;
           }
+          recordLoquiDecisionForRun(decision, { runId: result.runId, taskId: result.taskId });
           reply.code(202).send({
             ...envelope,
             task_id: result.taskId,
@@ -1013,6 +1157,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           submitted_at: tracked.submittedAt,
           completed_at: tracked.completedAt,
           error: tracked.error,
+          provider_lane_truth: receipt?.providerLaneTruth ?? null,
           active_run: Boolean(activeRun),
           progress: activeRun ? {
             phase: activeRun.run.phase,
@@ -1045,6 +1190,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
           submitted_at: persistedTask.submittedAt,
           completed_at: persistedRun?.completedAt ?? persistedTask.completedAt,
           error: persistedRun?.errors?.[0] ?? persistedTask.error,
+          provider_lane_truth: persistedRun?.finalReceipt?.providerLaneTruth ?? null,
           active_run: Boolean(activeRun),
           progress: activeRun ? {
             phase: activeRun.run.phase,

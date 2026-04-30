@@ -216,6 +216,7 @@ function buildHarness(projectRoot: string, opts: { typecheckPasses: boolean }) {
 test("e2e local_then_cloud: primary disqualifies, shadow lane runs, receipt carries the manifest", async () => {
   const repo = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -268,6 +269,7 @@ test("e2e local_then_cloud: primary disqualifies, shadow lane runs, receipt carr
 test("e2e local_then_cloud: primary passes → shadow never runs, manifest reports primary only", async () => {
   const repo = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });
@@ -323,6 +325,7 @@ test("e2e primary_only: receipt does NOT carry candidates manifest (back-compat 
 test("e2e tui: RunDetailScreen renders the candidate panel from a real persisted receipt", async () => {
   const repo = makeRepoWithLaneConfig({
     mode: "local_then_cloud",
+    allowFallback: true,
     primary: { lane: "local", provider: "ollama", model: "qwen3.5:9b" },
     shadow: { lane: "cloud", provider: "openrouter", model: "xiaomi/mimo-v2.5" },
   });

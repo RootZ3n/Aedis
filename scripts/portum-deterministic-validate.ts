@@ -1,7 +1,7 @@
 /**
  * Live-shaped validation runner — drives the deterministic builder
- * pipeline against a disposable clone of /mnt/ai/portum and produces
- * the validation report Phase 5 asks for.
+ * pipeline against a disposable clone of a configured Portum repo and
+ * produces the validation report Phase 5 asks for.
  *
  * Does NOT call any model. The Coordinator's deterministic pre-pass
  * is the entire decision layer; this script just feeds it three
@@ -10,7 +10,7 @@
  * Usage:
  *   npx tsx scripts/portum-deterministic-validate.ts
  *
- * The source repo at /mnt/ai/portum is never written to.
+ * The configured source repo is never written to.
  */
 
 import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync } from "node:fs";
@@ -20,7 +20,7 @@ import { execFileSync } from "node:child_process";
 import { tryDeterministicBuilder } from "../core/code-transforms/deterministic-builder.js";
 import { extractNamedExports } from "../workers/builder.js";
 
-const SOURCE = "/mnt/ai/portum";
+const SOURCE = process.env["PORTUM_REPO"] ?? process.env["AEDIS_PORTUM_REPO"] ?? "";
 
 interface Scenario {
   readonly id: "A" | "B" | "C";
@@ -43,6 +43,10 @@ function clonePortum(): string {
 }
 
 async function main() {
+  if (!SOURCE) {
+    console.error("Set PORTUM_REPO=/path/to/portum before running this validation script.");
+    process.exit(1);
+  }
   if (!existsSync(SOURCE)) {
     console.error(`Source repo ${SOURCE} not present; aborting.`);
     process.exit(1);

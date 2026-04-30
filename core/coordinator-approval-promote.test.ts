@@ -112,6 +112,23 @@ class BlockingBuilderWorker extends RealBuilderWorker {
   }
 }
 
+class PoisoningBuilderWorker extends RealBuilderWorker {
+  constructor(
+    writes: readonly { path: string; content: string }[],
+    private readonly outsideTarget: string,
+  ) {
+    super(writes);
+  }
+
+  override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+    const result = await super.execute(assignment);
+    const root = assignment.projectRoot ?? process.cwd();
+    rmSync(join(root, "core/widget.ts"), { force: true });
+    symlinkSync(this.outsideTarget, join(root, "core/widget.ts"), "file");
+    return result;
+  }
+}
+
 class StubScoutWorker extends AbstractWorker {
   readonly type: WorkerType = "scout";
   readonly name = "StubScout";
@@ -157,6 +174,24 @@ class StubVerifierWorker extends AbstractWorker {
   }
 }
 
+class FailingPoisoningVerifierWorker extends StubVerifierWorker {
+  readonly name = "FailingPoisoningVerifier";
+  constructor(private readonly outsidePath: string) { super(); }
+  override async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
+    const root = assignment.projectRoot ?? process.cwd();
+    rmSync(join(root, "core/widget.ts"), { force: true });
+    symlinkSync(this.outsidePath, join(root, "core/widget.ts"), "file");
+    return this.success(assignment, {
+      kind: "verifier",
+      testResults: [{ name: "poisoned-verifier", passed: false, durationMs: 0, output: "forced verifier failure" }],
+      typeCheckPassed: false,
+      lintPassed: true,
+      buildPassed: false,
+      passed: false,
+    }, { cost: this.zeroCost(), confidence: 0.1, touchedFiles: [], durationMs: 1 });
+  }
+}
+
 class StubIntegratorWorker extends AbstractWorker {
   readonly type: WorkerType = "integrator";
   readonly name = "StubIntegrator";
@@ -181,15 +216,24 @@ class StubIntegratorWorker extends AbstractWorker {
 
 function buildHarness(projectRoot: string, opts: {
   builder: AbstractWorker;
+  verifier?: AbstractWorker;
   requireApproval: boolean;
   autoPromoteOnSuccess?: boolean;
+  allowSourcePromotion?: boolean;
+  trustedLocalRepoWrites?: boolean;
   stateRoot?: string;
+  verificationHooks?: readonly {
+    name: string;
+    stage: string;
+    kind: "typecheck" | "lint" | "test" | "build" | "custom";
+    execute: () => Promise<{ passed: boolean; issues: any[]; stdout: string; stderr: string; exitCode: number; durationMs: number }>;
+  }[];
 }) {
   const registry = new WorkerRegistry();
   registry.register(new StubScoutWorker());
   registry.register(opts.builder);
   registry.register(new StubCriticWorker());
-  registry.register(new StubVerifierWorker());
+  registry.register(opts.verifier ?? new StubVerifierWorker());
   registry.register(new StubIntegratorWorker());
 
   const trustProfile: TrustProfile = {
@@ -217,6 +261,8 @@ function buildHarness(projectRoot: string, opts: {
       requireWorkspace: true,
       requireApproval: opts.requireApproval,
       autoPromoteOnSuccess: opts.autoPromoteOnSuccess ?? false,
+      allowSourcePromotion: opts.allowSourcePromotion ?? true,
+      trustedLocalRepoWrites: opts.trustedLocalRepoWrites ?? true,
       // Drop required checks AND register a stub passing hook so the
       // run gets a real "verification signal." Production gates
       // typecheck/tests by default; this harness exercises the
@@ -228,7 +274,7 @@ function buildHarness(projectRoot: string, opts: {
       // satisfies both gates so the run can reach PHASE 10 and pause.
       verificationConfig: {
         requiredChecks: [],
-        hooks: [{
+        hooks: opts.verificationHooks ?? [{
           name: "stub-typecheck",
           stage: "typecheck",
           kind: "typecheck",
@@ -372,6 +418,128 @@ test("approval flow: rejecting awaiting-approval run produces consistent termina
   }
 });
 
+test("rollback honesty: approval rejection rollback failure dominates verified evidence and API status", async (t) => {
+  const fastify = (await import("fastify")).default;
+  const repo = makeTempRepo();
+  const outside = mkdtempSync(join(tmpdir(), "aedis-rollback-outside-"));
+  try {
+    const original = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 901;\n" },
+    ]);
+    const { coordinator, receiptStore, events } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    await receiptStore.registerTask({
+      taskId: "task-rollback-reject",
+      runId: receipt.runId,
+      prompt: "modify widget in core",
+      submittedAt: new Date().toISOString(),
+    });
+
+    const awaiting = await receiptStore.getRun(receipt.runId);
+    const workspacePath = awaiting?.workspace?.workspacePath;
+    assert.ok(workspacePath, "approval run must preserve workspace for rejection");
+    writeFileSync(join(outside, "victim.ts"), "export const outside = true;\n", "utf-8");
+    rmSync(join(workspacePath, "core/widget.ts"), { force: true });
+    try {
+      symlinkSync(join(outside, "victim.ts"), join(workspacePath, "core/widget.ts"), "file");
+    } catch {
+      t.skip("symlink creation unavailable on this platform");
+      return;
+    }
+
+    const result = await coordinator.rejectRun(receipt.runId);
+    assert.equal(result.ok, true);
+
+    const persisted = await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.workspace?.cleanedUp === true ? current : null;
+    }, "rejection with rollback failure should persist cleanup");
+
+    assert.equal(persisted.status, "ROLLBACK_FAILED");
+    assert.equal(persisted.finalReceipt?.verdict, "failed");
+    assert.equal(persisted.finalReceipt?.rollback?.status, "failed");
+    assert.match(persisted.taskSummary, /ROLLBACK FAILED|manual inspection/i);
+    assert.match(persisted.finalReceipt?.humanSummary?.headline ?? "", /ROLLBACK FAILED|rollback failure/i);
+    assert.equal(persisted.finalReceipt?.verificationReceipt?.verdict, "pass-with-warnings", "verification evidence must be preserved as stage evidence");
+    assert.notEqual(persisted.finalReceipt?.humanSummary?.classification, "VERIFIED_SUCCESS");
+    assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), original, "source repo must not be mutated by rejection");
+
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator,
+      eventBus: {
+        emit: (event: AedisEvent) => { events.push(event); },
+        recentEvents: () => events,
+      },
+      config: { projectRoot: repo },
+    });
+    await app.register(taskRoutes);
+    const api = (await app.inject({ method: "GET", url: "/task-rollback-reject" })).json();
+    assert.equal(api.status, "failed", "task API must not surface rollback failure as complete/success");
+    assert.match(api.error ?? "", /ROLLBACK FAILED|manual inspection/i);
+    await app.close();
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("rollback honesty: verifier failure rollback failure dominates final receipt", async (t) => {
+  const repo = makeTempRepo();
+  const outside = mkdtempSync(join(tmpdir(), "aedis-rollback-verifier-outside-"));
+  try {
+    writeFileSync(join(outside, "victim.ts"), "export const outside = true;\n", "utf-8");
+    try {
+      const probe = join(outside, "probe.ts");
+      symlinkSync(join(outside, "victim.ts"), probe, "file");
+      rmSync(probe, { force: true });
+    } catch {
+      t.skip("symlink creation unavailable on this platform");
+      return;
+    }
+
+    const builder = new PoisoningBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 902;\n" },
+    ], join(outside, "victim.ts"));
+    const { coordinator, receiptStore } = buildHarness(repo, {
+      builder,
+      requireApproval: false,
+      autoPromoteOnSuccess: false,
+      verificationHooks: [{
+        name: "poisoned-typecheck",
+        stage: "typecheck",
+        kind: "typecheck",
+        execute: async () => {
+          return {
+            passed: false,
+            issues: [{ severity: "error", message: "forced verifier failure" }],
+            stdout: "",
+            stderr: "forced verifier failure",
+            exitCode: 1,
+            durationMs: 0,
+          };
+        },
+      }],
+    });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const persisted = await receiptStore.getRun(receipt.runId);
+
+    assert.equal(receipt.verdict, "failed");
+    assert.equal(receipt.rollback?.status, "failed");
+    assert.equal(persisted?.status, "ROLLBACK_FAILED");
+    assert.equal(persisted?.finalReceipt?.rollback?.status, "failed");
+    assert.equal(persisted?.finalReceipt?.verificationReceipt?.verdict, "fail", "verifier failure remains recorded as stage evidence");
+    assert.match(persisted?.taskSummary ?? "", /ROLLBACK FAILED|manual inspection/i);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("approval flow: task route reports active_run=false after approval-stage cancel", async () => {
   const fastify = (await import("fastify")).default;
   const repo = makeTempRepo();
@@ -507,6 +675,174 @@ test("approval flow: autoPromote=false creates pending approval after successful
     assert.equal(coordinator.getPendingApprovals().length, 1);
     assert.deepEqual(coordinator.listActiveRunIds(), [receipt.runId]);
     assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), "export const widget = 1;\n");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("public RC: default review-only mode refuses source promotion after approval", async () => {
+  const repo = makeTempRepo();
+  try {
+    const original = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 70;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, {
+      builder,
+      requireApproval: true,
+      allowSourcePromotion: false,
+      trustedLocalRepoWrites: false,
+    });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const awaiting = await receiptStore.getRun(receipt.runId);
+    assert.equal(awaiting?.status, "AWAITING_APPROVAL");
+    assert.equal(awaiting?.finalReceipt?.diffApproval?.status, "pending");
+    assert.equal(awaiting?.finalReceipt?.promotionSafety?.publicRcReviewOnly, true);
+
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true);
+
+    const promote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(promote.ok, false);
+    assert.match(promote.error ?? "", /public RC mode is review-only|trustedLocalRepoWrites/i);
+    assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), original);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("public RC: source promotion requires explicit opt-in plus approved diff receipt", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 71;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const preApprovePromote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(preApprovePromote.ok, false);
+    assert.match(preApprovePromote.error ?? "", /approval is pending|not approved|missing final diff approval/i);
+
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true);
+    const persisted = await receiptStore.getRun(receipt.runId);
+    assert.equal(persisted?.finalReceipt?.diffApproval?.status, "approved");
+    assert.equal(persisted?.finalReceipt?.promotionSafety?.readyForPromotion, true);
+
+    const promote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(promote.ok, true, `promoteToSource must succeed after explicit opt-in and approval; got ${promote.error}`);
+    assert.match(readFileSync(join(repo, "core/widget.ts"), "utf-8"), /widget = 71/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("public RC: promotion requires verifier pass and blocks failed verification", async () => {
+  const repo = makeTempRepo();
+  try {
+    const original = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 72;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, {
+      builder,
+      requireApproval: true,
+      verificationHooks: [{
+        name: "forced-fail",
+        stage: "typecheck",
+        kind: "typecheck",
+        execute: async () => ({
+          passed: false,
+          issues: [{ severity: "error", message: "forced failure" }],
+          stdout: "",
+          stderr: "forced failure",
+          exitCode: 1,
+          durationMs: 0,
+        }),
+      }],
+    });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    assert.notEqual(receipt.summary.phase, "awaiting_approval");
+    const promote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(promote.ok, false);
+    assert.match(promote.error ?? "", /verifier|READY_FOR_PROMOTION|approval|promotion safety/i);
+    assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), original);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("public RC: builder changes outside Scout plan are blocked before approval", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 73;\n" },
+      { path: "core/extra.ts", content: "export const extra = true;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "Update core/widget.ts to export widget as 73." });
+    const persisted = await receiptStore.getRun(receipt.runId);
+    assert.notEqual(persisted?.status, "AWAITING_APPROVAL");
+    const blockers = persisted?.finalReceipt?.mergeDecision?.critical
+      ?.map((finding: any) => finding.message)
+      .join("\n") ?? "";
+    assert.match(blockers, /undeclared|not declared|outside deliverables/i);
+    assert.equal(existsSync(join(repo, "core/extra.ts")), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("public RC: vague prompt remains needs_clarification before execution", async () => {
+  const repo = makeTempRepo();
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 74;\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const result = await coordinator.submitWithGates({ input: "make it better" });
+    assert.equal(result.kind, "needs_clarification");
+    assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), "export const widget = 1;\n");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("public RC: promotion requires critic review of actual diff", async () => {
+  const repo = makeTempRepo();
+  try {
+    const original = readFileSync(join(repo, "core/widget.ts"), "utf-8");
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 75;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true);
+    const persisted = await receiptStore.getRun(receipt.runId);
+    assert.ok(persisted?.finalReceipt);
+    await receiptStore.patchRun(receipt.runId, {
+      finalReceipt: {
+        ...(persisted!.finalReceipt as any),
+        promotionSafety: {
+          ...(persisted!.finalReceipt!.promotionSafety as any),
+          criticReviewedActualDiff: false,
+          readyForPromotion: false,
+          blockers: ["critic did not review the actual promoted diff"],
+        },
+      } as any,
+    });
+
+    const promote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(promote.ok, false);
+    assert.match(promote.error ?? "", /critic did not review/i);
+    assert.equal(readFileSync(join(repo, "core/widget.ts"), "utf-8"), original);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -821,11 +1157,10 @@ test("approval flow: promoteToSource resolves source repo from finalReceipt when
   }
 });
 
-test("approval flow: explicit source_repo body still wins over inferred sourceRepo", async () => {
-  // Defense: the body override is the highest-priority resolution and
-  // must keep working. Without that, callers that explicitly pass
-  // source_repo (e.g. anyone who'd worked around the run 6bf45418 bug
-  // by always supplying it) would silently route to a different repo.
+test("approval flow: explicit source_repo body is ignored in favor of canonical run sourceRepo", async () => {
+  // Public-RC safety: promotion must not trust a caller-supplied
+  // source_repo after run creation. The canonical source repo recorded
+  // on the receipt is the only allowed promotion target.
   const coordRoot = makeTempRepo();
   const inferredRepo = makeTempRepo();
   const explicitRepo = makeTempRepo();
@@ -845,19 +1180,50 @@ test("approval flow: explicit source_repo body still wins over inferred sourceRe
     const approve = await coordinator.approveRun(receipt.runId);
     assert.equal(approve.ok, true);
 
-    // Explicit body override targets explicitRepo. Body must beat inferred.
     const promote = await coordinator.promoteToSource(receipt.runId, explicitRepo);
-    assert.equal(promote.ok, true, `promoteToSource (explicit) must succeed; got error=${promote.error}`);
+    assert.equal(promote.ok, true, `promoteToSource must succeed against canonical sourceRepo; got error=${promote.error}`);
 
     const afterInferred = execFileSync("git", ["rev-parse", "HEAD"], { cwd: inferredRepo }).toString().trim();
     const afterExplicit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: explicitRepo }).toString().trim();
-    assert.equal(afterInferred, beforeInferred, "inferred repo must NOT move when an explicit body override is supplied");
-    assert.notEqual(afterExplicit, beforeExplicit, "explicit repo must move forward");
-    assert.equal(afterExplicit, promote.commitSha, "explicit HEAD must match promote SHA");
+    assert.notEqual(afterInferred, beforeInferred, "canonical inferred repo must move forward");
+    assert.equal(afterInferred, promote.commitSha, "canonical repo HEAD must match promote SHA");
+    assert.equal(afterExplicit, beforeExplicit, "caller-supplied source_repo must not be mutated");
   } finally {
     rmSync(coordRoot, { recursive: true, force: true });
     rmSync(inferredRepo, { recursive: true, force: true });
     rmSync(explicitRepo, { recursive: true, force: true });
+  }
+});
+
+test("approval flow: promoteToSource refuses symlink escape in canonical source repo", async (t) => {
+  const repo = makeTempRepo();
+  const outside = mkdtempSync(join(tmpdir(), "aedis-promote-outside-"));
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 123; // symlink-escape\n" },
+    ]);
+    const { coordinator } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const approve = await coordinator.approveRun(receipt.runId);
+    assert.equal(approve.ok, true);
+
+    writeFileSync(join(outside, "victim.ts"), "export const outside = true;\n", "utf-8");
+    rmSync(join(repo, "core/widget.ts"), { force: true });
+    try {
+      symlinkSync(join(outside, "victim.ts"), join(repo, "core/widget.ts"), "file");
+    } catch {
+      t.skip("symlink creation unavailable on this platform");
+      return;
+    }
+
+    const promote = await coordinator.promoteToSource(receipt.runId);
+    assert.equal(promote.ok, false, "promotion must refuse a source-repo symlink escape");
+    assert.match(promote.error ?? "", /symlink|escape|SafePath/i);
+    assert.equal(readFileSync(join(outside, "victim.ts"), "utf-8"), "export const outside = true;\n");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
@@ -1025,8 +1391,8 @@ test("promote-time typecheck gate: refuses to commit a tsc-breaking patch and le
 test("approval flow: promoteToSource fails honestly when finalReceipt is missing (legacy receipt)", async () => {
   // Defense: if a receipt was persisted by an older Aedis version with
   // no finalReceipt, promoteToSource must NOT fabricate a commit. It
-  // must surface "No commit SHA — nothing to promote" so the operator
-  // sees the truth and re-runs.
+  // must surface the missing data or missing safety evidence honestly
+  // so the operator sees the truth and re-runs.
   const repo = makeTempRepo();
   try {
     const stateRoot = mkdtempSync(join(tmpdir(), "aedis-state-legacy-"));
@@ -1048,7 +1414,7 @@ test("approval flow: promoteToSource fails honestly when finalReceipt is missing
     assert.equal(promote.ok, false, "promoteToSource must refuse a legacy receipt with no patchArtifact");
     assert.match(
       promote.error ?? "",
-      /No commit SHA|No patch artifact|Workspace not found/i,
+      /No commit SHA|No patch artifact|Workspace not found|promotion safety receipt/i,
       `error must surface the missing data honestly; got: ${promote.error}`,
     );
     rmSync(stateRoot, { recursive: true, force: true });
@@ -1187,6 +1553,54 @@ test("approval timeout: expired approval is auto-rejected with reason on receipt
       "source repo must not be mutated by approval timeout",
     );
   } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("rollback honesty: auto-timeout rollback failure dominates timeout rejection", async (t) => {
+  const repo = makeTempRepo();
+  const outside = mkdtempSync(join(tmpdir(), "aedis-rollback-timeout-outside-"));
+  try {
+    const builder = new RealBuilderWorker([
+      { path: "core/widget.ts", content: "export const widget = 904;\n" },
+    ]);
+    const { coordinator, receiptStore } = buildHarness(repo, { builder, requireApproval: true });
+
+    const receipt = await coordinator.submit({ input: "modify widget in core" });
+    const awaiting = await receiptStore.getRun(receipt.runId);
+    const workspacePath = awaiting?.workspace?.workspacePath;
+    assert.ok(workspacePath, "approval run must persist workspace path before timeout");
+
+    writeFileSync(join(outside, "victim.ts"), "export const outside = true;\n", "utf-8");
+    rmSync(join(workspacePath, "core/widget.ts"), { force: true });
+    try {
+      symlinkSync(join(outside, "victim.ts"), join(workspacePath, "core/widget.ts"), "file");
+    } catch {
+      t.skip("symlink creation unavailable on this platform");
+      return;
+    }
+
+    const r = await coordinator.rejectExpiredApprovals(
+      60 * 60 * 1000,
+      Date.now() + 2 * 60 * 60 * 1000,
+    );
+    assert.equal(r.count, 1);
+
+    const persisted = await waitFor(async () => {
+      const current = await receiptStore.getRun(receipt.runId);
+      return current?.workspace?.cleanedUp === true ? current : null;
+    }, "auto-timeout rollback failure should persist");
+
+    assert.equal(persisted.status, "ROLLBACK_FAILED");
+    assert.equal(persisted.finalReceipt?.verdict, "failed");
+    assert.equal(persisted.finalReceipt?.rollback?.status, "failed");
+    assert.match(persisted.taskSummary, /ROLLBACK FAILED|manual inspection/i);
+    assert.ok(
+      persisted.errors.some((e: string) => /approval timed out/i.test(e)),
+      "timeout reason should remain recorded as stage/context evidence",
+    );
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
 });

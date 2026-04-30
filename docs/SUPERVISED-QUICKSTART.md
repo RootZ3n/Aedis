@@ -129,7 +129,8 @@ npx tsx scripts/burn-in/test-burn-in.ts \
 ```
 
 The harness auto-rejects any `AWAITING_APPROVAL` run, so source stays
-clean. Results append to `/mnt/ai/tmp/aedis-burn-in-results.jsonl`.
+clean. Results append to the OS temp directory by default, or to
+`AEDIS_BURN_RESULTS` when set.
 
 `--summary` prints the latest invocation's results without re-running:
 
@@ -194,14 +195,14 @@ last-known-good behavior), pass `--allow-stale-server` to burn-in or
 - **Orphaned approvals on restart.** When the server starts, it scans
   for `AWAITING_APPROVAL` runs from a previous session and rolls each
   back (logged as `STARTUP RECOVERY`). Source stays untouched.
-- **Workspace residue.** Worktrees live under `/mnt/ai/aedis-scratch/`
-  (or `os.tmpdir()/aedis-ws-*`) and are cleaned up on cancel / reject /
-  finalize. To force-clean leftovers:
+- **Workspace residue.** Worktrees live under `AEDIS_TMPDIR` when set,
+  otherwise under `os.tmpdir()/aedis-ws-*`, and are cleaned up on cancel /
+  reject / finalize. To inspect leftovers:
 
   ```bash
-  ls /mnt/ai/aedis-scratch/
+  ls "${AEDIS_TMPDIR:-/tmp}" | grep aedis-ws-
   git worktree list                # see active worktrees
-  git worktree remove <path>       # then rm -rf if needed
+  git worktree remove <path>       # then remove the directory if needed
   ```
 
 - **Receipts.** All runs persist to `state/receipts/<runId>.json` (gitignored)
