@@ -158,7 +158,7 @@ test("OpenAI sk- prefix in added line rejected", () => {
   const r = checkFastPathDiff([makeChange({
     path: "src/widget.ts",
     originalContent: "export const widget = 1;\n",
-    content: "// sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nexport const widget = 1;\n",
+    content: `// ${"sk-" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}\nexport const widget = 1;\n`,
   })]);
   // It's inside a comment but it's still a secret-shaped token.
   assert.equal(r.ok, false);
