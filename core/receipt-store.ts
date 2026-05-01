@@ -1,8 +1,9 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 
 import type { RunReceipt } from "./coordinator.js";
 import type { CostEntry } from "./runstate.js";
@@ -395,6 +396,44 @@ export interface ReceiptPatch {
   readonly appendCircuitBreakerSkips?: readonly ReceiptCircuitBreakerSkip[];
 }
 
+// ─── Receipt Integrity ──────────────────────────────────────────────
+
+export interface ReceiptSignature {
+  readonly sha256: string;
+  readonly ts: number;
+}
+
+/**
+ * Canonicalize a value to a deterministic JSON string. Object keys are
+ * sorted recursively so that serialization order never affects the
+ * digest. Arrays preserve order (they are ordered data).
+ */
+export function canonicalizeReceiptJson(value: unknown): string {
+  return JSON.stringify(sortKeysDeep(value));
+}
+
+/**
+ * Compute a hex SHA-256 over the canonical JSON of a value. Two values
+ * that differ only in key order produce the same hash.
+ */
+export function computeReceiptHash(value: unknown): string {
+  const canonical = canonicalizeReceiptJson(value);
+  return createHash("sha256").update(canonical, "utf-8").digest("hex");
+}
+
+function sortKeysDeep(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(sortKeysDeep);
+  if (typeof obj === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(obj as Record<string, unknown>).sort()) {
+      sorted[key] = sortKeysDeep((obj as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return obj;
+}
+
 const INDEX_FILE = "index.json";
 const TASK_INDEX_FILE = "tasks.json";
 
@@ -443,7 +482,14 @@ export class ReceiptStore {
         const current = await this.readRunFile(runId);
         const now = new Date().toISOString();
         const updated = this.applyPatch(current ?? this.emptyReceipt(runId, now), patch, now);
-        await writeJsonAtomicLocked(runPath, redactForReceipt(updated));
+        const redacted = redactForReceipt(updated);
+        await writeJsonAtomicLocked(runPath, redacted);
+        // Write the integrity sidecar.
+        const sig: ReceiptSignature = {
+          sha256: computeReceiptHash(redacted),
+          ts: Date.now(),
+        };
+        writeFileSync(`${runPath}.sig`, JSON.stringify(sig), "utf-8");
         return updated;
       });
       await this.writeIndexEntry(this.toIndexEntry(next));
@@ -454,6 +500,25 @@ export class ReceiptStore {
   async getRun(runId: string): Promise<PersistentRunReceipt | null> {
     await this.ensureDirs();
     return this.readRunFile(runId);
+  }
+
+  async verifyReceiptIntegrity(runId: string): Promise<{ valid: boolean; reason?: string }> {
+    const runPath = this.runPath(runId);
+    if (!existsSync(runPath)) return { valid: false, reason: "receipt not found" };
+    const sigPath = `${runPath}.sig`;
+    if (!existsSync(sigPath)) return { valid: false, reason: "signature sidecar not found" };
+    try {
+      const receiptRaw = readFileSync(runPath, "utf-8");
+      const sigRaw = readFileSync(sigPath, "utf-8");
+      const sig = JSON.parse(sigRaw) as Record<string, unknown>;
+      if (typeof sig.sha256 !== "string") return { valid: false, reason: "missing sha256 in sidecar" };
+      const receipt = JSON.parse(receiptRaw);
+      const recomputed = computeReceiptHash(receipt);
+      if (recomputed !== sig.sha256) return { valid: false, reason: `hash mismatch: expected ${sig.sha256}, got ${recomputed}` };
+      return { valid: true };
+    } catch (err) {
+      return { valid: false, reason: `verification error: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
 
   async listRuns(limit: number = 20, status?: string): Promise<ReceiptIndexEntry[]> {

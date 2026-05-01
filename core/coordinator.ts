@@ -118,6 +118,7 @@ import {
   isGraphComplete,
   hasFailedNodes,
   getGraphSummary,
+  resetForRehearsal,
   type TaskGraphState,
   type TaskNode,
 } from "./task-graph.js";
@@ -229,6 +230,17 @@ import { scanInput as velumScanInput } from "./velum-input.js";
 import { scanDiff as velumScanDiff, type VelumResult } from "./velum-output.js";
 import { classifyTask, type ImpactClassification, type ImpactLevel } from "./impact-classifier.js";
 import { scoreConfidence, type ConfidenceLevel, type ConfidenceResult } from "./confidence-gate.js";
+import { checkGarbageOutput, summarizeGarbageResult, type GarbageCheckResult } from "./garbage-output-detector.js";
+import {
+  makeRiskAssessment,
+  makeModeSelected,
+  makePlanDrafted,
+  makeSafetyBlock,
+  makeAwaitingApproval,
+  makeRunCompletedSummary,
+  type OperatorNarrativeEvent,
+} from "./operator-narrative.js";
+import { classifyExecutionMode, type ExecutionModeResult } from "./execution-mode.js";
 import { withRepoLock } from "./file-lock.js";
 import {
   createWorkspace,
@@ -365,6 +377,13 @@ export interface CoordinatorConfig {
    * the registry default builder.
    */
   laneBuilderFactory?: typeof createBuilderForLane;
+  /**
+   * When true, runs that reach AWAITING_APPROVAL are auto-approved
+   * with decidedBy="system" and reason="trust_this_session". The flag
+   * is memory-only (CLI --trust-this-session) — no env-var or
+   * settings.json fallback exists.
+   */
+  trustThisSession?: boolean;
 }
 
 const DEFAULT_CONFIG: CoordinatorConfig = {
@@ -701,6 +720,29 @@ export interface RunReceipt {
    * Empty or omitted when no scouts were spawned.
    */
   readonly preflightScoutReportIds?: readonly string[];
+  /**
+   * Execution mode classification for this run (fast_review,
+   * standard_review, strict_review). Absent on legacy runs that
+   * predated the classifier.
+   */
+  readonly executionMode?: string;
+  /**
+   * Full execution mode classification detail. Contains mode, reason,
+   * skippedStages, factors, etc. Null on legacy runs.
+   */
+  readonly executionModeDetail?: ExecutionModeResult | null;
+  /**
+   * Garbage output detector result. Present when the detector ran
+   * (post-Builder, pre-approval). `ok: true` means no findings;
+   * `ok: false` means the diff was flagged and the run verdict
+   * was forced to "failed".
+   */
+  readonly garbageCheck?: GarbageCheckResult | null;
+  /**
+   * Per-model-call attempt log. Records every Builder model invocation
+   * including fallbacks, timeouts, and circuit-breaker skips.
+   */
+  readonly builderAttempts?: readonly unknown[];
 }
 
 export type RollbackStatus = "clean" | "failed" | "incomplete" | "unsafe_state";
@@ -1882,6 +1924,9 @@ export class Coordinator {
       promotionSafety: null,
       diffApproval: null,
       providerLaneTruth: null,
+      executionModeResult: null,
+      garbageCheckResult: null,
+      narrativeEvents: [],
     };
     this.activeRuns.set(run.id, active);
 
@@ -1904,6 +1949,51 @@ export class Coordinator {
     }
     console.log(`[coordinator] PHASE 3 done — run ${run.id} created, registered as active (projectRoot=${active.projectRoot})`);
     console.log(`[coordinator] changeSet created: ${charterTargets.length} file(s), scope=${active.scopeClassification?.type ?? "unknown"}`);
+
+    // ── Operator Narrative: risk + mode + plan ──────────────────────
+    this.narrate(active, makeRiskAssessment({
+      runId: active.run.id,
+      level: blastRadius.level === "low" ? "low" : blastRadius.level === "high" ? "high" : "medium",
+      reasons: blastRadius.signals ?? [],
+      targets: charterTargets,
+      scope: scopeClassification.type,
+      blastRadius: blastRadius.rawScore,
+    }));
+
+    // Classify execution mode.
+    const impactForMode = classifyTask(normalizedInput, charterTargets);
+    const executionModeResult = classifyExecutionMode({
+      prompt: normalizedInput,
+      charterTargets,
+      riskSignals: analysis.riskSignals ?? [],
+      scopeEstimate: analysis.scopeEstimate,
+      impact: impactForMode,
+      ambiguous: analysis.ambiguities.length > 0,
+    });
+    active.executionModeResult = executionModeResult;
+
+    this.narrate(active, makeModeSelected({
+      runId: active.run.id,
+      mode: executionModeResult.mode,
+      reasonCode: executionModeResult.reasonCode,
+      reason: executionModeResult.reason,
+      skippedStages: executionModeResult.skippedStages ?? [],
+      factors: executionModeResult.factors ?? [],
+    }));
+
+    // Plan drafted — summarize the graph shape for the narrative.
+    const graphSteps = topologicalSort(active.graph).map(
+      (n) => `${n.workerType}: ${n.label}`,
+    );
+    this.narrate(active, makePlanDrafted({
+      runId: active.run.id,
+      deliverables: charter.deliverables.map((d) => ({
+        description: d.description,
+        targetFiles: d.targetFiles ?? [],
+      })),
+      targetFiles: charterTargets,
+      steps: graphSteps,
+    }));
     await this.receiptStore.beginRun({
       runId: active.run.id,
       intentId: intent.id,
@@ -2628,6 +2718,25 @@ export class Coordinator {
             details: { diffApproval: active.diffApproval },
           }],
         });
+        // ── trust-this-session auto-approval ──────────────────────
+        if (this.config.trustThisSession) {
+          console.log(`[coordinator] trust-this-session: auto-approving run ${run.id}`);
+          await this.approveRun(run.id, { decidedBy: "system", reason: "trust_this_session" });
+          const postApproval = await this.receiptStore.getRun(run.id);
+          if (postApproval?.finalReceipt) {
+            return postApproval.finalReceipt as unknown as RunReceipt;
+          }
+          // Fallback: return the receipt we built before approval.
+          // Update diffApproval to reflect the auto-approval.
+          active.diffApproval = {
+            ...active.diffApproval,
+            status: "approved",
+            decidedBy: "system",
+            reason: "trust_this_session",
+            decidedAt: new Date().toISOString(),
+          };
+          return { ...awaitReceipt, diffApproval: active.diffApproval };
+        }
         return awaitReceipt;
       }
 
@@ -4592,16 +4701,23 @@ export class Coordinator {
 
       const phases = waveGated.map((n) => n.workerType);
       console.log(`[coordinator] executeGraph: dispatching ${waveGated.length} node(s) of type(s) [${phases.join(", ")}]${waveGated.length < dispatchable.length ? ` (${dispatchable.length - waveGated.length} wave-gated)` : ""}`);
+      // Advance phase — but skip backwards transitions during rehearsal.
+      const PHASE_ORDER = ["charter", "planning", "scouting", "building", "reviewing", "verifying", "integrating"];
+      const tryAdvance = (target: string) => {
+        const curIdx = PHASE_ORDER.indexOf(run.phase);
+        const targetIdx = PHASE_ORDER.indexOf(target);
+        if (targetIdx > curIdx) advancePhase(run, target as Parameters<typeof advancePhase>[1]);
+      };
       if (phases.includes("scout") && run.phase === "scouting") {
         // already in scouting
       } else if (phases.includes("builder")) {
-        if (run.phase !== "building") advancePhase(run, "building");
+        tryAdvance("building");
       } else if (phases.includes("critic")) {
-        if (run.phase !== "reviewing") advancePhase(run, "reviewing");
+        tryAdvance("reviewing");
       } else if (phases.includes("verifier")) {
-        if (run.phase !== "verifying") advancePhase(run, "verifying");
+        tryAdvance("verifying");
       } else if (phases.includes("integrator")) {
-        if (run.phase !== "integrating") advancePhase(run, "integrating");
+        tryAdvance("integrating");
       }
 
       const stageTimeoutMs = this.config.maxStageTimeoutSec * 1000;
@@ -4859,7 +4975,7 @@ export class Coordinator {
       }
 
       const criticResults = results.filter((r) => r.node.workerType === "critic");
-      for (const { result } of criticResults) {
+      for (const { result, node: criticNode } of criticResults) {
         if (
           result.output.kind === "critic" &&
           result.output.verdict === "request-changes" &&
@@ -4867,6 +4983,32 @@ export class Coordinator {
         ) {
           rehearsalRound++;
           console.log(`[coordinator] executeGraph: rehearsal round ${rehearsalRound}/${this.config.maxRehearsalRounds} — Critic requested changes`);
+
+          // Find the upstream builder for this critic node.
+          const upstreamBuilder = graph.edges
+            .filter((e) => e.to === criticNode.id)
+            .map((e) => graph.nodes.find((n) => n.id === e.from))
+            .find((n) => n?.workerType === "builder");
+
+          if (upstreamBuilder) {
+            // Reset graph: builder→ready, critic→planned, downstream→planned.
+            resetForRehearsal(graph, upstreamBuilder.id, criticNode.id);
+
+            // Store rehearsal feedback for the next Builder dispatch.
+            const criticOutput = result.output as {
+              comments?: readonly { severity: string; file?: string; line?: number; message: string }[];
+              suggestedChanges?: readonly { path: string; operation: string }[];
+              intentAlignment?: number;
+            };
+            active.rehearsalFeedback = {
+              round: rehearsalRound,
+              fromCriticTaskId: criticNode.runTaskId ?? criticNode.id,
+              intentAlignment: criticOutput.intentAlignment ?? 0,
+              comments: [...(criticOutput.comments ?? [])],
+              suggestedChanges: [...(criticOutput.suggestedChanges ?? [])],
+            };
+          }
+
           this.emit({
             type: "critic_review",
             payload: {
@@ -4882,6 +5024,24 @@ export class Coordinator {
             taskId: null,
             alternatives: ["Accept as-is", "Abort run"],
             rationale: "Critic identified issues; re-running builders with feedback",
+          });
+        } else if (
+          result.output.kind === "critic" &&
+          result.output.verdict === "request-changes" &&
+          rehearsalRound >= this.config.maxRehearsalRounds
+        ) {
+          // Cap hit — record checkpoint.
+          await this.persistReceiptCheckpoint(active, {
+            at: new Date().toISOString(),
+            type: "worker_step",
+            status: "EXECUTING_IN_WORKSPACE",
+            phase: run.phase,
+            summary: `Rehearsal loop capped at ${this.config.maxRehearsalRounds} rounds`,
+            details: { rehearsal_cap_hit: true, round: rehearsalRound },
+          });
+          this.emit({
+            type: "system_event",
+            payload: { event: "rehearsal_cap_hit", runId: active.run.id, round: rehearsalRound },
           });
         }
       }
@@ -5230,9 +5390,14 @@ export class Coordinator {
       implementationBrief: active.implementationBrief,
       signal: active.runAbortController.signal,
       fastPath: active.fastPath || undefined,
+      rehearsalFeedback: node.workerType === "builder" ? active.rehearsalFeedback : undefined,
       buildAssignment: (decision, task, intent, context, upstreamResults) =>
         this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),
     });
+    // Clear rehearsal feedback after it's been consumed by this dispatch.
+    if (node.workerType === "builder" && active.rehearsalFeedback) {
+      active.rehearsalFeedback = undefined;
+    }
 
     // ── Phase D: per-lane model dispatch for the primary builder ────
     // When the lane config specifies a primary provider/model and the
@@ -6507,17 +6672,19 @@ export class Coordinator {
    * Completes the commit and returns the final receipt.
    * This implements the DOCTRINE requirement for human-in-the-loop.
    */
-  async approveRun(runId: string): Promise<{ ok: boolean; commitSha?: string; error?: string }> {
+  async approveRun(runId: string, opts?: { decidedBy?: DiffApprovalReceipt["decidedBy"]; reason?: string }): Promise<{ ok: boolean; commitSha?: string; error?: string }> {
     const active = this.pendingApproval.get(runId);
     if (!active) return { ok: false, error: `No pending approval for run ${runId}` };
 
-    console.log(`[coordinator] APPROVAL RECEIVED for run ${runId} — committing...`);
+    const decidedBy = opts?.decidedBy ?? "human";
+    const reason = opts?.reason ?? "Human approved final diff for workspace commit and source-promotion eligibility";
+    console.log(`[coordinator] APPROVAL RECEIVED for run ${runId} (decidedBy=${decidedBy}) — committing...`);
     this.pendingApproval.delete(runId);
     active.diffApproval = this.buildDiffApprovalReceipt(
       active,
       "approved",
-      "Human approved final diff for workspace commit and source-promotion eligibility",
-      { decidedAt: new Date().toISOString(), decidedBy: "human" },
+      reason,
+      { decidedAt: new Date().toISOString(), decidedBy },
     );
 
     try {
@@ -8557,13 +8724,40 @@ export class Coordinator {
       ? { model: model || "unknown", inputTokens, outputTokens, estimatedCostUsd }
       : active.run.totalCost;
 
+    // ── Garbage output check (run BEFORE verdict so it can dominate) ──
+    if (!active.garbageCheckResult && active.changes.length > 0) {
+      const garbageChanges = active.changes.map((c) => ({
+        path: c.path,
+        operation: c.operation,
+        content: typeof c.content === "string" ? c.content : null,
+        originalContent: typeof c.originalContent === "string" ? c.originalContent : null,
+        diff: typeof c.diff === "string" ? c.diff : null,
+      }));
+      active.garbageCheckResult = checkGarbageOutput(
+        garbageChanges,
+        active.rawUserPrompt,
+      );
+      if (!active.garbageCheckResult.ok) {
+        const garbageSummary = summarizeGarbageResult(active.garbageCheckResult);
+        console.warn(`[coordinator] ${garbageSummary}`);
+        this.narrate(active, makeSafetyBlock({
+          runId: active.run.id,
+          gate: "merge_gate",
+          primaryReason: garbageSummary,
+          blockers: active.garbageCheckResult.findings.map((f) => `${f.kind}: ${f.reason}`),
+        }));
+      }
+    }
+
     // Determine the verdict: prefer the override passed by submit()
     // (which has already applied execution-gate truth enforcement),
     // fall back to determineVerdict for legacy/test callers.
     const rawVerdict = this.determineVerdict(active, verificationReceipt, judgmentReport, mergeDecision);
     const rollbackDominates = active.rollbackOutcome?.status !== undefined && active.rollbackOutcome.status !== "clean";
+    const garbageDominates = active.garbageCheckResult != null && !active.garbageCheckResult.ok;
     const verdict: RunReceipt["verdict"] =
       rollbackDominates ? "failed" :
+      garbageDominates ? "failed" :
       verdictOverride ??
       (executionDecision && !executionDecision.executionVerified && (rawVerdict === "success" || rawVerdict === "partial")
         ? "failed"
@@ -8697,6 +8891,10 @@ export class Coordinator {
       ...(active.preflightScoutReportIds.length > 0
         ? { preflightScoutReportIds: [...active.preflightScoutReportIds] }
         : {}),
+      executionMode: active.executionModeResult?.mode,
+      executionModeDetail: active.executionModeResult ?? null,
+      garbageCheck: active.garbageCheckResult ?? null,
+      builderAttempts: [],
     };
 
     // Compose the human-readable summary from the receipt we just
@@ -9214,6 +9412,21 @@ export class Coordinator {
     this.eventBus?.emit(event);
   }
 
+  private narrate(active: ActiveRun, event: OperatorNarrativeEvent): void {
+    active.narrativeEvents.push(event);
+    this.emit({ type: "operator_narrative", payload: event as unknown as Record<string, unknown> });
+  }
+
+  async receiptVerify(runId: string): Promise<{ valid: boolean; reason?: string }> {
+    const result = await this.receiptStore.verifyReceiptIntegrity(runId);
+    if (result.valid) {
+      console.log(`${runId}: VALID`);
+    } else {
+      console.error(`${runId}: INVALID — ${result.reason}`);
+    }
+    return result;
+  }
+
 }
 
 // ─── Internal State ──────────────────────────────────────────────────
@@ -9444,4 +9657,12 @@ interface ActiveRun {
   preflightScoutReportIds: string[];
   /** Preflight scout result for transparency in receipts/UI. */
   preflightScoutResult: PreflightScoutResult | null;
+  /** Execution mode classification. Set after scope/trivial classification. */
+  executionModeResult: ExecutionModeResult | null;
+  /** Rehearsal feedback to pass to the next Builder dispatch. */
+  rehearsalFeedback?: WorkerAssignment["rehearsalFeedback"];
+  /** Garbage output detector result. Set after Builder completes. */
+  garbageCheckResult: GarbageCheckResult | null;
+  /** Accumulated operator narrative events for the receipt. */
+  narrativeEvents: OperatorNarrativeEvent[];
 }

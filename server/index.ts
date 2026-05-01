@@ -134,6 +134,16 @@ export function isPortInUse(port: number, host: string): Promise<boolean> {
   });
 }
 
+/**
+ * Parse the --trust-this-session CLI flag from an argv array.
+ * Returns true ONLY when the literal `--trust-this-session` entry is
+ * present. No env-var or settings.json fallback exists — the session
+ * scope guarantee depends on this being memory-only.
+ */
+export function parseTrustThisSession(argv: readonly string[]): boolean {
+  return argv.includes("--trust-this-session");
+}
+
 export const DEFAULT_CONFIG: ServerConfig = {
   port: readPortFromEnv(),
   host: process.env["AEDIS_HOST"] === "0.0.0.0" && process.env["AEDIS_ALLOW_PUBLIC_BIND"] !== "true"

@@ -245,6 +245,44 @@ const EXPORT_CLAUSE_REGEX = /(?:^|\n)\s*export\s*\{\s*([^}]+)\}/g;
 const NAMED_EXPORT_SIG_REGEX =
   /(?:^|\n)\s*export\s+(?:abstract\s+)?(?:async\s+)?(?:default\s+)?(function|const|let|var|class|interface|type|enum)\s+(\w+)([^{=\n]*)/g;
 
+// ─── Rehearsal Feedback Formatting ──────────────────────────────────
+
+/**
+ * Format Critic rehearsal feedback into a prompt-ready string for the
+ * Builder's next iteration. Returns "" when feedback is undefined
+ * (first dispatch, no prior round).
+ */
+export function formatRehearsalFeedbackForBuilder(
+  feedback: WorkerAssignment["rehearsalFeedback"],
+): string {
+  if (!feedback) return "";
+  const lines: string[] = [];
+  lines.push(`=== REHEARSAL ROUND ${feedback.round} FEEDBACK ===`);
+  lines.push(`Critic intent alignment ${Math.round(feedback.intentAlignment * 100)}%`);
+  lines.push("");
+  if (feedback.comments.length === 0) {
+    lines.push("The Critic requested changes but left no specific comments.");
+  } else {
+    lines.push("Comments:");
+    for (const c of feedback.comments) {
+      const loc = c.file
+        ? (c.line != null ? `${c.file}:${c.line}` : c.file)
+        : "general";
+      lines.push(`  [${c.severity}] ${loc} — ${c.message}`);
+    }
+  }
+  lines.push("");
+  if (feedback.suggestedChanges.length === 0) {
+    lines.push("Suggested changes: (none)");
+  } else {
+    lines.push("Suggested changes:");
+    for (const s of feedback.suggestedChanges) {
+      lines.push(`  - ${s.operation} ${s.path}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 /**
  * Extract the set of named exports from a source file. Returns a
  * stable-sorted, deduplicated list of identifiers. Returns an empty

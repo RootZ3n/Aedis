@@ -610,3 +610,34 @@ function projectLoquiDecision(
   if (!decision) return undefined;
   return buildLoquiDecisionView(decision);
 }
+
+// ─── Diff Utilities ─────────────────────────────────────────────────
+
+/**
+ * Split a combined unified diff (multiple files) into a Map keyed by
+ * the b-side file path. Each value is a self-contained diff that
+ * starts with `diff --git ...` and contains all hunks for that file.
+ * Sections without a recognisable `diff --git a/... b/...` header are
+ * silently dropped.
+ */
+export function splitUnifiedDiffByFile(combined: string): Map<string, string> {
+  const result = new Map<string, string>();
+  const sections = combined.split(/(?=^diff --git )/m);
+  for (const section of sections) {
+    const headerMatch = /^diff --git a\/\S+ b\/(\S+)/.exec(section);
+    if (!headerMatch) continue;
+    const filePath = headerMatch[1];
+    result.set(filePath, section.trimEnd());
+  }
+  return result;
+}
+
+/**
+ * Synthesize a unified diff for a newly created file. The output uses
+ * `/dev/null` as the a-side and marks every line as added.
+ */
+export function synthesizeCreateDiff(filePath: string, content: string): string {
+  const lines = content.split("\n");
+  const added = lines.map((l) => `+${l}`).join("\n");
+  return `--- /dev/null\n+++ b/${filePath}\n@@ -0,0 +1,${lines.length} @@\n${added}\n`;
+}

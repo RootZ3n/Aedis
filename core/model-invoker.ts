@@ -904,3 +904,90 @@ export class InvokerError extends Error {
     this.kind = kind;
   }
 }
+
+// ─── Provider Failure Summary ───────────────────────────────────────
+
+export interface ProviderFailureSummary {
+  /** Human-readable one-line explanation. */
+  readonly headline: string;
+  /** Concrete next step for the operator. */
+  readonly nextStep: string;
+  /** Original error preserved for debug/audit. */
+  readonly rawError: string;
+  /** Normalized error category. */
+  readonly category: string;
+}
+
+const FAILURE_PATTERNS: readonly {
+  readonly test: (msg: string) => boolean;
+  readonly category: string;
+  readonly headline: string;
+  readonly nextStep: string;
+}[] = [
+  {
+    test: (m) => /429|rate.limit|too many requests/i.test(m),
+    category: "rate_limited",
+    headline: "Provider rate-limited the request",
+    nextStep: "Wait a few seconds and retry, or switch to a different provider/model in lane config.",
+  },
+  {
+    test: (m) => /unavailable|502|503|service.unavailable/i.test(m),
+    category: "provider_unavailable",
+    headline: "Provider is temporarily unavailable",
+    nextStep: "Check the provider's status page. Retry in a few minutes or configure a fallback provider.",
+  },
+  {
+    test: (m) => /model.not.found|does not exist|unknown model|no such model/i.test(m),
+    category: "model_not_found",
+    headline: "Model not found on the configured provider",
+    nextStep: "Verify the model name in .aedis/model-config.json matches a model the provider serves.",
+  },
+  {
+    test: (m) => /api.key|unauthorized|401|authentication|invalid.*key|missing.*key/i.test(m),
+    category: "api_key_invalid",
+    headline: "API key is missing or invalid",
+    nextStep: "Set the correct API key in the environment (e.g. OPENROUTER_API_KEY, MINIMAX_API_KEY).",
+  },
+  {
+    test: (m) => /timeout|timed.out|ETIMEDOUT|ESOCKETTIMEDOUT/i.test(m),
+    category: "timeout",
+    headline: "Request timed out waiting for the provider",
+    nextStep: "Increase the timeout in lane config, or try a faster model/provider.",
+  },
+  {
+    test: (m) => /circuit.breaker|breaker.open/i.test(m),
+    category: "circuit_breaker_open",
+    headline: "Circuit breaker is open for this provider",
+    nextStep: "The provider failed repeatedly. Wait for the breaker to reset or switch providers.",
+  },
+  {
+    test: (m) => /all.*fallback.*failed|exhausted|no.*providers/i.test(m),
+    category: "all_providers_failed",
+    headline: "All configured providers failed",
+    nextStep: "Check provider status, API keys, and network connectivity. At least one provider must be reachable.",
+  },
+];
+
+/**
+ * Normalize a raw provider error into a human-readable summary with
+ * a concrete next step. The raw error is preserved in `rawError` for
+ * debug/audit use.
+ */
+export function normalizeProviderError(rawError: string): ProviderFailureSummary {
+  for (const pattern of FAILURE_PATTERNS) {
+    if (pattern.test(rawError)) {
+      return {
+        headline: pattern.headline,
+        nextStep: pattern.nextStep,
+        rawError,
+        category: pattern.category,
+      };
+    }
+  }
+  return {
+    headline: "Provider returned an unexpected error",
+    nextStep: "Check the raw error below and the provider's documentation for guidance.",
+    rawError,
+    category: "unknown",
+  };
+}

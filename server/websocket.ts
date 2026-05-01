@@ -84,7 +84,8 @@ export type AedisEventType =
   | "system_status"
   | "system_pressure_warning"
   | "system_pressure_critical"
-  | "system_pressure_recovered";
+  | "system_pressure_recovered"
+  | "operator_narrative";
 
 /**
  * @deprecated Use AedisEventType. Alias kept for downstream code that

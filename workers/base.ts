@@ -165,6 +165,23 @@ export interface WorkerAssignment {
    * only), Scout limits scope. Verifier + typecheck still run fully.
    */
   readonly fastPath?: boolean;
+  /**
+   * Rehearsal feedback from a prior Critic round. Populated by the
+   * Coordinator when re-dispatching a Builder after a "request-changes"
+   * verdict. Absent on the first dispatch.
+   */
+  readonly rehearsalFeedback?: {
+    readonly round: number;
+    readonly fromCriticTaskId: string;
+    readonly intentAlignment: number;
+    readonly comments: readonly {
+      readonly severity: string;
+      readonly file?: string;
+      readonly line?: number;
+      readonly message: string;
+    }[];
+    readonly suggestedChanges: readonly { readonly path: string; readonly operation: string }[];
+  };
 }
 
 export interface WorkerResult {

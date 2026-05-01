@@ -29,6 +29,7 @@ export function buildDispatchAssignment(input: {
    */
   signal?: AbortSignal;
   fastPath?: boolean;
+  rehearsalFeedback?: WorkerAssignment["rehearsalFeedback"];
   buildAssignment: (
     decision: RoutingDecision,
     task: RunTask,
@@ -65,6 +66,7 @@ export function buildDispatchAssignment(input: {
     implementationBrief: input.implementationBrief,
     signal: input.signal,
     ...(input.fastPath ? { fastPath: true } : {}),
+    ...(input.rehearsalFeedback ? { rehearsalFeedback: input.rehearsalFeedback } : {}),
   };
 }
 

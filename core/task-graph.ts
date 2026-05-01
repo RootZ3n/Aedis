@@ -573,6 +573,48 @@ function propagateBlock(graph: TaskGraphState, failedNodeId: string): void {
   }
 }
 
+// ─── Rehearsal Reset ──────────────────────────────────────────────────
+
+/**
+ * Reset a Builder→Critic pair for a rehearsal round. Both nodes must
+ * be in the "completed" status. After the reset:
+ *   - Builder → "ready" (dispatches immediately on the next iteration)
+ *   - Critic  → "planned" (waits for the new Builder result)
+ *   - All downstream nodes in "ready" or "completed" → "planned"
+ *   - runTaskId is cleared on both nodes so the next dispatch
+ *     doesn't re-discover stale upstream bindings.
+ */
+export function resetForRehearsal(
+  graph: TaskGraphState,
+  builderId: string,
+  criticId: string,
+): void {
+  const builder = graph.nodes.find((n) => n.id === builderId);
+  const critic = graph.nodes.find((n) => n.id === criticId);
+  if (!builder) throw new TaskGraphError(`resetForRehearsal: builder node ${builderId} not found`);
+  if (!critic) throw new TaskGraphError(`resetForRehearsal: critic node ${criticId} not found`);
+  if (builder.status !== "completed") {
+    throw new TaskGraphError(`resetForRehearsal: builder must be completed, got ${builder.status}`);
+  }
+  if (critic.status !== "completed") {
+    throw new TaskGraphError(`resetForRehearsal: critic must be completed, got ${critic.status}`);
+  }
+
+  builder.status = "ready";
+  builder.runTaskId = null;
+  critic.status = "planned";
+  critic.runTaskId = null;
+
+  // Revert downstream nodes that were auto-readied or already ran.
+  const downstream = getDownstreamNodes(graph, criticId);
+  for (const node of downstream) {
+    if (node.status === "ready" || node.status === "completed") {
+      node.status = "planned";
+      node.runTaskId = null;
+    }
+  }
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────
 
 export class TaskGraphError extends Error {
