@@ -223,11 +223,43 @@ export class CriticWorker extends AbstractWorker {
       }
 
       const { model: primaryModel, provider: primaryProvider } = this.getActiveModelConfig(configRoot);
-      const builderOutput = builderResult.output as BuilderOutput & { contract?: TaskContract };
+      const builderOutput = builderResult.output as BuilderOutput & {
+        contract?: TaskContract;
+        qualityScore?: { overall: number; decision: string; retryReason?: string; dimensions?: Record<string, number> };
+        qualityGateResults?: readonly { gate: string; passed: boolean; score: number; message: string; details?: readonly string[] }[];
+        modelQualityProfile?: { provider: string; model: string; tier: string };
+      };
       const changes = builderOutput.changes;
       const contract = builderOutput.contract ?? null;
       const heuristicIssues = this.runHeuristicChecks(changes, contract, assignment);
       const heuristicComments = this.toComments(heuristicIssues, changes[0]?.path ?? assignment.task.targetFiles[0] ?? "unknown");
+
+      // Extract quality warnings from Builder output for Critic context
+      const qualityWarnings: string[] = [];
+      if (builderOutput.qualityScore) {
+        const qs = builderOutput.qualityScore;
+        if (qs.decision === 'retry') {
+          qualityWarnings.push(`Builder quality score below threshold: ${qs.overall} (${qs.retryReason ?? 'low quality'})`);
+        }
+        if (qs.dimensions) {
+          for (const [dim, score] of Object.entries(qs.dimensions)) {
+            if (score < 0.5) qualityWarnings.push(`Low ${dim} score: ${score}`);
+          }
+        }
+      }
+      if (builderOutput.qualityGateResults) {
+        for (const gate of builderOutput.qualityGateResults) {
+          if (!gate.passed) {
+            qualityWarnings.push(`Quality gate ${gate.gate} failed: ${gate.message}`);
+            if (gate.details) {
+              for (const d of gate.details) qualityWarnings.push(`  - ${d}`);
+            }
+          }
+        }
+      }
+      if (builderOutput.modelQualityProfile) {
+        qualityWarnings.push(`Builder model tier: ${builderOutput.modelQualityProfile.tier}`);
+      }
 
       // Model review via fallback-aware invoker.
       // The model call only runs when there's a contract AND this is not
@@ -246,7 +278,7 @@ export class CriticWorker extends AbstractWorker {
         console.log(`[critic] fast-path: skipping model review, heuristic-only`);
         rawModelReview = "[critic_fast_path] heuristic-only review — trivial single-file edit";
       } else if (contract) {
-        const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment, primaryModel);
+        const prompt = this.buildPrompt(contract, changes, heuristicIssues, assignment, primaryModel, qualityWarnings);
 
         // Read the per-repo declared chain from .aedis/model-config.json.
         // When present, it REPLACES the constructor-level legacy
@@ -742,8 +774,8 @@ export class CriticWorker extends AbstractWorker {
     }));
   }
 
-  private buildPrompt(contract: TaskContract, changes: readonly FileChange[], issues: readonly Issue[], assignment: WorkerAssignment, model: string): string {
-    return [
+  private buildPrompt(contract: TaskContract, changes: readonly FileChange[], issues: readonly Issue[], assignment: WorkerAssignment, model: string, qualityWarnings: string[] = []): string {
+    const sections = [
       `You are the Critic worker on model ${model}.`,
       "Review only. Do not rewrite code.",
       `Task: ${assignment.task.description}`,
@@ -751,9 +783,13 @@ export class CriticWorker extends AbstractWorker {
       `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
       `Interface rules: ${contract.interfaceRules.join(" | ")}`,
       `Heuristic issues: ${issues.map((i) => i.message).join(" | ") || "none"}`,
-      `Diffs:\n${summarizeChangesForCriticReview(changes)}`,
-      "Return a terse review summary and any blockers.",
-    ].join("\n\n");
+    ];
+    if (qualityWarnings.length > 0) {
+      sections.push(`Builder quality warnings:\n${qualityWarnings.map(w => `- ${w}`).join("\n")}`);
+    }
+    sections.push(`Diffs:\n${summarizeChangesForCriticReview(changes)}`);
+    sections.push("Return a terse review summary and any blockers.");
+    return sections.join("\n\n");
   }
 
   /**

@@ -28,6 +28,9 @@ import {
   resolveBuilderModelForTier,
   resolveBuilderChainForTier,
 } from "../server/routes/config.js";
+import { scoreBuilderQuality } from "../core/builder-quality-scorer.js";
+import { tuneBuilderPrompt, getVerificationConfig, recommendUpgrade, type ModelProfile } from "../core/model-quality-tuner.js";
+import { runQualityGates } from "../core/quality-gates.js";
 import type { EventBus } from "../server/websocket.js";
 import {
   AbstractWorker,
@@ -656,6 +659,9 @@ interface ExecutedTargetPatch {
    * survive failures.
    */
   readonly attemptRecords: readonly BuilderAttemptRecord[];
+  /** Quality evidence from the quality scorer and gates */
+  readonly qualityScore?: ReturnType<typeof scoreBuilderQuality>;
+  readonly gateResult?: ReturnType<typeof runQualityGates>;
 }
 
 // Structural type for assignment.context.layers — kept loose so we don't
@@ -816,6 +822,21 @@ export class BuilderWorker extends AbstractWorker {
           )
         : 0;
       const summaryContract = this.buildContract(assignment, assignment.task.targetFiles[0]);
+
+      // ── Aggregate quality evidence from all target patches ──────────
+      const allQualityScores = targetPatches.map(p => p.qualityScore).filter(Boolean);
+      const allGateResults = targetPatches.map(p => p.gateResult).filter(Boolean);
+      const avgQualityScore = allQualityScores.length > 0
+        ? allQualityScores.reduce((sum, s) => sum + s!.overall, 0) / allQualityScores.length
+        : null;
+      // Get provider/model from config for quality profile
+      const { model: cfgModel, provider: cfgProvider } = this.getActiveModelConfig(configRoot, assignment.tier);
+      const modelProfile = getVerificationConfig(cfgProvider, cfgModel);
+
+      // Determine if we should recommend a model upgrade
+      const qualityFailures = allQualityScores.filter(s => s && (s.decision === 'retry' || s.decision === 'reject')).length;
+      const recommendedUpgrade = qualityFailures >= 2 ? recommendUpgrade(cfgProvider, cfgModel) : null;
+
       const output: BuilderResult["output"] = {
         kind: "builder",
         changes,
@@ -827,6 +848,22 @@ export class BuilderWorker extends AbstractWorker {
         providerFindings,
         attemptRecords: [...allAttemptRecords],
       };
+      // Attach quality evidence (mutable because output is not readonly)
+      const outputAny = output as any;
+      outputAny.qualityScore = avgQualityScore;
+      outputAny.qualityGateResults = allGateResults;
+      outputAny.modelQualityProfile = {
+        provider: cfgProvider,
+        model: cfgModel,
+        tier: modelProfile.strictness,
+        requireTests: modelProfile.requireTests,
+        maxRetries: modelProfile.maxRetries,
+      };
+      outputAny.recommendedUpgrade = recommendedUpgrade ? {
+        provider: recommendedUpgrade.provider,
+        model: recommendedUpgrade.model,
+        reason: recommendedUpgrade.reason,
+      } : null;
 
       return this.success(assignment, output, {
         cost,
@@ -1587,7 +1624,17 @@ export class BuilderWorker extends AbstractWorker {
     }
 
     const built = this.buildPrompt(contract, assignment, promptContent, primaryModel, sectionInfo);
-    const prompt = built.prompt;
+    let prompt = built.prompt;
+
+    // ── Model-specific prompt tuning ─────────────────────────────────
+    const modelProfile = getVerificationConfig(primaryProvider, primaryModel);
+    prompt = tuneBuilderPrompt(prompt, primaryProvider, primaryModel);
+    console.log(
+      `[builder] model tuning: provider=${primaryProvider} model=${primaryModel} ` +
+      `strictness=${modelProfile.strictness} requireTests=${modelProfile.requireTests} ` +
+      `maxRetries=${modelProfile.maxRetries}`,
+    );
+
     if (built.truncated.length > 0) {
       const dropped = built.truncated
         .map((item) => `${item.path} (${item.chars} chars, layer ${item.layerIndex}: ${item.reason})`)
@@ -1728,6 +1775,39 @@ export class BuilderWorker extends AbstractWorker {
       sectionInfo !== null,
     );
 
+    // ── Quality Gates (pre-guard) ─────────────────────────────────────
+    const gateInput = {
+      rawResponse: response.text,
+      changes: [{ file: relativePath, oldContent: fullContent, newContent: attempt1Content, diff: attempt1Diff }],
+      originalContents: new Map([[relativePath, fullContent]]),
+      goal: contract.goal,
+      targetFiles: assignment.task.targetFiles,
+      model: response.usedModel,
+      provider: response.usedProvider,
+    };
+    const gateResult = runQualityGates(gateInput);
+    if (!gateResult.overall) {
+      console.warn(
+        `[builder] quality gates: ${gateResult.passedCount}/${gateResult.totalCount} passed — ${gateResult.reason}`,
+      );
+      for (const gate of gateResult.gates.filter(g => !g.passed)) {
+        console.warn(`[builder]   gate ${gate.gate}: ${gate.message}`);
+        if (gate.details) {
+          for (const d of gate.details) console.warn(`[builder]     - ${d}`);
+        }
+      }
+    }
+
+    // ── Builder Quality Scorer ─────────────────────────────────────────
+    const qualityScore = scoreBuilderQuality({
+      rawResponse: response.text,
+      changes: [{ file: relativePath, oldContent: fullContent, newContent: attempt1Content, diff: attempt1Diff }],
+      originalContent: fullContent,
+      goal: contract.goal,
+      prompt,
+      model: response.usedModel,
+      sectionEdit: sectionInfo !== null,
+    });
     // Build the diagnostic record up-front. Outcome / failureReason
     // get patched if a guard fires, but the cost/model/tokens/exports
     // captured here survive any subsequent throw — that's the whole
@@ -1749,6 +1829,45 @@ export class BuilderWorker extends AbstractWorker {
       proposed: attempt1Content,
     });
     attemptRecords.push(attempt1Record);
+
+    // ── Quality rejection (after attempt record created) ──────────────
+    if (qualityScore.decision === 'reject') {
+      const autoEscalate = process.env.AEDIS_AUTO_ESCALATE_ON_QUALITY_FAIL === 'true';
+      const upgrade = autoEscalate ? recommendUpgrade(primaryProvider, primaryModel) : null;
+      if (upgrade) {
+        console.warn(
+          `[builder] quality reject + auto-escalate: ${qualityScore.retryReason} → upgrading to ${upgrade.provider}/${upgrade.model}`,
+        );
+        this.noteDecision(taskId, `Auto-escalating due to quality failure`, upgrade.reason);
+      }
+      const rejectRecord: BuilderAttemptRecord = {
+        ...attempt1Record,
+        outcome: 'quality-reject' as AttemptOutcome,
+        failureReason: qualityScore.retryReason ?? 'quality too low',
+      };
+      const msg = `Builder quality scorer rejected output: ${qualityScore.retryReason}`;
+      throw new BuilderAttemptError(
+        msg,
+        this.markAttemptFailed(rejectRecord, attemptRecords, "quality-reject", "quality-reject", msg),
+      );
+    }
+    if (qualityScore.decision === 'retry') {
+      console.warn(
+        `[builder] quality scorer: retry recommended — ${qualityScore.retryReason}`,
+      );
+      this.noteDecision(taskId, `Quality scorer recommends retry`, qualityScore.retryReason ?? 'low quality');
+    }
+    console.log(
+      `[builder] quality score: ${qualityScore.overall} (structural=${qualityScore.dimensions.structural} diff=${qualityScore.dimensions.diff} code=${qualityScore.dimensions.code} adherence=${qualityScore.dimensions.adherence} anomaly=${qualityScore.dimensions.anomaly})`,
+    );
+
+    // ── Escalation recommendation from quality gates ───────────────────
+    if (gateResult.shouldEscalate) {
+      console.warn(
+        `[builder] quality gates recommend escalation: ${gateResult.reason}`,
+      );
+      this.noteDecision(taskId, `Quality gates recommend model escalation`, gateResult.reason);
+    }
 
     let updatedContent = attempt1Content;
     let diff = attempt1Diff;
@@ -1953,6 +2072,8 @@ export class BuilderWorker extends AbstractWorker {
       rawModelResponse: response.text,
       providerFindings,
       attemptRecords: [...attemptRecords],
+      qualityScore: qualityScore ?? undefined,
+      gateResult: gateResult ?? undefined,
     };
   }
 

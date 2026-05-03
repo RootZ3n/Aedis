@@ -33,6 +33,7 @@ export type AttemptOutcome =
   | "guard-doc-loss"
   | "guard-forbidden-change"
   | "guard-section-corruption"
+  | "quality-reject"
   | "io-error"
   | "model-cancelled"
   | "unknown";

@@ -613,6 +613,16 @@ export interface RunReceipt {
    */
   readonly humanSummary: RunSummary | null;
   /**
+   * Quality evidence from the Builder quality scorer, quality gates,
+   * and model quality tuner. Populated when quality modules are active.
+   */
+  readonly qualityEvidence?: {
+    readonly builderQualityScore?: number;
+    readonly qualityGateResults?: readonly { gate: string; passed: boolean; score: number; message: string }[];
+    readonly modelQualityProfile?: { provider: string; model: string; tier: string; requireTests: boolean; maxRetries: number };
+    readonly recommendedUpgrade?: { provider: string; model: string; reason: string };
+  };
+  /**
    * Planning-time blast radius estimate. Computed after scope
    * classification, before execution. Surfaced on the RunReceipt
    * so the UI can show a "projected risk" chip before the run
@@ -8895,6 +8905,8 @@ export class Coordinator {
       executionModeDetail: active.executionModeResult ?? null,
       garbageCheck: active.garbageCheckResult ?? null,
       builderAttempts: [],
+      // Quality evidence from Builder quality scorer, gates, and tuner
+      ...this.extractQualityEvidence(active.workerResults),
     };
 
     // Compose the human-readable summary from the receipt we just
@@ -8921,6 +8933,43 @@ export class Coordinator {
    * worker results yet (pre-build coherence failure path) so the
    * scorer can fall back to its gate-only path.
    */
+  private extractQualityEvidence(results: readonly WorkerResult[]): { qualityEvidence?: RunReceipt["qualityEvidence"] } {
+    const builderResults = results.filter(r => r.output?.kind === "builder");
+    if (builderResults.length === 0) return {};
+
+    const builderOutput = builderResults[0].output as any;
+    const qualityScore = builderOutput.qualityScore;
+    const gateResults = builderOutput.qualityGateResults;
+    const modelProfile = builderOutput.modelQualityProfile;
+    const recommendedUpgrade = builderOutput.recommendedUpgrade;
+
+    if (!qualityScore && !gateResults && !modelProfile && !recommendedUpgrade) return {};
+
+    return {
+      qualityEvidence: {
+        builderQualityScore: qualityScore?.overall ?? undefined,
+        qualityGateResults: gateResults?.map((g: any) => ({
+          gate: g.gate,
+          passed: g.passed,
+          score: g.score,
+          message: g.message,
+        })) ?? undefined,
+        modelQualityProfile: modelProfile ? {
+          provider: modelProfile.provider,
+          model: modelProfile.model,
+          tier: modelProfile.tier,
+          requireTests: modelProfile.requireTests,
+          maxRetries: modelProfile.maxRetries,
+        } : undefined,
+        recommendedUpgrade: recommendedUpgrade ? {
+          provider: recommendedUpgrade.provider,
+          model: recommendedUpgrade.model,
+          reason: recommendedUpgrade.reason,
+        } : undefined,
+      },
+    };
+  }
+
   private averageWorkerConfidence(results: readonly WorkerResult[]): number {
     if (results.length === 0) return 0;
     let total = 0;
