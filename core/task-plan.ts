@@ -43,7 +43,8 @@ export type SubtaskStatus =
   | "completed"   // success, advances to next subtask
   | "failed"      // attempts exhausted, loop may stop or skip
   | "skipped"     // user / loop chose to skip this subtask
-  | "blocked";    // approval required, Velum-blocked, budget hit, etc.
+  | "blocked"    // approval required, Velum-blocked, budget hit, etc.
+  | "needs_clarification"; // coordinator could not identify a target file even after scouts ran
 
 export type TaskPlanStatus =
   | "pending"     // created, not yet started
@@ -53,7 +54,8 @@ export type TaskPlanStatus =
   | "failed"      // one or more subtasks terminally failed and loop stopped
   | "cancelled"   // user cancelled
   | "interrupted" // server restart caught the plan mid-run
-  | "blocked";    // budget hit or stop signal; recoverable via continue
+  | "blocked"    // budget hit or stop signal; recoverable via continue
+  | "needs_replan"; // a subtask needs a target file attached or rephrased before the loop can continue
 
 export type StopReason =
   | "all_subtasks_complete"
@@ -67,7 +69,8 @@ export type StopReason =
   | "max_consecutive_failures_reached"
   | "user_cancelled"
   | "server_interrupted"
-  | "subtask_terminal_failure";
+  | "subtask_terminal_failure"
+  | "needs_clarification";
 
 export interface Subtask {
   /** Stable id within the plan, e.g. "st-1". */
@@ -102,6 +105,36 @@ export interface Subtask {
   readonly completedAt: string | null;
   /** Approximate cost charged to this subtask across attempts. */
   readonly costUsd: number;
+  /**
+   * Scout-derived candidate target files to attach. Populated when
+   * the coordinator's pre-dispatch guard rejected this subtask for
+   * lack of an actionable target. Empty for any other state. Surfaced
+   * to the UI as the "Suggested target" / "Show Scout Evidence" data.
+   */
+  readonly recommendedTargets?: readonly string[];
+  /**
+   * Scout report ids that produced the recommended targets. Lets the
+   * UI link the operator straight at the underlying evidence rather
+   * than guessing where it came from.
+   */
+  readonly scoutReportIds?: readonly string[];
+  /**
+   * Per-subtask record of (stage, provider, model) tuples that hit a
+   * stage timeout during this subtask. Persisted across repair
+   * attempts so the next dispatch can apply the timeout retry policy
+   * (default: do NOT re-dispatch a timed-out model). Increments on
+   * each timeout via `recordTimeout` from core/timeout-policy.ts.
+   * The UI's timeout-recovery card reads this to render the model
+   * + elapsed-time chip.
+   */
+  readonly timedOutModels?: readonly {
+    readonly stage: string;
+    readonly provider: string;
+    readonly model: string;
+    readonly at: string;
+    readonly stageTimeoutMs: number;
+    readonly consecutiveTimeouts: number;
+  }[];
 }
 
 export interface TaskPlanBudget {
@@ -322,6 +355,15 @@ export function findNextSubtask(plan: TaskPlan): Subtask | null {
 }
 
 /**
+ * Subtasks in `needs_clarification` are the ones holding up a
+ * `needs_replan` plan — surfaced separately so the UI can list them
+ * with their scout evidence + recommended targets.
+ */
+export function findNeedsClarificationSubtasks(plan: TaskPlan): readonly Subtask[] {
+  return plan.subtasks.filter((s) => s.status === "needs_clarification");
+}
+
+/**
  * Aggregate counts for the UI / final summary. Pure projection.
  */
 export interface SubtaskCounts {
@@ -331,15 +373,25 @@ export interface SubtaskCounts {
   readonly skipped: number;
   readonly blocked: number;
   readonly pending: number;
+  readonly needsClarification: number;
 }
 
 export function countSubtasks(plan: TaskPlan): SubtaskCounts {
-  const counts = { total: plan.subtasks.length, completed: 0, failed: 0, skipped: 0, blocked: 0, pending: 0 };
+  const counts = {
+    total: plan.subtasks.length,
+    completed: 0,
+    failed: 0,
+    skipped: 0,
+    blocked: 0,
+    pending: 0,
+    needsClarification: 0,
+  };
   for (const s of plan.subtasks) {
     if (s.status === "completed" || s.status === "repaired") counts.completed += 1;
     else if (s.status === "failed") counts.failed += 1;
     else if (s.status === "skipped") counts.skipped += 1;
     else if (s.status === "blocked") counts.blocked += 1;
+    else if (s.status === "needs_clarification") counts.needsClarification += 1;
     else counts.pending += 1;
   }
   return counts;
@@ -396,6 +448,8 @@ function buildHeadline(plan: TaskPlan, counts: SubtaskCounts): string {
       return `Cancelled at ${counts.completed}/${counts.total}.`;
     case "interrupted":
       return `Interrupted by server restart at ${counts.completed}/${counts.total}. Use /continue to resume.`;
+    case "needs_replan":
+      return `Mission needs replan at ${counts.completed}/${counts.total}: ${counts.needsClarification} subtask(s) need a target file.`;
     default:
       return `${plan.status} — ${counts.completed}/${counts.total} subtasks.`;
   }
@@ -429,6 +483,8 @@ function humanReason(reason: StopReason | ""): string {
       return "server interrupted mid-run";
     case "subtask_terminal_failure":
       return "subtask failed terminally after repairs";
+    case "needs_clarification":
+      return "subtask is missing a target file — clarification needed";
   }
 }
 
@@ -448,6 +504,9 @@ function recommendedNext(plan: TaskPlan, counts: SubtaskCounts): string {
   }
   if (plan.status === "cancelled") {
     return "Cancelled. Receipts for completed subtasks are intact.";
+  }
+  if (plan.status === "needs_replan") {
+    return "Review scout evidence, attach a target file to the affected subtask, then POST /task-plans/<id>/continue.";
   }
   if (counts.pending > 0) return "Continue to advance to the next pending subtask.";
   return "Plan terminal — no further action required.";

@@ -29,6 +29,7 @@
     "test": "bash -O globstar -c 'tsx --test --test-concurrency=4 core/**/*.test.{ts,tsx} server/**/*.test.ts workers/**/*.test.ts cli/**/*.test.{ts,tsx} scripts/**/*.test.ts'",
     "test:gauntlet": "tsx --test core/regression-gauntlet.test.ts",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:magister": "node scripts/smoke-magister-live.mjs",
     "tui": "tsx cli/tui/index.tsx",
     "security:secrets": "bash scripts/check-secrets.sh",
     "audit:release": "npm audit --audit-level=moderate",

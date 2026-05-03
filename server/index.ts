@@ -593,7 +593,41 @@ export async function createServer(
 
   server.post<{ Params: { runId: string } }>("/approvals/:runId/approve", async (req, reply) => {
     const result = await coordinator.approveRun(req.params.runId);
+    // Fail closed on contaminated workspaces. The coordinator returns
+    // `code: "unsafe_state"` with the structured `unsafeState` payload
+    // when rollback left the workspace dirty / unsafe. The HTTP
+    // response surface uses 409 so the UI button can display
+    // "MANUAL INSPECTION REQUIRED" instead of silently logging an
+    // ok:false. CLI and any other client see the same code.
+    if (result && (result as { code?: string }).code === "unsafe_state") {
+      reply.code(409).send(result);
+      return;
+    }
+    if (result && (result as { ok?: boolean }).ok === false) {
+      // Generic refusal (e.g. no pending approval) — surface as 400
+      // rather than 200-with-ok:false. Only the unsafe_state branch
+      // uses 409.
+      reply.code(400).send(result);
+      return;
+    }
     reply.send(result);
+  });
+
+  server.get<{ Params: { runId: string } }>("/approvals/:runId/safety", async (req, reply) => {
+    // Read-only assessment endpoint. CLIs and the UI poll this to
+    // decide whether to render the Approve/Reject card. Returns
+    // `unsafe: true` with a structured assessment whenever the run
+    // is in any rollback-incomplete / failed / unsafe-state shape,
+    // even when the in-memory pendingApproval entry has already
+    // been invalidated.
+    const runId = req.params.runId;
+    const persisted = await coordinator.getPersistedRunSnapshot(runId).catch(() => null);
+    if (!persisted) {
+      reply.code(404).send({ error: "run not found", runId });
+      return;
+    }
+    const assessment = coordinator.assessRunSafety(persisted);
+    reply.send({ runId, ...assessment });
   });
 
   server.post<{ Params: { runId: string } }>("/approvals/:runId/reject", async (req, reply) => {

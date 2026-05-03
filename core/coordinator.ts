@@ -214,6 +214,8 @@ import {
   type NamedTargetDiscoveryResult,
 } from "./named-target-discovery.js";
 import { runPreflightScouts, type PreflightScoutResult } from "./coordinator-preflight-scouts.js";
+import { detectFeatureUnderspecified } from "./feature-completeness-guard.js";
+import { assessUnsafeState, type UnsafeStateAssessment } from "./unsafe-state.js";
 import { ScoutEvidenceStore } from "./scout-report.js";
 import {
   decideMerge,
@@ -543,6 +545,21 @@ export interface TaskSubmission {
    * --repo CLI flag or the repoPath field on POST /tasks.
    */
   projectRoot?: string;
+  /**
+   * Per-stage timed-out model exclusions. The task-loop persists a
+   * subtask's timeout history across repair attempts and passes the
+   * accumulated entries here so the coordinator's chain builders
+   * can skip them on the next attempt. Without this, each repair
+   * resets the per-run blacklist and the same expensive model gets
+   * retried — the cost-control bug from 2026-05-03.
+   *
+   * Each entry is matched as (stage, provider, model) — exact match.
+   */
+  excludedModels?: ReadonlyArray<{
+    readonly stage: string;
+    readonly provider: string;
+    readonly model: string;
+  }>;
 }
 
 export interface RunReceipt {
@@ -849,6 +866,35 @@ export class CoordinatorError extends Error {
   }
 }
 
+/**
+ * Thrown when the coordinator cannot identify a target file before
+ * Builder dispatch — even after scouts ran. Carries the scout
+ * evidence so the task-loop can surface a NEEDS_CLARIFICATION /
+ * NEEDS_REPLAN state with actionable CTAs instead of a silent
+ * subtask_terminal_failure.
+ */
+export class NeedsClarificationError extends CoordinatorError {
+  readonly recommendedTargets: readonly string[];
+  readonly scoutReportIds: readonly string[];
+  readonly scoutSpawned: boolean;
+  readonly recommendedAction: string;
+
+  constructor(args: {
+    message: string;
+    recommendedTargets: readonly string[];
+    scoutReportIds: readonly string[];
+    scoutSpawned: boolean;
+    recommendedAction: string;
+  }) {
+    super(args.message);
+    this.name = "NeedsClarificationError";
+    this.recommendedTargets = [...args.recommendedTargets];
+    this.scoutReportIds = [...args.scoutReportIds];
+    this.scoutSpawned = args.scoutSpawned;
+    this.recommendedAction = args.recommendedAction;
+  }
+}
+
 export function collectAdversarialFindingsForConfidence(
   workerResults: readonly WorkerResult[],
   executionDecision: ExecutionGateDecision | null,
@@ -911,6 +957,35 @@ export class Coordinator {
   /** Deduplicate a list of strings, filtering out empty values. */
   private uniqueStrings(values: readonly string[]): string[] {
     return Array.from(new Set(values.filter((v): v is string => typeof v === "string" && v.length > 0)));
+  }
+
+  /**
+   * Repo-relative directory listing for the feature-completeness
+   * guard. Returns files AND subdirectories (the guard distinguishes
+   * via file-extension check). Path-traversal-safe — never escapes
+   * the project root, never throws on EACCES/ENOENT.
+   */
+  private listRepoChildren(projectRoot: string, relativeDir: string): readonly string[] {
+    try {
+      const cleanRel = relativeDir.replace(/^[/\\]+|[/\\]+$/g, "");
+      const target = cleanRel === "" || cleanRel === "."
+        ? projectRoot
+        : resolve(projectRoot, cleanRel);
+      const rootResolved = resolve(projectRoot);
+      // Don't escape the project root.
+      if (!target.startsWith(rootResolved)) return [];
+      if (!existsSync(target)) return [];
+      const entries = readdirSync(target);
+      const out: string[] = [];
+      for (const name of entries) {
+        if (name.startsWith(".")) continue;
+        if (name === "node_modules" || name === "dist" || name === "build") continue;
+        out.push(cleanRel === "" ? name : `${cleanRel}/${name}`);
+      }
+      return out;
+    } catch {
+      return [];
+    }
   }
   private config: CoordinatorConfig;
   private charterGen: CharterGenerator;
@@ -1386,7 +1461,14 @@ export class Coordinator {
       prompt: normalizedInput,
       analysis: baseAnalysis,
     });
-    const analysis: RequestAnalysis = {
+    // `analysis` and `charter` are LET (not const) because the
+    // preflight-scout phase below may discover additional targets
+    // that need to flow into charter.deliverables before scope
+    // classification reads `charterTargets`. Without that rebuild
+    // the scout's findings reach `preparedTargets.targets` but never
+    // the deliverables, and the run dies at the empty-targets guard
+    // before the Builder is ever dispatched.
+    let analysis: RequestAnalysis = {
       ...baseAnalysis,
       targets: preparedTargets.targets.length > 0
         ? [...preparedTargets.targets]
@@ -1396,7 +1478,7 @@ export class Coordinator {
           ? [...baseAnalysis.ambiguities, preparedTargets.clarification]
           : [...baseAnalysis.ambiguities],
     };
-    const charter = this.charterGen.generateCharter(analysis);
+    let charter = this.charterGen.generateCharter(analysis);
     const constraints = [
       ...this.charterGen.generateDefaultConstraints(analysis),
       ...(submission.extraConstraints ?? []),
@@ -1518,6 +1600,44 @@ export class Coordinator {
           console.log(
             `[coordinator] preflight scouts added ${newTargets.length} advisory target(s): ${newTargets.join(", ")}`,
           );
+
+          // SCOUT→DELIVERABLE HANDOFF (narrow rebuild).
+          //
+          // Charter.deliverables[].targetFiles was frozen at the
+          // pre-scout target list. The downstream `charterTargets`
+          // (computed below) reads from the charter — not from
+          // `preparedTargets` — so before this rebuild a scout that
+          // found a target had its findings sitting in
+          // `preparedTargets.targets` while the deliverables stayed
+          // empty, the empty-targets guard would throw, and the
+          // task-loop would convert it into subtask_terminal_failure.
+          //
+          // We rebuild ONLY when the charter was empty (no
+          // pre-scout target). This is the failure mode the bug
+          // report described — "Scout found 1 target but Builder
+          // never dispatched". When charter already had targets,
+          // we leave it alone — adding scout findings to a
+          // populated charter would silently widen Builder's file
+          // scope, which the doctrine explicitly forbids.
+          const charterHadTargets = charter.deliverables.some(
+            (d) => d.targetFiles.length > 0,
+          );
+          if (!charterHadTargets) {
+            analysis = {
+              ...analysis,
+              targets: mergedTargets,
+            };
+            charter = this.charterGen.generateCharter(analysis);
+            console.log(
+              `[coordinator] charter rebuilt post-scout (was empty): ${charter.deliverables.length} deliverable(s) ` +
+              `targeting [${charter.deliverables.flatMap((d) => [...d.targetFiles]).slice(0, 5).join(", ")}]`,
+            );
+          } else {
+            console.log(
+              `[coordinator] charter already populated; scout advisory targets stay in preparedTargets only ` +
+              `(no Builder scope widening)`,
+            );
+          }
         }
 
         // Persist scout evidence under AEDIS_STATE_ROOT
@@ -1594,11 +1714,94 @@ export class Coordinator {
         `${preparedTargets.rejected.map((candidate) => `${candidate.path} (${candidate.reason})`).join("; ")}`,
       );
     }
+    // PRE-DISPATCH GUARD — multi-file feature underspecification.
+    //
+    // A scaffold prompt ("add a new X mode/handler/feature") that
+    // resolves to only one anchor target almost always needs sibling
+    // changes (the new mode file, a companion, a session handler,
+    // a prompt template, etc.). Dispatching Builder against just the
+    // anchor produces churn: Builder edits the registry but never
+    // creates the implementation files.
+    //
+    // Pause the run, list the likely-related files in the same
+    // feature folder, and route the operator through the standard
+    // NEEDS_REPLAN flow with `repair_plan` / `show_scout_evidence`
+    // CTAs. The `discoverFeatureSiblings` helper is pure + injectable
+    // so tests cover the rule directly.
+    if (charterTargets.length > 0) {
+      const featureFinding = detectFeatureUnderspecified({
+        prompt: normalizedInput,
+        analysis,
+        charterTargets,
+        listSiblings: (relDir) => this.listRepoChildren(effectiveProjectRoot, relDir),
+      });
+      if (featureFinding) {
+        const recs = [featureFinding.anchorTarget, ...featureFinding.suggestedSiblings];
+        const scoutAdvisory: readonly string[] =
+          preflightScoutResult?.advisoryTargets ?? [];
+        const scoutReportIds: readonly string[] =
+          preflightScoutResult?.scoutReportIds ?? [];
+        const scoutSpawned = preflightScoutResult?.scouted ?? false;
+        console.log(
+          `[coordinator] feature-completeness guard: prompt looks like a multi-file scaffold ` +
+          `but only ${charterTargets.length} target was discovered. ` +
+          `Suggesting ${featureFinding.suggestedSiblings.length} sibling(s).`,
+        );
+        throw new NeedsClarificationError({
+          message: featureFinding.reason,
+          recommendedTargets: recs,
+          scoutReportIds,
+          scoutSpawned,
+          recommendedAction:
+            `Multi-file feature underspecified. Anchor target: ${featureFinding.anchorTarget}. ` +
+            `Likely additional targets: ${featureFinding.suggestedSiblings.slice(0, 5).join(", ")}` +
+            (featureFinding.suggestedSiblings.length > 5
+              ? ` (+${featureFinding.suggestedSiblings.length - 5} more)`
+              : "") +
+            `. Decompose the mission into per-file subtasks, or attach all targets to this subtask before retrying. ` +
+            (scoutAdvisory.length > 0
+              ? `Scout advisory: [${scoutAdvisory.slice(0, 3).join(", ")}].`
+              : ""),
+        });
+      }
+    }
+
     if (charterTargets.length === 0) {
-      throw new CoordinatorError(
+      // PRE-DISPATCH GUARD.
+      //
+      // We are about to throw before the Builder is dispatched.
+      // Surface the scout evidence (if any) on a typed error so the
+      // task-loop can convert this into a NEEDS_CLARIFICATION
+      // subtask state (and a NEEDS_REPLAN plan state) with
+      // actionable CTAs — instead of a silent
+      // subtask_terminal_failure that leaves the operator stranded.
+      //
+      // Scout evidence may exist even when validation rejected every
+      // candidate (e.g. paths that don't exist on disk yet for a
+      // create-task). We pass the raw advisoryTargets through so the
+      // operator can review what the scout proposed and clarify.
+      const scoutAdvisory: readonly string[] =
+        preflightScoutResult?.advisoryTargets ?? [];
+      const scoutReportIds: readonly string[] =
+        preflightScoutResult?.scoutReportIds ?? [];
+      const scoutSpawned = preflightScoutResult?.scouted ?? false;
+      const baseMsg =
         preparedTargets.clarification ??
-        "No actionable target files were identified for this request.",
-      );
+        "No actionable target files were identified for this request.";
+      const recommendedAction =
+        scoutAdvisory.length > 0
+          ? `Scout proposed ${scoutAdvisory.length} candidate target(s) but none could be validated. ` +
+            `Review and attach one of: ${scoutAdvisory.slice(0, 5).join(", ")}.`
+          : scoutSpawned
+            ? "Scouts ran but found no target files. Please clarify which file to modify."
+            : "No scouts ran. Please clarify which file to modify.";
+      throw new NeedsClarificationError({
+        message: baseMsg,
+        recommendedTargets: scoutAdvisory,
+        scoutReportIds,
+        scoutSpawned,
+        recommendedAction,
+      });
     }
     const scopeClassification = classifyScope(normalizedInput, charterTargets);
     console.log(
@@ -6682,9 +6885,36 @@ export class Coordinator {
    * Completes the commit and returns the final receipt.
    * This implements the DOCTRINE requirement for human-in-the-loop.
    */
-  async approveRun(runId: string, opts?: { decidedBy?: DiffApprovalReceipt["decidedBy"]; reason?: string }): Promise<{ ok: boolean; commitSha?: string; error?: string }> {
+  async approveRun(runId: string, opts?: { decidedBy?: DiffApprovalReceipt["decidedBy"]; reason?: string }): Promise<{ ok: boolean; commitSha?: string; error?: string; code?: string; unsafeState?: UnsafeStateAssessment }> {
     const active = this.pendingApproval.get(runId);
     if (!active) return { ok: false, error: `No pending approval for run ${runId}` };
+
+    // FAIL CLOSED on contaminated workspaces. The release-blocker
+    // discovered 2026-05-03: a run paused at AWAITING_APPROVAL, then
+    // rollback fired and reported ROLLBACK_INCOMPLETE, but the
+    // pendingApproval entry was still on disk. One Approve click
+    // would have promoted a contaminated workspace. Both sources of
+    // truth — the in-memory active.rollbackOutcome and the persisted
+    // run status — are checked. Either one being unsafe is enough.
+    const persisted = await this.receiptStore.getRun(runId).catch(() => null);
+    const unsafe = assessUnsafeState({
+      runStatus: persisted?.status,
+      finalReceipt: persisted?.finalReceipt as { rollback?: unknown } | null | undefined,
+      rollback: active.rollbackOutcome ?? null,
+      errors: persisted?.errors ?? [],
+    });
+    if (unsafe.unsafe) {
+      console.warn(
+        `[coordinator] approveRun BLOCKED for ${runId} — unsafe state ` +
+        `(${unsafe.primaryReason}); ${unsafe.dirtyFiles.length} dirty file(s)`,
+      );
+      return {
+        ok: false,
+        code: unsafe.errorCode ?? "unsafe_state",
+        error: unsafe.headline ?? "Approval blocked: workspace is unsafe and requires manual inspection.",
+        unsafeState: unsafe,
+      };
+    }
 
     const decidedBy = opts?.decidedBy ?? "human";
     const reason = opts?.reason ?? "Human approved final diff for workspace commit and source-promotion eligibility";
@@ -6992,6 +7222,54 @@ export class Coordinator {
   }
 
   /**
+   * Read-only snapshot for the safety endpoint and CLI pre-checks.
+   * Returns the persisted run record verbatim or null when the run
+   * does not exist on disk. The helper exists so the API/CLI never
+   * has to import receipt-store directly just to assess safety.
+   */
+  async getPersistedRunSnapshot(runId: string): Promise<{
+    runId: string;
+    status: string | null;
+    finalReceipt: unknown;
+    errors: readonly string[];
+    rollback: RollbackOutcome | null;
+  } | null> {
+    const persisted = await this.receiptStore.getRun(runId).catch(() => null);
+    if (!persisted) return null;
+    const finalReceipt = (persisted as { finalReceipt?: unknown }).finalReceipt ?? null;
+    const inMemory = this.activeRuns.get(runId)?.rollbackOutcome
+      ?? this.pendingApproval.get(runId)?.rollbackOutcome
+      ?? null;
+    const fromFinal = (finalReceipt as { rollback?: RollbackOutcome | null } | null)?.rollback ?? null;
+    return {
+      runId,
+      status: (persisted as { status?: string | null }).status ?? null,
+      finalReceipt,
+      errors: ((persisted as { errors?: string[] }).errors ?? []),
+      rollback: inMemory ?? fromFinal,
+    };
+  }
+
+  /**
+   * Pure projection: snapshot → unsafe-state assessment. Wraps the
+   * shared helper so the server route returns the same shape
+   * everywhere.
+   */
+  assessRunSafety(snapshot: {
+    status?: string | null;
+    finalReceipt?: unknown;
+    errors?: readonly string[];
+    rollback?: RollbackOutcome | null;
+  }): UnsafeStateAssessment {
+    return assessUnsafeState({
+      runStatus: snapshot.status,
+      finalReceipt: snapshot.finalReceipt as { rollback?: unknown } | null,
+      rollback: snapshot.rollback ?? null,
+      errors: snapshot.errors,
+    });
+  }
+
+  /**
    * Clean up workspace after approveRun/rejectRun completes.
    * Separated from the submit() finally block because the approval
    * path needs the workspace to survive until the user acts.
@@ -7141,10 +7419,7 @@ export class Coordinator {
           manualInspectionRequired: true,
         };
         active.rollbackOutcome = outcome;
-        void this.receiptStore.patchRun(active.run.id, {
-          status: this.persistentStatusForRollback(outcome),
-          appendErrors: [outcome.summary],
-        });
+        await this.persistRollbackOnReceipt(active.run.id, outcome);
         return outcome;
       } else {
         console.log(`[coordinator] rollbackChanges: verified clean — no uncommitted changes`);
@@ -7163,10 +7438,7 @@ export class Coordinator {
         manualInspectionRequired: true,
       };
       active.rollbackOutcome = outcome;
-      void this.receiptStore.patchRun(active.run.id, {
-        status: this.persistentStatusForRollback(outcome),
-        appendErrors: [outcome.summary],
-      });
+      await this.persistRollbackOnReceipt(active.run.id, outcome);
       return outcome;
     }
 
@@ -7183,10 +7455,7 @@ export class Coordinator {
     };
     active.rollbackOutcome = outcome;
     if (outcome.status !== "clean") {
-      await this.receiptStore.patchRun(active.run.id, {
-        status: this.persistentStatusForRollback(outcome),
-        appendErrors: [outcome.summary],
-      });
+      await this.persistRollbackOnReceipt(active.run.id, outcome);
     }
     return outcome;
   }
@@ -7455,6 +7724,64 @@ export class Coordinator {
     }).catch((err) => {
       console.warn(`[coordinator] recordPromotionFailure failed: ${err instanceof Error ? err.message : String(err)}`);
     });
+  }
+
+  /**
+   * Persist a rollback outcome into the receipt's finalReceipt.rollback
+   * field AND invalidate any pendingApproval entry for the run when
+   * the outcome is unsafe. Centralizes the two side-effects that
+   * every unsafe rollback branch must do:
+   *
+   *   1. The structured `rollback` object survives process restart so
+   *      the approval gate / promotion gate / UI / CLI can read it
+   *      via the single `assessUnsafeState` helper. Before this fix
+   *      `rollback` only lived on the in-memory `active.rollbackOutcome`,
+   *      so a server restart between rollback and the next action
+   *      would lose the contamination signal.
+   *
+   *   2. Any `pendingApproval` entry for this run is dropped — that
+   *      entry was created when verification was about to pass. If
+   *      rollback fired before approval was actually clicked, the
+   *      approval is now invalid (the workspace can't be trusted).
+   *      Without this drop the operator could click Approve from a
+   *      stale UI tab and promote a contaminated workspace.
+   */
+  private async persistRollbackOnReceipt(
+    runId: string,
+    outcome: RollbackOutcome,
+  ): Promise<void> {
+    try {
+      const persisted = await this.receiptStore.getRun(runId).catch(() => null);
+      const existingFinal = persisted?.finalReceipt ?? null;
+      const mergedFinal = existingFinal
+        ? {
+            ...existingFinal,
+            // Final verdict on a contaminated/unsafe rollback can
+            // never be "success". Force "failed" so any consumer that
+            // reads finalReceipt.verdict gets a truthful answer.
+            verdict: outcome.status === "clean" ? existingFinal.verdict : ("failed" as const),
+            rollback: outcome,
+          }
+        : null;
+      await this.receiptStore.patchRun(runId, {
+        status: this.persistentStatusForRollback(outcome),
+        appendErrors: [outcome.summary],
+        ...(mergedFinal ? { finalReceipt: mergedFinal as RunReceipt } : {}),
+      });
+    } catch (err) {
+      console.warn(
+        `[coordinator] persistRollbackOnReceipt: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Invalidate any in-memory pending approval for this run. Approval
+    // on a contaminated workspace must be impossible.
+    if (outcome.status !== "clean" && this.pendingApproval.has(runId)) {
+      console.warn(
+        `[coordinator] invalidating pendingApproval for ${runId} — rollback outcome=${outcome.status}, manual inspection required`,
+      );
+      this.pendingApproval.delete(runId);
+    }
   }
 
   private persistentStatusForRollback(outcome: RollbackOutcome): import("./receipt-store.js").PersistentRunStatus {
@@ -8087,6 +8414,18 @@ export class Coordinator {
   private validatePersistedPromotionSafety(finalReceipt: any): string | null {
     const safety = finalReceipt?.promotionSafety as PromotionSafety | undefined;
     const approval = finalReceipt?.diffApproval as DiffApprovalReceipt | undefined;
+    // Contaminated-workspace check FIRST. A run whose rollback left
+    // dirty files cannot promote regardless of whether the safety
+    // checks otherwise pass — the workspace is no longer trustworthy.
+    // This is the same single-source-of-truth helper the approval
+    // gate and the UI use.
+    const unsafe = assessUnsafeState({
+      finalReceipt: finalReceipt as { rollback?: unknown } | null,
+      rollback: finalReceipt?.rollback ?? null,
+    });
+    if (unsafe.unsafe) {
+      return `Promote refused: ${unsafe.headline ?? "workspace is in an unsafe state and requires manual inspection."}`;
+    }
     if (!this.config.allowSourcePromotion) {
       return "Source promotion disabled: public RC mode is review-only unless allowSourcePromotion is explicitly enabled.";
     }

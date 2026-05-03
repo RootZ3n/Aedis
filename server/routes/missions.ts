@@ -183,28 +183,45 @@ export const missionRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    // Emit creation event
+    // Emit creation event. `phase: "plan_ready"` is the explicit
+    // "no execution has happened yet" signal the UI keys off so the
+    // global status banner does not inherit the prior run's state
+    // (e.g. a stale COMPLETE 100% from the last build).
     ctx().eventBus.emit({
       type: "task_plan_event",
       payload: {
         kind: "plan_created",
+        phase: "plan_ready",
         taskPlanId: planId,
         status: "pending",
         currentSubtaskId: null,
         progress: { completed: 0, total: plan.subtasks.length },
         stopReason: "",
-        message: `Mission created: ${plan.subtasks.length} subtask(s). Click Start to begin.`,
+        executed: false,
+        message: `Plan ready — ${plan.subtasks.length} subtask(s) waiting for start. Click Start to begin.`,
         updatedAt: plan.updatedAt,
       },
     });
 
     reply.status(201).send({
-      status: "created",
+      status: "plan_ready",
+      phase: "plan_ready",
       task_plan_id: planId,
       plan,
+      executed: false,
+      next_action: {
+        kind: "start_required",
+        endpoint: `/task-plans/${planId}/start`,
+        method: "POST",
+        manualStartRequired: true,
+        approvalRequired: true,
+        description:
+          "Plan created but no Builder/Critic/Verifier/Integrator has run yet. " +
+          "Click Start in the Task Plan panel to dispatch the first subtask.",
+      },
       message:
-        `Mission plan created with ${plan.subtasks.length} subtask(s). ` +
-        `POST /task-plans/${planId}/start to begin execution. ` +
+        `Plan ready with ${plan.subtasks.length} subtask(s). ` +
+        `No execution has occurred — POST /task-plans/${planId}/start to begin. ` +
         `Approval is still required before source changes are promoted.`,
     });
   });

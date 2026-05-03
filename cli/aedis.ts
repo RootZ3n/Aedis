@@ -565,6 +565,75 @@ const COMMANDS = {
     await import("./tui/index.js");
   },
 
+  /**
+   * `aedis approve <runId>` — approve a run paused at the AWAITING_APPROVAL
+   * gate. Fails closed (exit code 2) when the run is in any unsafe
+   * rollback state — the operator must inspect the workspace before
+   * approval. Reads /approvals/:runId/safety as a pre-check so the
+   * exit code is correct even when the server's POST returns 200.
+   *
+   * Exit codes:
+   *   0  — approved + committed
+   *   1  — generic refusal (no pending approval, server error)
+   *   2  — refused for safety (rollback incomplete / unsafe state)
+   */
+  async approve(args: string[]) {
+    const runId = args[0];
+    if (!runId) {
+      console.error("approve <runId> [--force-unsafe]");
+      console.error("  Refuses with exit 2 if the run is in any unsafe rollback state.");
+      process.exitCode = 1;
+      return;
+    }
+    const force = args.includes("--force-unsafe");
+    const safety = await fetchJson(`/approvals/${encodeURIComponent(runId)}/safety`).catch(
+      (err: { status?: number }) => err?.status === 404 ? null : Promise.reject(err),
+    );
+    if (safety && safety.unsafe === true) {
+      console.error(`aedis approve: REFUSED — workspace is unsafe.`);
+      console.error(`  reason: ${safety.primaryReason}`);
+      console.error(`  ${safety.headline ?? ""}`);
+      if (Array.isArray(safety.dirtyFiles) && safety.dirtyFiles.length > 0) {
+        console.error(`  dirty files (${safety.dirtyFiles.length}):`);
+        for (const f of safety.dirtyFiles.slice(0, 10)) console.error(`    - ${f}`);
+      }
+      if (Array.isArray(safety.failedPaths) && safety.failedPaths.length > 0) {
+        console.error(`  unrecoverable paths (${safety.failedPaths.length}):`);
+        for (const f of safety.failedPaths.slice(0, 10)) console.error(`    - ${f}`);
+      }
+      console.error(`  manual inspection required before approval.`);
+      console.error(`  pass --force-unsafe to override (NOT RECOMMENDED).`);
+      if (!force) {
+        process.exitCode = 2;
+        return;
+      }
+      console.error(`  --force-unsafe set; proceeding anyway.`);
+    }
+    const url = `${API_BASE}/approvals/${encodeURIComponent(runId)}/approve`;
+    const res = await fetch(url, { method: "POST" });
+    const body = await res.json().catch(() => ({} as Record<string, unknown>));
+    if (res.status === 409) {
+      // Server-side unsafe-state refusal.
+      console.error(`aedis approve: REFUSED (409) — server flagged unsafe state.`);
+      console.error(`  ${body && (body as { error?: string }).error}`);
+      process.exitCode = 2;
+      return;
+    }
+    if (!res.ok) {
+      console.error(`aedis approve: ${res.status} ${res.statusText}`);
+      if (body && (body as { error?: string }).error) console.error(`  ${(body as { error: string }).error}`);
+      process.exitCode = 1;
+      return;
+    }
+    if ((body as { ok?: boolean }).ok === false) {
+      console.error(`aedis approve: refused — ${(body as { error?: string }).error ?? "unknown"}`);
+      process.exitCode = 1;
+      return;
+    }
+    const sha = (body as { commitSha?: string }).commitSha ?? "?";
+    console.log(`approved: run=${runId} commit=${String(sha).slice(0, 8)}`);
+  },
+
   async submit(args: string[]) {
     const input = args.join(" ").trim();
     if (!input) { console.error("submit <prompt>"); process.exitCode = 1; return; }
@@ -603,7 +672,7 @@ async function main(): Promise<void> {
 
   if (!cmd) {
     console.error("Usage: aedis <command> [args]");
-    console.error("Commands: submit, status, metrics, sessions, workers, health, doctor, reliability, tui");
+    console.error("Commands: submit, status, metrics, sessions, workers, health, doctor, reliability, approve, tui");
     process.exitCode = 1;
     return;
   }
@@ -611,7 +680,7 @@ async function main(): Promise<void> {
   const fn: ((args: string[]) => Promise<void>) | undefined = (COMMANDS as any)[cmd];
   if (!fn) {
     console.error(`Unknown command: ${cmd}`);
-    console.error("Commands: submit, status, metrics, sessions, workers, health, doctor, reliability, tui");
+    console.error("Commands: submit, status, metrics, sessions, workers, health, doctor, reliability, approve, tui");
     process.exitCode = 1;
     return;
   }

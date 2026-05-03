@@ -224,6 +224,7 @@ const VALID_PLAN_STATUSES: ReadonlySet<TaskPlanStatus> = new Set([
   "cancelled",
   "interrupted",
   "blocked",
+  "needs_replan",
 ]);
 
 const VALID_SUBTASK_STATUSES: ReadonlySet<SubtaskStatus> = new Set([
@@ -235,6 +236,7 @@ const VALID_SUBTASK_STATUSES: ReadonlySet<SubtaskStatus> = new Set([
   "failed",
   "skipped",
   "blocked",
+  "needs_clarification",
 ]);
 
 // Re-exported so call sites that touch the disk layout don't need

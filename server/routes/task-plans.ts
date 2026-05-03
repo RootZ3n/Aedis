@@ -60,6 +60,19 @@ let storeInstance: TaskPlanStore | null = null;
 const inFlightLoops = new Map<string, Promise<TaskPlan>>();
 
 /**
+ * Reset the module-scoped runner + store singletons. Test-only —
+ * the production server creates exactly one runner per process. Tests
+ * that build multiple fastify apps with different state roots call
+ * this between cases so the second app gets a fresh runner instead
+ * of reusing the first app's state-root.
+ */
+export function __resetTaskPlanSingletonsForTests(): void {
+  runnerInstance = null;
+  storeInstance = null;
+  inFlightLoops.clear();
+}
+
+/**
  * Lazy-init the per-process store + runner. Wired into the
  * coordinator + receipt store from the server context. On boot,
  * `restoreOnBoot` reconciles any plan that was running when the
@@ -305,6 +318,76 @@ export const taskPlanRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
+  fastify.post<{
+    Params: PlanIdParams & { subtaskId: string };
+    Body: { action?: string };
+  }>(
+    "/:id/subtasks/:subtaskId/timeout-recovery",
+    async (request, reply) => {
+      const { id, subtaskId } = request.params as { id: string; subtaskId: string };
+      const action = String(request.body?.action ?? "").trim();
+      const valid = ["retry_with_fallback", "retry_same_model", "skip_stage", "cancel_run"] as const;
+      type Action = typeof valid[number];
+      if (!valid.includes(action as Action)) {
+        reply.code(400).send({
+          error: "Bad request",
+          message: `action must be one of ${valid.join(", ")}; got "${action}"`,
+        });
+        return;
+      }
+      const { runner } = await getRunner(ctx());
+      try {
+        const plan = await runner.applyTimeoutDecision(id, subtaskId, action as Action);
+        reply.send({
+          task_plan_id: id,
+          subtask_id: subtaskId,
+          action,
+          plan,
+          message: `Timeout decision "${action}" applied to ${subtaskId}. POST /task-plans/${id}/continue to resume.`,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const code = /not found/i.test(msg) ? 404 : /needs_clarification|state/i.test(msg) ? 409 : 400;
+        reply.code(code).send({ error: code === 404 ? "Not found" : "Conflict", message: msg });
+      }
+    },
+  );
+
+  fastify.post<{
+    Params: PlanIdParams & { subtaskId: string };
+    Body: { target?: string };
+  }>(
+    "/:id/subtasks/:subtaskId/attach-target",
+    async (request, reply) => {
+      const { id, subtaskId } = request.params as { id: string; subtaskId: string };
+      const target = String(request.body?.target ?? "").trim();
+      if (!subtaskId) {
+        reply.code(400).send({ error: "Bad request", message: "subtaskId required" });
+        return;
+      }
+      if (!target) {
+        reply.code(400).send({ error: "Bad request", message: "target file path required" });
+        return;
+      }
+      const { runner } = await getRunner(ctx());
+      try {
+        const plan = await runner.attachTargetToSubtask(id, subtaskId, target);
+        reply.send({
+          task_plan_id: id,
+          subtask_id: subtaskId,
+          plan,
+          message:
+            `Target ${target} attached to ${subtaskId}. ` +
+            `POST /task-plans/${id}/continue to resume the loop.`,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const code = /not found/i.test(msg) ? 404 : /needs_clarification|non-empty/i.test(msg) ? 409 : 400;
+        reply.code(code).send({ error: code === 404 ? "Not found" : "Conflict", message: msg });
+      }
+    },
+  );
+
   fastify.post<{ Params: PlanIdParams; Body: SkipBody }>(
     "/:id/skip",
     async (request, reply) => {
@@ -355,10 +438,11 @@ function summarizeForList(plan: TaskPlan): unknown {
       else if (s.status === "failed") acc.failed += 1;
       else if (s.status === "skipped") acc.skipped += 1;
       else if (s.status === "blocked") acc.blocked += 1;
+      else if (s.status === "needs_clarification") acc.needsClarification += 1;
       else acc.pending += 1;
       return acc;
     },
-    { total: 0, completed: 0, failed: 0, skipped: 0, blocked: 0, pending: 0 },
+    { total: 0, completed: 0, failed: 0, skipped: 0, blocked: 0, pending: 0, needsClarification: 0 },
   );
   return {
     task_plan_id: plan.taskPlanId,

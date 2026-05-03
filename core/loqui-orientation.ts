@@ -100,7 +100,8 @@ export interface OrientationStateSnapshot {
       | "failed"
       | "cancelled"
       | "interrupted"
-      | "blocked";
+      | "blocked"
+      | "needs_replan";
     readonly objective: string;
   } | null;
   /** True when the coordinator has any RUNNING task. */

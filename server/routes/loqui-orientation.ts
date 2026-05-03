@@ -73,6 +73,7 @@ export async function detectActiveTask(receiptStore: ReceiptListingReader): Prom
  */
 export function pickHighlightedPlan(plans: readonly TaskPlan[]): TaskPlan | null {
   const order: ReadonlyArray<TaskPlan["status"]> = [
+    "needs_replan",
     "paused",
     "running",
     "interrupted",

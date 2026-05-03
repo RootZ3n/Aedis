@@ -490,6 +490,8 @@ body .app::before{
 .status-strip.idle::before{background:var(--orange);box-shadow:0 0 20px var(--orange)}
 .status-strip.running::before{background:var(--amber);box-shadow:0 0 20px var(--amber)}
 .status-strip.complete::before{background:var(--teal);box-shadow:0 0 20px var(--teal)}
+.status-strip.plan_ready::before{background:var(--cyan);box-shadow:0 0 20px var(--cyan)}
+.status-strip.needs_replan::before{background:var(--amber);box-shadow:0 0 20px var(--amber)}
 .status-strip.cancelled::before{background:var(--gray);box-shadow:0 0 20px rgba(255,255,255,.24)}
 .status-strip.failed::before{background:var(--red);box-shadow:0 0 20px var(--red)}
 .ss-left{display:flex;align-items:center;gap:10px;padding-left:8px}
@@ -499,6 +501,8 @@ body .app::before{
   animation:dotPulse 1.4s ease-in-out infinite;
 }
 .status-strip.complete .ss-dot{background:var(--teal);box-shadow:0 0 14px var(--teal)}
+.status-strip.plan_ready .ss-dot{background:var(--cyan);box-shadow:0 0 14px var(--cyan)}
+.status-strip.needs_replan .ss-dot{background:var(--amber);box-shadow:0 0 14px var(--amber)}
 .status-strip.cancelled .ss-dot{background:var(--gray);box-shadow:0 0 14px rgba(255,255,255,.24)}
 .status-strip.failed .ss-dot{background:var(--red);box-shadow:0 0 14px var(--red)}
 .status-strip.running .ss-dot{background:var(--amber);box-shadow:0 0 14px var(--amber)}
@@ -509,6 +513,8 @@ body .app::before{
   color:var(--orange);text-shadow:0 0 18px rgba(251,146,60,.4);
 }
 .status-strip.complete .ss-mid{color:var(--teal);text-shadow:0 0 18px rgba(77,245,200,.4)}
+.status-strip.plan_ready .ss-mid{color:var(--cyan);text-shadow:0 0 18px rgba(111,217,255,.4)}
+.status-strip.needs_replan .ss-mid{color:var(--amber);text-shadow:0 0 18px rgba(251,191,36,.4)}
 .status-strip.cancelled .ss-mid{color:var(--gray);text-shadow:0 0 18px rgba(255,255,255,.18)}
 .status-strip.failed .ss-mid{color:var(--red);text-shadow:0 0 18px rgba(255,68,68,.4)}
 .status-strip.running .ss-mid{color:var(--amber);text-shadow:0 0 18px rgba(255,207,107,.4)}
@@ -525,6 +531,8 @@ body .app::before{
   transition:width 320ms ease;
 }
 .status-strip.complete .ss-fill{background:linear-gradient(90deg,var(--cyan),var(--aqua),var(--teal-hot));background-size:200% 100%;box-shadow:0 0 12px rgba(94,234,212,.55)}
+.status-strip.plan_ready .ss-fill{background:linear-gradient(90deg,var(--cyan),var(--aqua));background-size:200% 100%;box-shadow:0 0 10px rgba(111,217,255,.45)}
+.status-strip.needs_replan .ss-fill{background:linear-gradient(90deg,var(--amber),var(--orange));background-size:200% 100%;box-shadow:0 0 10px rgba(251,191,36,.45)}
 .status-strip.cancelled .ss-fill{background:rgba(255,255,255,.35);box-shadow:0 0 10px rgba(255,255,255,.14)}
 .status-strip.failed .ss-fill{background:var(--red);box-shadow:0 0 10px var(--red)}
 .ss-score{
@@ -532,6 +540,8 @@ body .app::before{
   color:var(--orange);letter-spacing:-.02em;min-width:64px;text-align:right;
 }
 .status-strip.complete .ss-score{color:var(--teal)}
+.status-strip.plan_ready .ss-score{color:var(--cyan)}
+.status-strip.needs_replan .ss-score{color:var(--amber)}
 .status-strip.cancelled .ss-score{color:var(--gray)}
 .status-strip.failed .ss-score{color:var(--red)}
 
@@ -1332,7 +1342,10 @@ body .app::before{
 }
 .global-status-bar.status-running{border-color:rgba(251,191,36,.34)}
 .global-status-bar.status-complete{border-color:rgba(94,234,212,.34)}
+.global-status-bar.status-plan_ready{border-color:rgba(111,217,255,.42);background:linear-gradient(180deg,rgba(8,18,40,.96),rgba(4,10,24,.94))}
+.global-status-bar.status-needs_replan{border-color:rgba(251,191,36,.42);background:linear-gradient(180deg,rgba(40,28,8,.96),rgba(20,14,4,.94))}
 .global-status-bar.status-failed{border-color:rgba(255,85,119,.34)}
+.global-status-bar.status-contaminated{border-color:var(--red);background:linear-gradient(180deg,rgba(40,8,12,.96),rgba(20,4,6,.94));box-shadow:0 0 18px rgba(255,68,68,.18) inset}
 .gsb-status{
   display:flex;align-items:center;gap:8px;
 }
@@ -1344,7 +1357,10 @@ body .app::before{
 }
 .gsb-dot.running{background:var(--amber);color:var(--amber)}
 .gsb-dot.complete{background:var(--teal);color:var(--teal)}
+.gsb-dot.plan_ready{background:var(--cyan);color:var(--cyan)}
+.gsb-dot.needs_replan{background:var(--amber);color:var(--amber)}
 .gsb-dot.failed{background:var(--red);color:var(--red)}
+.gsb-dot.contaminated{background:var(--red);color:var(--red);animation:dotPulse 1s ease-in-out infinite}
 .gsb-dot.blocked{background:#fbbf24;color:#fbbf24}
 .gsb-dot.paused{background:var(--violet);color:var(--violet)}
 .gsb-word{letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
@@ -2172,6 +2188,49 @@ body .app::before{
         </div>
       </section>
 
+      <!-- NEEDS_REPLAN — pre-dispatch guard tripped, scout evidence + suggested repair -->
+      <section id="replan-card" class="approval-card panel">
+        <div class="approval-card-head">
+          <span class="approval-card-title" style="color:var(--cyan)">Mission Needs Replan</span>
+          <div id="replan-badges" class="approval-card-badges"></div>
+        </div>
+        <div id="replan-why" class="approval-card-why"></div>
+        <div id="replan-scout" style="font-family:var(--mono);font-size:11px;color:var(--ink-soft);line-height:1.6"></div>
+        <div id="replan-targets" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
+        <div class="approval-actions">
+          <button id="replan-repair" class="approval-btn approve" type="button">Repair Plan</button>
+          <button id="replan-show-evidence" class="approval-btn edit" type="button">Show Scout Evidence</button>
+          <button id="replan-skip" class="approval-btn reject" type="button">Skip Subtask</button>
+        </div>
+      </section>
+
+      <!-- CONTAMINATED WORKSPACE — dominates approval/replan/running -->
+      <!--
+        Single source of truth: assessUnsafeState in core/unsafe-state.ts
+        decides when to render this card. When this card is visible the
+        approval card is HIDDEN (rule pinned by ui index test).
+        Operator must inspect the dirty files before any approve /
+        promote action can proceed; the safe-action buttons here never
+        commit or promote.
+      -->
+      <section id="unsafe-state-card" class="approval-card panel" style="display:none">
+        <div class="approval-card-head">
+          <span class="approval-card-title" style="color:var(--red)">Contaminated Workspace</span>
+          <div id="unsafe-state-badges" class="approval-card-badges">
+            <span class="approval-badge fail">Manual Inspection Required</span>
+            <span class="approval-badge fail">Approval Blocked</span>
+          </div>
+        </div>
+        <div id="unsafe-state-why" class="approval-card-why" style="color:var(--red)"></div>
+        <div id="unsafe-state-files" style="font-family:var(--mono);font-size:11px;color:var(--ink-soft);line-height:1.6;margin-top:6px"></div>
+        <div id="unsafe-state-plan" style="font-family:var(--mono);font-size:11px;color:var(--ink-soft);line-height:1.6;margin-top:8px"></div>
+        <div class="approval-actions">
+          <button id="unsafe-state-show-diff" class="approval-btn edit" type="button">Show Last Diff</button>
+          <button id="unsafe-state-cancel" class="approval-btn reject" type="button">Cancel Run</button>
+          <button id="unsafe-state-mark-inspected" class="approval-btn edit" type="button" title="Marks the run done so a subsequent run can start. Workspace inspection still required.">Mark Inspected</button>
+        </div>
+      </section>
+
       <!-- Trust Summary -->
       <section class="panel trust-summary-panel" id="trust-summary-panel" style="display:none;">
         <div class="loqui-row">
@@ -2290,66 +2349,53 @@ body .app::before{
       verifier: 'teal',
       integrator: 'pink',
     };
-    // ROLE_PROVIDERS declares which providers may serve each role. Scout
-    // and Verifier stay local — they're zero-cost-by-design infra workers.
-    // Every other role accepts `ollama` now (big local qwen3.6:35b is
-    // plenty capable for Builder / Integrator / Coordinator on small repos
-    // — "tiny qwen only" was an outdated v1 assumption). Picking a small
-    // local model for Builder can still produce garbage; that's the
-    // operator's call, and the Builder's content-safety gates catch the
-    // worst of it.
+    // ROLE_PROVIDERS used to be a per-role provider allow-list, which
+    // meant Builder / Critic / Escalation each saw a different subset
+    // of registered models — operators couldn't pick (e.g.) Opus for
+    // Critic even though Aedis would happily dispatch it. The lists
+    // also drifted out of sync with the coordinator's full registry
+    // view. Every dropdown role now shares the SAME list: the full
+    // union of every registered (provider, model) tuple. Scout and
+    // Verifier stay fixed-local because they're zero-cost-by-design
+    // infra workers and render as read-only text, not dropdowns.
+    //
+    // The server's POST /config/models accepts any `{ model, provider }`
+    // pair — there is no server-side allow-list — so this matches the
+    // backend's actual contract.
+    const FIXED_LOCAL_ROLES = new Set(['scout', 'verifier']);
     const ROLE_PROVIDERS = {
-      scout:       ['local'],
-      verifier:    ['local'],
-      builder:     ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'minimax', 'anthropic'],
-      critic:      ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct'],
-      integrator:  ['ollama', 'modelstudio', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'anthropic'],
-      escalation:  ['ollama', 'anthropic', 'openai', 'glm-5.1-openrouter', 'glm-5.1-direct', 'openrouter', 'minimax'],
-      coordinator: ['ollama', 'openrouter', 'glm-5.1-openrouter', 'glm-5.1-direct', 'anthropic', 'openai'],
+      scout:    ['local'],
+      verifier: ['local'],
     };
 
     // Seeded fallback — used if /config/providers is unreachable at
     // load. Once the real registry fetch lands, rebuildModelOptions()
-    // overwrites this with the server truth.
+    // overwrites this with the server truth. Every dropdown role
+    // receives the SAME union of (provider, model) entries so
+    // Builder / Critic / Integrator / Escalation / Coordinator menus
+    // all match. Scout and Verifier render as fixed text and keep
+    // the local-only sentinel.
+    const SEED_DROPDOWN_OPTIONS = [
+      { model: 'qwen3.6-plus', provider: 'modelstudio', label: 'qwen3.6-plus [modelstudio]' },
+      { model: 'glm-4', provider: 'modelstudio', label: 'glm-4 [modelstudio]' },
+      { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
+      { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
+      { model: 'qwen3.5:9b', provider: 'ollama', label: 'qwen3.5:9b [ollama]' },
+      { model: 'qwen3.5:4b', provider: 'ollama', label: 'qwen3.5:4b [ollama]' },
+      { model: 'minimax-coding', provider: 'minimax', label: 'minimax-coding [minimax]' },
+      { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro [openrouter]' },
+      { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6 [anthropic]' },
+      { model: 'claude-opus-4-7', provider: 'anthropic', label: 'claude-opus-4-7 [anthropic]' },
+      { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4 [openai]' },
+    ];
     let MODEL_OPTIONS = {
       scout: [{ model: 'local', provider: 'local', label: 'local' }],
-      builder: [
-        { model: 'qwen3.6-plus', provider: 'modelstudio', label: 'qwen3.6-plus' },
-        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
-        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
-        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
-        { model: 'minimax-coding', provider: 'minimax', label: 'minimax-coding' },
-        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
-      ],
-      critic: [
-        { model: 'qwen3.5:9b', provider: 'ollama', label: 'qwen3.5:9b' },
-        { model: 'qwen3.5:4b', provider: 'ollama', label: 'qwen3.5:4b' },
-        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
-        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
-        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
-      ],
       verifier: [{ model: 'local', provider: 'local', label: 'local' }],
-      integrator: [
-        { model: 'glm-4', provider: 'modelstudio', label: 'glm-4' },
-        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
-        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
-        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
-        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
-      ],
-      escalation: [
-        { model: 'claude-opus-4-6', provider: 'anthropic', label: 'claude-opus-4-6' },
-        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
-        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
-        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
-        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
-      ],
-      coordinator: [
-        { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter', label: 'xiaomi/mimo-v2-pro' },
-        { model: 'z-ai/glm-5.1', provider: 'glm-5.1-openrouter', label: 'glm-5.1 [openrouter]' },
-        { model: 'glm-5.1', provider: 'glm-5.1-direct', label: 'glm-5.1 [direct]' },
-        { model: 'claude-sonnet-4-6', provider: 'anthropic', label: 'claude-sonnet-4-6' },
-        { model: 'gpt-5.4', provider: 'openai', label: 'gpt-5.4' },
-      ]
+      builder: [...SEED_DROPDOWN_OPTIONS],
+      critic: [...SEED_DROPDOWN_OPTIONS],
+      integrator: [...SEED_DROPDOWN_OPTIONS],
+      escalation: [...SEED_DROPDOWN_OPTIONS],
+      coordinator: [...SEED_DROPDOWN_OPTIONS],
     };
     const DEFAULT_MODEL_CONFIG = {
       scout: { model: 'local', provider: 'local' },
@@ -2416,6 +2462,11 @@ body .app::before{
       // progress without us building a WS bridge for plan events.
       taskPlan: null,
       taskPlanPollHandle: null,
+      // NEEDS_REPLAN payload from the most recent task_plan_event
+      // (kind=plan_needs_replan or subtask_needs_clarification).
+      // Cleared when the operator clicks Repair / Skip or when the
+      // plan transitions to a non-replan status.
+      replan: null,
     };
 
     function createEmptyRun() {
@@ -3709,11 +3760,27 @@ body .app::before{
       // and payload.taskPlanId is the inner field hoisted above.
       if (type === 'task_plan_event') {
         const planId = payload.taskPlanId || (rawPayload && rawPayload.payload && rawPayload.payload.taskPlanId);
+        // NEEDS_REPLAN events carry scout-derived recommendations and
+        // the two CTAs we render in the replan card. Cache them on
+        // state so the renderer can pick them up without re-fetching.
+        const kind = String(payload.kind || '');
+        if (kind === 'plan_needs_replan' || kind === 'subtask_needs_clarification') {
+          state.replan = {
+            taskPlanId: planId,
+            currentSubtaskId: payload.currentSubtaskId || null,
+            message: String(payload.message || ''),
+            recommendedTargets: Array.isArray(payload.recommendedTargets) ? payload.recommendedTargets : [],
+            scoutReportIds: Array.isArray(payload.scoutReportIds) ? payload.scoutReportIds : [],
+            ctas: Array.isArray(payload.ctas) ? payload.ctas : [],
+          };
+        }
         if (planId && state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.taskPlanId === planId) {
           // Fire-and-forget — loadTaskPlan re-renders + reschedules
           // the polling fallback if needed.
           void loadTaskPlan(planId);
         }
+        // Re-render so the replan card surfaces immediately.
+        render();
         return;
       }
       const runId = guessRunId(payload);
@@ -3994,27 +4061,56 @@ body .app::before{
     // disambiguate when the same model name appears on multiple
     // providers for the same role. Unknown providers in
     // ROLE_PROVIDERS[role] are silently skipped.
+    /**
+     * Build the per-role dropdown options from the live provider
+     * registry. Every dropdown role gets the SAME union of
+     * (provider, model) entries — Builder / Critic / Integrator /
+     * Escalation / Coordinator menus all match, mirroring the
+     * coordinator's full registry view. Scout and Verifier stay
+     * fixed-local because they render as read-only text.
+     *
+     * Labels include the provider tag in brackets unconditionally so
+     * operators can disambiguate (e.g. `glm-5.1 [openrouter]` vs
+     * `glm-5.1 [direct]`) without having to read the row's provider
+     * pill. Sorted alphabetically so the same model group stays
+     * adjacent across providers.
+     */
     function rebuildModelOptions(registry) {
+      // Build the unified dropdown list once from the entire registry.
+      const seen = new Set();
+      const unified = [];
+      const providerNames = Object.keys(registry || {}).sort();
+      for (const provider of providerNames) {
+        const entry = registry[provider];
+        if (!entry || !Array.isArray(entry.models)) continue;
+        for (const model of entry.models) {
+          const key = `${provider}::${model}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          unified.push({
+            provider,
+            model,
+            label: `${model} [${entry.label || provider}]`,
+          });
+        }
+      }
+      // Stable sort: model name first, then provider — same model on
+      // multiple providers stays grouped.
+      unified.sort((a, b) => {
+        const m = a.model.localeCompare(b.model);
+        return m !== 0 ? m : a.provider.localeCompare(b.provider);
+      });
+
       const next = {};
       for (const role of CONFIG_ROLE_ORDER) {
-        const allowed = ROLE_PROVIDERS[role] || [];
-        const raw = [];
-        for (const provider of allowed) {
-          const entry = registry[provider];
-          if (!entry) continue;
-          for (const model of entry.models) raw.push({ provider, model });
+        if (FIXED_LOCAL_ROLES.has(role)) {
+          next[role] = [{ model: 'local', provider: 'local', label: 'local' }];
+        } else {
+          // Same list for every dropdown role — the contract the
+          // operator asked for: builder/critic/escalation/etc.
+          // all show every model available to Aedis.
+          next[role] = unified.slice();
         }
-        const counts = raw.reduce((acc, o) => {
-          acc[o.model] = (acc[o.model] || 0) + 1;
-          return acc;
-        }, {});
-        next[role] = raw.map((o) => ({
-          model: o.model,
-          provider: o.provider,
-          label: counts[o.model] > 1
-            ? `${o.model} [${registry[o.provider]?.label || o.provider}]`
-            : o.model,
-        }));
       }
       MODEL_OPTIONS = next;
     }
@@ -4253,6 +4349,12 @@ body .app::before{
     function renderHeader() {
       const run = state.active;
       const status = normalizeRunStatus(run.status);
+      // Effective status mirrors the rule in core/banner-status.ts —
+      // a freshly created plan must override any stale prior run
+      // status (e.g. "complete" from the previous build), otherwise
+      // the strip would falsely advertise 100% with no Builder having
+      // run.
+      const effectiveStrip = effectiveBannerStatus(status);
       // Run outcome + metadata live on the Last-Run strip below the
       // banner. The class/word/fill/score writes below own the
       // visual state — the hero no longer carries a status word.
@@ -4265,18 +4367,49 @@ body .app::before{
       // Status strip
       const strip = document.getElementById('status-strip');
       if (strip) {
-        strip.className = `status-strip ${status}`;
+        strip.className = `status-strip ${effectiveStrip}`;
         const ssWord = document.getElementById('ss-word');
-        if (ssWord) ssWord.textContent = status.toUpperCase();
+        if (ssWord) {
+          const wordMap = { plan_ready: 'PLAN READY', needs_replan: 'NEEDS REPLAN' };
+          ssWord.textContent = wordMap[effectiveStrip] || effectiveStrip.toUpperCase();
+        }
         const ssFill = document.getElementById('ss-fill');
         if (ssFill) {
-          const pct = status === 'complete' ? 100 : status === 'failed' ? 100 : status === 'cancelled' ? 100 : status === 'running' ? 50 : 0;
+          let pct = 0;
+          if (effectiveStrip === 'complete' || effectiveStrip === 'failed' || effectiveStrip === 'cancelled') pct = 100;
+          else if (effectiveStrip === 'running') pct = 50;
+          else if (effectiveStrip === 'plan_ready') pct = 0;
+          else if (effectiveStrip === 'needs_replan') {
+            // Show progress proportional to completed subtasks so the
+            // operator can see how far the plan got before the guard
+            // tripped — not a red 100%.
+            const counts = state.taskPlan && (state.taskPlan.summary || {}).counts || {};
+            const total = (state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.subtasks.length) || 0;
+            const done = (counts.completed || 0) + (counts.skipped || 0);
+            pct = total > 0 ? Math.round((done / total) * 100) : 0;
+          }
           ssFill.style.width = pct + '%';
         }
         const ssScore = document.getElementById('ss-score');
         if (ssScore) {
-          const pct = status === 'complete' ? '100%' : status === 'failed' ? 'FAIL' : status === 'cancelled' ? 'STOP' : status === 'running' ? '...' : '0%';
-          ssScore.textContent = pct;
+          let label = '0%';
+          if (effectiveStrip === 'complete') label = '100%';
+          else if (effectiveStrip === 'failed') label = 'FAIL';
+          else if (effectiveStrip === 'cancelled') label = 'STOP';
+          else if (effectiveStrip === 'running') label = '...';
+          else if (effectiveStrip === 'plan_ready') {
+            const counts = state.taskPlan && (state.taskPlan.summary || {}).counts || {};
+            const total = (state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.subtasks.length) || 0;
+            const done = (counts.completed || 0) + (counts.skipped || 0);
+            label = total > 0 ? `${done}/${total}` : '0%';
+          }
+          else if (effectiveStrip === 'needs_replan') {
+            const counts = state.taskPlan && (state.taskPlan.summary || {}).counts || {};
+            const total = (state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.subtasks.length) || 0;
+            const done = (counts.completed || 0) + (counts.skipped || 0);
+            label = total > 0 ? `${done}/${total}` : 'REPLAN';
+          }
+          ssScore.textContent = label;
         }
       }
 
@@ -4302,6 +4435,25 @@ body .app::before{
       if (text.includes('running') || text.includes('active') || text === 'start') return 'running';
       if (text.includes('queue')) return 'queued';
       return 'idle';
+    }
+
+    /**
+     * Mirror of core/banner-status.ts:computeEffectiveBannerStatus.
+     * A freshly created plan (status === 'pending') must override any
+     * stale prior run status so the global banner cannot falsely show
+     * COMPLETE 100% after a mission was created but no Builder ran.
+     */
+    function effectiveBannerStatus(runStatus) {
+      const plan = state.taskPlan && state.taskPlan.plan;
+      const planStatus = plan ? plan.status : null;
+      if (planStatus === 'running') return 'running';
+      // NEEDS_REPLAN is a recoverable pause — render it distinctly
+      // from a red FAILED so the operator sees there's a clear next
+      // step (Repair Plan).
+      if (planStatus === 'needs_replan') return 'needs_replan';
+      if (planStatus === 'paused' || planStatus === 'blocked') return 'blocked';
+      if (planStatus === 'pending') return 'plan_ready';
+      return runStatus;
     }
 
     function renderWorkers() {
@@ -4352,6 +4504,14 @@ body .app::before{
     function renderReceipts() {
       const receipts = state.active.receipts || [];
       const container = document.getElementById('receipt-list');
+      // PLAN_READY: a freshly created plan has not executed — make
+      // the empty state explicit ("0 receipts — no source execution
+      // yet") so the receipts feed cannot imply the plan ran.
+      const planStatus = state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.status;
+      if (planStatus === 'pending') {
+        container.innerHTML = '<div class="empty">No receipts — plan ready, no source execution yet. Click Start Mission to dispatch the first subtask.</div>';
+        return;
+      }
       if (!receipts.length) {
         container.innerHTML = state.active.loadError
           ? `<div class="empty">${esc(state.active.loadError)}. No data due to error.</div>`
@@ -4479,6 +4639,15 @@ body .app::before{
       const run = state.active;
       const summary = run && run.runSummary;
       const blast = (summary && summary.blastRadius) || (run && run.blastRadius) || null;
+
+      // PLAN_READY: a freshly created plan has no execution yet —
+      // suppress any stale prior run's trust summary so the panel
+      // does not imply the new plan executed.
+      const planStatus = state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.status;
+      if (planStatus === 'pending') {
+        panel.style.display = 'none';
+        return;
+      }
 
       if (!summary && !blast) {
         panel.style.display = 'none';
@@ -5118,19 +5287,41 @@ body .app::before{
         const data = await res.json();
         state.taskPlan = data;
         renderTaskPlan();
+        // Re-render the global banner + replan card whenever the
+        // plan reloads. Without this, a polled-in transition (WS
+        // event missed) would update state but never repaint the
+        // header/CTA — leaving the user stuck on a stale view.
+        if (typeof render === 'function') render();
         // WS task_plan_event drives most refreshes. Poll as a fallback
-        // every 30s while the plan is running so a missed broadcast
-        // (network blip, late-joining tab) eventually reconciles.
+        // for any non-terminal state so a missed broadcast (network
+        // blip, late-joining tab, dropped WS frame) eventually
+        // reconciles.
+        //
+        //   running       → 3s   (active execution)
+        //   needs_replan  → 4s   (operator has a CTA waiting)
+        //   paused/blocked/pending/interrupted → 10s (stable)
+        //   completed/failed/cancelled → stop
         const status = String(data?.plan?.status || '');
-        if (status === 'running') {
-          if (state.taskPlanPollHandle) window.clearTimeout(state.taskPlanPollHandle);
-          state.taskPlanPollHandle = window.setTimeout(() => loadTaskPlan(planId), 30000);
-        } else if (state.taskPlanPollHandle) {
+        const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+        let nextDelayMs = 0;
+        if (status === 'running') nextDelayMs = 3000;
+        else if (status === 'needs_replan') nextDelayMs = 4000;
+        else if (status === 'pending' || status === 'paused' ||
+                 status === 'blocked' || status === 'interrupted') nextDelayMs = 10000;
+        if (state.taskPlanPollHandle) {
           window.clearTimeout(state.taskPlanPollHandle);
           state.taskPlanPollHandle = null;
         }
+        if (nextDelayMs > 0 && !TERMINAL.has(status)) {
+          state.taskPlanPollHandle = window.setTimeout(() => loadTaskPlan(planId), nextDelayMs);
+        }
       } catch (err) {
         console.warn('task-plan load failed', err);
+        // On error, retry once after a short backoff so a transient
+        // network blip during the "user just clicked Start" window
+        // does not strand the UI.
+        if (state.taskPlanPollHandle) window.clearTimeout(state.taskPlanPollHandle);
+        state.taskPlanPollHandle = window.setTimeout(() => loadTaskPlan(planId), 5000);
       }
     }
     window.loadTaskPlan = loadTaskPlan;
@@ -5886,17 +6077,30 @@ body .app::before{
       bar.style.display = shouldShow ? 'grid' : 'none';
       if (!shouldShow) return;
 
-      // Determine effective status
-      let effectiveStatus = status;
-      if (hasPlan && (planStatus === 'paused' || planStatus === 'blocked')) effectiveStatus = 'blocked';
-      if (hasPlan && planStatus === 'running') effectiveStatus = 'running';
+      // CONTAMINATED WORKSPACE dominates every other status. When the
+      // run's rollback left the workspace in an unsafe state, the
+      // banner must say so — operators must NOT see PAUSED / NEEDS
+      // REPLAN / RUNNING here, otherwise the contradictory-state UX
+      // bug returns. Mirrors the assertion in
+      // core/unsafe-state.ts:assessUnsafeState.
+      const unsafeAssessment = assessUnsafeStateUI(run);
+      const effectiveStatus = unsafeAssessment && unsafeAssessment.unsafe
+        ? 'contaminated'
+        : effectiveBannerStatus(status);
       bar.className = `global-status-bar status-${effectiveStatus}`;
 
       const dot = document.getElementById('gsb-dot');
       if (dot) dot.className = `gsb-dot ${effectiveStatus}`;
 
       const word = document.getElementById('gsb-word');
-      if (word) word.textContent = effectiveStatus.toUpperCase();
+      if (word) {
+        const wordMap = {
+          plan_ready: 'PLAN READY',
+          needs_replan: 'NEEDS REPLAN',
+          contaminated: 'CONTAMINATED — INSPECT',
+        };
+        word.textContent = wordMap[effectiveStatus] || effectiveStatus.toUpperCase();
+      }
 
       // Step info
       const stepEl = document.getElementById('gsb-step');
@@ -5905,9 +6109,18 @@ body .app::before{
         const counts = (state.taskPlan.summary || {}).counts || {};
         const done = (counts.completed || 0) + (counts.skipped || 0);
         const current = plan.subtasks.find(s => s.status === 'running' || s.status === 'verifying');
-        stepEl.textContent = current
-          ? `Step ${done + 1}/${plan.subtasks.length}: ${truncate(current.title || current.id, 30)}`
-          : `${done}/${plan.subtasks.length} complete`;
+        if (effectiveStatus === 'plan_ready') {
+          stepEl.textContent = `Plan ready — ${done}/${plan.subtasks.length}, waiting for start`;
+        } else if (effectiveStatus === 'needs_replan') {
+          const nc = plan.subtasks.find((s) => s.status === 'needs_clarification');
+          stepEl.textContent = nc
+            ? `Mission needs replan — ${nc.id} needs a target file`
+            : `Mission needs replan — review subtasks`;
+        } else if (current) {
+          stepEl.textContent = `Step ${done + 1}/${plan.subtasks.length}: ${truncate(current.title || current.id, 30)}`;
+        } else {
+          stepEl.textContent = `${done}/${plan.subtasks.length} complete`;
+        }
       } else if (stepEl) {
         stepEl.textContent = run.prompt ? truncate(run.prompt, 40) : '';
       }
@@ -5967,10 +6180,83 @@ body .app::before{
       // CTA button
       const cta = document.getElementById('gsb-cta');
       if (cta) {
-        if (effectiveStatus === 'blocked' || effectiveStatus === 'paused') {
+        if (effectiveStatus === 'needs_replan' && hasPlan) {
+          // Pre-dispatch guard tripped — surface a Repair Plan CTA
+          // that scrolls to the replan card. Distinct from the warn
+          // styling so the operator sees this is recoverable, not
+          // a red FAILED dead-end.
+          cta.style.display = 'inline-flex';
+          cta.textContent = 'Repair Plan';
+          cta.className = 'gsb-cta';
+          cta.disabled = false;
+          cta.onclick = () => {
+            const card = document.getElementById('replan-card');
+            if (card) {
+              card.classList.add('show');
+              card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          };
+        } else if (effectiveStatus === 'plan_ready' && hasPlan) {
+          // Plan exists but no Builder has run. Surface "Start mission"
+          // so the next action is unambiguous — clicking dispatches the
+          // first subtask via /task-plans/:id/start.
+          cta.style.display = 'inline-flex';
+          cta.textContent = 'Start Mission';
+          cta.className = 'gsb-cta';
+          cta.disabled = false;
+          cta.onclick = async () => {
+            const planId = state.taskPlan.plan.taskPlanId;
+            cta.disabled = true;
+            const original = cta.textContent;
+            cta.textContent = 'Starting...';
+            try {
+              const res = await fetch(`${API_BASE}/task-plans/${encodeURIComponent(planId)}/start`, { method: 'POST' });
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || `HTTP ${res.status}`);
+              }
+              if (typeof loadTaskPlan === 'function') await loadTaskPlan(planId);
+              const panel = document.getElementById('taskplan-panel');
+              if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              render();
+              // Fast follow-up burst: the loop transitions
+              // pending → running → (needs_replan|paused|completed)
+              // in milliseconds for the failure modes we care about
+              // (e.g. the pre-dispatch guard). Without this burst, a
+              // dropped WS frame would leave the UI on the pre-Start
+              // status until the 10s poll cycle.
+              [400, 1200, 3000, 6000, 10000].forEach((ms) => {
+                window.setTimeout(() => {
+                  if (typeof loadTaskPlan === 'function') void loadTaskPlan(planId);
+                }, ms);
+              });
+            } catch (e) {
+              console.warn('start mission failed', e);
+              cta.disabled = false;
+              cta.textContent = original;
+            }
+          };
+        } else if (effectiveStatus === 'contaminated') {
+          // CONTAMINATED workspace dominates everything else — the
+          // CTA must NOT route to the approval card. Send the operator
+          // straight to the inspect-and-cancel card instead.
+          cta.style.display = 'inline-flex';
+          cta.textContent = 'Inspect Workspace';
+          cta.className = 'gsb-cta warn';
+          cta.disabled = false;
+          cta.onclick = () => {
+            const card = document.getElementById('unsafe-state-card');
+            if (card) {
+              card.style.display = '';
+              card.classList.add('show');
+              card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          };
+        } else if (effectiveStatus === 'blocked' || effectiveStatus === 'paused') {
           cta.style.display = 'inline-flex';
           cta.textContent = 'Review';
           cta.className = 'gsb-cta warn';
+          cta.disabled = false;
           cta.onclick = () => {
             const card = document.getElementById('approval-card');
             if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5979,6 +6265,7 @@ body .app::before{
           cta.style.display = 'inline-flex';
           cta.textContent = 'New Task';
           cta.className = 'gsb-cta';
+          cta.disabled = false;
           cta.onclick = () => {
             const input = document.getElementById('loqui-input');
             if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
@@ -5990,11 +6277,84 @@ body .app::before{
     }
 
     // ─── UX Polish: Approval Card ─────────────────────────────────
+    /**
+     * UI mirror of core/unsafe-state.ts:assessUnsafeState. The shared
+     * helper is the single source of truth for "this run cannot be
+     * approved / promoted because rollback left it contaminated."
+     * Mirrored inline (not imported) because the dashboard is a static
+     * HTML file, but the rule and the strings stay aligned with the
+     * server / CLI helper. Tests pin the parity.
+     *
+     * Returns null when the run is safe; otherwise an assessment shaped
+     * the same way as the helper's return value.
+     */
+    function assessUnsafeStateUI(run) {
+      if (!run) return null;
+      const reasons = new Set();
+      const dirtyFiles = new Set();
+      const failedPaths = new Set();
+      const status = String(run.status || '').toUpperCase();
+      if (status === 'ROLLBACK_INCOMPLETE') reasons.add('rollback_incomplete');
+      if (status === 'ROLLBACK_FAILED') reasons.add('rollback_failed');
+      if (status === 'UNSAFE_STATE') reasons.add('unsafe_state');
+
+      const rb = (run.runSummary && run.runSummary.rollback) || run.rollback || null;
+      if (rb) {
+        const st = String(rb.status || '').toLowerCase();
+        if (st === 'incomplete') reasons.add('rollback_incomplete');
+        else if (st === 'failed') reasons.add('rollback_failed');
+        else if (st === 'unsafe_state') reasons.add('unsafe_state');
+        if (rb.manualInspectionRequired === true) reasons.add('manual_inspection_required');
+        for (const f of rb.dirtyFiles || []) if (f) dirtyFiles.add(String(f));
+        for (const f of rb.failedPaths || []) if (f) failedPaths.add(String(f));
+      }
+      const errors = run.errors || (run.runSummary && run.runSummary.errors) || [];
+      const ERR_RE = /\bROLLBACK\s+(INCOMPLETE|FAILED|UNSAFE)\b|\bmanual\s+inspection\s+required\b/i;
+      for (const e of errors || []) {
+        if (typeof e === 'string' && ERR_RE.test(e)) reasons.add('manual_inspection_required');
+      }
+      if (status === 'ROLLBACK_INCOMPLETE' || status === 'ROLLBACK_FAILED' || status === 'UNSAFE_STATE') {
+        reasons.add('manual_inspection_required');
+      }
+      const ordered = [];
+      for (const r of ['rollback_failed','rollback_incomplete','unsafe_state','manual_inspection_required']) {
+        if (reasons.has(r)) ordered.push(r);
+      }
+      if (ordered.length === 0) return null;
+      const dirty = [...dirtyFiles].slice(0, 50);
+      const failed = [...failedPaths].slice(0, 50);
+      const primary = ordered[0];
+      let headline;
+      if (primary === 'rollback_failed') {
+        headline = failed.length > 0
+          ? `CONTAMINATED WORKSPACE — rollback could not restore ${failed.length} file(s); manual inspection required.`
+          : `CONTAMINATED WORKSPACE — rollback failed; manual inspection required.`;
+      } else if (primary === 'rollback_incomplete') {
+        headline = dirty.length > 0
+          ? `CONTAMINATED WORKSPACE — ${dirty.length} file(s) still dirty after rollback; manual inspection required.`
+          : `CONTAMINATED WORKSPACE — rollback incomplete; manual inspection required.`;
+      } else if (primary === 'unsafe_state') {
+        headline = 'CONTAMINATED WORKSPACE — rollback status check failed; manual inspection required.';
+      } else {
+        headline = 'MANUAL INSPECTION REQUIRED — workspace cannot be trusted until reviewed.';
+      }
+      return { unsafe: true, reasons: ordered, primaryReason: primary, dirtyFiles: dirty, failedPaths: failed, headline };
+    }
+
     function renderApprovalCard() {
       const card = document.getElementById('approval-card');
       if (!card) return;
       const run = state.active;
       const status = normalizeRunStatus(run.status);
+      // Safety gate: if the run is in any contaminated/unsafe state,
+      // the approval card MUST stay hidden — the contaminated-workspace
+      // card takes its place. This mirrors the API 409 behavior and
+      // the CLI exit-2 behavior.
+      const unsafe = assessUnsafeStateUI(run);
+      if (unsafe && unsafe.unsafe) {
+        card.classList.remove('show');
+        return;
+      }
       const isAwaiting = String(run.status || '').toLowerCase().includes('await') ||
                          String(run.status || '').toLowerCase().includes('approval');
       const planPaused = state.taskPlan && state.taskPlan.plan &&
@@ -6061,6 +6421,165 @@ body .app::before{
           diffPreview.innerHTML = '<div class="diff-empty">No diff available yet</div>';
         }
       }
+    }
+
+    /**
+     * Render the NEEDS_REPLAN card. Visible only when:
+     *   - The current plan's status is `needs_replan`, OR
+     *   - The most recent WS event was a plan_needs_replan /
+     *     subtask_needs_clarification.
+     *
+     * Distinct from the approval card: this is the "we paused
+     * BEFORE Builder ran because we couldn't identify a target file
+     * with confidence" state. The operator's two CTAs are
+     * Repair Plan (auto-attach the top scout target and resume) and
+     * Show Scout Evidence (open the existing scouts panel).
+     */
+    function renderReplanCard() {
+      const card = document.getElementById('replan-card');
+      if (!card) return;
+      const plan = state.taskPlan && state.taskPlan.plan;
+      const planNeedsReplan = plan && plan.status === 'needs_replan';
+      const haveLiveEvent = state.replan && state.replan.taskPlanId;
+      const show = planNeedsReplan || haveLiveEvent;
+      if (!show) {
+        card.classList.remove('show');
+        return;
+      }
+      card.classList.add('show');
+
+      // Source data: prefer the live event payload, fall back to the
+      // plan's persisted needs-clarification subtask.
+      let payload = state.replan;
+      let subtask = null;
+      if (plan) {
+        subtask = plan.subtasks.find((s) => s.status === 'needs_clarification') || null;
+      }
+      if (!payload && subtask) {
+        payload = {
+          taskPlanId: plan.taskPlanId,
+          currentSubtaskId: subtask.id,
+          message: subtask.blockerReason || 'Subtask needs a target file before Builder can run.',
+          recommendedTargets: subtask.recommendedTargets || [],
+          scoutReportIds: subtask.scoutReportIds || [],
+          ctas: [],
+        };
+      }
+      if (!payload) {
+        card.classList.remove('show');
+        return;
+      }
+
+      const why = document.getElementById('replan-why');
+      if (why) {
+        why.textContent = payload.message ||
+          'A subtask was paused before Builder dispatch — no actionable target file was identified.';
+      }
+
+      const scout = document.getElementById('replan-scout');
+      if (scout) {
+        const sub = subtask || (plan && plan.subtasks.find((s) => s.id === payload.currentSubtaskId));
+        const action = sub && sub.nextRecommendedAction;
+        scout.innerHTML = action
+          ? `Suggested action: ${esc(action)}`
+          : `Subtask ${esc(payload.currentSubtaskId || '?')} is paused for clarification.`;
+      }
+
+      const targets = document.getElementById('replan-targets');
+      if (targets) {
+        const recs = payload.recommendedTargets || [];
+        if (recs.length === 0) {
+          targets.innerHTML = '<span class="approval-badge neutral">No scout-recommended targets — clarify the prompt.</span>';
+        } else {
+          targets.innerHTML = recs.map((t, i) => {
+            const cls = i === 0 ? 'pass' : 'neutral';
+            const tag = i === 0 ? ' (top)' : '';
+            return `<span class="approval-badge ${cls}" title="${esc(t)}">${esc(t)}${tag}</span>`;
+          }).join('');
+        }
+      }
+    }
+
+    // NEEDS_REPLAN button handlers — fire the two CTAs the
+    // task-loop emitted, and the optional Skip subtask escape hatch.
+    {
+      const repair = document.getElementById('replan-repair');
+      const showEv = document.getElementById('replan-show-evidence');
+      const skipBtn = document.getElementById('replan-skip');
+
+      if (repair) repair.addEventListener('click', async () => {
+        const r = state.replan;
+        if (!r || !r.taskPlanId || !r.currentSubtaskId) return;
+        const top = (r.recommendedTargets || [])[0];
+        if (!top) {
+          window.alert('No scout-recommended target available. Edit the subtask prompt and continue, or skip.');
+          return;
+        }
+        repair.disabled = true;
+        const original = repair.textContent;
+        repair.textContent = 'Repairing...';
+        try {
+          const res = await fetch(
+            `${API_BASE}/task-plans/${encodeURIComponent(r.taskPlanId)}/subtasks/${encodeURIComponent(r.currentSubtaskId)}/attach-target`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ target: top }),
+            },
+          );
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || `HTTP ${res.status}`);
+          }
+          // Resume the loop now that a target is attached.
+          await fetch(`${API_BASE}/task-plans/${encodeURIComponent(r.taskPlanId)}/continue`, { method: 'POST' });
+          state.replan = null;
+          await loadTaskPlan(r.taskPlanId);
+          render();
+        } catch (e) {
+          console.warn('replan repair failed', e);
+          repair.disabled = false;
+          repair.textContent = original;
+          window.alert(`Repair failed: ${e.message || e}`);
+        }
+      });
+
+      if (showEv) showEv.addEventListener('click', () => {
+        const panel = document.getElementById('scouts-panel');
+        if (panel) {
+          panel.classList.add('show');
+          panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        // Force-reload scout evidence if we have a plan id.
+        const r = state.replan;
+        if (r && r.taskPlanId && typeof loadScoutEvidence === 'function') {
+          // Reset the cached id so loadScoutEvidence re-fetches.
+          if (typeof lastScoutRunId !== 'undefined') lastScoutRunId = null;
+          void loadScoutEvidence(r.taskPlanId);
+        }
+      });
+
+      if (skipBtn) skipBtn.addEventListener('click', async () => {
+        const r = state.replan;
+        if (!r || !r.taskPlanId || !r.currentSubtaskId) return;
+        if (!window.confirm('Skip this subtask? The plan will advance past it.')) return;
+        skipBtn.disabled = true;
+        try {
+          await fetch(`${API_BASE}/task-plans/${encodeURIComponent(r.taskPlanId)}/skip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subtaskId: r.currentSubtaskId }),
+          });
+          await fetch(`${API_BASE}/task-plans/${encodeURIComponent(r.taskPlanId)}/continue`, { method: 'POST' });
+          state.replan = null;
+          await loadTaskPlan(r.taskPlanId);
+          render();
+        } catch (e) {
+          console.warn('replan skip failed', e);
+        } finally {
+          skipBtn.disabled = false;
+        }
+      });
     }
 
     // Approval card button handlers
@@ -6836,8 +7355,11 @@ body .app::before{
         state.loqui.messages = state.loqui.messages.filter(m => !m.missionProposal);
         state.loqui.messages.push({
           role: 'assistant',
-          text: `Mission created (${planId}) with ${p.subtasks.length} subtask(s). Click Start in the Task Plan panel to begin. Approval is required before any source changes.`,
-          label: 'Planning',
+          text: `Plan ready (${planId}) — ${p.subtasks.length} subtask(s) waiting for start. ` +
+                `No Builder/Critic/Verifier/Integrator has run yet. ` +
+                `Click "Start Mission" in the top status bar (or Start in the Task Plan panel) ` +
+                `to dispatch the first subtask. Approval is still required before any source changes.`,
+          label: 'Plan Ready',
           at: new Date().toISOString(),
         });
         if (typeof loadTaskPlan === 'function') await loadTaskPlan(planId);
@@ -6960,11 +7482,107 @@ body .app::before{
     }
 
     // ─── Patch render() to include new panels ─────────────────────
+    /**
+     * Render the CONTAMINATED WORKSPACE card. This card dominates
+     * approval/replan/running cards whenever the run is in any
+     * unsafe rollback state. The Approve button is structurally
+     * unreachable from here — only Cancel Run, Show Last Diff, and
+     * Mark Inspected (which is a UI-only acknowledgement; it does
+     * not touch the workspace).
+     */
+    function renderUnsafeStateCard() {
+      const card = document.getElementById('unsafe-state-card');
+      if (!card) return;
+      const run = state.active;
+      const unsafe = assessUnsafeStateUI(run);
+      if (!unsafe || !unsafe.unsafe) {
+        card.style.display = 'none';
+        card.classList.remove('show');
+        return;
+      }
+      card.style.display = '';
+      card.classList.add('show');
+
+      const why = document.getElementById('unsafe-state-why');
+      if (why) why.textContent = unsafe.headline;
+
+      const filesEl = document.getElementById('unsafe-state-files');
+      if (filesEl) {
+        const dirtyHtml = unsafe.dirtyFiles.length > 0
+          ? `<div><b>Files still dirty (${unsafe.dirtyFiles.length}):</b><ul style="margin:4px 0 0 16px">${unsafe.dirtyFiles.slice(0,10).map((f) => `<li>${esc(f)}</li>`).join('')}</ul></div>`
+          : '';
+        const failedHtml = unsafe.failedPaths.length > 0
+          ? `<div style="margin-top:6px"><b>Unrecoverable paths (${unsafe.failedPaths.length}):</b><ul style="margin:4px 0 0 16px">${unsafe.failedPaths.slice(0,10).map((f) => `<li>${esc(f)}</li>`).join('')}</ul></div>`
+          : '';
+        const noneHtml = (!dirtyHtml && !failedHtml)
+          ? '<div>No specific files surfaced on the rollback outcome — inspect the whole worktree.</div>'
+          : '';
+        filesEl.innerHTML = dirtyHtml + failedHtml + noneHtml;
+      }
+
+      const planEl = document.getElementById('unsafe-state-plan');
+      if (planEl) {
+        // Inline copy of buildInspectionPlan from core/unsafe-state.ts.
+        // Read-only commands the operator can paste into a terminal.
+        // Never mutates the repo on its own.
+        const where = (run && run.workspace && run.workspace.workspacePath) ||
+                      (run && run.sourceRepo) || 'the affected repo';
+        const fileSlice = unsafe.dirtyFiles.concat(unsafe.failedPaths).slice(0, 10);
+        const inspectCmd = fileSlice.length > 0
+          ? fileSlice.map((f) => `git -C ${where} diff -- ${f}`).join(' && ')
+          : `git -C ${where} status --porcelain`;
+        planEl.innerHTML = [
+          '<div><b>Inspection plan (read-only commands):</b></div>',
+          `<div>1. <code>git -C ${esc(where)} status --porcelain</code></div>`,
+          `<div>2. <code>git -C ${esc(where)} diff --stat</code></div>`,
+          `<div>3. <code>${esc(inspectCmd)}</code></div>`,
+          `<div style="color:var(--red);margin-top:6px">Do NOT trust this workspace until you've inspected the files. Approval and source promotion are blocked until cleared.</div>`,
+        ].join('');
+      }
+    }
+
+    // Wire the unsafe-state card buttons. None of these can promote
+    // or commit. Cancel Run cancels the in-flight task plan;
+    // Mark Inspected only collapses the card (workspace inspection
+    // still required out-of-band by the operator).
+    {
+      const showDiffBtn = document.getElementById('unsafe-state-show-diff');
+      const cancelBtn = document.getElementById('unsafe-state-cancel');
+      const markBtn = document.getElementById('unsafe-state-mark-inspected');
+      if (showDiffBtn) showDiffBtn.addEventListener('click', () => {
+        const card = document.getElementById('approval-card');
+        // We deliberately don't show the approval card; instead jump
+        // to the receipt feed where the diff and rollback summary live.
+        const receipts = document.getElementById('receipt-list');
+        if (receipts) receipts.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      if (cancelBtn) cancelBtn.addEventListener('click', async () => {
+        const planId = state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.taskPlanId;
+        if (planId) {
+          await fetch(`${API_BASE}/task-plans/${encodeURIComponent(planId)}/cancel`, { method: 'POST' }).catch(() => {});
+          if (typeof loadTaskPlan === 'function') await loadTaskPlan(planId);
+          render();
+        }
+      });
+      if (markBtn) markBtn.addEventListener('click', () => {
+        if (!window.confirm('Mark this run as inspected? You confirm you have inspected the dirty files and discarded any unwanted state. This does NOT clean the workspace.')) return;
+        const card = document.getElementById('unsafe-state-card');
+        if (card) {
+          card.style.display = 'none';
+          card.classList.remove('show');
+        }
+        // Local UI flag only — does not change server state.
+        state.unsafeStateAcknowledged = true;
+      });
+    }
+
     const _origRender = render;
     render = function() {
       _origRender();
       renderGlobalStatusBar();
+      renderUnsafeStateCard();
       renderApprovalCard();
+      renderReplanCard();
       renderReceiptSummary();
       renderLoquiSuggestions();
       renderTimeline();
