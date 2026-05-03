@@ -98,7 +98,9 @@ const DEFAULT_MODEL_CONFIG: ModelConfig = {
   // empty-config fallback.
   critic: { model: "qwen3.5:9b", provider: "ollama" },
   verifier: { model: "local", provider: "local" },
-  integrator: { model: "glm-5.1", provider: "zai" },
+  // Integrator is code-based (heuristic coherence checks, no LLM calls).
+  // The model/provider fields exist for receipt completeness only.
+  integrator: { model: "local", provider: "local" },
   escalation: { model: "glm-5.1", provider: "zai" },
   coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
   builderTiers: {},
@@ -111,9 +113,8 @@ const LOCAL_SMOKE_MODEL_CONFIG: ModelConfig = {
   builder: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
   critic: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
   verifier: { model: "local", provider: "local" },
-  // Integrator is deterministic today, but keep the profile complete
-  // so receipts and future role checks do not imply cloud is required.
-  integrator: { model: "integration-judge", provider: "local" },
+  // Integrator is code-based (no LLM calls) — local placeholder for receipts.
+  integrator: { model: "local", provider: "local" },
   escalation: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
   coordinator: { model: LOCAL_SMOKE_MODEL, provider: "ollama" },
   builderTiers: {

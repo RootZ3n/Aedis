@@ -63,7 +63,7 @@ test("loadModelConfig falls back to defaults when no config file exists (fallbac
     assert.equal(config.builder.provider, "openrouter");
     assert.equal(config.critic.provider, "ollama");
     assert.equal(config.critic.model, "qwen3.5:9b");
-    assert.equal(config.integrator.model, "glm-5.1");
+    assert.equal(config.integrator.model, "local");
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -369,7 +369,7 @@ test("checkAnthropicHotPathDoctrine flags Anthropic primary in builder/critic/in
       builder: { model: "claude-sonnet-4-6", provider: "anthropic" },
       critic: { model: "claude-sonnet-4-6", provider: "anthropic" },
       verifier: { model: "local", provider: "local" },
-      integrator: { model: "glm-5.1", provider: "zai" },
+      integrator: { model: "local", provider: "local" },
       escalation: { model: "glm-5.1", provider: "zai" },
       coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
       builderTiers: {},
@@ -390,7 +390,7 @@ test("checkAnthropicHotPathDoctrine flags Anthropic in tier chain entries", () =
       builder: { model: "minimax-coding", provider: "minimax" },
       critic: { model: "qwen3.5:9b", provider: "ollama" },
       verifier: { model: "local", provider: "local" },
-      integrator: { model: "glm-5.1", provider: "zai" },
+      integrator: { model: "local", provider: "local" },
       escalation: { model: "glm-5.1", provider: "zai" },
       coordinator: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
       builderTiers: {

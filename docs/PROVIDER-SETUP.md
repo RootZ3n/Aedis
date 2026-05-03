@@ -63,7 +63,7 @@ Anthropic Hot Path."
    ```
    A valid key returns JSON with `"data"`.
 
-## 2. Z.ai (required for default integrator/escalation)
+## 2. Z.ai (required for default escalation)
 
 1. Get an API key from [z.ai](https://z.ai) or [open.bigmodel.cn](https://open.bigmodel.cn).
 2. Add to `.env`:

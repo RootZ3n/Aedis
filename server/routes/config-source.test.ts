@@ -108,7 +108,7 @@ test("resolveModelConfigForResponse: default profile + no saved file → all rol
       // Server's actual defaults — these are the values that were
       // showing up as "qwen" in the dropdown before the fix.
       assert.equal(result.config.builder.provider, "openrouter");
-      assert.equal(result.config.integrator.provider, "zai");
+      assert.equal(result.config.integrator.provider, "local");
       assert.equal(result.config.escalation.provider, "zai");
     });
   } finally {
