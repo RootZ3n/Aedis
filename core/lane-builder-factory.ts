@@ -60,7 +60,7 @@ const SUPPORTED_MODELS_BY_PROVIDER: Readonly<Record<Provider, readonly string[]>
     "moonshotai/kimi-k2",
     "z-ai/glm-5.1",
   ],
-  anthropic: ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+  anthropic: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
   openai: ["gpt-4o-mini"],
   minimax: ["minimax-coding"],
   modelstudio: ["qwen3.6-plus"],

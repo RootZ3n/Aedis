@@ -233,6 +233,7 @@ const COST_PER_1K: Record<string, { input: number; output: number }> = {
   "xiaomi/mimo-v2.5": { input: 0.001, output: 0.002 },
   "xiaomi/mimo-v2.5-pro": { input: 0.002, output: 0.004 },
   // Anthropic
+  "claude-opus-4-7":   { input: 0.015,  output: 0.075  },
   "claude-opus-4-6":   { input: 0.015,  output: 0.075  },
   "claude-sonnet-4-6": { input: 0.003,  output: 0.015  },
   // OpenAI

@@ -38,6 +38,11 @@ export interface ModelProfile {
 
 const MODEL_PROFILES: Record<string, ModelProfile> = {
   // Strong models — full autonomy
+  'anthropic/claude-opus-4-7': {
+    provider: 'anthropic', model: 'claude-opus-4-7', tier: 'strong',
+    capabilities: { codeGeneration: 0.97, codeReview: 0.97, contextWindow: 200000, instructionFollowing: 0.97, reasoning: 0.97 },
+    tuning: { promptStyle: 'minimal', maxFilesPerStep: 5, maxCharsPerFile: 80000, verificationStrictness: 'standard', requireTests: false, requireDiffReview: true, maxRetries: 2, cooldownMs: 2000 },
+  },
   'anthropic/claude-sonnet-4-6': {
     provider: 'anthropic', model: 'claude-sonnet-4-6', tier: 'strong',
     capabilities: { codeGeneration: 0.95, codeReview: 0.95, contextWindow: 200000, instructionFollowing: 0.95, reasoning: 0.95 },
