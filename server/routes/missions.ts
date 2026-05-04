@@ -198,7 +198,7 @@ export const missionRoutes: FastifyPluginAsync = async (fastify) => {
         progress: { completed: 0, total: plan.subtasks.length },
         stopReason: "",
         executed: false,
-        message: `Plan ready — ${plan.subtasks.length} subtask(s) waiting for start. Click Start to begin.`,
+        message: `Plan ready — ${plan.subtasks.length} subtask(s). Aedis will start safe work automatically.`,
         updatedAt: plan.updatedAt,
       },
     });
@@ -210,18 +210,17 @@ export const missionRoutes: FastifyPluginAsync = async (fastify) => {
       plan,
       executed: false,
       next_action: {
-        kind: "start_required",
+        kind: "auto_start",
         endpoint: `/task-plans/${planId}/start`,
         method: "POST",
-        manualStartRequired: true,
+        manualStartRequired: false,
         approvalRequired: true,
         description:
-          "Plan created but no Builder/Critic/Verifier/Integrator has run yet. " +
-          "Click Start in the Task Plan panel to dispatch the first subtask.",
+          "Plan created. The UI starts safe work automatically and pauses only for clarification, safety, or review.",
       },
       message:
         `Plan ready with ${plan.subtasks.length} subtask(s). ` +
-        `No execution has occurred — POST /task-plans/${planId}/start to begin. ` +
+        `The UI will POST /task-plans/${planId}/start automatically. ` +
         `Approval is still required before source changes are promoted.`,
     });
   });

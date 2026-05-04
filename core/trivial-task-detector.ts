@@ -4,7 +4,8 @@
  *
  * A task qualifies as trivial when ALL of:
  *   1. Exactly one target file
- *   2. Prompt indicates comment-only, whitespace, or formatting change
+ *   2. Prompt indicates comment-only, whitespace, formatting, or a
+ *      small literal replacement
  *   3. No test requirement detected in the prompt
  *   4. No risk signals (security, destructive ops, etc.)
  *
@@ -23,6 +24,25 @@ const TRIVIAL_PATTERNS = [
   /\b(copyright|license)\s+(header|notice|banner)/i,
   /\b(todo|fixme|hack|xxx)\s+(comment|note|tag)/i,
 ];
+
+const SIMPLE_LITERAL_REPLACEMENT =
+  /\b(change|replace|update|set)\s+[`'"]?([A-Za-z0-9_.:-][^,.;\n]{0,40}?)['"`]?\s+\bto\b\s+[`'"]?([^,.;\n]{1,80})/i;
+
+function isSimpleLiteralReplacement(prompt: string): boolean {
+  const match = SIMPLE_LITERAL_REPLACEMENT.exec(prompt);
+  if (!match) return false;
+
+  const before = match[2]?.trim() ?? "";
+  const after = match[3]?.trim() ?? "";
+  if (!before || !after) return false;
+
+  const combined = `${before} ${after}`;
+  if (/\b(support|implement|refactor|migrate|integrate|redesign|security|auth|database|endpoint|api)\b/i.test(combined)) {
+    return false;
+  }
+
+  return before.split(/\s+/).length <= 6 && after.split(/\s+/).length <= 10;
+}
 
 // Patterns that indicate a test requirement — disqualifies fast path.
 const TEST_REQUIREMENT_PATTERNS = [
@@ -59,7 +79,9 @@ export function isTrivialTask(opts: {
     return { isTrivial: false, reason: `scope too large: ${scopeEstimate}` };
   }
 
-  const isTrivialEdit = TRIVIAL_PATTERNS.some((p) => p.test(prompt));
+  const isTrivialEdit =
+    TRIVIAL_PATTERNS.some((p) => p.test(prompt)) ||
+    isSimpleLiteralReplacement(prompt);
   if (!isTrivialEdit) {
     return { isTrivial: false, reason: "prompt does not match trivial edit patterns" };
   }

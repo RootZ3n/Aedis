@@ -18,6 +18,7 @@ import {
   type RunInvocationContext,
 } from "../core/model-invoker.js";
 import { DiffApplier } from "../core/diff-applier.js";
+import { validateUnifiedDiff } from "../core/diff-truth.js";
 import {
   resolveSafeDeletePath,
   resolveSafeExistingPath,
@@ -183,6 +184,7 @@ import {
   formatBriefForBuilder,
   type ImplementationBrief,
 } from "../core/implementation-brief.js";
+import { validateAtomicDiff } from "../core/atomic-builder.js";
 import {
   BuilderAttemptError,
   sumAttemptCosts,
@@ -684,6 +686,7 @@ export class BuilderWorker extends AbstractWorker {
   private readonly fallbackModel: { provider: Provider; model: string } | null;
   private readonly pinnedModel: { provider: Provider; model: string } | null;
   private readonly diffApplier: DiffApplier;
+  private readonly atomicDiffFingerprints = new Map<string, Set<string>>();
 
   /**
    * Per-run fallback contexts. Keyed by intent.runId so the timeout
@@ -715,6 +718,20 @@ export class BuilderWorker extends AbstractWorker {
   }
 
   canHandle(assignment: WorkerAssignment): boolean {
+    if (assignment.atomicBuilder) {
+      // Refuse a dispatch with no target file. canHandle's normal
+      // contract is a predicate, but an empty atomicBuilder.file would
+      // silently pass the file===file check below — there's no safe
+      // recovery path further downstream, so fail loud here instead of
+      // letting Builder run on an empty path.
+      if (!assignment.atomicBuilder.file) {
+        throw new Error(
+          "Atomic Builder dispatch refused: atomicBuilder.file is empty — coordinator must validate target before dispatch",
+        );
+      }
+      return assignment.task.targetFiles.length === 1 &&
+        assignment.task.targetFiles[0] === assignment.atomicBuilder.file;
+    }
     return assignment.task.targetFiles.length >= 1;
   }
 
@@ -773,7 +790,11 @@ export class BuilderWorker extends AbstractWorker {
 
     try {
       if (!this.canHandle(assignment)) {
-        throw new Error("Builder requires at least one in-scope file to build");
+        throw new Error(
+          assignment.atomicBuilder
+            ? `Atomic Builder requires exactly one target file matching ${assignment.atomicBuilder.file}`
+            : "Builder requires at least one in-scope file to build",
+        );
       }
 
       const runId = this.extractRunId(assignment);
@@ -1117,12 +1138,23 @@ export class BuilderWorker extends AbstractWorker {
     const briefBlock = brief ? formatBriefForBuilder(brief) : "";
     const taskShape = classifyTaskShape(userRequest);
     const routeDirective = routeStrategyDirective(taskShape);
+    const atomic = assignment.atomicBuilder ?? null;
+    const atomicLines = atomic
+      ? [
+          "ATOMIC BUILDER MODE — HARD CONTRACT:",
+          `  Exact file path: ${atomic.file}`,
+          `  Allowed operation: ${atomic.operation}`,
+          `  Expected diff shape: ${atomic.expectedDiffShape}`,
+          "  You must not edit, create, delete, or mention changes to any other file.",
+          "  Produce one minimal operation only. Do not bundle adjacent feature work.",
+        ].join("\n")
+      : "";
     const blockerProtocolLines = [
       "BLOCKER PROTOCOL — when you cannot make the requested change:",
-      "  • Do NOT return the original file unchanged (that produces an empty-diff failure).",
+      "  • Do NOT modify the file just to report a blocker.",
       "  • Do NOT invent files or behavior. Stay within the selected-files list.",
-      "  • If the target file already satisfies the request, add a single top-of-file comment line describing that fact, and return the file otherwise unchanged.",
-      "  • If the request is ambiguous or impossible, add a single top-of-file comment line starting with `// AEDIS_BLOCKER:` stating the specific missing information, and return the rest of the file unchanged.",
+      "  • If the target file already satisfies the request, return the original file unchanged so Aedis can classify it as no real change.",
+      "  • If the request is ambiguous or impossible, return the original file unchanged. Aedis will ask the user one clear question instead of creating a pseudo-diff.",
     ];
     if (sectionInfo) {
       fixedParts = [
@@ -1140,6 +1172,7 @@ export class BuilderWorker extends AbstractWorker {
         `Constraints: ${contract.constraints.join(" | ") || "none"}`,
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
+        atomicLines,
         briefBlock,
         routeDirective,
         "",
@@ -1189,6 +1222,7 @@ export class BuilderWorker extends AbstractWorker {
         `Constraints: ${contract.constraints.join(" | ") || "none"}`,
         `Forbidden changes: ${contract.forbiddenChanges.join(" | ") || "none"}`,
         `Interface rules: ${contract.interfaceRules.join(" | ")}`,
+        atomicLines,
         briefBlock,
         routeDirective,
         blockerProtocolLines.join("\n"),
@@ -1512,6 +1546,7 @@ export class BuilderWorker extends AbstractWorker {
       if (after !== undefined) body.push(`+${after}`);
     }
     return [
+      `diff --git a/${filePath} b/${filePath}`,
       `--- a/${filePath}`,
       `+++ b/${filePath}`,
       `@@ -1,${originalLines.length} +1,${updatedLines.length} @@`,
@@ -1947,10 +1982,26 @@ export class BuilderWorker extends AbstractWorker {
         this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-empty-diff", "empty-diff", msg),
       );
     }
+    const proposedDiffTruth = validateUnifiedDiff(diff);
+    console.log(`[diff] stage=builder-output length=${diff.length}`);
+    if (!proposedDiffTruth.ok) {
+      const msg = `Model produced no effective source change (${proposedDiffTruth.reason})`;
+      throw new BuilderAttemptError(
+        msg,
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-empty-diff", "empty-diff", msg),
+      );
+    }
     if (DiffApplier.looksLikeRawDiff(updatedContent)) {
       throw new BuilderAttemptError(
         `SAFETY: Refusing to write raw diff text to ${relativePath}`,
         this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-raw-diff", "raw-diff", `raw diff text in output`),
+      );
+    }
+    if (/AEDIS_BLOCKER:/i.test(updatedContent)) {
+      const msg = `Builder returned a blocker comment instead of a valid source edit`;
+      throw new BuilderAttemptError(
+        msg,
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-blocker-comment", "blocker-comment", msg),
       );
     }
     if (looksLikeConversationalProse(updatedContent, relativePath)) {
@@ -1978,6 +2029,15 @@ export class BuilderWorker extends AbstractWorker {
 
     const realDiff = await computeGitDiff(projectRoot, relativePath).catch(() => diff);
     const finalDiff = realDiff && realDiff.trim() ? realDiff : diff;
+    console.log(`[diff] stage=builder length=${finalDiff.length}`);
+    const finalDiffTruth = validateUnifiedDiff(finalDiff);
+    if (!finalDiffTruth.ok) {
+      const msg = `Model produced no effective source change (${finalDiffTruth.reason})`;
+      throw new BuilderAttemptError(
+        msg,
+        this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-empty-diff", "empty-diff", msg),
+      );
+    }
     const change: FileChange = {
       path: relativePath,
       operation,
@@ -1985,8 +2045,27 @@ export class BuilderWorker extends AbstractWorker {
       originalContent: fullContent,
       content: updatedContent,
     };
+    if (assignment.atomicBuilder) {
+      const fingerprint = `${runId}:${assignment.atomicBuilder.file}:${finalDiff.trim()}`;
+      const seen = this.atomicDiffFingerprints.get(runId) ?? new Set<string>();
+      if (seen.has(fingerprint)) {
+        throw new BuilderAttemptError(
+          `Atomic Builder validation failed: repeated identical output for ${assignment.atomicBuilder.file}`,
+          this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-atomic-repeat", "atomic-repeat", "repeated identical output"),
+        );
+      }
+      const atomicResult = validateAtomicDiff(assignment.atomicBuilder, [change]);
+      if (!atomicResult.ok) {
+        throw new BuilderAttemptError(
+          `Atomic Builder validation failed: ${atomicResult.reason}`,
+          this.markAttemptFailed(activeAttemptRecord, attemptRecords, "guard-atomic-diff", "atomic-diff", atomicResult.reason),
+        );
+      }
+      seen.add(fingerprint);
+      this.atomicDiffFingerprints.set(runId, seen);
+    }
     const decisions: BuildDecision[] = [{
-      description: `Applied contract-scoped update to ${relativePath}` +
+      description: `${assignment.atomicBuilder ? `Atomic ${assignment.atomicBuilder.operation}` : "Applied contract-scoped update"} to ${relativePath}` +
         (sectionInfo ? ` (section-edit mode, lines ${sectionInfo.startLine}-${sectionInfo.endLine})` : ""),
       rationale: contract.goal,
       alternatives: ["Refuse patch outside scope", "Request narrower contract"],
@@ -2028,6 +2107,7 @@ export class BuilderWorker extends AbstractWorker {
         diff: finalDiff,
         path: relativePath,
         operation,
+        atomic: assignment.atomicBuilder ?? null,
         model: response.usedModel,
         provider: response.usedProvider,
         costUsd: cost.estimatedCostUsd,

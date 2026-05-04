@@ -58,11 +58,11 @@ test("loadModelConfig falls back to defaults when no config file exists (fallbac
   try {
     const config = loadModelConfig(projectRoot);
     // Defaults from server/routes/config.ts DEFAULT_MODEL_CONFIG.
-    // Critic must NOT default to Anthropic — that would violate the
-    // no-Anthropic-hot-path doctrine on every empty-config install.
+    // Critic stays on Mimo in the default hot path while the pipeline
+    // is stabilized. It must NOT default to Anthropic.
     assert.equal(config.builder.provider, "openrouter");
-    assert.equal(config.critic.provider, "ollama");
-    assert.equal(config.critic.model, "qwen3.5:9b");
+    assert.equal(config.critic.provider, "openrouter");
+    assert.equal(config.critic.model, "xiaomi/mimo-v2.5");
     assert.equal(config.integrator.model, "local");
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });

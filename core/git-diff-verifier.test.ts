@@ -89,9 +89,31 @@ test("git diff verifier: unchanged reference file does not block expected writes
     });
 
     assert.equal(result.passed, true, result.summary);
+    assert.ok(result.changedLineCount > 0, "passed verification must include concrete diff lines");
+    assert.deepEqual([...result.filesWithoutDiffLines], []);
     assert.deepEqual(result.expectedButUnchanged, []);
     assert.deepEqual(result.unexpectedReferenceChanges, []);
     assert.deepEqual([...result.confirmed].sort(), ["src/user.controller.ts", "src/user.service.ts"].sort());
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("git diff verifier: empty canonical diff blocks even when git sees changed files", async () => {
+  const repo = makeGitRepo();
+  try {
+    writeFileSync(join(repo, "src/user.controller.ts"), "export class UserController { createUser() {} }\n", "utf-8");
+
+    const result = await verifyGitDiff({
+      projectRoot: repo,
+      manifestFiles: ["src/user.controller.ts"],
+      expectedFiles: ["src/user.controller.ts"],
+      canonicalDiff: "",
+    });
+
+    assert.equal(result.passed, false);
+    assert.match(result.summary, /canonical diff invalid/i);
+    assert.equal(result.changedLineCount > 0, true);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -110,6 +132,7 @@ test("git diff verifier: unchanged write-required controller blocks", async () =
     });
 
     assert.equal(result.passed, false);
+    assert.equal(result.changedLineCount > 0, true);
     assert.deepEqual(result.expectedButUnchanged, ["src/user.controller.ts"]);
   } finally {
     rmSync(repo, { recursive: true, force: true });

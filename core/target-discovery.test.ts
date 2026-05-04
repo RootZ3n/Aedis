@@ -474,3 +474,112 @@ test("target discovery: non-existent file WITHOUT creation verb is still rejecte
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
+
+test("target discovery: missing explicit path auto-corrects to unique matching filename", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-target-correct-"));
+  try {
+    mkdirSync(join(projectRoot, "packages", "demo", "src"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "packages", "demo", "src", "message.ts"),
+      "export const message = 'hello';\n",
+      "utf-8",
+    );
+    mkdirSync(join(projectRoot, "web", "app", "components"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "web", "app", "components", "MarkdownMessage.tsx"),
+      "export function MarkdownMessage() { return null; }\n",
+      "utf-8",
+    );
+
+    const prompt = "In src/message.ts, change the exported message string from hello to hello from aedis.";
+    const analysis: import("./charter.js").RequestAnalysis = {
+      raw: prompt,
+      category: "feature",
+      targets: ["src/message.ts"],
+      scopeEstimate: "small",
+      riskSignals: [],
+      ambiguities: [],
+    };
+    const prepared = prepareTargetsForPrompt({ projectRoot, prompt, analysis });
+
+    assert.deepEqual(prepared.targets, ["packages/demo/src/message.ts"]);
+    assert.ok(
+      prepared.selected.some((candidate) =>
+        candidate.path === "packages/demo/src/message.ts" &&
+        candidate.reasons.some((reason) => /did-you-mean/i.test(reason)),
+      ),
+    );
+    assert.ok(
+      !prepared.targets.includes("web/app/components/MarkdownMessage.tsx"),
+      "must not drift to a fuzzy message component",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: UI Tier 1 prompt runs internal filename search", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-target-ui-tier1-"));
+  try {
+    mkdirSync(join(projectRoot, "packages", "demo", "src"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "packages", "demo", "src", "message.ts"),
+      "export const message = \"hello\";\n",
+      "utf-8",
+    );
+
+    const prompt = "In src/message.ts, change hello to hello from test 3";
+    const analysis: import("./charter.js").RequestAnalysis = {
+      raw: prompt,
+      category: "feature",
+      targets: ["src/message.ts"],
+      scopeEstimate: "small",
+      riskSignals: [],
+      ambiguities: [],
+    };
+    const prepared = prepareTargetsForPrompt({ projectRoot, prompt, analysis });
+
+    assert.deepEqual(prepared.targets, ["packages/demo/src/message.ts"]);
+    assert.equal(prepared.clarification, null);
+    assert.ok(
+      prepared.rejected.some((entry) =>
+        /auto-corrected to packages\/demo\/src\/message\.ts/.test(entry.reason),
+      ),
+      "must use internal did-you-mean discovery rather than asking the user to run find",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("target discovery: unresolved explicit path asks clarification instead of picking fuzzy file", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-target-no-fuzzy-"));
+  try {
+    mkdirSync(join(projectRoot, "web", "app", "components"), { recursive: true });
+    writeFileSync(
+      join(projectRoot, "web", "app", "components", "MarkdownMessage.tsx"),
+      "export function MarkdownMessage() { return null; }\n",
+      "utf-8",
+    );
+
+    const prompt = "In src/message.ts, change the exported message string from hello to hello from aedis.";
+    const analysis: import("./charter.js").RequestAnalysis = {
+      raw: prompt,
+      category: "feature",
+      targets: ["src/message.ts"],
+      scopeEstimate: "small",
+      riskSignals: [],
+      ambiguities: [],
+    };
+    const prepared = prepareTargetsForPrompt({ projectRoot, prompt, analysis });
+
+    assert.deepEqual(prepared.targets, []);
+    assert.match(prepared.clarification ?? "", /requested file was not found/i);
+    assert.ok(
+      !prepared.targets.includes("web/app/components/MarkdownMessage.tsx"),
+      "must ask one question instead of editing a fuzzy match",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});

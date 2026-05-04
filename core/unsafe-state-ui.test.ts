@@ -48,10 +48,13 @@ test("renderApprovalCard hides the card when assessUnsafeStateUI flags unsafe", 
   const idx = HTML.indexOf("function renderApprovalCard()");
   assert.ok(idx > 0);
   const block = HTML.slice(idx, idx + 4_000);
-  // The function MUST call the assessor.
-  assert.match(block, /assessUnsafeStateUI\(run\)/);
-  // It MUST early-return without `card.classList.add('show')` when unsafe.
-  assert.match(block, /if \(unsafe && unsafe\.unsafe\)\s*\{[\s\S]*?card\.classList\.remove\('show'\)/);
+  // The function must use the dominant state, which is computed from
+  // assessUnsafeStateUI and gives contaminated workspaces top priority.
+  assert.match(block, /getDominantUiState\(\)/);
+  assert.match(HTML, /const unsafe = assessUnsafeStateUI\(run\)/);
+  // It MUST early-return without `card.classList.add('show')` unless
+  // the dominant state is approval.
+  assert.match(block, /if \(dominant\.kind !== 'approval'\)\s*\{[\s\S]*?card\.classList\.remove\('show'\)/);
 });
 
 test("CONTAMINATED WORKSPACE card markup exists, starts hidden, and lacks an Approve button", () => {
@@ -98,7 +101,7 @@ test("global status bar resolves effectiveStatus='contaminated' when the assesso
   // The block must compute unsafeAssessment first.
   assert.match(block, /assessUnsafeStateUI\(run\)/);
   assert.match(block, /'contaminated'/);
-  assert.match(block, /CONTAMINATED — INSPECT/);
+  assert.match(block, /INSPECT WORKSPACE/);
   assert.match(block, /effectiveStatus === 'contaminated'/);
 });
 

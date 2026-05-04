@@ -30,6 +30,7 @@ import {
   type RunCandidatesBlock,
   type RunCandidateView,
   type RunLoquiDecisionView,
+  type RunDetailResponse,
 } from "./run-contracts.js";
 
 // ─── Request Schemas ─────────────────────────────────────────────────
@@ -190,8 +191,15 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
         } | null;
         const candidates = projectCandidatesFromReceipt(persisted.finalReceipt);
         const loqui = projectLoquiDecision(runId, task?.taskId ?? null);
+        const changes = apiChangesFromReceipt(persisted.finalReceipt);
+        assertApiDiffInvariant({
+          route: "/runs/:id",
+          runId,
+          changes,
+          receipt: persisted.finalReceipt,
+        });
         reply.send({
-          ...buildRunDetailResponse({
+          ...buildRunDetailResponse(withApiDiff({
             id: persisted.runId,
             taskId: task?.taskId ?? null,
             runId: persisted.runId,
@@ -203,7 +211,9 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
             filesChanged: persisted.changesSummary.map((change) => ({
               path: change.path,
               operation: change.operation,
+              ...(change.diff ? { diff: change.diff } : {}),
             })),
+            changes,
             summary: {
               classification: persisted.finalClassification,
               headline: typeof humanSummary?.headline === "string" && humanSummary.headline
@@ -236,7 +246,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
             checkpoints: persisted.checkpoints,
             candidates,
             ...(loqui ? { loqui } : {}),
-          }),
+          })),
           source: "persistent-receipts",
         });
         return;
@@ -255,7 +265,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
         const detail = projectRunDetail(tracked as unknown as TrackedRunLike);
         if (detail) {
           reply.send({
-            ...buildRunDetailResponse({
+            ...buildRunDetailResponse(withApiDiff({
               id: detail.id,
               taskId: detail.id,
               runId: detail.runId ?? detail.id,
@@ -265,6 +275,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
               completedAt: detail.completedAt,
               receipt: detail.receipt,
               filesChanged: detail.filesChanged,
+              changes: detail.changes,
               summary: detail.summary,
               confidence: detail.confidence,
               errors: detail.errors,
@@ -274,7 +285,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
               totalCostUsd: detail.totalCostUsd,
               workerEvents: [],
               checkpoints: [],
-            }),
+            })),
             source: "tracked-runs",
           });
           return;
@@ -288,7 +299,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
         const liveCandidates = projectCandidatesFromActiveRun(ctx(), runId);
         const loqui = projectLoquiDecision(runId, task?.taskId ?? null);
         reply.send({
-          ...buildRunDetailResponse({
+          ...buildRunDetailResponse(withApiDiff({
             id: runId,
             taskId: task?.taskId ?? null,
             runId,
@@ -298,6 +309,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
             completedAt: active.run.completedAt,
             receipt: null,
             filesChanged: [],
+            changes: [],
             summary: {
               classification: null,
               headline: `Run is ${active.run.phase}`,
@@ -314,7 +326,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
             checkpoints: [],
             candidates: liveCandidates,
             ...(loqui ? { loqui } : {}),
-          }),
+          })),
           runState: {
             phase: active.run.phase,
             tasks: active.run.tasks.map((t) => ({
@@ -365,7 +377,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
       const started = runEvents.find((event) => event.type === "run_started");
       const completed = runEvents.find((event) => event.type === "run_complete");
       reply.send({
-        ...buildRunDetailResponse({
+        ...buildRunDetailResponse(withApiDiff({
           id: runId,
           taskId: String((started?.payload as any)?.taskId ?? ""),
           runId,
@@ -375,6 +387,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
           completedAt: completed?.timestamp ?? null,
           receipt: null,
           filesChanged: [],
+          changes: [],
           summary: {
             classification: String((completed?.payload as any)?.classification ?? "") || null,
             headline: "Run detail reconstructed from event history",
@@ -389,7 +402,7 @@ export const runRoutes: FastifyPluginAsync = async (fastify) => {
           totalCostUsd: Number((completed?.payload as any)?.totalCostUsd ?? 0),
           workerEvents: [],
           checkpoints: [],
-        }),
+        })),
         timeline: runEvents.map((e) => ({
           type: e.type,
           timestamp: e.timestamp,
@@ -609,6 +622,49 @@ function projectLoquiDecision(
     ?? (taskId ? getLoquiDecisionForRun(taskId) : undefined);
   if (!decision) return undefined;
   return buildLoquiDecisionView(decision);
+}
+
+function withApiDiff(response: RunDetailResponse): RunDetailResponse {
+  const diffLength = response.changes.reduce((sum, change) => sum + change.diff.length, 0);
+  console.log(`[diff] stage=api length=${diffLength}`);
+  return response;
+}
+
+function apiChangesFromReceipt(receipt: unknown): readonly { path: string; operation: string; diff: string }[] {
+  const raw = (receipt as { changes?: unknown } | null)?.changes;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((change): change is { path?: unknown; operation?: unknown; diff?: unknown } => Boolean(change))
+    .map((change) => ({
+      path: String(change.path ?? ""),
+      operation: String(change.operation ?? "modify"),
+      diff: typeof change.diff === "string" ? change.diff : "",
+    }))
+    .filter((change) => change.path && change.diff.trim());
+}
+
+function internalReceiptDiffLength(receipt: unknown): number {
+  const raw = (receipt as { changes?: unknown } | null)?.changes;
+  if (!Array.isArray(raw)) return 0;
+  return raw.reduce((sum, change) => {
+    const diff = (change as { diff?: unknown } | null)?.diff;
+    return sum + (typeof diff === "string" ? diff.length : 0);
+  }, 0);
+}
+
+function assertApiDiffInvariant(input: {
+  route: string;
+  runId: string;
+  changes: readonly { diff: string }[];
+  receipt: unknown;
+}): void {
+  const internalLength = internalReceiptDiffLength(input.receipt);
+  const apiLength = input.changes.reduce((sum, change) => sum + change.diff.length, 0);
+  if (internalLength > 0 && apiLength <= 0) {
+    throw new Error(
+      `[diff] stage=api invariant failed route=${input.route} run=${input.runId}: internal diff length=${internalLength} api diff length=${apiLength}`,
+    );
+  }
 }
 
 // ─── Diff Utilities ─────────────────────────────────────────────────

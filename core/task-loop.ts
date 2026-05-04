@@ -95,6 +95,14 @@ export interface CoordinatorLike {
 export interface ReceiptStoreReader {
   getRun(runId: string): Promise<({
     status: string;
+    finalReceipt?: {
+      failureReason?: string | null;
+      blockedStage?: string | null;
+      nextAllowedActions?: readonly string[];
+      rawFailureEvidence?: readonly string[];
+      diffApproval?: { status: string } | null;
+    } | null;
+    failureReason?: string | null;
     providerAttempts?: ReadonlyArray<{
       taskId?: string;
       provider: string;
@@ -378,6 +386,52 @@ export class TaskLoopRunner {
     ];
   }
 
+  private buildBuilderNoEffectiveCtas(planId: string, subtaskId: string): TaskPlanEventPayload["ctas"] {
+    return [
+      {
+        key: "repair_plan",
+        label: "Rewrite Operation",
+        endpoint: `/task-plans/${planId}/subtasks/${subtaskId}/attach-target`,
+        method: "POST",
+        description: "Choose a new target or rewrite the atomic operation before retrying.",
+      },
+      {
+        key: "show_scout_evidence",
+        label: "Scout Evidence",
+        endpoint: `/task-plans/${planId}`,
+        method: "GET",
+        description: "Review candidate target files before choosing a recovery action.",
+      },
+    ];
+  }
+
+  private isBuilderNoEffectiveReceipt(receipt: RunReceipt, persisted: Awaited<ReturnType<ReceiptStoreReader["getRun"]>>): boolean {
+    const finalReceipt = persisted?.finalReceipt;
+    const reason = receipt.failureReason ?? finalReceipt?.failureReason ?? persisted?.failureReason ?? "";
+    const evidence = [
+      receipt.executionGateReason,
+      ...(receipt.rawFailureEvidence ?? []),
+      ...(finalReceipt?.rawFailureEvidence ?? []),
+      receipt.humanSummary?.headline ?? "",
+    ].join(" ");
+    return (
+      reason === "builder_no_effective_change" ||
+      /builder_no_effective_change|content_identical_output|no effective source change|no effective file changes|byte-identical/i.test(evidence)
+    );
+  }
+
+  private failureSignatureFor(receipt: RunReceipt, subtask: Subtask): string {
+    const actions = receipt.nextAllowedActions?.join(",") ?? "";
+    const target = receipt.rawFailureEvidence?.join(" ").match(/\b[\w./-]+\.(?:ts|tsx|js|jsx|json|css|md)\b/)?.[0] ?? "";
+    return [
+      receipt.failureReason ?? "unknown",
+      receipt.blockedStage ?? "",
+      target,
+      normalizeWhitespace(subtask.prompt).slice(0, 240),
+      actions,
+    ].join("|");
+  }
+
   /**
    * Build the standard "needs replan" CTA pair so every event that
    * surfaces this state agrees on shape and labels.
@@ -417,6 +471,7 @@ export class TaskLoopRunner {
       this.logger.log(`[task-loop] plan ${planId} already terminal (${plan.status}); no-op`);
       return plan;
     }
+    plan = await this.reconcileApprovedBlockedSubtask(plan);
     // Move the plan into running on the first iteration. The loop
     // body persists every state change, so a crash mid-iteration
     // leaves the plan in a truthful state.
@@ -465,6 +520,33 @@ export class TaskLoopRunner {
         return plan;
       }
     }
+  }
+
+  private async reconcileApprovedBlockedSubtask(plan: TaskPlan): Promise<TaskPlan> {
+    if (plan.status !== "paused" || plan.stopReason !== "approval_required") return plan;
+    const blocked = plan.subtasks.find((s) => s.status === "blocked" && s.lastRunId);
+    if (!blocked?.lastRunId) return plan;
+    const persisted = await this.receiptStore.getRun(blocked.lastRunId).catch(() => null);
+    if (!persisted) return plan;
+    if (persisted.status !== "READY_FOR_PROMOTION" && persisted.status !== "COMPLETE" && persisted.status !== "VERIFIED_PASS") {
+      return plan;
+    }
+    const completedStatus: SubtaskStatus = blocked.repairAttempts > 0 ? "repaired" : "completed";
+    const reconciled = mergeSubtask(plan, blocked.id, {
+      status: completedStatus,
+      lastVerdict: blocked.lastVerdict ?? "partial",
+      blockerReason: "",
+      nextRecommendedAction: "approval accepted; continue to next subtask",
+      completedAt: this.now(),
+    });
+    const next = await this.persist({
+      ...reconciled,
+      status: "paused",
+      stopReason: "",
+      updatedAt: this.now(),
+    });
+    this.emitEvent(next, completedStatus === "repaired" ? "subtask_repaired" : "subtask_completed", `Subtask ${blocked.id} approved`, blocked.id);
+    return next;
   }
 
   /**
@@ -862,6 +944,47 @@ export class TaskLoopRunner {
     // the operator sees the most recent analysis.
     this.lastDiagnosis = diagnosis;
 
+    if (this.isBuilderNoEffectiveReceipt(receipt, post)) {
+      const signature = this.failureSignatureFor(receipt, subtask);
+      const priorSignatures = subtask.failureSignatures ?? [];
+      const repeatCount = priorSignatures.filter((s) => s === signature).length + 1;
+      const actions = receipt.nextAllowedActions ?? post?.finalReceipt?.nextAllowedActions ?? [
+        "choose_different_target",
+        "rewrite_operation",
+        "retry_different_model",
+        "cancel",
+      ];
+      const blocker =
+        "Builder made no effective source change. Choose a new target, rewrite the operation, or retry with a different model.";
+      const cleared = mergeSubtask(working, subtask.id, {
+        status: "needs_clarification",
+        lastVerdict: receipt.verdict,
+        evidenceRunIds,
+        attempts: subtask.attempts + 1,
+        repairAttempts: subtask.repairAttempts,
+        costUsd: subtask.costUsd + cost,
+        blockerReason: repeatCount >= 2
+          ? `${blocker} Repeated no-op protection stopped an identical second attempt.`
+          : blocker,
+        nextRecommendedAction: "Choose a new target, rewrite the operation, retry with a different model, or cancel.",
+        failureReason: "builder_no_effective_change",
+        blockedStage: "builder",
+        nextAllowedActions: actions,
+        failureSignatures: [...priorSignatures, signature],
+      });
+      const updated = await this.persist({
+        ...cleared,
+        status: "needs_replan",
+        stopReason: "needs_clarification",
+        spent: bumpSpent(cleared.spent, { runtimeMs: dt, costUsd: cost, attempted: 1 }),
+        updatedAt: this.now(),
+      });
+      const ctas = this.buildBuilderNoEffectiveCtas(plan.taskPlanId, subtask.id);
+      this.emitEvent(updated, "subtask_needs_clarification", blocker, subtask.id, { ctas });
+      this.emitEvent(updated, "plan_needs_replan", blocker, subtask.id, { ctas });
+      return { plan: updated, stopReason: "needs_clarification", executed: true };
+    }
+
     // STAGE TIMEOUT GATE — runs BEFORE the repair branch.
     //
     // If any new timeouts were detected on this attempt, persist them
@@ -1154,6 +1277,11 @@ export class TaskLoopRunner {
     const augmentedPrompt = sub.prompt.includes(trimmed)
       ? sub.prompt
       : `Target file: ${trimmed}\n\n${sub.prompt}`;
+    if (sub.failureReason === "builder_no_effective_change" && augmentedPrompt === sub.prompt) {
+      throw new TaskLoopError(
+        "Repair attempt would repeat the same target/operation after a builder no-op. Choose a different target, rewrite the operation, or retry with a different model.",
+      );
+    }
     const next = mergeSubtask(plan, subtaskId, {
       status: "pending",
       prompt: augmentedPrompt,
@@ -1269,6 +1397,10 @@ function mergeSubtask(plan: TaskPlan, id: string, patch: Partial<Subtask>): Task
     ...plan,
     subtasks: plan.subtasks.map((s) => (s.id === id ? { ...s, ...patch } : s)),
   };
+}
+
+function normalizeWhitespace(input: string): string {
+  return String(input ?? "").replace(/\s+/g, " ").trim();
 }
 
 function bumpSpent(

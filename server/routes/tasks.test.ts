@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -167,6 +167,163 @@ test("POST /:id/promote returns clear failure for bad persisted artifact", async
     assert.equal(body.error, "Promotion failed");
     assert.match(body.message, /No patch artifact/);
     assert.match(body.action, /Re-run the task|receipt/i);
+
+    await app.close();
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("POST /loqui/unified dispatches Tier 1 file edits through canonical build submission", async () => {
+  const fastify = (await import("fastify")).default;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-tasks-loqui-build-"));
+  const prompt = "In src/message.ts, change hello to hello from test 3";
+  let capturedSubmission: { input: string; projectRoot?: string } | null = null;
+
+  try {
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "src", "message.ts"), `export const message = "hello";\n`);
+
+    const receiptStore = new ReceiptStore(projectRoot);
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator: {
+        submitWithGates: async (submission: { input: string; projectRoot?: string }) => {
+          capturedSubmission = submission;
+          return {
+            kind: "executing",
+            receipt: new Promise(() => {}),
+          };
+        },
+      },
+      eventBus: { emit: () => {} },
+      config: { projectRoot },
+    });
+    await app.register(taskRoutes);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/loqui/unified",
+      payload: {
+        input: prompt,
+        repoPath: projectRoot,
+        context: { projectRoot },
+      },
+    });
+
+    assert.equal(res.statusCode, 202);
+    const body = res.json();
+    assert.equal(body.route, "build");
+    assert.equal(body.status, "running");
+    assert.equal(body.prompt, prompt);
+    assert.equal(capturedSubmission?.input, prompt);
+    assert.equal(capturedSubmission?.projectRoot, projectRoot);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await app.close();
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("POST /loqui legacy endpoint executes build prompts instead of answering with diagnostics", async () => {
+  const fastify = (await import("fastify")).default;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-tasks-loqui-legacy-build-"));
+  const prompt = "In src/message.ts, change hello to hello from test 3";
+  let capturedSubmission: { input: string; projectRoot?: string } | null = null;
+
+  try {
+    mkdirSync(join(projectRoot, "src"), { recursive: true });
+    writeFileSync(join(projectRoot, "src", "message.ts"), `export const message = "hello";\n`);
+
+    const receiptStore = new ReceiptStore(projectRoot);
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator: {
+        submitWithGates: async (submission: { input: string; projectRoot?: string }) => {
+          capturedSubmission = submission;
+          return {
+            kind: "executing",
+            receipt: new Promise(() => {}),
+          };
+        },
+      },
+      eventBus: { emit: () => {} },
+      config: { projectRoot },
+    });
+    await app.register(taskRoutes);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/loqui",
+      payload: {
+        question: prompt,
+        repoPath: projectRoot,
+      },
+    });
+
+    assert.equal(res.statusCode, 202);
+    const body = res.json();
+    assert.equal(body.route, "build");
+    assert.equal(body.status, "running");
+    assert.equal(body.answer, undefined);
+    assert.equal(capturedSubmission?.input, prompt);
+    assert.equal(capturedSubmission?.projectRoot, projectRoot);
+    assert.doesNotMatch(JSON.stringify(body), /\bfind\s+\./i);
+    assert.doesNotMatch(JSON.stringify(body), /\bgit status\b/i);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await app.close();
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("POST /loqui legacy endpoint returns one clarification for unresolved build targets", async () => {
+  const fastify = (await import("fastify")).default;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-tasks-loqui-legacy-clarify-"));
+  const prompt = "In src/message.ts, change hello to hello from test 3";
+  let submitCount = 0;
+
+  try {
+    const receiptStore = new ReceiptStore(projectRoot);
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator: {
+        submitWithGates: async () => {
+          submitCount += 1;
+          return {
+            kind: "needs_clarification",
+            question: "I could not find src/message.ts or a unique message.ts match. Which file should I edit?",
+          };
+        },
+      },
+      eventBus: { emit: () => {} },
+      config: { projectRoot },
+    });
+    await app.register(taskRoutes);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/loqui",
+      payload: {
+        question: prompt,
+        repoPath: projectRoot,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.route, "clarify");
+    assert.equal(body.status, "needs_clarification");
+    assert.equal(body.answer, undefined);
+    assert.equal(submitCount, 1, "build prompt must reach canonical submit gate once");
+    assert.match(body.clarification, /which file should i edit/i);
+    assert.doesNotMatch(JSON.stringify(body), /\bfind\s+\./i);
+    assert.doesNotMatch(JSON.stringify(body), /\bgit status\b/i);
 
     await app.close();
   } finally {

@@ -181,6 +181,26 @@ export function classifyExecution(
     };
   }
 
+  // ── Rule 4a: awaiting manual approval → PARTIAL_SUCCESS ─────────
+  // A pending approval receipt with a real patch artifact is not a
+  // no-op. The run intentionally paused before source promotion, so
+  // surface the review state instead of falling through to the
+  // defensive "unverified partial" rule below.
+  if (
+    verdict === "partial" &&
+    receipt.diffApproval?.status === "pending" &&
+    typeof receipt.patchArtifact?.diff === "string" &&
+    receipt.patchArtifact.diff.trim().length > 0
+  ) {
+    factors.push("approval:pending");
+    return {
+      classification: "PARTIAL_SUCCESS",
+      reasonCode: "approval-required",
+      reason: "Review required before applying the diff",
+      factors,
+    };
+  }
+
   // ── Rule 3: gate errored → FAILED ────────────────────────────────
   // "Execution errored" markers come from the thrown-error path in
   // the execution gate.

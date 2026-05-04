@@ -86,6 +86,7 @@
 html,body{
   margin:0;
   min-height:100%;
+  overflow-x:hidden;
   background:
     radial-gradient(ellipse 70% 55% at 50% 42%,transparent 24%,rgba(0,0,4,.82) 100%),
     radial-gradient(circle at 8% 12%,rgba(111,217,255,.16),transparent 34%),
@@ -95,6 +96,8 @@ html,body{
     radial-gradient(circle at 50% 60%,rgba(30,80,140,.18),transparent 60%),
     linear-gradient(180deg,#020617 0%,#01030d 46%,#020818 100%);
   color:var(--ink);
+  font-size:18px;
+  line-height:1.65;
   font-family:var(--body);
   -webkit-font-smoothing:antialiased;
   text-rendering:optimizeLegibility;
@@ -585,18 +588,18 @@ body .app::before{
 
 /* ─── Prompt form ───────────────────────────────────────────────── */
 .field,.button,.config-select{
-  width:100%;min-height:54px;border-radius:16px;
+  width:100%;min-height:62px;border-radius:14px;
   border:1px solid rgba(120,200,255,.18);
   background:rgba(4,10,24,.82);
-  color:var(--ink);font:inherit;padding:14px 16px;
+  color:var(--ink);font:inherit;font-size:18px;padding:16px 18px;
 }
 .field:focus,.config-select:focus{
   outline:none;border-color:rgba(77,245,200,.45);
   box-shadow:0 0 0 3px rgba(77,245,200,.08),0 0 20px rgba(77,245,200,.10);
 }
 .button{
-  width:auto;min-width:160px;cursor:pointer;
-  font-family:var(--mono);text-transform:uppercase;letter-spacing:.16em;font-size:12px;
+  width:auto;min-width:180px;cursor:pointer;
+  font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;font-size:14px;
   background:linear-gradient(180deg,rgba(77,245,200,.18),rgba(77,245,200,.08));
   color:var(--teal);
   border-color:rgba(94,234,212,.34);
@@ -950,6 +953,79 @@ body .app::before{
   border:1px dashed rgba(120,200,255,.12);border-radius:14px;
 }
 .loqui-unified-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:stretch}
+.loqui-log,
+.loqui-suggestions{
+  display:none;
+}
+.primary-status-card{
+  display:grid;
+  gap:12px;
+  padding:22px;
+  border-radius:12px;
+  border:1px solid rgba(120,200,255,.18);
+  background:linear-gradient(180deg,rgba(4,10,24,.86),rgba(2,6,16,.94));
+  box-shadow:var(--shadow-panel);
+}
+.primary-status-kicker{
+  font-family:var(--mono);
+  font-size:13px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+.primary-status-title{
+  font-size:24px;
+  font-weight:700;
+  line-height:1.25;
+  color:var(--ink-cold);
+}
+.primary-status-detail{
+  font-size:17px;
+  line-height:1.6;
+  color:var(--muted);
+}
+.primary-status-actions{display:flex;gap:12px;flex-wrap:wrap}
+.primary-status-actions .button{min-width:220px}
+.advanced-details{
+  border:1px solid rgba(120,200,255,.16);
+  border-radius:12px;
+  background:rgba(4,10,24,.5);
+  padding:0;
+}
+.advanced-details > summary{
+  cursor:pointer;
+  list-style:none;
+  padding:16px 18px;
+  font-family:var(--mono);
+  font-size:15px;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--ink-cold);
+}
+.advanced-details > summary::-webkit-details-marker{display:none}
+.advanced-details > summary::before{content:"+";display:inline-block;width:22px;color:var(--teal)}
+.advanced-details[open] > summary::before{content:"-"}
+.advanced-details-body{
+  display:grid;
+  gap:14px;
+  padding:0 18px 18px;
+}
+
+/* Release-candidate default: one smooth agent surface. */
+#guided-start,
+.abyss-banner,
+#status-strip,
+#metrics-strip,
+#orientation-panel,
+.loqui-log,
+.loqui-suggestions,
+.settings-panel{
+  display:none !important;
+}
+.shell > .vitals,
+.shell > div[style*="border-bottom"]{
+  display:none !important;
+}
 .loqui-intent-badge{
   display:inline-flex;align-items:center;gap:6px;
   padding:3px 10px;border-radius:999px;
@@ -1327,23 +1403,25 @@ body .app::before{
 
 /* ─── UX Polish: Global Status Bar ─────────────────────────────── */
 .global-status-bar{
-  position:sticky;top:0;z-index:50;
+  position:sticky;top:0;z-index:80;
   display:grid;grid-template-columns:auto 1fr auto auto;
   align-items:center;gap:14px;
-  padding:8px 18px;
+  padding:12px 20px;
   border-radius:0 0 16px 16px;
   border:1px solid rgba(120,200,255,.14);border-top:none;
   background:
     linear-gradient(180deg,rgba(4,10,24,.96),rgba(2,6,16,.94));
   box-shadow:0 8px 32px rgba(0,0,0,.55);
   backdrop-filter:blur(6px);
-  font-family:var(--mono);font-size:11px;
+  font-family:var(--mono);font-size:14px;
   transition:border-color 300ms;
 }
 .global-status-bar.status-running{border-color:rgba(251,191,36,.34)}
 .global-status-bar.status-complete{border-color:rgba(94,234,212,.34)}
 .global-status-bar.status-plan_ready{border-color:rgba(111,217,255,.42);background:linear-gradient(180deg,rgba(8,18,40,.96),rgba(4,10,24,.94))}
 .global-status-bar.status-needs_replan{border-color:rgba(251,191,36,.42);background:linear-gradient(180deg,rgba(40,28,8,.96),rgba(20,14,4,.94))}
+.global-status-bar.status-clarify,
+.global-status-bar.status-blocked{border-color:rgba(251,191,36,.42);background:linear-gradient(180deg,rgba(40,28,8,.96),rgba(20,14,4,.94))}
 .global-status-bar.status-failed{border-color:rgba(255,85,119,.34)}
 .global-status-bar.status-contaminated{border-color:var(--red);background:linear-gradient(180deg,rgba(40,8,12,.96),rgba(20,4,6,.94));box-shadow:0 0 18px rgba(255,68,68,.18) inset}
 .gsb-status{
@@ -1359,6 +1437,7 @@ body .app::before{
 .gsb-dot.complete{background:var(--teal);color:var(--teal)}
 .gsb-dot.plan_ready{background:var(--cyan);color:var(--cyan)}
 .gsb-dot.needs_replan{background:var(--amber);color:var(--amber)}
+.gsb-dot.clarify{background:var(--amber);color:var(--amber)}
 .gsb-dot.failed{background:var(--red);color:var(--red)}
 .gsb-dot.contaminated{background:var(--red);color:var(--red);animation:dotPulse 1s ease-in-out infinite}
 .gsb-dot.blocked{background:#fbbf24;color:#fbbf24}
@@ -1369,11 +1448,11 @@ body .app::before{
   color:var(--muted);min-width:0;
 }
 .gsb-info span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gsb-model{color:var(--ink-cold);font-size:10px;letter-spacing:.06em}
-.gsb-last-action{color:var(--ink-dim);font-size:10px;max-width:260px}
+.gsb-model{color:var(--ink-cold);font-size:12px;letter-spacing:.02em}
+.gsb-last-action{color:var(--ink-dim);font-size:12px;max-width:320px}
 .gsb-cta{
-  font-family:var(--mono);font-size:11px;letter-spacing:.10em;text-transform:uppercase;
-  padding:5px 14px;border-radius:999px;cursor:pointer;
+  font-family:var(--mono);font-size:14px;letter-spacing:.06em;text-transform:uppercase;
+  padding:10px 18px;border-radius:12px;cursor:pointer;
   border:1px solid rgba(94,234,212,.34);
   background:rgba(77,245,200,.08);color:var(--teal);
   transition:background 200ms,border-color 200ms;
@@ -1385,27 +1464,34 @@ body .app::before{
 
 /* ─── UX Polish: Approval Card ─────────────────────────────────── */
 .approval-card{
-  display:none;gap:12px;padding:18px;
+  display:none;gap:14px;padding:20px;
   border:1px solid rgba(251,191,36,.34);
-  border-radius:22px;
+  border-radius:12px;
   background:
     radial-gradient(ellipse 80% 120% at 50% -10%,rgba(251,191,36,.08),transparent 60%),
     linear-gradient(180deg,rgba(4,10,24,.88),rgba(2,6,16,.94));
   box-shadow:0 0 24px rgba(251,191,36,.10);
 }
 .approval-card.show{display:grid}
+.approval-card.sticky-review{
+  position:sticky;
+  top:58px;
+  z-index:75;
+  border-color:rgba(251,191,36,.72);
+  box-shadow:0 18px 60px rgba(0,0,0,.58),0 0 0 1px rgba(251,191,36,.18),0 0 30px rgba(251,191,36,.16);
+}
 .approval-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.approval-card-title{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#fbbf24}
+.approval-card-title{font-family:var(--mono);font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:#fbbf24}
 .approval-card-why{
-  font-family:var(--font-ui);font-size:13px;line-height:1.5;color:var(--ink-cold);
+  font-family:var(--font-ui);font-size:17px;line-height:1.6;color:var(--ink-cold);
   padding:10px 12px;border-radius:12px;
   border:1px solid rgba(120,200,255,.10);background:rgba(4,10,24,.7);
 }
 .approval-card-badges{display:flex;gap:6px;flex-wrap:wrap}
 .approval-badge{
   display:inline-flex;align-items:center;gap:4px;
-  padding:3px 10px;border-radius:999px;
-  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 10px;border-radius:999px;
+  font-family:var(--mono);font-size:12px;letter-spacing:.04em;text-transform:uppercase;
 }
 .approval-badge.pass{color:var(--teal);border:1px solid rgba(94,234,212,.38);background:rgba(94,234,212,.06)}
 .approval-badge.fail{color:var(--red);border:1px solid rgba(255,85,119,.38);background:rgba(255,85,119,.06)}
@@ -1418,8 +1504,8 @@ body .app::before{
 }
 .approval-actions{display:flex;gap:10px;flex-wrap:wrap;padding-top:6px}
 .approval-btn{
-  font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;
-  padding:8px 20px;border-radius:12px;cursor:pointer;
+  font-family:var(--mono);font-size:15px;letter-spacing:.04em;text-transform:uppercase;
+  padding:12px 22px;border-radius:12px;cursor:pointer;
   transition:background 200ms,border-color 200ms;
 }
 .approval-btn.approve{
@@ -1960,13 +2046,13 @@ body .app::before{
       <!-- Loqui chat panel -->
       <section class="panel loqui-panel">
         <div class="loqui-row">
-          <div class="label">Loqui</div>
-          <span class="tiny" id="loqui-mode-tag">unified &middot; intent routing</span>
+          <div class="label">Prompt</div>
+          <span class="tiny" id="loqui-mode-tag">automatic agent flow</span>
         </div>
         <div id="loqui-log" class="loqui-log"></div>
         <form id="loqui-form" class="loqui-unified-form">
           <input id="loqui-input" class="field" type="text"
-            placeholder="Ask, plan, or build — Loqui routes it." autocomplete="off" />
+            placeholder="Describe the code change you want." autocomplete="off" />
           <button id="loqui-send" class="button" type="submit">Send</button>
         </form>
         <div id="loqui-suggestions" class="loqui-suggestions"></div>
@@ -1991,6 +2077,47 @@ body .app::before{
           </details>
         </div>
       </section>
+
+      <section id="primary-status-card" class="primary-status-card">
+        <div id="primary-status-kicker" class="primary-status-kicker">Ready</div>
+        <div id="primary-status-title" class="primary-status-title">Tell Aedis what to change.</div>
+        <div id="primary-status-detail" class="primary-status-detail">Safe tasks start automatically. If review is required, the review bar stays at the top.</div>
+        <div class="primary-status-actions">
+          <button id="primary-action" class="button" type="button">Focus Prompt</button>
+        </div>
+      </section>
+
+      <!-- Diff Viewer — default output surface. Details below contain
+           operational telemetry; this remains visible on the default
+           screen so the user can inspect the current output or patch. -->
+      <section class="panel diff-panel" id="diff-panel">
+        <div class="diff-panel-head">
+          <div class="loqui-row" style="gap:10px">
+            <div class="label">Current Output / Diff</div>
+            <span id="diff-panel-files" class="diff-panel-files">waiting for Builder</span>
+          </div>
+          <button id="diff-panel-toggle" class="diff-panel-toggle" type="button">HIDE</button>
+        </div>
+        <div id="diff-panel-body" class="diff-panel-body"></div>
+      </section>
+
+      <section id="approval-card" class="approval-card panel sticky-review">
+        <div class="approval-card-head">
+          <span class="approval-card-title">Review required</span>
+          <div id="approval-badges" class="approval-card-badges"></div>
+        </div>
+        <div id="approval-why" class="approval-card-why"></div>
+        <div id="approval-diff-preview" class="approval-diff-preview"></div>
+        <div class="approval-actions">
+          <button id="approval-approve" class="approval-btn approve" type="button">Approve</button>
+          <button id="approval-reject" class="approval-btn reject" type="button">Reject</button>
+          <button id="approval-view-full" class="approval-btn edit" type="button">View diff</button>
+        </div>
+      </section>
+
+      <details id="advanced-details" class="advanced-details">
+        <summary>Details</summary>
+        <div class="advanced-details-body">
 
       <!-- Candidate Workspaces — primary vs shadow side-by-side.
            Populated from /runs/:id `candidates` block when a run is
@@ -2158,36 +2285,6 @@ body .app::before{
         <div id="timeline-list" class="timeline-list"></div>
       </section>
 
-      <!-- Diff Viewer — transparency rule: sits directly below the Lumen
-           live log so the operator can watch +/- lines land in real time
-           as each Builder completes. Always visible; empty state when
-           no diff yet. Collapsible via the HIDE/SHOW toggle. -->
-      <section class="panel diff-panel" id="diff-panel">
-        <div class="diff-panel-head">
-          <div class="loqui-row" style="gap:10px">
-            <div class="label">Proposed Diff</div>
-            <span id="diff-panel-files" class="diff-panel-files">waiting for Builder</span>
-          </div>
-          <button id="diff-panel-toggle" class="diff-panel-toggle" type="button">HIDE</button>
-        </div>
-        <div id="diff-panel-body" class="diff-panel-body"></div>
-      </section>
-
-      <!-- UX: Approval Card -->
-      <section id="approval-card" class="approval-card panel">
-        <div class="approval-card-head">
-          <span class="approval-card-title">Approval Required</span>
-          <div id="approval-badges" class="approval-card-badges"></div>
-        </div>
-        <div id="approval-why" class="approval-card-why"></div>
-        <div id="approval-diff-preview" class="approval-diff-preview"></div>
-        <div class="approval-actions">
-          <button id="approval-approve" class="approval-btn approve" type="button">Approve</button>
-          <button id="approval-reject" class="approval-btn reject" type="button">Reject</button>
-          <button id="approval-view-full" class="approval-btn edit" type="button">View Full Diff</button>
-        </div>
-      </section>
-
       <!-- NEEDS_REPLAN — pre-dispatch guard tripped, scout evidence + suggested repair -->
       <section id="replan-card" class="approval-card panel">
         <div class="approval-card-head">
@@ -2266,6 +2363,9 @@ body .app::before{
         <div id="config-status" class="settings-note">Loading model config...</div>
       </section>
 
+        </div>
+      </details>
+
       <!-- Manage Models -->
       <section class="panel settings-panel">
         <div class="settings-row">
@@ -2292,6 +2392,7 @@ body .app::before{
       }
       let basePath = loc.pathname.replace(/\/[^\/]*\.html?$/i, '');
       if (basePath.endsWith('/')) basePath = basePath.slice(0, -1);
+      if (basePath === '/ui') basePath = '';
       const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
       return {
         api: overrideApi || `${loc.protocol}//${loc.host}${basePath}`,
@@ -2399,11 +2500,11 @@ body .app::before{
     };
     const DEFAULT_MODEL_CONFIG = {
       scout: { model: 'local', provider: 'local' },
-      builder: { model: 'qwen3.6-plus', provider: 'modelstudio' },
-      critic: { model: 'qwen3.5:9b', provider: 'ollama' },
+      builder: { model: 'xiaomi/mimo-v2.5', provider: 'openrouter' },
+      critic: { model: 'xiaomi/mimo-v2.5', provider: 'openrouter' },
       verifier: { model: 'local', provider: 'local' },
-      integrator: { model: 'glm-4', provider: 'modelstudio' },
-      escalation: { model: 'claude-opus-4-6', provider: 'anthropic' },
+      integrator: { model: 'local', provider: 'local' },
+      escalation: { model: 'glm-5.1', provider: 'zai' },
       coordinator: { model: 'xiaomi/mimo-v2-pro', provider: 'openrouter' }
     };
 
@@ -2502,12 +2603,12 @@ body .app::before{
         blastRadius: null,
         runSummary: null,
         // Transparency rule: every run that produces code changes must
-        // surface the actual diff. patchDiff is the raw unified-diff
-        // text from finalReceipt.patchArtifact.diff, patchFiles is the
-        // list of paths it touched. Both are empty until the final
-        // receipt arrives over WS (or is fetched via GET /tasks/:id).
+        // surface the actual diff. The browser's canonical diff source
+        // is /runs/:id changes[].diff; patchDiff is a derived cache only.
+        changes: [],
         patchDiff: '',
         patchFiles: [],
+        detailRefreshInFlight: false,
       };
     }
 
@@ -2615,6 +2716,12 @@ body .app::before{
           state.active = state.runs[0];
         }
         render();
+        if (state.currentRunId) {
+          const current = ensureRun(state.currentRunId);
+          if (runHasAwaitingApproval(current) || !canonicalRunChanges(current).length) {
+            refreshRunDetailForApproval(current);
+          }
+        }
       } catch (err) {
         state.historyError = `Failed to load run history: ${err && err.message ? err.message : String(err)}`;
         render();
@@ -2676,6 +2783,19 @@ body .app::before{
             failureExplanation: backendFailure || mined,
           };
         }
+        if (Array.isArray(data.changes)) {
+          run.changes = data.changes
+            .filter((change) => change && typeof change === 'object')
+            .map((change) => ({
+              path: String(change.path || ''),
+              operation: String(change.operation || change.type || 'modify'),
+              diff: typeof change.diff === 'string' ? change.diff : '',
+            }));
+          const changesWithDiff = run.changes.filter((change) => change.diff.trim());
+          run.patchDiff = changesWithDiff.map((change) => change.diff.replace(/\n*$/, '\n')).join('');
+          run.patchFiles = changesWithDiff.map((change) => change.path).filter(Boolean);
+        }
+        run.detailRefreshInFlight = false;
         // Stash preflight scout report IDs if present in the receipt
         if (data.receipt && Array.isArray(data.receipt.preflightScoutReportIds)) {
           run.preflightScoutReportIds = data.receipt.preflightScoutReportIds;
@@ -2708,9 +2828,17 @@ body .app::before{
         render();
       } catch (err) {
         const run = ensureRun(runId);
+        run.detailRefreshInFlight = false;
         run.loadError = `API error retrieving run details: ${err && err.message ? err.message : String(err)}`;
         render();
       }
+    }
+
+    function refreshRunDetailForApproval(run) {
+      const runId = run && run.id ? String(run.id) : '';
+      if (!runId || run.detailRefreshInFlight) return;
+      run.detailRefreshInFlight = true;
+      void loadRunDetail(runId);
     }
 
     function setSocketStatus(label, ok = false) {
@@ -2977,7 +3105,7 @@ body .app::before{
 
         state.loqui.messages.push({
           role: 'assistant',
-          text: `${route === 'resume' ? 'Resume queued' : 'Build queued'} — run ${runId}. Watch the worker grid and Lumen log for progress.`,
+          text: `${route === 'resume' ? 'Resume queued' : 'Build queued'} — run ${runId}. Current status and diff will stay visible here.`,
           label,
           at: new Date().toISOString(),
         });
@@ -3017,7 +3145,7 @@ body .app::before{
       }
 
       // Plan Assist / Mission Mode — Loqui suggests a task plan.
-      // Multi-step prompts become mission proposals with Start Mission,
+      // Multi-step prompts become mission proposals with Run Plan,
       // Edit Plan, and Ask Clarifying Question buttons.
       if (route === 'suggest_plan' || data.status === 'suggest_plan') {
         const suggestion = data.plan_suggestion || {};
@@ -3417,10 +3545,12 @@ body .app::before{
           const conf = formatConfidence(
             payload.confidence ?? (payload.result && payload.result.confidence)
           );
+          const file = String(payload.file || payload.path || '').trim();
+          const op = String((payload.atomic && payload.atomic.operation) || payload.operation || 'edit').trim();
           pushLumen(run, {
             color: 'orange',
             icon: '🔨',
-            text: `Builder complete — confidence ${conf}`,
+            text: `Builder step complete — ${op}${file ? ` in ${file}` : ''} — confidence ${conf}`,
           });
           return;
         }
@@ -3468,8 +3598,22 @@ body .app::before{
           pushLumen(run, {
             color: 'red',
             icon: '❌',
-            text: `${capitalize(wt)} failed — ${truncate(err, 80)}`,
+            text: plainStateText(`${capitalize(wt)} blocked — ${truncate(err, 80)}`),
           });
+          return;
+        }
+
+        case 'system_event': {
+          const eventName = String(payload.event || '');
+          if (eventName === 'approval_required') {
+            run.status = 'awaiting_approval';
+            refreshRunDetailForApproval(run);
+            pushLumen(run, {
+              color: 'orange',
+              icon: '!',
+              text: 'Review required',
+            });
+          }
           return;
         }
 
@@ -3561,7 +3705,7 @@ body .app::before{
                  : run.blastRadius.level === 'medium' ? 'orange'
                  : 'teal',
             icon: '⊙',
-            text: `Blast radius: ${run.blastRadius.level} — ${run.blastRadius.rationale}`,
+            text: `Change scope: ${run.blastRadius.level} — ${run.blastRadius.rationale}`,
           });
           return;
         }
@@ -3654,7 +3798,7 @@ body .app::before{
           pushLumen(run, {
             color: 'red',
             icon: '⛔',
-            text: `Execution failed — ${truncate(reason, 120)}`,
+            text: plainStateText(`${runHasNoOpSignal(run) || /no[-_ ]?op|empty[-_ ]diff|no effective/i.test(reason) ? 'The model did not make a real change.' : 'This run is blocked until you choose what to do next.'} ${truncate(reason, 120)}`),
             big: true,
             verdictClass: 'failed',
           });
@@ -3859,16 +4003,6 @@ body .app::before{
         if (commitSha) run.commitSha = commitSha;
         if (r.verdict) run.verdict = String(r.verdict);
 
-        // Transparency rule: the final receipt carries the patch artifact.
-        // Pull out the unified diff + changed-file list so the UI can
-        // render the actual +/- lines that landed (or would have landed
-        // on a workspace-only commit). Try both the normalized shape and
-        // the raw finalReceipt shape for compatibility with sparse events.
-        const pa = (r.finalReceipt && r.finalReceipt.patchArtifact) || r.patchArtifact || null;
-        if (pa && typeof pa.diff === 'string' && pa.diff.trim().length > 0) {
-          run.patchDiff = pa.diff;
-          run.patchFiles = Array.isArray(pa.changedFiles) ? pa.changedFiles : [];
-        }
       }
 
       if (type === 'worker_complete' && payload.payload && payload.payload.cost) {
@@ -3897,32 +4031,6 @@ body .app::before{
         }
       }
 
-      // Live diff: accumulate each Builder's per-file diff as the run
-      // progresses so the Diff panel lights up BEFORE the final receipt
-      // arrives. Uses the same panel render path as the end-of-run
-      // patchArtifact; just prepends the live hunks.
-      if (type === 'builder_complete' && typeof payload.diff === 'string' && payload.diff.trim()) {
-        const filePath = String(payload.file || payload.path || '');
-        // Avoid double-append if the same file comes through twice (rehearsal
-        // loop, partial retry). Keep the latest diff per file.
-        const existing = run.patchDiff || '';
-        const marker = filePath ? `diff --git a/${filePath} ` : null;
-        let next = existing;
-        if (marker && existing.includes(marker)) {
-          // Replace the existing hunk for this file in-place.
-          const startIdx = existing.indexOf(marker);
-          const afterStart = existing.indexOf('\ndiff --git ', startIdx + marker.length);
-          const nextFileIdx = afterStart === -1 ? existing.length : afterStart + 1;
-          next = existing.slice(0, startIdx) + payload.diff.replace(/\n*$/, '\n') + existing.slice(nextFileIdx);
-        } else {
-          next = existing ? existing.replace(/\n*$/, '\n') + payload.diff : payload.diff;
-        }
-        run.patchDiff = next;
-        if (filePath && !(run.patchFiles || []).includes(filePath)) {
-          run.patchFiles = [...(run.patchFiles || []), filePath];
-        }
-      }
-
       if (type === 'run_started' || type === 'start' || type === 'run') run.status = 'running';
       else if (type === 'run_cancelled') {
         run.status = payload.status || payload.verdict || 'cancelled';
@@ -3936,6 +4044,10 @@ body .app::before{
       } else if (type.includes('partial')) run.status = 'partial';
       else if (type.includes('error') || type.includes('failed')) run.status = 'failed';
       else if (payload.status) run.status = payload.status;
+
+      if (runHasAwaitingApproval(run) && !hasRenderableRealDiff(canonicalRunDiff(run))) {
+        refreshRunDetailForApproval(run);
+      }
 
       if (type === 'worker_assigned') {
         const workerType = String(
@@ -4370,7 +4482,7 @@ body .app::before{
         strip.className = `status-strip ${effectiveStrip}`;
         const ssWord = document.getElementById('ss-word');
         if (ssWord) {
-          const wordMap = { plan_ready: 'PLAN READY', needs_replan: 'NEEDS REPLAN' };
+          const wordMap = { plan_ready: 'READY', needs_replan: 'NEEDS CLARITY' };
           ssWord.textContent = wordMap[effectiveStrip] || effectiveStrip.toUpperCase();
         }
         const ssFill = document.getElementById('ss-fill');
@@ -4456,6 +4568,217 @@ body .app::before{
       return runStatus;
     }
 
+    function plainStateText(text) {
+      const raw = String(text || '').trim();
+      if (!raw) return '';
+      return raw
+        .replace(/\bNEEDS_REPLAN\b/g, 'I need a clearer target file.')
+        .replace(/\bNO-OP EXECUTION DETECTED\b/gi, 'The model did not make a real change.')
+        .replace(/\bNO_OP\b/g, 'The model did not make a real change.')
+        .replace(/\bblast radius\b/gi, 'change breadth')
+        .replace(/\bsubtask terminal failure\b/gi, 'This run is blocked until you choose what to do next.')
+        .replace(/\bapproval required\b/gi, 'Review required');
+    }
+
+    function runHasNoOpSignal(run) {
+      const texts = [
+        run && run.status,
+        run && run.verdict,
+        run && run.executionReason,
+        run && run.runSummary && run.runSummary.classification,
+        run && run.runSummary && run.runSummary.headline,
+      ].filter(Boolean).join(' ');
+      return /\bno[-_ ]?op\b|empty[-_ ]diff|no effective source change/i.test(texts);
+    }
+
+    function runHasAwaitingApproval(run) {
+      const statusText = String((run && run.status) || '').toLowerCase();
+      return statusText.includes('await') || statusText.includes('approval');
+    }
+
+    function countRealDiffLines(diff) {
+      return String(diff || '').split(/\r?\n/).filter((line) => {
+        if (!line) return false;
+        if (line.startsWith('+++') || line.startsWith('---')) return false;
+        return line.startsWith('+') || line.startsWith('-');
+      }).length;
+    }
+
+    function hasRenderableRealDiff(diff) {
+      const text = String(diff || '');
+      if (!text.trim()) return false;
+      const hasHeaders = /^---\s+/m.test(text) && /^\+\+\+\s+/m.test(text);
+      return hasHeaders && countRealDiffLines(text) > 0;
+    }
+
+    function canonicalRunChanges(run) {
+      return Array.isArray(run && run.changes) ? run.changes : [];
+    }
+
+    function canonicalRunDiff(run) {
+      return canonicalRunChanges(run)
+        .map((change) => typeof change.diff === 'string' ? change.diff.replace(/\n*$/, '\n') : '')
+        .filter((diff) => diff.trim())
+        .join('');
+    }
+
+    function canonicalRunFiles(run) {
+      return canonicalRunChanges(run)
+        .map((change) => String(change.path || ''))
+        .filter(Boolean);
+    }
+
+    function currentDiffIsVisible() {
+      const body = document.getElementById('diff-panel-body');
+      if (!body) return false;
+      if (body.querySelector('.diff-empty')) return false;
+      return countRealDiffLines(body.textContent || '') > 0;
+    }
+
+    function assertDiffVisibleForApproval(run) {
+      const diff = canonicalRunDiff(run);
+      const approval = document.getElementById('approval-card');
+      const approvalVisible = approval && approval.classList.contains('show');
+      if (!approvalVisible || !hasRenderableRealDiff(diff)) return;
+      if (!currentDiffIsVisible()) {
+        const message = 'Aedis UI invariant failed: approval is visible but canonical diff is not visible.';
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.search.includes('dev=1')) {
+          throw new Error(message);
+        }
+        console.error(message);
+      }
+    }
+
+    function getDominantUiState() {
+      const run = state.active || createEmptyRun();
+      const status = normalizeRunStatus(run.status);
+      const plan = state.taskPlan && state.taskPlan.plan;
+      const planStatus = plan ? String(plan.status || '') : '';
+      const unsafe = assessUnsafeStateUI(run);
+      const awaitingApproval = runHasAwaitingApproval(run);
+      const hasDiff = hasRenderableRealDiff(canonicalRunDiff(run));
+      const noOp = runHasNoOpSignal(run);
+      const failed = status === 'failed' || /fail|error/i.test(String(run.verdict || ''));
+
+      if (unsafe && unsafe.unsafe) {
+        return {
+          kind: 'contaminated',
+          title: 'Contaminated workspace',
+          detail: plainStateText(unsafe.headline),
+          action: 'Inspect Workspace',
+        };
+      }
+      if (noOp) {
+        return {
+          kind: 'blocked',
+          title: 'The model did not make a real change.',
+          detail: 'This run is blocked until you choose what to do next.',
+          action: 'Try Again',
+        };
+      }
+      if (failed && awaitingApproval) {
+        return {
+          kind: 'blocked',
+          title: 'This run is blocked.',
+          detail: 'The attempted change failed, so there is nothing safe to approve.',
+          action: 'New Task',
+        };
+      }
+      if (awaitingApproval && !hasDiff) {
+        return {
+          kind: 'blocked',
+          title: 'The model did not make a real change.',
+          detail: 'Review is blocked because there is no visible diff to approve.',
+          action: 'Try Again',
+        };
+      }
+      if (planStatus === 'blocked' || planStatus === 'paused' || status === 'blocked') {
+        return {
+          kind: 'blocked',
+          title: 'This run is blocked until you choose what to do next.',
+          detail: plainStateText(run.executionReason || run.verdict || 'Review the next action before continuing.'),
+          action: 'Review',
+        };
+      }
+      if (awaitingApproval && hasDiff) {
+        return {
+          kind: 'approval',
+          title: 'Review required',
+          detail: 'A diff is ready. Approve it, reject it, or inspect the patch.',
+          action: 'View diff',
+        };
+      }
+      if (planStatus === 'needs_replan' || (state.replan && state.replan.taskPlanId)) {
+        return {
+          kind: 'clarify',
+          title: 'I need a clearer target file.',
+          detail: plainStateText((state.replan && state.replan.message) || 'Tell Aedis which file to change so it can continue.'),
+          action: 'Answer Question',
+        };
+      }
+      if (status === 'running' || status === 'queued' || state.submitting) {
+        return {
+          kind: 'running',
+          title: 'Aedis is working.',
+          detail: plainStateText((run.lumen && run.lumen.length ? run.lumen[run.lumen.length - 1].text : '') || 'Running the change pipeline.'),
+          action: 'View diff',
+        };
+      }
+      if (status === 'complete') {
+        return {
+          kind: 'complete',
+          title: 'Run complete.',
+          detail: plainStateText((run.runSummary && run.runSummary.headline) || 'The latest run has finished.'),
+          action: 'New Task',
+        };
+      }
+      return {
+        kind: 'idle',
+        title: 'Tell Aedis what to change.',
+        detail: 'Safe tasks start automatically. If review is required, the review bar stays at the top.',
+        action: 'Focus Prompt',
+      };
+    }
+
+    function renderPrimaryStatusCard() {
+      const card = document.getElementById('primary-status-card');
+      if (!card) return;
+      const dominant = getDominantUiState();
+      const kicker = document.getElementById('primary-status-kicker');
+      const title = document.getElementById('primary-status-title');
+      const detail = document.getElementById('primary-status-detail');
+      const action = document.getElementById('primary-action');
+      card.dataset.state = dominant.kind;
+      if (kicker) kicker.textContent = dominant.kind === 'idle' ? 'Ready' : dominant.kind.replace(/_/g, ' ');
+      if (title) title.textContent = dominant.title;
+      if (detail) detail.textContent = dominant.detail;
+      if (action) {
+        action.style.display = dominant.kind === 'idle' ? 'none' : 'inline-flex';
+        action.textContent = dominant.action;
+        action.onclick = () => {
+          if (dominant.kind === 'approval' || dominant.action === 'View diff') {
+            const diffPanel = document.getElementById('diff-panel');
+            if (diffPanel) diffPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+          }
+          if (dominant.kind === 'contaminated') {
+            const card = document.getElementById('unsafe-state-card');
+            if (card) {
+              const details = document.getElementById('advanced-details');
+              if (details) details.open = true;
+              card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            return;
+          }
+          const input = document.getElementById('loqui-input');
+          if (input) {
+            input.focus();
+            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        };
+      }
+    }
+
     function renderWorkers() {
       const html = ROLE_ORDER.map((role) => {
         const worker = state.active.workers[role];
@@ -4509,7 +4832,7 @@ body .app::before{
       // yet") so the receipts feed cannot imply the plan ran.
       const planStatus = state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.status;
       if (planStatus === 'pending') {
-        container.innerHTML = '<div class="empty">No receipts — plan ready, no source execution yet. Click Start Mission to dispatch the first subtask.</div>';
+        container.innerHTML = '<div class="empty">No receipts yet. Aedis will start safe work automatically and pause only for review or clarification.</div>';
         return;
       }
       if (!receipts.length) {
@@ -4563,7 +4886,8 @@ body .app::before{
       const toggle = document.getElementById('diff-panel-toggle');
       if (!panel || !body) return;
       const run = state.active;
-      const diff = String(run.patchDiff || '');
+      const changes = canonicalRunChanges(run);
+      const diff = canonicalRunDiff(run);
 
       // Always show the panel. Zen's transparency rule: the panel sits
       // below Lumen so the operator can watch lines land as each Builder
@@ -4580,19 +4904,27 @@ body .app::before{
       }
       toggle.textContent = body.classList.contains('collapsed') ? 'SHOW' : 'HIDE';
 
-      if (!diff.trim()) {
+      if (!changes.length) {
         filesEl.textContent = 'waiting for Builder';
+        body.dataset.diffVisible = 'false';
         body.innerHTML = '<div class="diff-empty">No changes yet — the Builder has not returned a diff for this run.</div>';
         return;
       }
+      if (!hasRenderableRealDiff(diff)) {
+        filesEl.textContent = 'diff blocked';
+        body.dataset.diffVisible = 'false';
+        body.innerHTML = '<div class="diff-empty">No approvable diff is available. Aedis blocked review because the patch has no real line changes.</div>';
+        return;
+      }
 
-      const files = Array.isArray(run.patchFiles) ? run.patchFiles : [];
-      const lineCount = diff.split('\n').length;
+      const files = canonicalRunFiles(run);
+      const lineCount = countRealDiffLines(diff);
       filesEl.textContent = files.length > 0
         ? files.join(', ')
         : `${lineCount} line${lineCount === 1 ? '' : 's'}`;
 
       body.innerHTML = renderUnifiedDiff(diff);
+      body.dataset.diffVisible = 'true';
     }
 
     function renderUnifiedDiff(diff) {
@@ -5217,8 +5549,10 @@ body .app::before{
         state.taskPlanFormSubtasks = [{ title: '', prompt: '' }];
         renderTaskPlanForm();
         document.getElementById('taskplan-objective-input').value = '';
-        // Load + show the new plan.
+        // Load + start the new plan. The only pauses should be
+        // clarification, safety, or review.
         await loadTaskPlan(id);
+        await startTaskPlanById(id);
       } catch (err) {
         setTaskPlanFormError(err && err.message ? err.message : String(err));
       } finally {
@@ -5247,7 +5581,11 @@ body .app::before{
     async function startTaskPlan() {
       const data = state.taskPlan;
       if (!data || !data.plan) return;
-      const id = data.plan.taskPlanId;
+      await startTaskPlanById(data.plan.taskPlanId);
+    }
+
+    async function startTaskPlanById(id) {
+      if (!id) return;
       try {
         const res = await fetch(`${API_BASE}/task-plans/${encodeURIComponent(id)}/start`, { method: 'POST' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -5371,6 +5709,13 @@ body .app::before{
         if (current.lastVerdict) meta.push(`<span>verdict <strong>${esc(current.lastVerdict)}</strong></span>`);
         if (current.lastRunId) meta.push(`<span>run <code>${esc(String(current.lastRunId).slice(0, 8))}</code></span>`);
         if (current.blockerReason) {
+          if (current.failureReason === 'builder_no_effective_change') {
+            meta.push(`<span style="color:var(--orange);font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;border-radius:999px;border:1px solid currentColor">builder no-op</span>`);
+            meta.push(`<span style="color:var(--orange)">Builder made no effective source change. Choose a new target, rewrite the operation, or retry with a different model.</span>`);
+            if (Array.isArray(current.nextAllowedActions) && current.nextAllowedActions.length) {
+              meta.push(`<span style="color:var(--muted)">actions ${current.nextAllowedActions.map(esc).join(' · ')}</span>`);
+            }
+          } else {
           // Parse diagnosis category from blockerReason (format: "category: rootCause")
           const colonIdx = current.blockerReason.indexOf(':');
           const diagCategory = colonIdx > 0 ? current.blockerReason.slice(0, colonIdx).trim() : '';
@@ -5385,6 +5730,7 @@ body .app::before{
             meta.push(`<span style="color:${catColor};font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;border-radius:999px;border:1px solid currentColor">${esc(diagCategory)}</span>`);
           }
           meta.push(`<span style="color:var(--red)">⚠ ${esc(diagBody)}</span>`);
+          }
         }
         if (current.nextRecommendedAction) meta.push(`<span style="color:var(--muted)">→ ${esc(current.nextRecommendedAction)}</span>`);
         document.getElementById('taskplan-current-meta').innerHTML = meta.join('');
@@ -6083,10 +6429,8 @@ body .app::before{
       // REPLAN / RUNNING here, otherwise the contradictory-state UX
       // bug returns. Mirrors the assertion in
       // core/unsafe-state.ts:assessUnsafeState.
-      const unsafeAssessment = assessUnsafeStateUI(run);
-      const effectiveStatus = unsafeAssessment && unsafeAssessment.unsafe
-        ? 'contaminated'
-        : effectiveBannerStatus(status);
+      const dominant = getDominantUiState();
+      const effectiveStatus = dominant.kind === 'approval' ? 'blocked' : dominant.kind;
       bar.className = `global-status-bar status-${effectiveStatus}`;
 
       const dot = document.getElementById('gsb-dot');
@@ -6095,9 +6439,11 @@ body .app::before{
       const word = document.getElementById('gsb-word');
       if (word) {
         const wordMap = {
-          plan_ready: 'PLAN READY',
-          needs_replan: 'NEEDS REPLAN',
-          contaminated: 'CONTAMINATED — INSPECT',
+          plan_ready: 'READY',
+          clarify: 'NEEDS CLARITY',
+          contaminated: 'INSPECT WORKSPACE',
+          blocked: 'BLOCKED',
+          approval: 'REVIEW REQUIRED',
         };
         word.textContent = wordMap[effectiveStatus] || effectiveStatus.toUpperCase();
       }
@@ -6110,19 +6456,19 @@ body .app::before{
         const done = (counts.completed || 0) + (counts.skipped || 0);
         const current = plan.subtasks.find(s => s.status === 'running' || s.status === 'verifying');
         if (effectiveStatus === 'plan_ready') {
-          stepEl.textContent = `Plan ready — ${done}/${plan.subtasks.length}, waiting for start`;
-        } else if (effectiveStatus === 'needs_replan') {
+          stepEl.textContent = `Plan ready — ${done}/${plan.subtasks.length}`;
+        } else if (effectiveStatus === 'clarify') {
           const nc = plan.subtasks.find((s) => s.status === 'needs_clarification');
           stepEl.textContent = nc
-            ? `Mission needs replan — ${nc.id} needs a target file`
-            : `Mission needs replan — review subtasks`;
+            ? `${nc.id} needs a clearer target file`
+            : `I need a clearer target file.`;
         } else if (current) {
           stepEl.textContent = `Step ${done + 1}/${plan.subtasks.length}: ${truncate(current.title || current.id, 30)}`;
         } else {
           stepEl.textContent = `${done}/${plan.subtasks.length} complete`;
         }
       } else if (stepEl) {
-        stepEl.textContent = run.prompt ? truncate(run.prompt, 40) : '';
+        stepEl.textContent = dominant.title;
       }
 
       // Scout status chip
@@ -6180,13 +6526,13 @@ body .app::before{
       // CTA button
       const cta = document.getElementById('gsb-cta');
       if (cta) {
-        if (effectiveStatus === 'needs_replan' && hasPlan) {
+        if (effectiveStatus === 'clarify' && hasPlan) {
           // Pre-dispatch guard tripped — surface a Repair Plan CTA
           // that scrolls to the replan card. Distinct from the warn
           // styling so the operator sees this is recoverable, not
           // a red FAILED dead-end.
           cta.style.display = 'inline-flex';
-          cta.textContent = 'Repair Plan';
+          cta.textContent = 'Answer Question';
           cta.className = 'gsb-cta';
           cta.disabled = false;
           cta.onclick = () => {
@@ -6201,7 +6547,7 @@ body .app::before{
           // so the next action is unambiguous — clicking dispatches the
           // first subtask via /task-plans/:id/start.
           cta.style.display = 'inline-flex';
-          cta.textContent = 'Start Mission';
+          cta.textContent = 'Start';
           cta.className = 'gsb-cta';
           cta.disabled = false;
           cta.onclick = async () => {
@@ -6251,6 +6597,15 @@ body .app::before{
               card.classList.add('show');
               card.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
+          };
+        } else if (dominant.kind === 'approval') {
+          cta.style.display = 'inline-flex';
+          cta.textContent = 'Review';
+          cta.className = 'gsb-cta warn';
+          cta.disabled = false;
+          cta.onclick = () => {
+            const card = document.getElementById('approval-card');
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
           };
         } else if (effectiveStatus === 'blocked' || effectiveStatus === 'paused') {
           cta.style.display = 'inline-flex';
@@ -6345,22 +6700,13 @@ body .app::before{
       const card = document.getElementById('approval-card');
       if (!card) return;
       const run = state.active;
-      const status = normalizeRunStatus(run.status);
-      // Safety gate: if the run is in any contaminated/unsafe state,
-      // the approval card MUST stay hidden — the contaminated-workspace
-      // card takes its place. This mirrors the API 409 behavior and
-      // the CLI exit-2 behavior.
-      const unsafe = assessUnsafeStateUI(run);
-      if (unsafe && unsafe.unsafe) {
+      const dominant = getDominantUiState();
+      const diff = canonicalRunDiff(run);
+      if (dominant.kind !== 'approval') {
         card.classList.remove('show');
         return;
       }
-      const isAwaiting = String(run.status || '').toLowerCase().includes('await') ||
-                         String(run.status || '').toLowerCase().includes('approval');
-      const planPaused = state.taskPlan && state.taskPlan.plan &&
-                         (state.taskPlan.plan.status === 'paused' || state.taskPlan.plan.status === 'blocked');
-
-      if (!isAwaiting && !planPaused) {
+      if (!hasRenderableRealDiff(diff) || !currentDiffIsVisible()) {
         card.classList.remove('show');
         return;
       }
@@ -6371,11 +6717,11 @@ body .app::before{
       if (whyEl) {
         const summary = run.runSummary;
         if (summary && summary.headline) {
-          whyEl.textContent = summary.headline;
+          whyEl.textContent = plainStateText(summary.headline);
         } else if (run.prompt) {
           whyEl.textContent = `Requested: ${truncate(run.prompt, 120)}`;
         } else {
-          whyEl.textContent = 'A change is awaiting your approval before promotion.';
+          whyEl.textContent = 'A change is ready for review before promotion.';
         }
       }
 
@@ -6384,18 +6730,13 @@ body .app::before{
       if (badges) {
         const parts = [];
         const summary = run.runSummary;
-        if (run.executionVerified === true) {
-          parts.push('<span class="approval-badge pass">Execution Verified</span>');
-        } else if (run.executionVerified === false) {
-          parts.push('<span class="approval-badge fail">Execution Failed</span>');
-        }
+        if (run.executionVerified === true) parts.push('<span class="approval-badge pass">Verified</span>');
         if (summary) {
           if (summary.verification === 'passed') parts.push('<span class="approval-badge pass">Tests Pass</span>');
-          else if (summary.verification === 'failed') parts.push('<span class="approval-badge fail">Tests Fail</span>');
           const bl = summary.blastRadius || run.blastRadius;
           if (bl) {
             const cls = bl.level === 'high' ? 'fail' : bl.level === 'medium' ? 'warn' : 'pass';
-            parts.push(`<span class="approval-badge ${cls}">Blast: ${esc(bl.level)}</span>`);
+            parts.push(`<span class="approval-badge ${cls}">Scope: ${esc(bl.level)}</span>`);
           }
           if (summary.confidence && summary.confidence.overall) {
             const pct = Math.round(summary.confidence.overall * 100);
@@ -6404,23 +6745,19 @@ body .app::before{
           }
         }
         if (run.preflightScoutReportIds && run.preflightScoutReportIds.length > 0) {
-          parts.push(`<span class="approval-badge pass">Scout Evidence</span>`);
+          parts.push(`<span class="approval-badge pass">Discovery used</span>`);
         }
-        if (parts.length === 0) parts.push('<span class="approval-badge neutral">Pending verification</span>');
+        if (parts.length === 0) parts.push('<span class="approval-badge neutral">Ready to review</span>');
         badges.innerHTML = parts.join('');
       }
 
       // Diff preview
       const diffPreview = document.getElementById('approval-diff-preview');
       if (diffPreview) {
-        const diff = run.patchDiff || '';
-        if (diff.trim()) {
-          diffPreview.innerHTML = renderUnifiedDiff(diff);
-          diffPreview.style.display = 'block';
-        } else {
-          diffPreview.innerHTML = '<div class="diff-empty">No diff available yet</div>';
-        }
+        diffPreview.innerHTML = renderUnifiedDiff(diff);
+        diffPreview.style.display = 'block';
       }
+      assertDiffVisibleForApproval(run);
     }
 
     /**
@@ -6438,6 +6775,11 @@ body .app::before{
     function renderReplanCard() {
       const card = document.getElementById('replan-card');
       if (!card) return;
+      const dominant = getDominantUiState();
+      if (dominant.kind !== 'clarify') {
+        card.classList.remove('show');
+        return;
+      }
       const plan = state.taskPlan && state.taskPlan.plan;
       const planNeedsReplan = plan && plan.status === 'needs_replan';
       const haveLiveEvent = state.replan && state.replan.taskPlanId;
@@ -6472,8 +6814,8 @@ body .app::before{
 
       const why = document.getElementById('replan-why');
       if (why) {
-        why.textContent = payload.message ||
-          'A subtask was paused before Builder dispatch — no actionable target file was identified.';
+        why.textContent = plainStateText(payload.message) ||
+          'I need a clearer target file before I can continue.';
       }
 
       const scout = document.getElementById('replan-scout');
@@ -6594,14 +6936,12 @@ body .app::before{
         approveBtn.disabled = true;
         approveBtn.textContent = 'Approving...';
         try {
-          // Try plan approve first, then run approve
           const planId = state.taskPlan && state.taskPlan.plan && state.taskPlan.plan.taskPlanId;
+          const approveRes = await fetch(`${API_BASE}/approvals/${encodeURIComponent(run.id)}/approve`, { method: 'POST' });
+          if (!approveRes.ok) throw new Error(`approval HTTP ${approveRes.status}`);
           if (planId) {
             await fetch(`${API_BASE}/task-plans/${encodeURIComponent(planId)}/continue`, { method: 'POST' });
             await loadTaskPlan(planId);
-          } else {
-            const taskId = run.taskId || run.id;
-            await fetch(`${API_BASE}/tasks/${encodeURIComponent(taskId)}/approve`, { method: 'POST' });
           }
           render();
         } catch (err) {
@@ -6883,8 +7223,11 @@ body .app::before{
         }
         case 'scout_complete':
           return mkEntry('success', 'discovery', 'normal', 'Scout complete — confidence ' + fmtConf(payload.confidence), '');
-        case 'builder_complete':
-          return mkEntry('success', 'building', 'high', 'Builder complete — confidence ' + fmtConf(payload.confidence), '');
+        case 'builder_complete': {
+          const file = String(payload.file || payload.path || '').trim();
+          const op = String((payload.atomic && payload.atomic.operation) || payload.operation || 'edit').trim();
+          return mkEntry('success', 'building', 'high', `Builder step: ${op}${file ? ` — ${file}` : ''} — confidence ` + fmtConf(payload.confidence), '');
+        }
         case 'critic_review':
           return mkEntry('info', 'reviewing', 'normal', 'Critic review — confidence ' + fmtConf(payload.confidence), '');
         case 'verifier_check':
@@ -7187,15 +7530,16 @@ body .app::before{
         state.loqui.messages = state.loqui.messages.filter(m => !m.planSuggestion);
         state.loqui.messages.push({
           role: 'assistant',
-          text: `Task plan created (${planId}). ${s.subtasks.length} subtasks ready. Click Start in the Task Plan panel to begin supervised execution.`,
+          text: `Task plan created (${planId}). Aedis is starting the first safe step now and will pause only for clarification, safety, or review.`,
           label: 'Planning',
           at: new Date().toISOString(),
         });
 
-        // Load the plan in the task plan panel
+        // Load and start the plan automatically.
         if (typeof loadTaskPlan === 'function') {
           await loadTaskPlan(planId);
         }
+        await startTaskPlanById(planId);
         render();
 
         // Scroll to the plan panel
@@ -7311,7 +7655,7 @@ body .app::before{
           ${scoutHtml}
           <div class="mission-approval-note">${esc(proposal.approvalReminder || '')}</div>
           <div class="mission-actions">
-            <button class="mission-btn start" onclick="missionStart()">Start Mission</button>
+            <button class="mission-btn start" onclick="missionStart()">Run Plan</button>
             <button class="mission-btn edit" onclick="missionEdit()">Edit Plan</button>
             <button class="mission-btn ask" onclick="missionClarify()">Ask Clarifying Question</button>
           </div>
@@ -7355,14 +7699,12 @@ body .app::before{
         state.loqui.messages = state.loqui.messages.filter(m => !m.missionProposal);
         state.loqui.messages.push({
           role: 'assistant',
-          text: `Plan ready (${planId}) — ${p.subtasks.length} subtask(s) waiting for start. ` +
-                `No Builder/Critic/Verifier/Integrator has run yet. ` +
-                `Click "Start Mission" in the top status bar (or Start in the Task Plan panel) ` +
-                `to dispatch the first subtask. Approval is still required before any source changes.`,
+          text: `Plan ready (${planId}). Aedis is starting the first safe step now. It will pause only for clarification, safety, or review.`,
           label: 'Plan Ready',
           at: new Date().toISOString(),
         });
         if (typeof loadTaskPlan === 'function') await loadTaskPlan(planId);
+        await startTaskPlanById(planId);
         render();
         const panel = document.getElementById('taskplan-panel');
         if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -7580,6 +7922,7 @@ body .app::before{
     render = function() {
       _origRender();
       renderGlobalStatusBar();
+      renderPrimaryStatusCard();
       renderUnsafeStateCard();
       renderApprovalCard();
       renderReplanCard();
@@ -7600,8 +7943,9 @@ body .app::before{
     void loadPersistedRuns();
     void loadMetrics();
     void loadLaneProfile();
-    // Show guided start after initial data loads
-    window.setTimeout(showGuidedStart, 300);
+    // Guided start is intentionally disabled in the release-candidate
+    // default UI. The first viewport is the prompt, status, diff, and
+    // one primary action.
     // Fetch provider registry first so dropdowns reflect server truth,
     // then pull the saved worker-model assignments.
     (async () => {

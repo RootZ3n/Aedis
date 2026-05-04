@@ -394,6 +394,7 @@ interface Rule {
 // question.
 const BUILD_RULES: readonly Rule[] = [
   { name: "imperative-build", pattern: /\b(build|implement|create|scaffold|generate|write|add|make)\b/, weight: 2 },
+  { name: "explicit-edit", pattern: /\b(change|update|modify|edit|set)\b/, weight: 2 },
   { name: "refactor-verbs", pattern: /\b(refactor|rename|rewrite|restructure)\b/, weight: 2 },
   { name: "fix-bug", pattern: /\b(fix|patch|repair|resolve)\b/, weight: 2 },
   { name: "delete-verb", pattern: /\b(delete|remove|drop)\b/, weight: 2 },

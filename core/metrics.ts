@@ -92,7 +92,8 @@ export interface RunDetail {
   readonly submittedAt: string;
   readonly completedAt: string | null;
   readonly receipt: RunReceipt | null;
-  readonly filesChanged: readonly { path: string; operation: string }[];
+  readonly filesChanged: readonly { path: string; operation: string; diff?: string }[];
+  readonly changes: readonly { path: string; operation: string; diff: string }[];
   readonly summary: {
     readonly classification: string | null;
     readonly headline: string;
@@ -262,6 +263,7 @@ export function projectRunDetail(run: TrackedRunLike | null | undefined): RunDet
               e.kind === "file_created" ? "create" : e.kind === "file_deleted" ? "delete" : "modify",
           }))
       : [];
+  const changes = extractApiChanges(receipt);
 
   const errors: { source: string; message: string; suggestedFix?: string }[] = [];
   if (run.error) {
@@ -284,6 +286,7 @@ export function projectRunDetail(run: TrackedRunLike | null | undefined): RunDet
     completedAt: run.completedAt,
     receipt: receipt ?? null,
     filesChanged,
+    changes,
     summary: {
       classification: classificationOf(receipt),
       headline: humanSummary?.headline ?? "",
@@ -314,6 +317,21 @@ export function projectRunDetail(run: TrackedRunLike | null | undefined): RunDet
         : null,
     totalCostUsd: Number(receipt?.totalCost?.estimatedCostUsd ?? 0),
   };
+}
+
+function extractApiChanges(receipt: RunReceipt | null): readonly { path: string; operation: string; diff: string }[] {
+  const raw = (receipt as unknown as { changes?: unknown; patchArtifact?: unknown } | null)?.changes;
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((change): change is { path?: unknown; operation?: unknown; diff?: unknown } => Boolean(change))
+      .map((change) => ({
+        path: String(change.path ?? ""),
+        operation: String(change.operation ?? "modify"),
+        diff: typeof change.diff === "string" ? change.diff : "",
+      }))
+      .filter((change) => change.path && change.diff.trim());
+  }
+  return [];
 }
 
 // ─── Internals ───────────────────────────────────────────────────────

@@ -115,13 +115,18 @@ export function prepareTargetsForPrompt(input: {
   const prompt = input.prompt;
   const promptWords = extractPromptWords(prompt);
   const files = rawTargets.length === 0 ||
-    rawTargets.some((target) => isBasenameTarget(target) || looksLikeStemTarget(target))
+    rawTargets.some((target) =>
+      isBasenameTarget(target) ||
+      looksLikeStemTarget(target) ||
+      looksLikeExplicitFilePath(normalizeTarget(target, projectRoot))
+    )
     ? collectDiscoveryFiles(projectRoot)
     : [];
   const selected: TargetDiscoveryCandidate[] = [];
   const rejected: TargetDiscoveryRejection[] = [];
   const targets: string[] = [];
   const basenameTargets: string[] = [];
+  let hasUnresolvedExplicitPathTarget = false;
 
   for (const target of rawTargets) {
     const normalized = normalizeTarget(target, projectRoot);
@@ -131,6 +136,22 @@ export function prepareTargetsForPrompt(input: {
     const existingType = inspectExistingPath(projectRoot, normalized);
     if (existingType) {
       targets.push(normalized);
+      continue;
+    }
+
+    const missingPathCorrection = resolveMissingPathTarget({
+      target: normalized,
+      promptWords,
+      analysis: input.analysis,
+      files,
+    });
+    if (missingPathCorrection) {
+      targets.push(missingPathCorrection.path);
+      selected.push(missingPathCorrection);
+      rejected.push({
+        path: normalized,
+        reason: `requested file was not found; auto-corrected to ${missingPathCorrection.path}`,
+      });
       continue;
     }
 
@@ -165,6 +186,9 @@ export function prepareTargetsForPrompt(input: {
       continue;
     }
 
+    if (looksLikeExplicitFilePath(normalized)) {
+      hasUnresolvedExplicitPathTarget = true;
+    }
     rejected.push({
       path: normalized,
       reason: "target path does not exist in the repo and could not be resolved to a real file",
@@ -215,6 +239,7 @@ export function prepareTargetsForPrompt(input: {
 
   if (
     targets.length === 0 &&
+    !hasUnresolvedExplicitPathTarget &&
     !hasAmbiguousBasenameRejection(rejected) &&
     isBoundedBackendPrompt(prompt, input.analysis)
   ) {
@@ -244,6 +269,8 @@ export function prepareTargetsForPrompt(input: {
   const clarification =
     dedupedTargets.length === 0 && hasAmbiguousBasenameRejection(rejected)
       ? "Multiple files matched the requested basename and the prompt did not disambiguate which one to change."
+      : dedupedTargets.length === 0 && hasUnresolvedExplicitPathTarget
+      ? "The requested file was not found in this repo. Name the correct target file before Aedis edits anything."
       : null;
 
   return {
@@ -254,6 +281,65 @@ export function prepareTargetsForPrompt(input: {
     rejected: dedupeRejections(rejected),
     clarification,
   };
+}
+
+function resolveMissingPathTarget(input: {
+  target: string;
+  promptWords: readonly string[];
+  analysis: RequestAnalysis;
+  files: readonly DiscoveryFile[];
+}): TargetDiscoveryCandidate | null {
+  if (!looksLikeExplicitFilePath(input.target)) {
+    return null;
+  }
+  const requestedBase = basename(input.target).toLowerCase();
+  const requestedSegments = input.target.toLowerCase().split("/").filter(Boolean);
+  const matches = input.files
+    .filter((file) => file.basename === requestedBase)
+    .map((file) => {
+      const candidate = scoreCandidate(file, input.promptWords, input.analysis, "basename");
+      const pathSegments = file.path.toLowerCase().split("/").filter(Boolean);
+      let score = candidate.score + 40;
+      const reasons = [...candidate.reasons, `did-you-mean match for missing ${input.target}`];
+      if (file.path.toLowerCase().endsWith(input.target.toLowerCase())) {
+        score += 120;
+        reasons.push("repo path suffix matches requested path");
+      } else {
+        const sharedTail = countSharedTailSegments(requestedSegments, pathSegments);
+        if (sharedTail > 1) {
+          score += sharedTail * 25;
+          reasons.push(`${sharedTail} trailing path segments match request`);
+        }
+      }
+      return {
+        ...candidate,
+        score,
+        reasons: uniqueStrings(reasons).slice(0, 6),
+      };
+    })
+    .sort(compareCandidates);
+
+  if (matches.length === 0) {
+    return null;
+  }
+  const top = matches[0]!;
+  const runnerUp = matches[1];
+  if (!runnerUp) {
+    return top;
+  }
+  if (top.score >= 140 && top.score - runnerUp.score >= 25) {
+    return top;
+  }
+  return null;
+}
+
+function countSharedTailSegments(a: readonly string[], b: readonly string[]): number {
+  let count = 0;
+  while (count < a.length && count < b.length) {
+    if (a[a.length - 1 - count] !== b[b.length - 1 - count]) break;
+    count += 1;
+  }
+  return count;
 }
 
 function resolveBasenameTarget(input: {
@@ -535,7 +621,14 @@ function collectDiscoveryFiles(projectRoot: string): DiscoveryFile[] {
       });
     }
   };
-  walk(projectRoot);
+  try {
+    walk(projectRoot);
+  } catch (err) {
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return out;
+    }
+    throw err;
+  }
   return out;
 }
 
@@ -565,6 +658,10 @@ function isBasenameTarget(target: string): boolean {
   if (!target) return false;
   if (target.includes("/")) return false;
   return /\.[a-z0-9]+$/i.test(target);
+}
+
+function looksLikeExplicitFilePath(target: string): boolean {
+  return target.includes("/") && /\.[a-z0-9]+$/i.test(target);
 }
 
 function looksLikeStemTarget(target: string): boolean {

@@ -35,6 +35,7 @@ test("run contracts produce stable detail responses", () => {
     completedAt: "2026-04-11T10:01:00.000Z",
     receipt: null,
     filesChanged: [],
+    changes: [],
     summary: {
       classification: "VERIFIED_SUCCESS",
       headline: "done",

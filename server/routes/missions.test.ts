@@ -88,15 +88,15 @@ test("POST /start returns plan_ready, not complete; plan.status === 'pending'", 
 
     // next_action makes the next step explicit.
     assert.ok(body.next_action, "must surface next_action");
-    assert.equal(body.next_action.kind, "start_required");
+    assert.equal(body.next_action.kind, "auto_start");
     assert.equal(body.next_action.method, "POST");
     assert.match(String(body.next_action.endpoint), /^\/task-plans\/.+\/start$/);
-    assert.equal(body.next_action.manualStartRequired, true);
+    assert.equal(body.next_action.manualStartRequired, false);
     assert.equal(body.next_action.approvalRequired, true);
     assert.match(
       String(body.message),
-      /No execution has occurred|waiting for start|Plan ready/i,
-      "message should not imply the task ran",
+      /automatically|Plan ready/i,
+      "message should describe automatic start behavior",
     );
 
     // WS event mirrors the response.

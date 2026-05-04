@@ -222,9 +222,20 @@ function retryDelay(attempt: number, retryAfterSec?: number): number {
 
 const COST_PER_1K: Record<string, { input: number; output: number }> = {
   // Ollama — local, free
-  "local":            { input: 0,      output: 0      },
-  "qwen3.5:4b":      { input: 0,      output: 0      },
-  "qwen3.5:9b":      { input: 0,      output: 0      },
+  "local":                  { input: 0, output: 0 },
+  "qwen3.5:0.8b":           { input: 0, output: 0 },
+  "qwen3.5:4b":             { input: 0, output: 0 },
+  "qwen3.5:9b":             { input: 0, output: 0 },
+  "qwen3.5:27b":            { input: 0, output: 0 },
+  "qwen3-coder:30b":        { input: 0, output: 0 },
+  "qwen2.5-coder:3b":       { input: 0, output: 0 },
+  "deepseek-coder-v2:16b":  { input: 0, output: 0 },
+  "granite4.1:30b":         { input: 0, output: 0 },
+  "gemma4:26b":             { input: 0, output: 0 },
+  "ibm/granite4.1:8b":      { input: 0, output: 0 },
+  "gemma4:e4b":             { input: 0, output: 0 },
+  "qwen3.6:latest":         { input: 0, output: 0 },
+  "laguna-xs.2:latest":     { input: 0, output: 0 },
   // ModelStudio
   "qwen3.6-plus":    { input: 0.0008, output: 0.002  },
   "glm-4":           { input: 0.001,  output: 0.002  },

@@ -203,6 +203,7 @@ test("buildRunDetailResponse passes loqui + candidates through unchanged", () =>
     completedAt: "2026-04-28T10:01:00.000Z",
     receipt: null,
     filesChanged: [],
+    changes: [],
     summary: {
       classification: "VERIFIED_SUCCESS",
       headline: "done",

@@ -60,6 +60,8 @@ import {
 import {
   detectFeatureUnderspecified,
 } from "./feature-completeness-guard.js";
+import { filesInUnifiedDiff } from "./atomic-builder.js";
+import { validateUnifiedDiff } from "./diff-truth.js";
 
 const NOW = "2026-05-02T12:00:00.000Z";
 
@@ -214,6 +216,15 @@ class StubReceiptStore implements ReceiptStoreReader {
 }
 
 function makeSuccessReceipt(runId: string): RunReceipt {
+  const atomicDiff = [
+    "diff --git a/magister/router.ts b/magister/router.ts",
+    "--- a/magister/router.ts",
+    "+++ b/magister/router.ts",
+    "@@ -1,5 +1,5 @@",
+    " // Mode registry — every conversational mode is wired in here.",
+    '-export const REGISTERED_MODES = ["varros-narrator"] as const;',
+    '+export const REGISTERED_MODES = ["varros-narrator", "teach-me-anything"] as const;',
+  ].join("\n");
   const receipt: unknown = {
     id: runId,
     runId,
@@ -239,11 +250,14 @@ function makeSuccessReceipt(runId: string): RunReceipt {
     },
     commitSha: "feedfacecafe",
     durationMs: 12,
+    patchArtifact: {
+      diff: atomicDiff,
+      files: ["magister/router.ts"],
+    },
     executionVerified: true,
     executionGateReason: "",
     executionEvidence: [
       { kind: "file_modified", ref: "magister/router.ts" },
-      { kind: "file_created", ref: "magister/modes/teach-me-anything.ts" },
     ],
     humanSummary: { headline: "Teach Me Anything mode wired" },
   };
@@ -280,6 +294,44 @@ function makeFailedReceipt(runId: string): RunReceipt {
     executionGateReason: "stub failed",
     executionEvidence: [],
     humanSummary: { headline: "stub failed" },
+  };
+  return receipt as RunReceipt;
+}
+
+function makeBuilderNoOpReceipt(runId: string): RunReceipt {
+  const receipt: unknown = {
+    id: runId,
+    runId,
+    intentId: "stub-intent",
+    timestamp: NOW,
+    verdict: "failed",
+    summary: {},
+    graphSummary: {},
+    verificationReceipt: null,
+    waveVerifications: [],
+    judgmentReport: null,
+    mergeDecision: null,
+    totalCost: {
+      runId,
+      stage: "task",
+      role: "builder",
+      model: "stub",
+      provider: "stub",
+      ts: NOW,
+      tokensIn: 0,
+      tokensOut: 0,
+      estimatedCostUsd: 0.001,
+    },
+    commitSha: null,
+    durationMs: 5,
+    executionVerified: false,
+    executionGateReason: "content_identical_output: Builder reported required file(s) but produced no effective diff: magister/router.ts",
+    executionEvidence: [],
+    humanSummary: { headline: "Builder made no effective source change" },
+    failureReason: "builder_no_effective_change",
+    blockedStage: "builder",
+    nextAllowedActions: ["choose_different_target", "rewrite_operation", "retry_different_model", "cancel"],
+    rawFailureEvidence: ["content_identical_output: magister/router.ts byte-identical"],
   };
   return receipt as RunReceipt;
 }
@@ -451,6 +503,14 @@ test("Magister fixture: attaching a target via /attachTargetToSubtask resumes Bu
     const second = await runner.run(plan.taskPlanId);
     assert.equal(second.status, "completed",
       "after target attached + resume, Builder should dispatch and complete");
+    const successReceipt = makeSuccessReceipt("assertion-run") as unknown as { patchArtifact: { diff: string; files: string[] } };
+    assert.ok(successReceipt.patchArtifact.diff.trim().length > 0,
+      "Magister Teach Me Anything success path must carry a non-empty atomic diff");
+    assert.equal(validateUnifiedDiff(successReceipt.patchArtifact.diff).ok, true,
+      "Magister smoke must fail if success/approval is represented without a renderable real diff");
+    assert.deepEqual(filesInUnifiedDiff(successReceipt.patchArtifact.diff), ["magister/router.ts"],
+      "Magister atomic diff must touch exactly one file");
+    assert.doesNotMatch(successReceipt.patchArtifact.diff, /NO-OP execution detected/i);
     const subFinal = second.subtasks.find((s) => s.id === stuck.id)!;
     assert.ok(["completed", "repaired"].includes(subFinal.status));
     assert.equal(subFinal.lastVerdict, "success");
@@ -505,6 +565,48 @@ test("Magister fixture: generic CoordinatorError still maps to FAILED (does not 
     assert.equal(out.stopReason, "subtask_terminal_failure");
     const replanEvt = events.find((e) => e.kind === "plan_needs_replan");
     assert.equal(replanEvt, undefined, "non-NeedsClarification errors must not pretend to need replan");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("Magister fixture: byte-identical atomic Builder output ends NEEDS_REPLAN, not critic_timeout", async () => {
+  const root = buildMagisterFixture();
+  const stateRoot = mkdtempSync(join(tmpdir(), "aedis-magister-noop-state-"));
+  try {
+    const store = new TaskPlanStore({ stateRoot });
+    const coordinator: CoordinatorLike = {
+      async submit(submission: TaskSubmission): Promise<RunReceipt> {
+        return makeBuilderNoOpReceipt(submission.runId ?? "noop-run");
+      },
+      async cancel(): Promise<void> {},
+    };
+    const runner = new TaskLoopRunner({
+      store,
+      coordinator,
+      receiptStore: new StubReceiptStore(),
+      now: () => NOW,
+      logger: { log: () => {}, warn: () => {}, error: () => {} },
+    });
+    const plan = createTaskPlan(
+      {
+        objective: MAGISTER_PROMPT,
+        repoPath: root,
+        subtasks: [{
+          title: "Teach Me Anything atomic router step",
+          prompt: `Target file: magister/router.ts\n\n${MAGISTER_PROMPT}`,
+        }],
+      },
+      { taskPlanId: "magister-noop", now: NOW },
+    );
+    await store.create(plan);
+    const final = await runner.run(plan.taskPlanId);
+    assert.equal(final.status, "needs_replan");
+    assert.equal(final.stopReason, "needs_clarification");
+    assert.equal(final.subtasks[0].failureReason, "builder_no_effective_change");
+    assert.equal(final.subtasks[0].blockedStage, "builder");
+    assert.doesNotMatch(final.subtasks[0].blockerReason, /critic_timeout/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(stateRoot, { recursive: true, force: true });

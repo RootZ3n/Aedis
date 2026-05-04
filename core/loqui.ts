@@ -113,6 +113,7 @@ function buildPrompt(
   const lines: string[] = [];
   lines.push("Answer the user's repo question using the actual code context below.");
   lines.push("Prefer grounded file evidence over assumptions. If context is insufficient, say what is missing.");
+  lines.push("Do not tell the user to run safe read-only diagnostics such as find, ls, rg, or git status; use the grounded context already provided.");
   lines.push("");
   lines.push(`Question: ${question}`);
   lines.push("");

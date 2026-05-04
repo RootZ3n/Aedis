@@ -46,6 +46,7 @@ import type {
 import type { CostEntry } from "./runstate.js";
 import type { TrustProfile } from "../router/trust-router.js";
 import type { AedisEvent, EventBus } from "../server/websocket.js";
+import { validateUnifiedDiff } from "./diff-truth.js";
 
 // ─── Stubs (mirror coordinator-integration.test.ts) ─────────────────
 
@@ -646,10 +647,13 @@ test("approval flow: AWAITING_APPROVAL persists the full awaitReceipt into final
       persisted.finalReceipt,
       "finalReceipt must be persisted at AWAITING_APPROVAL — without it approveRun has nothing to merge patchArtifact into (run 4b3ec065 regression)",
     );
-    // patchArtifact is still null at this point — the workspace hasn't
-    // committed yet. The check that it FILLS IN after approveRun is the
-    // next test.
-    assert.equal(persisted.finalReceipt.patchArtifact, null, "patchArtifact must be null pre-approval (workspace uncommitted)");
+    // Approval now persists the workspace diff before the commit so the
+    // review UI/API cannot show AWAITING_APPROVAL without a visible patch.
+    const patchArtifact = persisted.finalReceipt.patchArtifact;
+    assert.ok(patchArtifact, "patchArtifact must be present pre-approval so review has a visible diff");
+    assert.equal(patchArtifact.commitSha, null, "workspace is still uncommitted before approval");
+    assert.deepEqual(patchArtifact.changedFiles, ["core/widget.ts"]);
+    assert.equal(validateUnifiedDiff(patchArtifact.diff).ok, true, "pre-approval patch must be a renderable real diff");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

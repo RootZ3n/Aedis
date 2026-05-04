@@ -25,6 +25,7 @@
 import { existsSync } from "node:fs";
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import { answerLoqui } from "../../core/loqui.js";
+import { routeLoquiInput } from "../../core/loqui-router.js";
 
 interface LoquiQuery {
   question?: string;
@@ -70,6 +71,33 @@ export const loquiRoutes: FastifyPluginAsync = async (fastify) => {
         reply.code(400).send({
           error: "Bad request",
           message: `repoPath does not exist on this host: ${repoPath}`,
+        });
+        return;
+      }
+
+      const decision = routeLoquiInput({
+        input: question,
+        context: { projectRoot: repoPath },
+      });
+      if (decision.action === "build") {
+        reply.code(409).send({
+          error: "Build request sent to read-only Loqui endpoint",
+          message: "This is an edit request. Submit it through /tasks or /tasks/loqui/unified so Aedis can run target discovery and approval.",
+          route: "build",
+          intent: decision.intent,
+          confidence: decision.confidence,
+          signals: [...decision.signals],
+        });
+        return;
+      }
+      if (decision.action === "clarify") {
+        reply.send({
+          answer: decision.clarification,
+          confidence: decision.confidence,
+          relatedFiles: [],
+          reason: decision.reason,
+          provider: null,
+          route: "clarify",
         });
         return;
       }

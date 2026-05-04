@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { splitUnifiedDiffByFile, synthesizeCreateDiff } from "./runs.js";
+import { runRoutes } from "./runs.js";
+import { ReceiptStore } from "../../core/receipt-store.js";
 
 // ─── splitUnifiedDiffByFile ─────────────────────────────────────────
 
@@ -60,4 +65,63 @@ test("synthesizeCreateDiff: empty content produces single-line +", () => {
   const out = synthesizeCreateDiff("empty.ts", "");
   // Empty content split → single empty string → @@ -0,0 +1,1 @@
   assert.match(out, /@@ -0,0 \+1,1 @@/);
+});
+
+test("GET /runs/:id returns canonical changes[].diff from persisted FileChange diffs", async () => {
+  const fastify = (await import("fastify")).default;
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-runs-api-diff-"));
+  const diff = [
+    "diff --git a/src/message.ts b/src/message.ts",
+    "--- a/src/message.ts",
+    "+++ b/src/message.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const message = \"hello\";",
+    "+export const message = \"hello from aedis\";",
+    "",
+  ].join("\n");
+
+  try {
+    const receiptStore = new ReceiptStore(projectRoot);
+    const finalReceipt = {
+      runId: "run-api-diff",
+      verdict: "partial",
+      humanSummary: { classification: "PARTIAL_SUCCESS", headline: "Review required", narrative: "", verification: "pass" },
+      changes: [{ path: "src/message.ts", operation: "modify", diff }],
+      executionVerified: false,
+      executionGateReason: "Review required before applying the diff",
+      blastRadius: null,
+      totalCost: { model: "test", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+    } as any;
+    await receiptStore.patchRun("run-api-diff", {
+      prompt: "change message",
+      taskSummary: "change message",
+      status: "AWAITING_APPROVAL",
+      finalClassification: "PARTIAL_SUCCESS",
+      changesSummary: [{ path: "src/message.ts", operation: "modify", diff }],
+      finalReceipt,
+      totalCost: finalReceipt.totalCost,
+    });
+
+    const app = fastify();
+    (app as any).decorate("ctx", {
+      receiptStore,
+      coordinator: { getRunStatus: () => null },
+      eventBus: { recentEvents: () => [] },
+      config: { projectRoot },
+    });
+    await app.register(runRoutes);
+
+    const res = await app.inject({ method: "GET", url: "/run-api-diff" });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.changes.length, 1);
+    assert.equal(body.changes[0].path, "src/message.ts");
+    assert.equal(body.changes[0].diff, diff);
+    assert.equal(body.filesChanged[0].diff, diff);
+    assert.match(JSON.stringify(body), /\+export const message = \\"hello from aedis\\";/);
+
+    await app.close();
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
 });

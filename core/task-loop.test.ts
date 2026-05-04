@@ -45,6 +45,10 @@ interface StubScript {
   /** Headlines surfaced on partial/failed receipts. Useful for the
    *  blockerReason assertion. */
   headlines?: readonly string[];
+  failureReasons?: readonly string[];
+  blockedStages?: readonly string[];
+  rawFailureEvidence?: readonly string[][];
+  nextAllowedActions?: readonly string[][];
 }
 
 class StubCoordinator implements CoordinatorLike {
@@ -69,7 +73,17 @@ class StubCoordinator implements CoordinatorLike {
     const cost = this.script.costs?.[idx] ?? 0.001;
     const duration = this.script.durations?.[idx] ?? 5;
     const headline = this.script.headlines?.[idx] ?? `stub-${verdict}`;
-    return makeReceipt({ runId, verdict, costUsd: cost, durationMs: duration, headline });
+    return makeReceipt({
+      runId,
+      verdict,
+      costUsd: cost,
+      durationMs: duration,
+      headline,
+      failureReason: this.script.failureReasons?.[idx],
+      blockedStage: this.script.blockedStages?.[idx],
+      rawFailureEvidence: this.script.rawFailureEvidence?.[idx],
+      nextAllowedActions: this.script.nextAllowedActions?.[idx],
+    });
   }
 
   async cancel(runId: string): Promise<void> {
@@ -91,6 +105,10 @@ function makeReceipt(input: {
   costUsd: number;
   durationMs: number;
   headline: string;
+  failureReason?: string;
+  blockedStage?: string;
+  rawFailureEvidence?: readonly string[];
+  nextAllowedActions?: readonly string[];
 }): RunReceipt {
   // Cast the receipt — the loop driver only reads a small slice
   // (verdict, totalCost.estimatedCostUsd, humanSummary?.headline,
@@ -125,6 +143,10 @@ function makeReceipt(input: {
     executionGateReason: input.verdict === "success" ? "" : "stubbed verdict",
     executionEvidence: [],
     humanSummary: { headline: input.headline },
+    ...(input.failureReason ? { failureReason: input.failureReason } : {}),
+    ...(input.blockedStage ? { blockedStage: input.blockedStage } : {}),
+    ...(input.rawFailureEvidence ? { rawFailureEvidence: input.rawFailureEvidence } : {}),
+    ...(input.nextAllowedActions ? { nextAllowedActions: input.nextAllowedActions } : {}),
   };
   return receipt as RunReceipt;
 }
@@ -301,6 +323,87 @@ test("loop: AWAITING_APPROVAL receipt pauses the loop and marks subtask blocked,
     } finally {
       receiptStore.getRun = originalGet;
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loop: builder no-op ends NEEDS_REPLAN and does not queue repair", async () => {
+  const { dir, store, coordinator, runner } = tempRunner({
+    verdicts: ["failed", "success"],
+    failureReasons: ["builder_no_effective_change"],
+    blockedStages: ["builder"],
+    rawFailureEvidence: [["content_identical_output: magister/router.ts byte-identical"]],
+    nextAllowedActions: [["choose_different_target", "rewrite_operation", "retry_different_model", "cancel"]],
+  });
+  try {
+    const plan = freshPlan({
+      subtasks: [{ prompt: "Target file: magister/router.ts\nAdd Teach Me Anything route" }],
+      budget: { maxAttemptsPerSubtask: 3, maxRepairAttempts: 2 },
+    });
+    await store.create(plan);
+    const final = await runner.run(plan.taskPlanId);
+    assert.equal(final.status, "needs_replan");
+    assert.equal(final.stopReason, "needs_clarification");
+    assert.equal(coordinator.calls.length, 1, "builder no-op must not auto-repair");
+    assert.equal(final.subtasks[0].status, "needs_clarification");
+    assert.equal(final.subtasks[0].failureReason, "builder_no_effective_change");
+    assert.match(final.subtasks[0].blockerReason, /Builder made no effective source change/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loop: identical repair after builder no-op is blocked before dispatch", async () => {
+  const { dir, store, coordinator, runner } = tempRunner({
+    verdicts: ["failed"],
+    failureReasons: ["builder_no_effective_change"],
+    blockedStages: ["builder"],
+    rawFailureEvidence: [["content_identical_output: magister/router.ts byte-identical"]],
+  });
+  try {
+    const plan = freshPlan({
+      subtasks: [{ prompt: "Target file: magister/router.ts\nAdd Teach Me Anything route" }],
+    });
+    await store.create(plan);
+    const final = await runner.run(plan.taskPlanId);
+    await assert.rejects(
+      () => runner.attachTargetToSubtask(plan.taskPlanId, final.subtasks[0].id, "magister/router.ts"),
+      /Repair attempt would repeat the same target\/operation/,
+    );
+    assert.equal(coordinator.calls.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loop: approval continue reconciles approved blocked subtask", async () => {
+  const { dir, store, coordinator, receiptStore, runner } = tempRunner({
+    verdicts: ["partial", "success"],
+  });
+  try {
+    const plan = freshPlan({
+      subtasks: [{ prompt: "step 1" }, { prompt: "step 2" }],
+    });
+    await store.create(plan);
+    const originalGet = receiptStore.getRun.bind(receiptStore);
+    let firstRunId = "";
+    receiptStore.getRun = async (runId: string) => {
+      firstRunId = firstRunId || runId;
+      if (runId === firstRunId) return { status: "AWAITING_APPROVAL" };
+      return originalGet(runId);
+    };
+    const paused = await runner.run(plan.taskPlanId);
+    assert.equal(paused.status, "paused");
+    receiptStore.getRun = async (runId: string) => {
+      if (runId === firstRunId) return { status: "READY_FOR_PROMOTION" };
+      return originalGet(runId);
+    };
+    const final = await runner.run(plan.taskPlanId);
+    assert.equal(final.status, "completed");
+    assert.equal(final.subtasks[0].status, "completed");
+    assert.equal(final.subtasks[1].status, "completed");
+    assert.equal(coordinator.calls.length, 2, "approved first subtask is reconciled, then second subtask runs");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

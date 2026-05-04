@@ -214,6 +214,7 @@ export interface PersistentRunReceipt {
   changesSummary: Array<{
     path: string;
     operation: string;
+    diff?: string;
   }>;
   verificationResults: {
     final: unknown | null;
@@ -345,6 +346,7 @@ export interface ReceiptPatch {
   readonly changesSummary?: Array<{
     path: string;
     operation: string;
+    diff?: string;
   }>;
   readonly verificationResults?: {
     final?: unknown | null;
@@ -982,15 +984,19 @@ function dedupeStrings(values: readonly string[]): string[] {
 }
 
 function dedupeChanges(
-  changes: readonly { path: string; operation: string }[],
-): Array<{ path: string; operation: string }> {
+  changes: readonly { path: string; operation: string; diff?: string }[],
+): Array<{ path: string; operation: string; diff?: string }> {
   const seen = new Set<string>();
-  const out: Array<{ path: string; operation: string }> = [];
+  const out: Array<{ path: string; operation: string; diff?: string }> = [];
   for (const change of changes) {
     const key = `${change.operation}:${change.path}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ path: change.path, operation: change.operation });
+    out.push({
+      path: change.path,
+      operation: change.operation,
+      ...(change.diff ? { diff: change.diff } : {}),
+    });
   }
   return out;
 }

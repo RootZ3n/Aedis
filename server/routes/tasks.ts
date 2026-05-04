@@ -681,6 +681,75 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
+      const decision = routeLoquiInput({
+        input: question,
+        context: { projectRoot: repoPath },
+      });
+      if (decision.action === "build") {
+        const result = await submitBuildTask(ctx(), decision.effectivePrompt, repoPath, undefined);
+        const envelope = {
+          route: "build" as const,
+          intent: decision.intent,
+          label: decision.label,
+          reason: decision.reason,
+          confidence: decision.confidence,
+          signals: [...decision.signals],
+          original_input: decision.originalInput,
+        };
+        if (result.kind === "blocked") {
+          reply.code(400).send({
+            ...envelope,
+            route: "blocked",
+            status: "blocked",
+            reason: result.reason,
+            flags: [...result.flags],
+          });
+          return;
+        }
+        if (result.kind === "needs_clarification") {
+          reply.send({
+            ...envelope,
+            route: "clarify",
+            status: "needs_clarification",
+            clarification: result.question,
+          });
+          return;
+        }
+        if (result.kind === "needs_decomposition") {
+          reply.code(202).send({
+            ...envelope,
+            ...buildDecompositionResponse(result),
+          });
+          return;
+        }
+        recordLoquiDecisionForRun(decision, { runId: result.runId, taskId: result.taskId });
+        reply.code(202).send({
+          ...envelope,
+          task_id: result.taskId,
+          run_id: result.runId,
+          prompt: result.prompt,
+          repo_path: result.repoPath,
+          status: "running",
+          message: "Build task submitted. Watch the main status card and current diff for progress.",
+        });
+        return;
+      }
+
+      if (decision.action === "clarify") {
+        reply.send({
+          route: "clarify",
+          intent: decision.intent,
+          label: decision.label,
+          reason: decision.reason,
+          confidence: decision.confidence,
+          signals: [...decision.signals],
+          original_input: decision.originalInput,
+          status: "needs_clarification",
+          clarification: decision.clarification,
+        });
+        return;
+      }
+
       const answer = await askLoqui(question, repoPath);
       reply.send({ answer });
     }
@@ -907,7 +976,7 @@ export const taskRoutes: FastifyPluginAsync = async (fastify) => {
             prompt: result.prompt,
             repo_path: result.repoPath,
             status: "running",
-            message: "Build task submitted. Watch the worker grid and Lumen log for progress.",
+            message: "Build task submitted. Watch the main status card and current diff for progress.",
           });
           return;
         }

@@ -204,6 +204,12 @@ import {
   type RejectedCandidate,
 } from "./implementation-brief.js";
 import { tryDeterministicBuilder, type DeterministicBuilderResult } from "./code-transforms/deterministic-builder.js";
+import {
+  buildAtomicStep,
+  validateAtomicDiff,
+  validateAtomicDispatchTarget,
+  type AtomicBuilderStep,
+} from "./atomic-builder.js";
 import { runRepairAuditPass, type RepairAuditResult } from "./repair-audit-pass.js";
 import { isTrivialTask, type TrivialCheckResult } from "./trivial-task-detector.js";
 import { prepareTargetsForPrompt } from "./target-discovery.js";
@@ -215,6 +221,7 @@ import {
 } from "./named-target-discovery.js";
 import { runPreflightScouts, type PreflightScoutResult } from "./coordinator-preflight-scouts.js";
 import { detectFeatureUnderspecified } from "./feature-completeness-guard.js";
+import { detectModuleAnchorMismatch } from "./module-anchor-guard.js";
 import { assessUnsafeState, type UnsafeStateAssessment } from "./unsafe-state.js";
 import { ScoutEvidenceStore } from "./scout-report.js";
 import {
@@ -228,6 +235,12 @@ import {
   verifyGitDiff,
   type GitDiffResult,
 } from "./git-diff-verifier.js";
+import {
+  buildCanonicalDiff,
+  canonicalDiffForChange,
+  validateApprovalChanges,
+  validateUnifiedDiff,
+} from "./diff-truth.js";
 import { scanInput as velumScanInput } from "./velum-input.js";
 import { scanDiff as velumScanDiff, type VelumResult } from "./velum-output.js";
 import { classifyTask, type ImpactClassification, type ImpactLevel } from "./impact-classifier.js";
@@ -290,8 +303,10 @@ import {
   builderTierCollapseWarning,
   findNextStrongerBuilderTier,
   getActiveModelProfile,
+  resolveAssignmentChain,
   resolveAllBuilderTierModels,
 } from "../server/routes/config.js";
+import { BuilderAttemptError } from "../workers/builder-diagnostics.js";
 
 const exec = promisify(execFile);
 
@@ -351,6 +366,14 @@ export interface CoordinatorConfig {
   maxRunTimeoutSec: number;
   /** Maximum seconds per individual dispatch stage. Default: 180 */
   maxStageTimeoutSec: number;
+  /**
+   * Builder-only stage timeout in seconds. Larger than the generic
+   * stage timeout because complex Builder dispatches (Sonnet on
+   * multi-hunk edits, retried prompts, escalated tiers) routinely
+   * exceed 180s on the wire. Set independently so Critic/Verifier
+   * stay tight while Builder gets the headroom it needs. Default: 300.
+   */
+  builderStageTimeoutSec: number;
   /** Maximum USD cost per run. Null = no limit. Default: 1.00 */
   maxRunCostUsd: number | null;
   /**
@@ -402,6 +425,7 @@ const DEFAULT_CONFIG: CoordinatorConfig = {
   maxGraphIterations: 50,
   maxRunTimeoutSec: 600,
   maxStageTimeoutSec: 180,
+  builderStageTimeoutSec: 300,
   maxRunCostUsd: 1.00,
   // Default strict — source repo is never mutated when workspace
   // creation fails. Operators must explicitly opt into the legacy
@@ -672,6 +696,15 @@ export interface RunReceipt {
    */
   readonly patchArtifact: PatchArtifact | null;
   /**
+   * Canonical API/UI diff source. This is copied from FileChange.diff
+   * and is the only field external consumers should render as a diff.
+   */
+  readonly changes?: readonly {
+    readonly path: string;
+    readonly operation: "create" | "modify" | "delete";
+    readonly diff: string;
+  }[];
+  /**
    * Workspace cleanup result. Records whether the disposable workspace
    * was successfully cleaned up. Null when no workspace was created.
    * cleanup_error is a SEVERE state — the receipt must surface it.
@@ -770,7 +803,22 @@ export interface RunReceipt {
    * including fallbacks, timeouts, and circuit-breaker skips.
    */
   readonly builderAttempts?: readonly unknown[];
+  /** Structured terminal failure reason for task-loop/UI policy. */
+  readonly failureReason?: StructuredFailureReason | null;
+  /** Pipeline stage where this receipt is blocked. */
+  readonly blockedStage?: "builder" | "critic" | "verifier" | "rollback" | null;
+  /** Stable recovery actions the operator may take next. */
+  readonly nextAllowedActions?: readonly string[];
+  /** Raw evidence preserved for audit without forcing UI parsing. */
+  readonly rawFailureEvidence?: readonly string[];
 }
+
+export type StructuredFailureReason =
+  | "builder_no_effective_change"
+  | "builder_timeout"
+  | "critic_timeout"
+  | "verification_failed"
+  | "rollback_incomplete";
 
 export type RollbackStatus = "clean" | "failed" | "incomplete" | "unsafe_state";
 
@@ -1764,6 +1812,57 @@ export class Coordinator {
               : ""),
         });
       }
+
+      // PRE-DISPATCH GUARD — module-anchor mismatch.
+      //
+      // When the prompt names a project/module ("…in Magister project")
+      // and that name matches a real top-level directory, every
+      // charter target must live inside it. Otherwise scouts have
+      // surfaced files in the wrong area (e.g. web/app/components for
+      // a magister/ task) and Builder would write into the wrong file
+      // before the model's own AEDIS_BLOCKER self-report could fire.
+      const anchorFinding = detectModuleAnchorMismatch({
+        prompt: normalizedInput,
+        analysis,
+        charterTargets,
+        listChildren: (relDir) => this.listRepoChildren(effectiveProjectRoot, relDir),
+      });
+      if (anchorFinding) {
+        const scoutAdvisory: readonly string[] =
+          preflightScoutResult?.advisoryTargets ?? [];
+        const scoutReportIds: readonly string[] =
+          preflightScoutResult?.scoutReportIds ?? [];
+        const scoutSpawned = preflightScoutResult?.scouted ?? false;
+        console.warn(
+          `[coordinator] module-anchor guard: prompt names "${anchorFinding.anchorName}" but every ` +
+          `target is outside ${anchorFinding.anchorDirectory}/ ` +
+          `(violating: ${anchorFinding.violatingTargets.slice(0, 3).join(", ")}).`,
+        );
+        const suggestedHead = anchorFinding.suggestedTargets.slice(0, 5).join(", ");
+        throw new NeedsClarificationError({
+          message: anchorFinding.reason,
+          recommendedTargets: anchorFinding.suggestedTargets,
+          scoutReportIds,
+          scoutSpawned,
+          recommendedAction:
+            `Anchor mismatch. Prompt names "${anchorFinding.anchorName}" but discovered targets ` +
+            `(${anchorFinding.violatingTargets.slice(0, 3).join(", ")}` +
+            (anchorFinding.violatingTargets.length > 3
+              ? ` +${anchorFinding.violatingTargets.length - 3} more`
+              : "") +
+            `) live outside ${anchorFinding.anchorDirectory}/. ` +
+            (anchorFinding.suggestedTargets.length > 0
+              ? `Attach a target inside ${anchorFinding.anchorDirectory}/ — candidates: ${suggestedHead}` +
+                (anchorFinding.suggestedTargets.length > 5
+                  ? ` (+${anchorFinding.suggestedTargets.length - 5} more)`
+                  : "") +
+                "."
+              : `Verify ${anchorFinding.anchorDirectory}/ is the correct location and attach a target before retrying.`) +
+            (scoutAdvisory.length > 0
+              ? ` Scout advisory: [${scoutAdvisory.slice(0, 3).join(", ")}].`
+              : ""),
+        });
+      }
     }
 
     if (charterTargets.length === 0) {
@@ -2128,6 +2227,7 @@ export class Coordinator {
       cancelledGenerations: new Set<string>(),
       pendingDispatches: new Map<string, Promise<unknown>>(),
       rejectedCandidates: preparedTargets.rejected.map((entry) => ({ path: entry.path, reason: entry.reason })),
+      plannerAuthorizedTargets: [],
       userNamedStrippedTargets: [],
       fastPath: false,
       runAbortController: new AbortController(),
@@ -2721,12 +2821,14 @@ export class Coordinator {
             expectedFiles,
             nonMutatingFiles,
             createdFiles,
+            canonicalDiff: buildCanonicalDiff(active.changes).diff,
           });
           active.gitDiffResult = gitDiffResult;
           console.log(
             `[coordinator] PHASE 9d: GitDiffVerifier — ${gitDiffResult.summary} ` +
             `(ratio=${gitDiffResult.confirmationRatio.toFixed(2)} passed=${gitDiffResult.passed})`,
           );
+          this.logDiffLifecycle("verifier", buildCanonicalDiff(active.changes).diff);
         } catch (err) {
           // Git diff failure is a signal-quality issue — we couldn't verify
           // on-disk truth. Log it as a warning and create a synthetic failed
@@ -2739,6 +2841,9 @@ export class Coordinator {
             undeclaredChanges: [],
             unexpectedReferenceChanges: [],
             confirmed: [],
+            filesWithDiffLines: [],
+            filesWithoutDiffLines: [],
+            changedLineCount: 0,
             passed: false,
             confirmationRatio: 0,
             summary: `git diff verification failed: ${errMsg}`,
@@ -2767,6 +2872,7 @@ export class Coordinator {
       // files are critical because they indicate the on-disk state diverged
       // from what was declared.
       const gitDiffFindings = this.gitDiffFindings(gitDiffResult);
+      const approvalDiffFindings = this.approvalDiffFindings(active.changes);
       // Bugfix must-modify rule — fires only when the user request
       // looks bugfix-shaped AND no non-test source files were
       // actually modified. Feature / refactor tasks are unaffected.
@@ -2778,11 +2884,27 @@ export class Coordinator {
       // before the graph was built. Should never fire after the Phase 4.5
       // fix; kept as a defense-in-depth net for future regressions.
       const userTargetFindings = this.userTargetFindings(active);
-      const extraFindings = [...waveFailures, ...gitDiffFindings, ...bugfixFindings, ...userTargetFindings];
-      const mergeDecision: MergeDecision =
+      const extraFindings = [...waveFailures, ...gitDiffFindings, ...approvalDiffFindings, ...bugfixFindings, ...userTargetFindings];
+      let mergeDecision: MergeDecision =
         extraFindings.length === 0
           ? baseDecision
           : this.mergeInFindings(baseDecision, extraFindings);
+      if (active.patchArtifact?.diff && /AEDIS_BLOCKER:/i.test(active.patchArtifact.diff)) {
+        const blockerFinding = {
+          severity: "critical" as const,
+          source: "coordinator" as const,
+          code: "builder:blocker-comment",
+          message: "Builder returned a blocker comment instead of a valid source edit",
+        };
+        mergeDecision = {
+          action: "block",
+          findings: [blockerFinding],
+          critical: [blockerFinding],
+          advisory: [],
+          primaryBlockReason: blockerFinding.message,
+          summary: blockerFinding.message,
+        };
+      }
       this.logMergeDecision(mergeDecision);
       this.recordMergeDecision(active, mergeDecision);
 
@@ -2863,10 +2985,12 @@ export class Coordinator {
 
       // Phase 10: Commit
       const changeCount = Math.max(active.changes.length, active.run.filesTouched.length);
+      const approvalDiffTruth = validateApprovalChanges(active.changes);
       const canCommit =
         this.config.autoCommit &&
         !active.cancelled &&
         changeCount > 0 &&
+        approvalDiffTruth.ok &&
         mergeDecision.action === "apply";
 
       // Approval gate: if requireApproval is true, pause instead of auto-committing.
@@ -2878,6 +3002,14 @@ export class Coordinator {
       const shouldPauseForApproval = finalRequireApproval || !this.config.autoPromoteOnSuccess;
       if (canCommit && shouldPauseForApproval) {
         console.log(`[coordinator] PHASE 10: APPROVAL REQUIRED — ${changeCount} change(s) ready. Pausing for external approval.`);
+        active.patchArtifact = this.buildCanonicalPatchArtifact(active);
+        this.logDiffLifecycle("approval", active.patchArtifact.diff);
+        const patchTruth = validateUnifiedDiff(active.patchArtifact.diff);
+        if (!patchTruth.ok) {
+          const msg = `builder_no_effective_change: approval patch is not valid (${patchTruth.reason})`;
+          this.recordBuilderNoEffectiveFailure(active, [msg]);
+          throw new Error(msg);
+        }
         advancePhase(run, "awaiting_approval");
         this.emit({ type: "system_event", payload: { runId: active.run.id, event: "approval_required", changeCount } });
         recordDecision(active.run, {
@@ -3040,11 +3172,12 @@ export class Coordinator {
       // workspace. On failure, still try to capture the diff for debugging.
       if (active.workspace) {
         try {
-          active.patchArtifact = await generatePatch(active.workspace);
+          active.patchArtifact = this.buildCanonicalPatchArtifact(active);
           console.log(
             `[coordinator] patch artifact: ${active.patchArtifact.changedFiles.length} file(s), ` +
             `${active.patchArtifact.diff.length} bytes, commit=${active.patchArtifact.commitSha?.slice(0, 8) ?? "none"}`,
           );
+          this.logDiffLifecycle("finalize", active.patchArtifact.diff);
           // Save patch to workspace receipts directory
           await saveWorkspaceReceipt(
             active.workspace,
@@ -3210,6 +3343,21 @@ export class Coordinator {
 
       return evaluatedReceipt;
     } catch (err) {
+      // NeedsClarificationError is a typed "soft failure" — task-loop
+      // (task-loop.ts:703) catches it off the wire to translate into
+      // needs_replan + needs_clarification with scout evidence. The
+      // pre-build guards (feature-completeness, module-anchor) throw
+      // before this try/catch, but the atomic-dispatch guard fires
+      // inside buildTaskGraph (which is inside this try). Re-throw so
+      // task-loop sees the typed error instead of a generic "failed"
+      // receipt with the message buried in failureReason. Workspace
+      // cleanup still runs via the finally block below.
+      if (err instanceof NeedsClarificationError) {
+        console.warn(
+          `[coordinator] submit() propagating NeedsClarificationError to caller — ${err.message}`,
+        );
+        throw err;
+      }
       const errMessage = err instanceof Error ? err.message : String(err);
       const errStack = err instanceof Error ? err.stack : undefined;
       console.error(`[coordinator] ═══ submit() CAUGHT EXCEPTION — ${errMessage}`);
@@ -3607,14 +3755,22 @@ export class Coordinator {
         metadata: { category: analysis.category, scopeEstimate: analysis.scopeEstimate, fastPath: true },
       });
 
-      const deliverable = deliverables[0]!;
-      const builderNode = addNode(graph, {
-        label: `Build: ${deliverable.description}`,
-        workerType: "builder",
-        targetFiles: deliverable.targetFiles,
-        metadata: { deliverableType: deliverable.type, fastPath: true },
-      });
-      addEdge(graph, scoutNode.id, builderNode.id, "data");
+      const fastBuilderNodes: TaskNode[] = [];
+      for (const deliverable of this.groupBuilderDeliverables(active, deliverables)) {
+        const atomicTarget = this.resolveAtomicDispatchTarget(active, analysis, deliverable);
+        const builderNode = addNode(graph, {
+          label: `Atomic build: ${deliverable.description}`,
+          workerType: "builder",
+          targetFiles: deliverable.targetFiles,
+          metadata: {
+            deliverableType: deliverable.type,
+            fastPath: true,
+            atomicBuilder: buildAtomicStep(atomicTarget, deliverable.description),
+          },
+        });
+        addEdge(graph, scoutNode.id, builderNode.id, "data");
+        fastBuilderNodes.push(builderNode);
+      }
 
       const criticNode = addNode(graph, {
         label: "Critic: heuristic review (fast-path)",
@@ -3622,7 +3778,9 @@ export class Coordinator {
         targetFiles,
         metadata: { fastPath: true },
       });
-      addEdge(graph, builderNode.id, criticNode.id, "data");
+      for (const builderNode of fastBuilderNodes) {
+        addEdge(graph, builderNode.id, criticNode.id, "data");
+      }
 
       const verifierNode = addNode(graph, {
         label: "Verifier: tests, types, lint",
@@ -3662,12 +3820,14 @@ export class Coordinator {
       // smallest wave id covered so multi-wave deliverables land in the
       // earliest phase (schema before consumers).
       const waveId = this.resolveWaveForFiles(active.plan, deliverable.targetFiles);
+      const atomicTarget = this.resolveAtomicDispatchTarget(active, analysis, deliverable);
       const builder = addNode(graph, {
-        label: `Build: ${deliverable.description}`,
+        label: `Atomic build: ${deliverable.description}`,
         workerType: "builder",
         targetFiles: deliverable.targetFiles,
         metadata: {
           deliverableType: deliverable.type,
+          atomicBuilder: buildAtomicStep(atomicTarget, deliverable.description),
           ...(waveId != null ? { waveId } : {}),
         },
       });
@@ -3761,54 +3921,24 @@ export class Coordinator {
     deliverables: readonly Deliverable[],
   ): readonly Deliverable[] {
     const uniqueFiles = this.uniqueStrings(deliverables.flatMap((deliverable) => deliverable.targetFiles));
-    if (uniqueFiles.length <= 1 || !this.shouldCoordinateBuilderScope(active)) {
-      return deliverables;
-    }
-
-    const typeForFiles = (files: readonly string[]): Deliverable["type"] => {
+    const typeForFile = (file: string): Deliverable["type"] => {
       const matched = new Set(
         deliverables
-          .filter((deliverable) => deliverable.targetFiles.some((file) => files.includes(file)))
+          .filter((deliverable) => deliverable.targetFiles.includes(file))
           .map((deliverable) => deliverable.type),
       );
       return matched.size === 1
         ? [...matched][0]!
         : "modify";
     };
-
-    const grouped: Deliverable[] = [];
-    const assigned = new Set<string>();
-    const plan = active.plan;
-
-    if (plan && plan.waves.length > 0) {
-      for (const wave of plan.waves) {
-        const files = uniqueFiles.filter((file) => wave.files.includes(file));
-        if (files.length === 0) continue;
-        files.forEach((file) => assigned.add(file));
-        grouped.push({
-          description: `Coordinated ${wave.name} update (${files.length} file(s))`,
-          targetFiles: files,
-          type: typeForFiles(files),
-        });
-      }
-    }
-
-    const leftovers = uniqueFiles.filter((file) => !assigned.has(file));
-    if (leftovers.length > 0) {
-      grouped.push({
-        description: `Coordinated implementation across ${leftovers.length} file(s)`,
-        targetFiles: leftovers,
-        type: typeForFiles(leftovers),
-      });
-    }
-
-    return grouped.length > 0
-      ? grouped
-      : [{
-          description: `Coordinated implementation across ${uniqueFiles.length} file(s)`,
-          targetFiles: uniqueFiles,
-          type: typeForFiles(uniqueFiles),
-        }];
+    return uniqueFiles.map((file) => {
+      const source = deliverables.find((deliverable) => deliverable.targetFiles.includes(file));
+      return {
+        description: `${source?.description ?? "Modify file"} [atomic file: ${file}]`,
+        targetFiles: [file],
+        type: typeForFile(file),
+      };
+    });
   }
 
   private refreshImplementationBrief(active: ActiveRun, reason: string): void {
@@ -3915,6 +4045,110 @@ export class Coordinator {
       ...waveScoped,
       ...broader,
     ]).slice(0, Math.max(baseTargets.length, maxTargets));
+  }
+
+  /**
+   * Validate that a deliverable's first target file is safe to feed
+   * into `buildAtomicStep`. Throws NeedsClarificationError when the
+   * target is empty, missing on disk, or absent from the discovery
+   * pipeline (charter targets ∪ scout advisory). The throw routes
+   * through task-loop.ts:703 → needs_replan with scout evidence so
+   * the operator can attach a real target instead of approving a
+   * bogus diff.
+   */
+  private resolveAtomicDispatchTarget(
+    active: ActiveRun,
+    analysis: RequestAnalysis,
+    deliverable: Deliverable,
+  ): string {
+    const advisoryTargets = active.preflightScoutResult?.advisoryTargets ?? [];
+    // Mirror the prepareDeliverablesForGraph keep-logic — see the
+    // sibling regex at the explicit-new-file branch (the one that
+    // emits "explicit new-file target — prompt has create intent").
+    // Without this, a `type: "modify"` deliverable for a file the
+    // prompt explicitly wants created (e.g. "Create hello-aedis.txt")
+    // would be rejected as missing.
+    const promptHasCreateIntent =
+      /\b(create|new file|new module|extract\s+\w+\s+into|move\s+\w+\s+to\s+a\s+new)\b/i.test(
+        analysis.raw,
+      );
+    const plannerAuthorizedTargets = active.plannerAuthorizedTargets ?? [];
+    const result = validateAtomicDispatchTarget({
+      file: deliverable.targetFiles[0] ?? "",
+      deliverable: { description: deliverable.description, type: deliverable.type },
+      knownTargets: this.uniqueStrings([
+        ...analysis.targets,
+        ...plannerAuthorizedTargets,
+      ]),
+      advisoryTargets,
+      fileExists: (file) => this.fileExists(file, active.projectRoot),
+      allowMissingFile: promptHasCreateIntent,
+    });
+    if (result.ok) return result.file;
+
+    const scoutReportIds = active.preflightScoutResult?.scoutReportIds ?? [];
+    const scoutSpawned = active.preflightScoutResult?.scouted ?? false;
+    const suggested = result.suggestedTargets.slice(0, 5).join(", ");
+    const recommendedAction =
+      result.reason === "empty"
+        ? `Attach a target file to deliverable "${deliverable.description}" before dispatching Builder.` +
+          (result.suggestedTargets.length > 0
+            ? ` Discovered candidates: ${suggested}` +
+              (result.suggestedTargets.length > 5
+                ? ` (+${result.suggestedTargets.length - 5} more)`
+                : "") +
+              "."
+            : "")
+        : result.reason === "missing"
+        ? `Builder cannot edit a non-existent file. Either mark the deliverable as a "create" type or pick a real target` +
+          (result.suggestedTargets.length > 0 ? ` (e.g. ${suggested}).` : ".")
+        : `Replace the target with one of the discovered candidates` +
+          (result.suggestedTargets.length > 0 ? `: ${suggested}.` : " before retrying.");
+
+    console.warn(
+      `[coordinator] atomic-dispatch guard: ${result.reason} target ` +
+      `(file="${deliverable.targetFiles[0] ?? ""}" deliverable="${deliverable.description}").`,
+    );
+    throw new NeedsClarificationError({
+      message: result.message,
+      recommendedTargets: result.suggestedTargets,
+      scoutReportIds,
+      scoutSpawned,
+      recommendedAction,
+    });
+  }
+
+  /**
+   * Re-run the atomic-dispatch guard against a Builder node about to
+   * be dispatched. Used by executeGraph on EVERY Builder dispatch
+   * (initial + every rehearsal retry) so a node whose target somehow
+   * drifted from the discovery pipeline cannot reach the model. The
+   * synthetic Deliverable is reconstructed from node.metadata so the
+   * shared helper is the single source of truth.
+   */
+  private validateBuilderDispatch(active: ActiveRun, node: TaskNode): void {
+    if (node.workerType !== "builder") return;
+    const meta = node.metadata as { deliverableType?: Deliverable["type"] };
+    const deliverable: Deliverable = {
+      description: node.label,
+      targetFiles: [...node.targetFiles],
+      type: meta.deliverableType ?? "modify",
+    };
+    this.resolveAtomicDispatchTarget(active, active.analysis, deliverable);
+  }
+
+  private atomicStepFromNode(node: TaskNode): AtomicBuilderStep | null {
+    const candidate = node.metadata.atomicBuilder as AtomicBuilderStep | undefined;
+    if (
+      candidate &&
+      typeof candidate.file === "string" &&
+      typeof candidate.operation === "string" &&
+      typeof candidate.expectedDiffShape === "string"
+    ) {
+      return candidate;
+    }
+    if (node.workerType !== "builder" || node.targetFiles.length !== 1) return null;
+    return buildAtomicStep(node.targetFiles[0]!, node.label);
   }
 
   private isIgnoredPlanningPath(pathLike: string): boolean {
@@ -4071,6 +4305,7 @@ export class Coordinator {
     const decisions: string[] = [];
     let didFilter = false;
     active.rejectedCandidates = [];
+    active.plannerAuthorizedTargets = [];
 
     console.log(`[coordinator] prepareDeliverablesForGraph: ${totalBefore} deliverable(s) before filter (projectRoot=${active.projectRoot})`);
 
@@ -4122,6 +4357,7 @@ export class Coordinator {
           continue;
         }
         didFilter = true;
+        active.plannerAuthorizedTargets.push(...expansion.selectedFiles);
         this.appendRejectedCandidates(active, expansion.rejectedCandidates);
         decisions.push(
           `  expand ${rawTarget} -> ${expansion.selectedFiles.join(", ") || "(no dispatchable files found)"}`,
@@ -4320,6 +4556,7 @@ export class Coordinator {
             targetFiles: inferred,
           });
           for (const impl of inferred) {
+            active.plannerAuthorizedTargets.push(impl);
             decisions.push(`  infer ${impl} (implementation paired with test-only deliverable)`);
           }
           console.log(
@@ -4395,6 +4632,7 @@ export class Coordinator {
           });
           for (const t of testFiles) {
             seenPaths.add(resolve(active.projectRoot, t));
+            active.plannerAuthorizedTargets.push(t);
             decisions.push(`  inject ${t} (test pair for implementation file)`);
           }
           console.log(`[coordinator] prepareDeliverablesForGraph: injected ${testFiles.length} test pair(s)`);
@@ -4551,6 +4789,10 @@ export class Coordinator {
         didFilter = true;
       }
       deduped = filtered;
+      const allowedPlannerTargets = new Set(deduped.flatMap((d) => d.targetFiles));
+      active.plannerAuthorizedTargets = active.plannerAuthorizedTargets.filter((file) =>
+        allowedPlannerTargets.has(file),
+      );
     }
 
     console.log(`[coordinator] prepareDeliverablesForGraph: ${deduped.length} deliverable(s) after filter+dedup+test-inject`);
@@ -4904,8 +5146,22 @@ export class Coordinator {
       // builder nodes belonging to waves whose upstream waves have completed.
       // Non-builder nodes (scout, critic, verifier, integrator) are not
       // wave-gated — they always dispatch when topologically ready.
-      const waveGated = this.applyWaveGating(active, dispatchable);
+      let waveGated = this.applyWaveGating(active, dispatchable);
+      const builderWave = waveGated.filter((node) => node.workerType === "builder");
+      if (builderWave.length > 1) {
+        const firstBuilder = builderWave[0];
+        waveGated = waveGated.filter((node) => node.workerType !== "builder" || node.id === firstBuilder.id);
+      }
       if (waveGated.length === 0 && dispatchable.length > 0) {
+        if (hasFailedNodes(graph)) {
+          console.log(`[coordinator] executeGraph: dispatchable nodes are wave-gated behind failed node(s) → attempting recovery`);
+          const recovered = await this.attemptRecovery(active);
+          if (!recovered) {
+            console.log(`[coordinator] executeGraph: recovery returned false — breaking loop`);
+            break;
+          }
+          continue;
+        }
         // All dispatchable nodes were wave-gated — this means upstream
         // waves haven't completed yet. Wait for current wave to finish.
         console.log(`[coordinator] executeGraph: all ${dispatchable.length} dispatchable node(s) wave-gated — waiting for current wave`);
@@ -4933,10 +5189,35 @@ export class Coordinator {
         tryAdvance("integrating");
       }
 
-      const stageTimeoutMs = this.config.maxStageTimeoutSec * 1000;
+      // Per-node stage timeout. Builder gets a separate, larger budget
+      // (builderStageTimeoutSec) because Sonnet on complex multi-hunk
+      // edits routinely exceeds the 180s shared-stage default. Other
+      // workers stay on maxStageTimeoutSec.
+      const stageTimeoutSecForNode = (node: TaskNode): number =>
+        node.workerType === "builder"
+          ? this.config.builderStageTimeoutSec
+          : this.config.maxStageTimeoutSec;
+
+      // PRE-DISPATCH ANCHOR/TARGET GUARD — runs on EVERY Builder
+      // dispatch (initial AND rehearsal retries), not just at graph
+      // build. Throwing NeedsClarificationError here escapes Promise.all
+      // and submit()'s outer catch re-throws it (coordinator.ts catch
+      // for NeedsClarificationError) so task-loop translates to
+      // needs_replan. This is what closes the rehearsal-retry hole
+      // where the second Builder dispatch could land on an unrelated
+      // file (e.g. web/.../route.ts) that the discovery pipeline
+      // never sanctioned for this task.
+      for (const node of waveGated) {
+        if (node.workerType === "builder") {
+          this.validateBuilderDispatch(active, node);
+        }
+      }
+
       const results = await Promise.all(
         waveGated.map(async (node) => {
           const stageStart = Date.now();
+          const stageTimeoutSec = stageTimeoutSecForNode(node);
+          const stageTimeoutMs = stageTimeoutSec * 1000;
           // Drain any prior in-flight dispatch for this node before
           // launching a fresh one. Prevents the "recovery overlaps a
           // timed-out attempt" race that produced ENOENT and dual
@@ -4975,7 +5256,7 @@ export class Coordinator {
                 // active.changes by the time the critic dispatches, so
                 // this synthetic failure does not discard upstream work.
                 const classificationTag = `[${node.workerType}_timeout] `;
-                reject(new Error(`${classificationTag}execution.limits: stage timeout (${this.config.maxStageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`));
+                reject(new Error(`${classificationTag}execution.limits: stage timeout (${stageTimeoutSec}s) exceeded for ${node.workerType} ${node.id.slice(0, 6)}`));
               },
               stageTimeoutMs,
             );
@@ -4990,6 +5271,27 @@ export class Coordinator {
             const msg = err instanceof Error ? err.message : String(err);
             console.error(`[coordinator] ${msg}`);
             if (timedOut) {
+              if (node.workerType === "builder") {
+                this.recordStructuredFailure(active, "builder_timeout", "builder", [msg], ["retry_different_model", "rewrite_operation", "cancel"]);
+              } else if (node.workerType === "critic") {
+                this.recordStructuredFailure(active, "critic_timeout", "critic", [msg], ["retry_with_fallback", "retry_different_model", "cancel"]);
+              }
+              const model = this.modelIdentityForTimeout(active, node);
+              if (model) {
+                this.receiptStore.patchRun(active.run.id, {
+                  appendProviderAttempts: [{
+                    at: new Date().toISOString(),
+                    taskId: node.runTaskId ?? node.id,
+                    attemptIndex: 1,
+                    provider: model.provider,
+                    model: model.model,
+                    outcome: "timeout",
+                    durationMs: Date.now() - stageStart,
+                    costUsd: 0,
+                    errorMsg: msg,
+                  }],
+                }).catch(() => undefined);
+              }
               this.persistReceiptCheckpoint(active, {
                 at: new Date().toISOString(),
                 type: "worker_step",
@@ -5000,7 +5302,7 @@ export class Coordinator {
                   cancelledGenerationId: node.runTaskId ?? null,
                   workerType: node.workerType,
                   nodeId: node.id,
-                  stageTimeoutSec: this.config.maxStageTimeoutSec,
+                  stageTimeoutSec,
                   classification: `${node.workerType}_timeout`,
                 },
               }).catch(() => undefined);
@@ -5410,6 +5712,68 @@ export class Coordinator {
     };
   }
 
+  private isBuilderNoEffectiveFailureMessage(message: string): boolean {
+    return (
+      /builder_no_effective_change/i.test(message) ||
+      /content_identical_output/i.test(message) ||
+      /no effective source change/i.test(message) ||
+      /no effective file changes/i.test(message) ||
+      /byte-identical/i.test(message) ||
+      /empty diff/i.test(message) ||
+      /guard-empty-diff/i.test(message)
+    );
+  }
+
+  private isTerminalBuilderNoEffective(result: WorkerResult): boolean {
+    return (
+      result.workerType === "builder" &&
+      !result.success &&
+      result.issues.some((issue) => this.isBuilderNoEffectiveFailureMessage(issue.message))
+    );
+  }
+
+  private recordStructuredFailure(
+    active: ActiveRun,
+    failureReason: StructuredFailureReason,
+    blockedStage: NonNullable<RunReceipt["blockedStage"]>,
+    evidence: readonly string[],
+    nextAllowedActions: readonly string[],
+  ): void {
+    active.structuredFailureReason = failureReason;
+    active.blockedStage = blockedStage;
+    active.nextAllowedActions = nextAllowedActions;
+    active.rawFailureEvidence = evidence;
+    active.run.failureReason = failureReason;
+  }
+
+  private recordBuilderNoEffectiveFailure(active: ActiveRun, evidence: readonly string[]): void {
+    this.recordStructuredFailure(
+      active,
+      "builder_no_effective_change",
+      "builder",
+      evidence,
+      ["choose_different_target", "rewrite_operation", "retry_different_model", "cancel"],
+    );
+  }
+
+  private modelIdentityForTimeout(active: ActiveRun, node: TaskNode): { provider: string; model: string } | null {
+    try {
+      const config = loadModelConfigFromDisk(active.sourceRepo);
+      if (node.workerType === "critic") {
+        const head = resolveAssignmentChain(config.critic)[0];
+        return head ? { provider: head.provider, model: head.model } : null;
+      }
+      if (node.workerType === "builder") {
+        const tier = node.assignedTier ?? "standard";
+        const head = resolveAssignmentChain(config.builderTiers?.[tier] ?? config.builder)[0];
+        return head ? { provider: head.provider, model: head.model } : null;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
   private async dispatchNode(
     active: ActiveRun,
     node: TaskNode
@@ -5588,7 +5952,11 @@ export class Coordinator {
     );
 
     const recentContext = this.resolveRecentContext(active, node);
-    const assignment: WorkerAssignment = buildDispatchAssignment({
+    const nodeAtomic = node.workerType === "builder"
+      ? this.atomicStepFromNode(node)
+      : null;
+    const assignment: WorkerAssignment = {
+      ...buildDispatchAssignment({
       decision: routingDecision,
       task: runTask,
       intent,
@@ -5606,7 +5974,9 @@ export class Coordinator {
       rehearsalFeedback: node.workerType === "builder" ? active.rehearsalFeedback : undefined,
       buildAssignment: (decision, task, intent, context, upstreamResults) =>
         this.trustRouter.buildAssignment(decision, task, intent, context, upstreamResults),
-    });
+      }),
+      ...(nodeAtomic ? { atomicBuilder: nodeAtomic } : {}),
+    };
     // Clear rehearsal feedback after it's been consumed by this dispatch.
     if (node.workerType === "builder" && active.rehearsalFeedback) {
       active.rehearsalFeedback = undefined;
@@ -5715,7 +6085,7 @@ export class Coordinator {
     // minimal patch and we synthesize a successful BuilderResult.
     // Otherwise we fall through to worker.execute() with the brief.
     let deterministic: DeterministicBuilderResult | null = null;
-    let result: WorkerResult;
+    let result: WorkerResult | null = null;
     if (node.workerType === "builder") {
       try {
         deterministic = await tryDeterministicBuilder({
@@ -5794,6 +6164,22 @@ export class Coordinator {
         originalContent: a.transform.originalContent,
         content: a.transform.updatedContent,
       }));
+      let atomicFailure: string | null = null;
+      for (const change of changes) {
+        const applied = appliedFiles.find((candidate) => candidate.file === change.path);
+        const deterministicAtomic = {
+          file: change.path,
+          operation: applied?.transform.transformType ?? nodeAtomic?.operation ?? "deterministic modify",
+          expectedDiffShape: applied?.transform.insertedSnippetSummary
+            ? `deterministic ${applied.transform.transformType}: ${applied.transform.insertedSnippetSummary}`
+            : `deterministic ${applied?.transform.transformType ?? "modify"} diff for ${change.path}`,
+        };
+        const atomicResult = validateAtomicDiff(deterministicAtomic, [change]);
+        if (!atomicResult.ok) {
+          atomicFailure = `Atomic Builder validation failed for deterministic transform ${change.path}: ${atomicResult.reason}`;
+          break;
+        }
+      }
       const summaryContract = {
         file: appliedFiles[0]?.file ?? "",
         scopeFiles: appliedFiles.map((a) => a.file),
@@ -5809,7 +6195,7 @@ export class Coordinator {
         rationale: a.transform.notes,
         alternatives: ["Fall back to LLM Builder"],
       }));
-      result = {
+      result = atomicFailure ? syntheticFailure(atomicFailure) : {
         workerType: "builder",
         taskId: runTask.id,
         success: true,
@@ -5834,26 +6220,29 @@ export class Coordinator {
         assumptions: [],
         durationMs: 1,
       };
-      this.emit({
-        type: "builder_complete",
-        payload: {
-          runId: active.run.id,
-          taskId: node.id,
-          file: appliedFiles[0]?.file,
-          path: appliedFiles[0]?.file,
-          operation: "modify",
-          model: deterministicModel,
-          provider: "deterministic",
-          costUsd: 0,
-          tokensIn: 0,
-          tokensOut: 0,
-          fellBack: false,
-          sectionMode: false,
-          confidence: 0.95,
-          deterministic: true,
-          diff: changes.map((c) => c.diff).join("\n"),
-        },
-      });
+      if (!atomicFailure) {
+        this.emit({
+          type: "builder_complete",
+          payload: {
+            runId: active.run.id,
+            taskId: node.id,
+            file: appliedFiles[0]?.file,
+            path: appliedFiles[0]?.file,
+            operation: nodeAtomic?.operation ?? "modify",
+            atomic: nodeAtomic,
+            model: deterministicModel,
+            provider: "deterministic",
+            costUsd: 0,
+            tokensIn: 0,
+            tokensOut: 0,
+            fellBack: false,
+            sectionMode: false,
+            confidence: 0.95,
+            deterministic: true,
+            diff: changes.map((c) => c.diff).join("\n"),
+          },
+        });
+      }
     } else {
       if (deterministic && deterministic.kind === "skipped" && deterministic.skipped.length > 0) {
         const skipSummary = deterministic.skipped
@@ -5877,8 +6266,43 @@ export class Coordinator {
             })),
           },
         });
+        if (node.workerType === "builder") {
+          const requiredFiles = this.requiredBuilderDeliverables(active, node);
+          const priorChanges = active.changes.filter((change) =>
+            requiredFiles.includes(this.normalizeRunPath(change.path)),
+          );
+          if (requiredFiles.length === 0 || priorChanges.length === requiredFiles.length) {
+            result = {
+              workerType: "builder",
+              taskId: runTask.id,
+              success: true,
+              output: {
+                kind: "builder",
+                changes: priorChanges,
+                decisions: [{
+                  description: requiredFiles.length === 0
+                    ? "Atomic deterministic step is reference-only"
+                    : "Atomic deterministic step already satisfied by an earlier file operation",
+                  rationale: deterministic.reason,
+                  alternatives: ["Fall back to LLM Builder"],
+                }],
+                needsCriticReview: false,
+              },
+              issues: [],
+              cost: { model: "deterministic/already-satisfied", inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+              confidence: 0.95,
+              touchedFiles: priorChanges.map((change) => ({ path: change.path, operation: change.operation })),
+              assumptions: [],
+              durationMs: 1,
+            };
+          } else {
+            result = null;
+          }
+        } else {
+          result = null;
+        }
       }
-      try {
+      if (!result) try {
         result = await worker.execute(assignment);
         console.log(`[coordinator] dispatchNode: ${node.workerType} returned success=${result.success} confidence=${result.confidence} touchedFiles=${result.touchedFiles.length} issues=${result.issues.length}`);
       } catch (err) {
@@ -5886,6 +6310,12 @@ export class Coordinator {
         console.error(`[coordinator] dispatchNode: ${node.workerType} EXECUTE THREW — ${errMessage}`);
         if (err instanceof Error && err.stack) {
           console.error(`[coordinator] dispatchNode: stack:\n${err.stack}`);
+        }
+        if (
+          node.workerType === "builder" &&
+          (err instanceof BuilderAttemptError || this.isBuilderNoEffectiveFailureMessage(errMessage))
+        ) {
+          this.recordBuilderNoEffectiveFailure(active, [errMessage]);
         }
         result = syntheticFailure(`Worker threw: ${errMessage}`);
       }
@@ -5905,6 +6335,13 @@ export class Coordinator {
       let currentTier = assignment.tier;
       while (!result.success && active.weakOutputRetries < 2) {
         const errMsg = result.issues[0]?.message ?? "";
+        if (this.isTerminalBuilderNoEffective(result)) {
+          console.warn(
+            `[coordinator] weak-output recovery: builder no-effective-change is terminal for this attempt — no retry`,
+          );
+          this.recordBuilderNoEffectiveFailure(active, [errMsg]);
+          break;
+        }
         const finding = classifyWeakOutput({ builderError: errMsg, changeCount: 0 });
         if (!finding.retriable || finding.reason === "unknown") {
           console.log(
@@ -6088,54 +6525,6 @@ export class Coordinator {
             `${noEffectiveFiles.join(", ")}`,
           );
 
-          if (active.weakOutputRetries < 2) {
-            active.weakOutputRetries += 1;
-            const retryHint =
-              `Your previous output produced no effective diff. It reported required file(s), but the workspace ` +
-              `content did not change. Required files: ${requiredFiles.join(", ")}. Retry now with concrete ` +
-              `source and test changes in every required file: ${noEffectiveFiles.join(", ")}. Do not return ` +
-              `content-identical output.`;
-            const retryBrief = briefWithRetryHint(active.implementationBrief, retryHint);
-            active.implementationBrief = retryBrief;
-            this.receiptStore.patchRun(active.run.id, {
-              implementationBrief: briefToReceiptJson(retryBrief),
-            }).catch(() => {});
-            this.emit({
-              type: "system_event",
-              payload: {
-                runId: active.run.id,
-                checkpointLabel: "content_identical_output_retry",
-                summary: `retry builder for no-effective required file(s): ${noEffectiveFiles.join(", ")}`,
-              },
-            });
-
-            try {
-              const retryResult = await worker.execute({
-                ...assignment,
-                implementationBrief: retryBrief,
-              });
-              await this.persistProviderAttempts(active, runTask.id, retryResult);
-              result = retryResult;
-              missingRequired = this.missingRequiredBuilderDeliverables(active, node, result);
-              noEffectiveFiles = missingRequired.length === 0
-                ? await this.noEffectiveRequiredBuilderDeliverables(active, node, result)
-                : [];
-              console.log(
-                `[coordinator] content-identical retry attempt=${retryBrief.attempt} ` +
-                `success=${result.success} remaining=${noEffectiveFiles.join(", ") || "none"} ` +
-                `missing=${missingRequired.join(", ") || "none"}`,
-              );
-            } catch (retryErr) {
-              const rmsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-              result = syntheticFailure(
-                `content_identical_output: retry failed while attempting concrete required change(s) ` +
-                `${noEffectiveFiles.join(", ")}: ${rmsg}`,
-              );
-              missingRequired = this.missingRequiredBuilderDeliverables(active, node, result);
-              noEffectiveFiles = [];
-            }
-          }
-
           if (result.success && missingRequired.length > 0) {
             result = this.missingRequiredBuilderFailure(
               result,
@@ -6148,6 +6537,7 @@ export class Coordinator {
               requiredFiles,
               noEffectiveFiles,
             );
+            this.recordBuilderNoEffectiveFailure(active, [result.issues[0]?.message ?? "content_identical_output"]);
           }
         }
       }
@@ -6434,7 +6824,44 @@ export class Coordinator {
       const result = active.workerResults.find(
         (wr) => wr.taskId === node.runTaskId || wr.taskId === node.id,
       );
-      const failureSignals = result?.issues?.map((i) => i.message) ?? [];
+      const runTask = active.run.tasks.find((task) => task.id === node.runTaskId || task.id === node.id);
+      const failureSignals = [
+        ...(result?.issues?.map((i) => i.message) ?? []),
+        ...(runTask?.result?.issues?.map((i) => i.message) ?? []),
+      ];
+      if (node.workerType === "builder" && active.structuredFailureReason === "builder_timeout") {
+        console.warn(
+          `[coordinator] attemptRecovery: builder timeout is terminal for automatic recovery — not re-dispatching node ${node.id.slice(0, 6)}`,
+        );
+        continue;
+      }
+      if (node.workerType === "critic" && active.structuredFailureReason === "critic_timeout") {
+        console.warn(
+          `[coordinator] attemptRecovery: critic timeout is terminal for same-model recovery — not re-dispatching node ${node.id.slice(0, 6)}`,
+        );
+        continue;
+      }
+      if (node.workerType === "builder" && failureSignals.some((m) => this.isBuilderNoEffectiveFailureMessage(m))) {
+        console.warn(
+          `[coordinator] attemptRecovery: builder no-effective-change is terminal — not re-dispatching node ${node.id.slice(0, 6)}`,
+        );
+        this.recordBuilderNoEffectiveFailure(active, failureSignals);
+        continue;
+      }
+      if (node.workerType === "builder" && failureSignals.some((m) => /\[builder_timeout\]|builder_timeout/i.test(m))) {
+        console.warn(
+          `[coordinator] attemptRecovery: builder timeout is terminal for automatic recovery — not re-dispatching node ${node.id.slice(0, 6)}`,
+        );
+        this.recordStructuredFailure(active, "builder_timeout", "builder", failureSignals, ["retry_different_model", "rewrite_operation", "cancel"]);
+        continue;
+      }
+      if (node.workerType === "critic" && failureSignals.some((m) => /\[critic_timeout\]|critic_timeout/i.test(m))) {
+        console.warn(
+          `[coordinator] attemptRecovery: critic timeout is terminal for same-model recovery — not re-dispatching node ${node.id.slice(0, 6)}`,
+        );
+        this.recordStructuredFailure(active, "critic_timeout", "critic", failureSignals, ["retry_with_fallback", "retry_different_model", "cancel"]);
+        continue;
+      }
       const recoveryResult = {
         success: false,
         failureSignals,
@@ -6693,6 +7120,26 @@ export class Coordinator {
       });
     }
 
+    if (result.filesWithoutDiffLines.length > 0) {
+      findings.push({
+        source: "change-set-gate",
+        severity: "critical",
+        code: "git-diff:no-real-lines",
+        message: `${result.filesWithoutDiffLines.length} expected file(s) changed by status but have no concrete diff lines: ${result.filesWithoutDiffLines.slice(0, 5).join(", ")}${result.filesWithoutDiffLines.length > 5 ? "…" : ""}`,
+        files: result.filesWithoutDiffLines,
+      });
+    }
+
+    if (result.actualChangedFiles.length > 0 && result.changedLineCount <= 0) {
+      findings.push({
+        source: "change-set-gate",
+        severity: "critical",
+        code: "git-diff:empty-effective-diff",
+        message: "Git diff reported changed files but zero added/deleted diff lines; refusing to approve an empty effective patch.",
+        files: result.actualChangedFiles,
+      });
+    }
+
     if (result.undeclaredChanges.length > 0) {
       findings.push({
         source: "change-set-gate",
@@ -6723,6 +7170,26 @@ export class Coordinator {
     }
 
     return findings;
+  }
+
+  private approvalDiffFindings(changes: readonly FileChange[]): MergeFinding[] {
+    const truth = validateApprovalChanges(changes);
+    if (truth.ok) {
+      return [{
+        source: "coordinator",
+        severity: "advisory",
+        code: "approval-diff:confirmed",
+        message: `Approval diff confirmed: ${truth.reason}`,
+        files: [...truth.changedFiles],
+      }];
+    }
+    return [{
+      source: "coordinator",
+      severity: "critical",
+      code: "approval-diff:invalid",
+      message: `Approval blocked: ${truth.reason}`,
+      files: [...truth.changedFiles],
+    }];
   }
 
   /**
@@ -6918,6 +7385,35 @@ export class Coordinator {
 
     const decidedBy = opts?.decidedBy ?? "human";
     const reason = opts?.reason ?? "Human approved final diff for workspace commit and source-promotion eligibility";
+    const approvalDiffTruth = validateApprovalChanges(active.changes);
+    if (!approvalDiffTruth.ok) {
+      console.warn(
+        `[coordinator] approveRun BLOCKED for ${runId} — invalid approval diff: ${approvalDiffTruth.reason}`,
+      );
+      active.run.failureReason = "builder_no_effective_change";
+      advancePhase(active.run, "failed");
+      await this.rollbackChanges(active, {
+        action: "block",
+        findings: [],
+        critical: [{
+          source: "coordinator",
+          severity: "critical",
+          code: "approval-diff:invalid",
+          message: approvalDiffTruth.reason,
+        }],
+        advisory: [],
+        primaryBlockReason: approvalDiffTruth.reason,
+        summary: `Approval blocked: ${approvalDiffTruth.reason}`,
+      });
+      this.pendingApproval.delete(runId);
+      await this.receiptStore.patchRun(runId, {
+        status: "VERIFIED_FAIL",
+        taskSummary: `Approval blocked: ${approvalDiffTruth.reason}`,
+        completedAt: new Date().toISOString(),
+        appendErrors: [`builder_no_effective_change: ${approvalDiffTruth.reason}`],
+      });
+      return { ok: false, code: "approval_diff_invalid", error: approvalDiffTruth.reason };
+    }
     console.log(`[coordinator] APPROVAL RECEIVED for run ${runId} (decidedBy=${decidedBy}) — committing...`);
     this.pendingApproval.delete(runId);
     active.diffApproval = this.buildDiffApprovalReceipt(
@@ -6945,7 +7441,15 @@ export class Coordinator {
         let patchArtifact: PatchArtifact | null = null;
         if (active.workspace) {
           try {
-            patchArtifact = await generatePatch(active.workspace);
+            patchArtifact = {
+              ...this.buildCanonicalPatchArtifact(active),
+              commitSha,
+            };
+            this.logDiffLifecycle("approval", patchArtifact.diff);
+            const patchTruth = validateUnifiedDiff(patchArtifact.diff);
+            if (!patchTruth.ok) {
+              throw new Error(`approval patch generation produced an invalid diff: ${patchTruth.reason}`);
+            }
             active.patchArtifact = patchArtifact;
             console.log(
               `[coordinator] approval patch artifact: ${patchArtifact.changedFiles.length} file(s), ` +
@@ -8452,7 +8956,15 @@ export class Coordinator {
    * actual decision; this is a per-run convenience wrapper.
    */
   selectBestRunCandidate(runId: string): Candidate | null {
-    return selectBestCandidate(this.getRunCandidates(runId));
+    return selectBestCandidate(
+      this.getRunCandidates(runId).filter((candidate) =>
+        candidate.status === "passed" &&
+        candidate.patchArtifact !== null &&
+        typeof candidate.patchArtifact.diff === "string" &&
+        candidate.patchArtifact.diff.trim().length > 0 &&
+        !/AEDIS_BLOCKER:/i.test(candidate.patchArtifact.diff),
+      ),
+    );
   }
 
   /**
@@ -8826,11 +9338,78 @@ export class Coordinator {
           return inScope;
         })
       : [...incoming];
-    if (result.output.kind === "builder") {
-      active.changes.push(...filtered);
-    } else {
-      active.changes = filtered;
+    const normalized = filtered.map((change) => this.normalizeChangeDiff(change));
+    const priorTruth = buildCanonicalDiff(active.changes);
+    if (
+      result.output.kind === "integrator" &&
+      active.changes.length > 0 &&
+      priorTruth.ok &&
+      normalized.length === 0
+    ) {
+      const msg =
+        `builder_no_effective_change: canonical diff disappeared at integrator stage ` +
+        `(previous length=${priorTruth.diff.length})`;
+      this.recordBuilderNoEffectiveFailure(active, [msg]);
+      throw new Error(msg);
     }
+    const truth = buildCanonicalDiff(normalized);
+    this.logDiffLifecycle(result.output.kind, truth.diff);
+    if (normalized.length > 0 && !truth.ok) {
+      const msg = `builder_no_effective_change: canonical diff invalid at ${result.output.kind} stage (${truth.reason})`;
+      this.recordBuilderNoEffectiveFailure(active, [msg]);
+      throw new Error(msg);
+    }
+    if (result.output.kind === "builder") {
+      active.changes.push(...normalized);
+    } else {
+      active.changes = normalized;
+    }
+  }
+
+  private normalizeChangeDiff(change: FileChange): FileChange {
+    const diff = canonicalDiffForChange(change);
+    return { ...change, diff };
+  }
+
+  private buildCanonicalPatchArtifact(active: ActiveRun): PatchArtifact {
+    const canonical = buildCanonicalDiff(active.changes);
+    if (!canonical.ok) {
+      throw new Error(`canonical approval diff invalid: ${canonical.reason}`);
+    }
+    return {
+      diff: canonical.diff,
+      changedFiles: [...canonical.changedFiles],
+      commitSha: null,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private logDiffLifecycle(stage: string, diff: string | null | undefined): void {
+    console.log(`[diff] stage=${stage} length=${String(diff ?? "").length}`);
+  }
+
+  private buildUnifiedDiff(filePath: string, originalContent: string, updatedContent: string): string {
+    const originalLines = originalContent.split(/\r?\n/);
+    const updatedLines = updatedContent.split(/\r?\n/);
+    const max = Math.max(originalLines.length, updatedLines.length);
+    const body: string[] = [];
+    for (let i = 0; i < max; i++) {
+      const before = originalLines[i];
+      const after = updatedLines[i];
+      if (before === after) {
+        if (before !== undefined) body.push(` ${before}`);
+        continue;
+      }
+      if (before !== undefined) body.push(`-${before}`);
+      if (after !== undefined) body.push(`+${after}`);
+    }
+    return [
+      `diff --git a/${filePath} b/${filePath}`,
+      `--- a/${filePath}`,
+      `+++ b/${filePath}`,
+      `@@ -1,${originalLines.length} +1,${updatedLines.length} @@`,
+      ...body,
+    ].join("\n");
   }
 
   private async persistReceiptCheckpoint(
@@ -8855,6 +9434,7 @@ export class Coordinator {
       changesSummary: active.changes.map((change) => ({
         path: change.path,
         operation: change.operation,
+        diff: change.diff,
       })),
       runSummary: getRunSummary(active.run),
       graphSummary: getGraphSummary(active.graph),
@@ -8966,6 +9546,7 @@ export class Coordinator {
       changesSummary: active.changes.map((change) => ({
         path: change.path,
         operation: change.operation,
+        diff: change.diff,
       })),
       verificationResults: {
         final: receipt.verificationReceipt,
@@ -9216,6 +9797,11 @@ export class Coordinator {
         : null,
       evaluation: null,
       patchArtifact: active.patchArtifact ?? null,
+      changes: active.changes.map((change) => ({
+        path: change.path,
+        operation: change.operation,
+        diff: change.diff ?? "",
+      })),
       workspaceCleanup: active.workspaceCleanup ?? null,
       rollback: active.rollbackOutcome ?? null,
       providerLaneTruth: active.providerLaneTruth ?? null,
@@ -9244,6 +9830,10 @@ export class Coordinator {
       executionModeDetail: active.executionModeResult ?? null,
       garbageCheck: active.garbageCheckResult ?? null,
       builderAttempts: [],
+      failureReason: active.structuredFailureReason ?? null,
+      blockedStage: active.blockedStage ?? null,
+      nextAllowedActions: active.nextAllowedActions ?? [],
+      rawFailureEvidence: active.rawFailureEvidence ?? [],
       // Quality evidence from Builder quality scorer, gates, and tuner
       ...this.extractQualityEvidence(active.workerResults),
     };
@@ -9964,6 +10554,13 @@ interface ActiveRun {
   /** Files or paths considered and dropped during planning/context selection. */
   rejectedCandidates: RejectedCandidate[];
   /**
+   * Targets added by deterministic coordinator planning after the
+   * charter/scout pass, such as existing test pairs for implementation
+   * files. These are allowed through the atomic dispatch guard because
+   * they came from a bounded planner rule, not from Builder output.
+   */
+  plannerAuthorizedTargets: string[];
+  /**
    * Defense-in-depth tripwire: paths the user named in the prompt that
    * existed on disk but fell out of the final deliverable manifest after
    * `prepareDeliverablesForGraph`. Populated by Phase 4.6 of the prepare
@@ -10018,6 +10615,11 @@ interface ActiveRun {
   runInvocationContext: RunInvocationContext;
   /** GitDiffVerifier result from phase 9d. Null when not run. */
   gitDiffResult: GitDiffResult | null;
+  /** Structured terminal failure state consumed by task-loop/UI. */
+  structuredFailureReason?: StructuredFailureReason | null;
+  blockedStage?: "builder" | "critic" | "verifier" | "rollback" | null;
+  nextAllowedActions?: readonly string[];
+  rawFailureEvidence?: readonly string[];
   /** Promotion-ready patch artifact. Generated after successful execution. */
   patchArtifact: PatchArtifact | null;
   /** Workspace cleanup result. Populated in finally block. */

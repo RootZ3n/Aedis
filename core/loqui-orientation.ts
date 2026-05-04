@@ -225,7 +225,7 @@ export function buildOrientation(snapshot: OrientationStateSnapshot): Orientatio
         whatAedisWillDo: willDoLines,
         whatAedisWillNotDo: baseWillNotDo,
         whatYouCanDoNext: [
-          "Watch the worker grid and the live log to see progress.",
+          "Watch the main status card and current diff for progress.",
           "When the run finishes, review the proposed diff and approve or reject.",
           "Use Cancel on the task plan to stop early — Aedis halts after the current subtask.",
         ],
@@ -297,8 +297,8 @@ export function buildOrientation(snapshot: OrientationStateSnapshot): Orientatio
         whatAedisWillDo: willDoLines,
         whatAedisWillNotDo: baseWillNotDo,
         whatYouCanDoNext: [
-          `Plan ${shortId(snapshot.highlightedPlan.taskPlanId)} is ready to start.`,
-          "Click Start on the task plan panel to begin the first subtask.",
+          `Plan ${shortId(snapshot.highlightedPlan.taskPlanId)} is ready.`,
+          "Aedis starts safe work automatically and pauses only for clarification, safety, or review.",
           "Aedis will pause for approval before any source-repo change is promoted.",
         ],
       },

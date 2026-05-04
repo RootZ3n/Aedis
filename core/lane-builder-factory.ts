@@ -51,7 +51,21 @@ export function isSupportedProvider(p: string): p is Provider {
 
 const SUPPORTED_MODELS_BY_PROVIDER: Readonly<Record<Provider, readonly string[]>> = Object.freeze({
   local: ["local", "integration-judge", "verification"],
-  ollama: ["qwen3.5:9b"],
+  ollama: [
+    "qwen3.5:9b",
+    "qwen3.5:4b",
+    "qwen3.5:0.8b",
+    "qwen3.5:27b",
+    "qwen3-coder:30b",
+    "qwen2.5-coder:3b",
+    "deepseek-coder-v2:16b",
+    "granite4.1:30b",
+    "gemma4:26b",
+    "ibm/granite4.1:8b",
+    "gemma4:e4b",
+    "qwen3.6:latest",
+    "laguna-xs.2:latest",
+  ],
   openrouter: [
     "xiaomi/mimo-v2.5",
     "xiaomi/mimo-v2-pro",

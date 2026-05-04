@@ -204,7 +204,7 @@ export const taskPlanRoutes: FastifyPluginAsync = async (fastify) => {
           currentSubtaskId: null,
           progress: { completed: 0, total: plan.subtasks.length },
           stopReason: "",
-          message: `Task plan created with ${plan.subtasks.length} subtask(s)`,
+          message: `Task plan created with ${plan.subtasks.length} subtask(s). Aedis will start safe work automatically.`,
           updatedAt: plan.updatedAt,
         },
       });

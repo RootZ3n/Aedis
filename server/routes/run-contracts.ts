@@ -96,7 +96,8 @@ export interface RunDetailResponse {
   readonly submittedAt: string;
   readonly completedAt: string | null;
   readonly receipt: unknown | null;
-  readonly filesChanged: readonly { path: string; operation: string }[];
+  readonly filesChanged: readonly { path: string; operation: string; diff?: string }[];
+  readonly changes: readonly { path: string; operation: string; diff: string }[];
   readonly summary: {
     readonly classification: string | null;
     readonly headline: string;

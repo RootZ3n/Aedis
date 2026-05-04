@@ -123,6 +123,16 @@ test("router: build intent → action=build, effectivePrompt is the raw input", 
   assert.equal(r.effectivePrompt, "build a capability registry");
 });
 
+test("router: explicit single-file edit routes to build, not answer prose", () => {
+  const r = routeLoquiInput({
+    input: "In src/message.ts, change hello to hello from test 3",
+  });
+  assert.equal(r.action, "build");
+  assert.equal(r.intent, "build");
+  assert.ok(r.confidence >= 0.4, `expected strong enough build confidence, got ${r.confidence}`);
+  assert.ok(r.signals.some((signal) => signal === "build:explicit-edit"));
+});
+
 test("router: question intent → action=answer, label=Answering", () => {
   const r = routeLoquiInput({ input: "what files handle auth?" });
   assert.equal(r.action, "answer");

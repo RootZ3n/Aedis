@@ -253,7 +253,7 @@ test("buildOrientation: no plans → variant=no-plans, suggests Create Plan", ()
   assert.ok(ids.includes("create-task-plan"));
 });
 
-test("buildOrientation: pending plan → variant=plan-pending, mentions Start", () => {
+test("buildOrientation: pending plan → variant=plan-pending, mentions automatic start", () => {
   const res = buildOrientation(
     snapshotDefault({
       planCount: 1,
@@ -266,7 +266,7 @@ test("buildOrientation: pending plan → variant=plan-pending, mentions Start", 
   );
   assert.equal(res.variant, "plan-pending");
   const next = res.sections.whatYouCanDoNext.join(" ");
-  assert.match(next, /Start/);
+  assert.match(next, /starts safe work automatically/);
 });
 
 test("buildOrientation: paused plan → variant=plan-paused, mentions approval and Continue", () => {

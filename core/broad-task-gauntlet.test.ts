@@ -385,7 +385,7 @@ test("gauntlet-3: multi-file scope produces multi-stage plan with wave-assigned 
   }
 });
 
-test("gauntlet-4: empty-diff recovery uses attempt 2 on the same tier, then attempt 3 on a stronger tier", async () => {
+test("gauntlet-4: builder empty-diff is terminal and does not enter weak-output retries", async () => {
   const repo = makeRepo({
     "core/util.ts": "export const x = 1;\n",
     ".aedis/model-config.json": JSON.stringify({
@@ -407,22 +407,16 @@ test("gauntlet-4: empty-diff recovery uses attempt 2 on the same tier, then atte
     const { coordinator } = buildHarness(repo, builder);
     await coordinator.submit({ input: "modify core/util.ts to export 2" });
 
-    assert.ok(builder.attempts >= 3, `builder should have been called three times; got ${builder.attempts}`);
+    assert.equal(builder.attempts, 1, `builder no-op must stop after one call; got ${builder.attempts}`);
     const briefs = builder.seenBriefs;
     assert.equal(briefs[0].attempt, 1);
     assert.equal(briefs[0].retryHint, null);
-    assert.equal(briefs[1].attempt, 2, "second attempt must have bumped attempt counter");
-    assert.ok(briefs[1].retryHint, "retry must carry a hint");
-    assert.match(briefs[1].retryHint ?? "", /concrete edit|NO change|empty/i);
-    assert.equal(briefs[1].tier, briefs[0].tier, "second attempt should stay on the same tier");
-    assert.equal(briefs[2].attempt, 3, "third attempt must exist when a stronger tier is configured");
-    assert.equal(briefs[2].tier, "premium", "third attempt should escalate to the stronger tier");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
 });
 
-test("gauntlet-5: weak-output retry cap is 2 extra attempts — a persistently empty builder eventually fails honestly", async () => {
+test("gauntlet-5: persistent empty builder stops immediately with structured failure", async () => {
   const repo = makeRepo({
     "core/util.ts": "export const x = 1;\n",
     ".aedis/model-config.json": JSON.stringify({
@@ -440,11 +434,12 @@ test("gauntlet-5: weak-output retry cap is 2 extra attempts — a persistently e
     const { coordinator } = buildHarness(repo, builder);
     const receipt = await coordinator.submit({ input: "modify core/util.ts" });
 
-    assert.ok(builder.attempts >= 3, `builder should reach the final stronger-tier retry; got ${builder.attempts}`);
+    assert.equal(builder.attempts, 1, `builder no-op must not retry automatically; got ${builder.attempts}`);
     for (const b of builder.seenBriefs) {
       assert.ok(b.attempt <= 3, `attempt must be capped at 3 per dispatch; saw ${b.attempt}`);
     }
     assert.notEqual(receipt.verdict, "success", "run should not succeed when all attempts fail");
+    assert.equal(receipt.failureReason, "builder_no_effective_change");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -562,7 +557,7 @@ test("missing-required-deliverable: successful source+test output remains green 
   }
 });
 
-test("content-identical-required: source+test request retries when Builder returns no effective diff", async () => {
+test("content-identical-required: source+test no-effective Builder output stops before repair", async () => {
   const repo = makeRepo({
     "core/run-summary.ts": "export function summary() { return 'old'; }\n",
     "core/run-summary.test.ts": "import test from 'node:test';\n",
@@ -583,18 +578,15 @@ test("content-identical-required: source+test request retries when Builder retur
         "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
     });
 
-    assert.ok(builder.attempts >= 2, `Builder should retry after content-identical output; got ${builder.attempts}`);
-    const retryHint = builder.seenBriefs.find((brief) => /no effective diff/i.test(brief.retryHint ?? ""))?.retryHint ?? "";
-    assert.match(retryHint, /no effective diff/i);
-    assert.match(retryHint, /Required files/i);
-    assert.match(retryHint, /core\/run-summary\.(test\.)?ts/);
-    assert.doesNotMatch(JSON.stringify(receipt), /content_identical_output/);
+    assert.equal(builder.attempts, 1, `Builder no-effective output must not retry; got ${builder.attempts}`);
+    assert.equal(receipt.failureReason, "builder_no_effective_change");
+    assert.match(JSON.stringify(receipt.rawFailureEvidence ?? []), /content_identical_output/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
 });
 
-test("content-identical-required: retry succeeds with real source+test diff", async () => {
+test("content-identical-required: later valid output is not tried after terminal no-effective result", async () => {
   const repo = makeRepo({
     "core/run-summary.ts": "export function summary() { return 'old'; }\n",
     "core/run-summary.test.ts": "import test from 'node:test';\n",
@@ -612,14 +604,15 @@ test("content-identical-required: retry succeeds with real source+test diff", as
         "Refactor run-summary wording behavior across core/run-summary.ts and core/run-summary.test.ts, updating both files.",
     });
 
-    assert.ok(builder.attempts >= 2, "content-identical output should be retried");
-    assert.ok(
+    assert.equal(builder.attempts, 1, "content-identical output must stop before trying a later valid output");
+    assert.equal(receipt.failureReason, "builder_no_effective_change");
+    assert.equal(
       events.some((event) =>
         event.type === "system_event" &&
         event.payload.checkpointLabel === "content_identical_output_retry"),
-      "retry event should record content-identical recovery",
+      false,
+      "content-identical retry event must not be emitted",
     );
-    assert.doesNotMatch(JSON.stringify(receipt), /content_identical_output/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -645,7 +638,8 @@ test("content-identical-required: persistent no-effective Builder output fails c
     const failed = events.find((event) => event.type === "task_failed");
     assert.match(JSON.stringify(failed?.payload ?? {}), /content_identical_output/);
     assert.match(JSON.stringify(failed?.payload ?? {}), /core\/run-summary\.(test\.)?ts/);
-    assert.ok(builder.attempts >= 2, "Builder should retry once before final content-identical failure");
+    assert.equal(builder.attempts, 1, "Builder no-effective output must stop immediately");
+    assert.equal(receipt.failureReason, "builder_no_effective_change");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -818,7 +812,7 @@ test("gauntlet-11: context budget drops are recorded in rejectedCandidates befor
   }
 });
 
-test("gauntlet-12: broad backend discovery selects actionable files and dispatches a coordinated builder assignment", async () => {
+test("gauntlet-12: broad backend discovery selects actionable files and dispatches atomic builder assignments", async () => {
   const repo = makeRepo({
     "src/server.ts": "import { registerRoutes } from './router.js';\nexport function startServer() { return registerRoutes(); }\n",
     "src/router.ts": "export function registerRoutes() { return ['/models']; }\n",
@@ -833,12 +827,16 @@ test("gauntlet-12: broad backend discovery selects actionable files and dispatch
     });
 
     assert.ok(builder.seenBriefs.length >= 1, "builder should receive a prepared assignment");
-    const seen = builder.seenBriefs[0];
-    assert.ok(seen.targets.includes("src/server.ts"), `expected src/server.ts in ${JSON.stringify(seen.targets)}`);
-    assert.ok(seen.targets.includes("src/router.ts"), `expected src/router.ts in ${JSON.stringify(seen.targets)}`);
-    assert.ok(seen.contextTargets.includes("src/server.ts"));
-    assert.ok(seen.contextTargets.includes("src/router.ts"));
-    assert.equal(seen.targets.some((target) => !target.includes("/")), false, "builder targets must be repo-relative full paths");
+    const allTargets = new Set(builder.seenBriefs.flatMap((seen) => seen.targets));
+    const allContextTargets = new Set(builder.seenBriefs.flatMap((seen) => seen.contextTargets));
+    assert.ok(allTargets.has("src/server.ts"), `expected src/server.ts in ${JSON.stringify([...allTargets])}`);
+    assert.ok(allTargets.has("src/router.ts"), `expected src/router.ts in ${JSON.stringify([...allTargets])}`);
+    assert.ok(allContextTargets.has("src/server.ts"));
+    assert.ok(allContextTargets.has("src/router.ts"));
+    assert.equal([...allTargets].some((target) => !target.includes("/")), false, "builder targets must be repo-relative full paths");
+    for (const seen of builder.seenBriefs) {
+      assert.equal(seen.targets.length, 1, `atomic builder dispatch must target one file, got ${JSON.stringify(seen.targets)}`);
+    }
 
     const persisted = await receiptStore.getRun(receipt.runId);
     const brief = persisted?.implementationBrief as Record<string, unknown>;
@@ -865,14 +863,17 @@ test("gauntlet-13: basename prompts resolve to full repo-relative files before b
     });
 
     assert.ok(builder.seenBriefs.length >= 1, "builder should have been dispatched");
-    const seen = builder.seenBriefs[0];
     assert.deepEqual(
-      [...seen.targets].sort(),
+      [...new Set(builder.seenBriefs.flatMap((seen) => seen.targets))].sort(),
       ["src/router.ts", "src/server.ts"],
     );
+    const seen = builder.seenBriefs[0];
     assert.ok(seen.selectedPaths.includes("src/server.ts"));
     assert.ok(seen.selectedPaths.includes("src/router.ts"));
-    assert.equal(seen.targets.includes("scripts/server.ts"), false, "lower-ranked basename candidates must not leak into dispatch");
+    assert.equal(builder.seenBriefs.some((entry) => entry.targets.includes("scripts/server.ts")), false, "lower-ranked basename candidates must not leak into dispatch");
+    for (const entry of builder.seenBriefs) {
+      assert.equal(entry.targets.length, 1, `atomic builder dispatch must target one file, got ${JSON.stringify(entry.targets)}`);
+    }
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

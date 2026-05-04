@@ -56,6 +56,32 @@ function makeAssignment(projectRoot: string) {
   } as const;
 }
 
+test("BuilderWorker.canHandle throws when atomicBuilder.file is empty", () => {
+  // Defense-in-depth: even if the coordinator's pre-dispatch validator
+  // were bypassed, an empty atomicBuilder.file would otherwise satisfy
+  // canHandle's `targetFiles[0] === atomicBuilder.file` check (both
+  // empty) and silently dispatch. Builder must refuse here.
+  const projectRoot = mkdtempSync(join(tmpdir(), "aedis-builder-empty-"));
+  try {
+    const worker = new BuilderWorker({ projectRoot });
+    const assignment = {
+      ...makeAssignment(projectRoot),
+      task: {
+        ...makeAssignment(projectRoot).task,
+        targetFiles: [""],
+      },
+      atomicBuilder: { file: "", operation: "modify code", expectedDiffShape: "one localized hunk" },
+    };
+    assert.throws(
+      () => worker.canHandle(assignment as any),
+      /atomicBuilder\.file is empty/i,
+      "canHandle must throw on empty atomic file",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("BuilderWorker accepts multi-file assignments and builds a coordinated contract", () => {
   const projectRoot = mkdtempSync(join(tmpdir(), "aedis-builder-multi-"));
   try {

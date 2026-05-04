@@ -99,6 +99,14 @@ export interface Subtask {
   readonly blockerReason: string;
   /** Human suggestion for what to do next if this subtask is blocked / failed. */
   readonly nextRecommendedAction: string;
+  /** Structured failure reason copied from the run receipt when available. */
+  readonly failureReason?: string | null;
+  /** Pipeline stage that blocked the subtask when available. */
+  readonly blockedStage?: string | null;
+  /** Stable recovery actions the UI can render. */
+  readonly nextAllowedActions?: readonly string[];
+  /** Attempt signatures used to block identical automatic repairs. */
+  readonly failureSignatures?: readonly string[];
   /** ISO timestamp of first run start, or null. */
   readonly startedAt: string | null;
   /** ISO timestamp of terminal transition, or null. */

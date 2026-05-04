@@ -93,10 +93,10 @@ export interface ModelConfig {
 const DEFAULT_MODEL_CONFIG: ModelConfig = {
   scout: { model: "local", provider: "local" },
   builder: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
-  // No Anthropic in the hot path — see DOCTRINE.md. Per-repo
-  // `.aedis/model-config.json` is authoritative; this is only the
-  // empty-config fallback.
-  critic: { model: "qwen3.5:9b", provider: "ollama" },
+  // No Anthropic in the hot path — see DOCTRINE.md. Keep Critic on
+  // the same stable Mimo family as Builder until the pipeline is
+  // consistently producing valid one-file diffs.
+  critic: { model: "xiaomi/mimo-v2.5", provider: "openrouter" },
   verifier: { model: "local", provider: "local" },
   // Integrator is code-based (heuristic coherence checks, no LLM calls).
   // The model/provider fields exist for receipt completeness only.

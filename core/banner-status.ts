@@ -12,8 +12,7 @@
  * run's status (often "complete" from the prior task) used to leak
  * into the banner because the UI only overrode the banner for
  * paused/blocked/running plan states. A pending plan now becomes
- * `plan_ready` here, which the UI maps to a distinct teal banner +
- * Start CTA.
+ * `plan_ready` here, which the UI maps to a distinct ready banner.
  *
  * Pure function — no I/O, no time, no side effects. The HTML UI
  * inlines the same rule; tests pin the behavior here.
@@ -82,7 +81,7 @@ export function computeEffectiveBannerStatus(
 export function bannerStatusLabel(status: EffectiveBannerStatus): string {
   switch (status) {
     case "plan_ready":
-      return "PLAN READY";
+      return "READY";
     case "idle":
       return "IDLE";
     case "queued":
@@ -110,7 +109,7 @@ export function bannerStatusLabel(status: EffectiveBannerStatus): string {
 export function bannerStatusSubtitle(status: EffectiveBannerStatus): string {
   switch (status) {
     case "plan_ready":
-      return "Plan ready — waiting for start";
+      return "Plan ready";
     case "blocked":
       return "Operator action required";
     case "running":

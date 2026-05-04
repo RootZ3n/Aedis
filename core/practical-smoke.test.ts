@@ -48,11 +48,23 @@ import type { OperatorNarrativeEvent } from "./operator-narrative.js";
 class FixtureBuilderWorker extends AbstractWorker {
   readonly type: WorkerType = "builder";
   readonly name = "FixtureBuilder";
-  constructor(private readonly writes: readonly { path: string; content: string }[]) { super(); }
+  readonly seenTargetFiles: string[][] = [];
+  constructor(
+    private readonly writes: readonly { path: string; content: string }[],
+    private readonly expectedTargetFiles: readonly string[] | null = null,
+  ) { super(); }
   async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
     const { writeFile, readFile } = await import("node:fs/promises");
     const { resolve } = await import("node:path");
     const root = assignment.projectRoot ?? process.cwd();
+    this.seenTargetFiles.push([...assignment.task.targetFiles]);
+    if (this.expectedTargetFiles) {
+      assert.deepEqual(
+        [...assignment.task.targetFiles].sort(),
+        [...this.expectedTargetFiles].sort(),
+        "Builder must dispatch only to corrected target files",
+      );
+    }
     const changes = [];
     for (const w of this.writes) {
       const abs = resolve(root, w.path);
@@ -201,6 +213,7 @@ function makeFixtureRepo(): string {
   mkdirSync(join(dir, "src"), { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "smoke-fixture", version: "0.0.0" }), "utf-8");
   writeFileSync(join(dir, "README.md"), "# Smoke Fixture\n\nA tiny repo used by Aedis practical smoke tests.\n", "utf-8");
+  writeFileSync(join(dir, "src/message.ts"), "export const message = \"hello\";\n", "utf-8");
   writeFileSync(join(dir, "src/util.ts"), "export const util = 1;\n", "utf-8");
   writeFileSync(join(dir, "src/util.test.ts"), "// existing tests\n", "utf-8");
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
@@ -291,6 +304,73 @@ test("smoke: helper function add reaches approval with a visible diff", async ()
     );
     assert.equal(readFileSync(join(repo, "src/util.ts"), "utf-8"), before,
       "source repo must not be promoted without approval");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("smoke: Tier 1 explicit src/message.ts edit dispatches correct file and reaches approval", async () => {
+  const repo = makeFixtureRepo();
+  try {
+    const before = readFileSync(join(repo, "src/message.ts"), "utf-8");
+    const builder = new FixtureBuilderWorker([{
+      path: "src/message.ts",
+      content: before.replace("hello", "hello from aedis"),
+    }], ["src/message.ts"]);
+    const { coordinator, events } = buildSmoke(repo, builder);
+    const r = await coordinator.submit({
+      input: "In src/message.ts, change the exported message string from hello to hello from aedis. Only edit src/message.ts.",
+      projectRoot: repo,
+    });
+
+    readinessContract(
+      { runId: r.runId, filesModified: r.summary.filesModified, commitSha: r.commitSha },
+      events,
+      { expectDiff: true },
+    );
+    assert.deepEqual(builder.seenTargetFiles.at(-1), ["src/message.ts"]);
+    assert.equal(readFileSync(join(repo, "src/message.ts"), "utf-8"), before,
+      "source repo must not be promoted without approval");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("smoke: Tier 1 did-you-mean target correction reaches approval", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "aedis-smoke-correct-"));
+  try {
+    mkdirSync(join(repo, "packages", "demo", "src"), { recursive: true });
+    mkdirSync(join(repo, "web", "app", "components"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "target-correct", version: "0.0.0" }), "utf-8");
+    writeFileSync(join(repo, "packages", "demo", "src", "message.ts"), "export const message = \"hello\";\n", "utf-8");
+    writeFileSync(join(repo, "web", "app", "components", "MarkdownMessage.tsx"), "export function MarkdownMessage() { return null; }\n", "utf-8");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "smoke@aedis.local"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Aedis Smoke"], { cwd: repo });
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync("git", ["commit", "-qm", "init"], { cwd: repo });
+
+    const before = readFileSync(join(repo, "packages", "demo", "src", "message.ts"), "utf-8");
+    const builder = new FixtureBuilderWorker([{
+      path: "packages/demo/src/message.ts",
+      content: before.replace("hello", "hello from aedis"),
+    }], ["packages/demo/src/message.ts"]);
+    const { coordinator, events } = buildSmoke(repo, builder);
+    const r = await coordinator.submit({
+      input: "In src/message.ts, change the exported message string from hello to hello from aedis.",
+      projectRoot: repo,
+    });
+
+    readinessContract(
+      { runId: r.runId, filesModified: r.summary.filesModified, commitSha: r.commitSha },
+      events,
+      { expectDiff: true },
+    );
+    assert.deepEqual(builder.seenTargetFiles.at(-1), ["packages/demo/src/message.ts"]);
+    assert.ok(
+      builder.seenTargetFiles.every((targets) => !targets.includes("web/app/components/MarkdownMessage.tsx")),
+      "Builder must never dispatch to fuzzy MarkdownMessage match",
+    );
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

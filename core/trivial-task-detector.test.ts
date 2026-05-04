@@ -56,6 +56,26 @@ test("trivial-task-detector: formatting fix is trivial", () => {
   assert.equal(result.isTrivial, true);
 });
 
+test("trivial-task-detector: explicit single-file string value change is fast-path eligible", () => {
+  const result = isTrivialTask({
+    targets: ["src/message.ts"],
+    prompt: "In src/message.ts, change hello to hello from test 3",
+    scopeEstimate: "small",
+    riskSignals: [],
+  });
+  assert.equal(result.isTrivial, true, `expected string replacement to be trivial, got: ${result.reason}`);
+});
+
+test("trivial-task-detector: feature-like update-to prompt is not fast-path eligible", () => {
+  const result = isTrivialTask({
+    targets: ["src/auth.ts"],
+    prompt: "In src/auth.ts, update login to support oauth",
+    scopeEstimate: "small",
+    riskSignals: [],
+  });
+  assert.equal(result.isTrivial, false);
+});
+
 // ─── Non-trivial tasks: should NOT qualify ──────────────────────────
 
 test("trivial-task-detector: multi-file task is not trivial", () => {

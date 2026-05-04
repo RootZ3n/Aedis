@@ -188,7 +188,9 @@ class StubScout extends AbstractWorker {
 class StubCritic extends AbstractWorker {
   readonly type: WorkerType = "critic";
   readonly name = "StubCritic";
+  public callCount = 0;
   async execute(a: WorkerAssignment): Promise<WorkerResult> {
+    this.callCount += 1;
     return this.success(a, {
       kind: "critic", verdict: "approve", comments: [], suggestedChanges: [], intentAlignment: 0.9,
     }, { cost: this.zeroCost(), confidence: 0.9, touchedFiles: [], durationMs: 1 });
@@ -655,7 +657,9 @@ test("multi-step decomposition: rejectPlan removes pendingPlan without execution
 class HangingCritic extends AbstractWorker {
   readonly type: WorkerType = "critic";
   readonly name = "HangingCritic";
+  public callCount = 0;
   async execute(_a: WorkerAssignment): Promise<WorkerResult> {
+    this.callCount += 1;
     // Hang until the coordinator's stage-timeout setTimeout fires.
     // The Promise.race in coordinator.dispatchNode rejects with the
     // [critic_timeout]-tagged error well before the backstop below; the
@@ -679,9 +683,10 @@ test("critic stage timeout: synthetic failure carries [critic_timeout] classific
   try {
     const before = originalContents(repo);
     const builder = new MultiStepBuilder(() => "succeed");
+    const critic = new HangingCritic();
     const { coordinator, receiptStore } = buildHarness(repo, {
       builder,
-      critic: new HangingCritic(),
+      critic,
       requireApproval: false,
       autoPromoteOnSuccess: false,
       // 1-second stage cap so the hanging critic times out fast.
@@ -725,6 +730,17 @@ test("critic stage timeout: synthetic failure carries [critic_timeout] classific
       "critic_timeout",
       "checkpoint details must carry classification: \"critic_timeout\"",
     );
+    assert.equal(
+      persisted.finalReceipt?.failureReason,
+      "critic_timeout",
+      "final receipt must carry structured critic_timeout failureReason",
+    );
+    assert.equal(
+      persisted.finalReceipt?.blockedStage,
+      "critic",
+      "final receipt must identify critic as blockedStage",
+    );
+    assert.equal(critic.callCount, 1, "critic timeout must not retry the same critic model automatically");
 
     // Builder output preservation: the workspace was rolled back by the
     // merge gate, but the source repo bytes must still be unchanged
@@ -747,6 +763,36 @@ test("critic stage timeout: synthetic failure carries [critic_timeout] classific
       `verdict=${persisted.finalReceipt?.verdict ?? "n/a"} ` +
       `criticTimeoutCheckpoint=${!!criticTimeoutCheckpoint}`,
     );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("failure-chain: builder no-effective-change does not dispatch critic or verifier", async () => {
+  const repo = makeMultiStepRepo();
+  try {
+    const builder = new MultiStepBuilder((file) => file.endsWith("types.ts") ? "no-op" : "succeed");
+    const critic = new StubCritic();
+    const { coordinator, receiptStore } = buildHarness(repo, {
+      builder,
+      critic,
+      requireApproval: false,
+      autoPromoteOnSuccess: false,
+    });
+
+    const receipt = await coordinator.submit({
+      input: "In core/types.ts, add a small exported Token helper type.",
+    });
+    const persisted = await receiptStore.getRun(receipt.runId);
+    assert.equal(receipt.failureReason, "builder_no_effective_change");
+    assert.equal(receipt.blockedStage, "builder");
+    assert.equal(critic.callCount, 0, "critic must not run after terminal builder no-op");
+    assert.equal(
+      persisted?.workerEvents?.some((event) => event.workerType === "verifier"),
+      false,
+      "verifier must not run after terminal builder no-op",
+    );
+    assert.match(receipt.rawFailureEvidence?.join(" ") ?? "", /content_identical_output|no effective/i);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

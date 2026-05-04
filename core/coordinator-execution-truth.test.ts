@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 import { Coordinator } from "./coordinator.js";
 import { WorkerRegistry, AbstractWorker } from "../workers/base.js";
@@ -80,14 +81,16 @@ class RealBuilderWorker extends AbstractWorker {
   }
 
   async execute(assignment: WorkerAssignment): Promise<WorkerResult> {
-    const { writeFile } = await import("node:fs/promises");
+    const { readFile, writeFile } = await import("node:fs/promises");
     const { resolve } = await import("node:path");
     const root = assignment.projectRoot ?? process.cwd();
 
     const changes = [];
     for (const w of this.writes) {
-      await writeFile(resolve(root, w.path), w.content, "utf-8");
-      changes.push({ path: w.path, operation: "modify" as const, content: w.content });
+      const abs = resolve(root, w.path);
+      const originalContent = await readFile(abs, "utf-8");
+      await writeFile(abs, w.content, "utf-8");
+      changes.push({ path: w.path, operation: "modify" as const, originalContent, content: w.content });
     }
     const output: BuilderOutput = {
       kind: "builder",
@@ -302,7 +305,22 @@ function buildCoordinatorWithStubs(
   };
 
   const coordinator = new Coordinator(
-    { projectRoot, autoCommit: false },
+    {
+      projectRoot,
+      autoCommit: false,
+      verificationConfig: {
+        hooks: [{
+          name: "Stub Test Hook",
+          stage: "custom-hook",
+          kind: "tests",
+          async execute() {
+            return { passed: true, issues: [], exitCode: 0, durationMs: 1 };
+          },
+        }],
+        requiredChecks: ["tests"],
+        minimumConfidence: 0,
+      },
+    },
     trustProfile,
     registry,
     eventBus,
@@ -319,6 +337,13 @@ function makeTempRepo(): string {
   // try to shell out to ollama and add a 20s timeout to every run of
   // this test). The file content is irrelevant to what the gate checks.
   writeFileSync(join(dir, "core/capability-registry.ts"), "// placeholder\n", "utf-8");
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["add", "."], { cwd: dir });
+  execFileSync(
+    "git",
+    ["-c", "user.email=aedis@example.invalid", "-c", "user.name=Aedis Test", "commit", "-q", "-m", "baseline"],
+    { cwd: dir },
+  );
   return dir;
 }
 

@@ -11,14 +11,14 @@ import {
 test("plan_ready overrides a stale prior 'complete' run status", () => {
   // The exact UX bug: previous run completed, user creates a new
   // mission → plan.status = 'pending', run.status still 'complete'.
-  // Banner must show PLAN READY, not COMPLETE 100%.
+  // Banner must show READY, not COMPLETE 100%.
   const eff = computeEffectiveBannerStatus({
     runStatus: "complete",
     planStatus: "pending",
   });
   assert.equal(eff, "plan_ready");
-  assert.equal(bannerStatusLabel(eff), "PLAN READY");
-  assert.equal(bannerStatusSubtitle(eff), "Plan ready — waiting for start");
+  assert.equal(bannerStatusLabel(eff), "READY");
+  assert.equal(bannerStatusSubtitle(eff), "Plan ready");
   // 0% never 100% — a freshly created plan must not advertise
   // completion.
   assert.equal(bannerProgressPct(eff), 0);

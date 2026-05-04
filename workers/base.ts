@@ -25,6 +25,7 @@ import type { ExecutionReceipt } from "../core/execution-gate.js";
 import type { CostEntry, Issue, RunTask, RunState } from "../core/runstate.js";
 import type { ImplementationBrief } from "../core/implementation-brief.js";
 import type { InvokeAttempt } from "../core/model-invoker.js";
+import type { AtomicBuilderStep } from "../core/atomic-builder.js";
 
 // ─── Worker Types ────────────────────────────────────────────────────
 
@@ -143,6 +144,12 @@ export interface WorkerAssignment {
    * Coordinator don't produce one; production dispatches always include it.
    */
   readonly implementationBrief?: ImplementationBrief;
+  /**
+   * Atomic Builder Mode contract. When present on a Builder assignment,
+   * the worker may edit exactly this file and must keep the diff within
+   * the declared operation shape.
+   */
+  readonly atomicBuilder?: AtomicBuilderStep;
   /**
    * Cancellation signal threaded from Coordinator.cancel(runId) down to
    * provider calls. When the run is cancelled, this signal aborts —
